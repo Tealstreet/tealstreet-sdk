@@ -3,9 +3,7 @@
 //
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
-import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { createTape, withTimeout, replayStoreReady, ReplayClock, prepareTsReplaySockets } from './tape.mjs';
@@ -13,6 +11,7 @@ import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'nod
 import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 import { deterministicReplay, replayTransportReady } from './polling.mjs';
+import { acquireReplayFixture } from './replay-fixture.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -34,16 +33,9 @@ const venue = venueOf(values.venue);
 if (values['cpu-profile'] && values.impl !== 'rust') throw new Error('cpu-profile is supported only for impl rust');
 if (!['single', 'batch'].includes(values.delivery)) throw new Error('delivery must be single or batch');
 if (!['frame', 'recorded'].includes(values.cadence)) throw new Error('cadence must be frame or recorded');
-const tapeBytes = readFileSync(values.tape);
-const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
-  .toString('utf8')
-  .split('\n')
-  .filter(Boolean)
-  .map((line) => {
-    const record = JSON.parse(line);
-    if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
-    return record;
-  });
+const fixtureLease = acquireReplayFixture(values.tape);
+try {
+const records = fixtureLease.records;
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -883,4 +875,8 @@ writeFileSync(
   }),
 );
 realClearTimeout(replayDeadline);
+} finally {
+  // Retain common inputs through setup, both GC snapshots and serialization.
+  fixtureLease.release();
+}
 process.exit(0);

@@ -137,10 +137,94 @@ fn push_orders(
     );
 }
 #[test]
+fn rest_and_ws_balance_conventions_match_across_currencies_and_pnl_signs() {
+    use safe_cex_engine::model::Balance;
+    for (btc_pnl, eth_pnl) in [(10., 100.), (-10., -100.), (10., -100.), (-10., 100.)] {
+        let (mut e, a, socket) = started();
+        let btc = BTC.replace("69000", if btc_pnl > 0. { "69000" } else { "71000" });
+        let eth = ETH.replace("1900", if eth_pnl > 0. { "1900" } else { "2100" });
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., &btc),
+        );
+        assert_eq!(
+            e.store().balance(),
+            &Balance {
+                total: 1000. - btc_pnl,
+                free: 931.,
+                used: 69.,
+                upnl: btc_pnl,
+            }
+        );
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 19., &eth),
+        );
+        let expected = Balance {
+            total: 1200. - btc_pnl - eth_pnl,
+            free: 1112.,
+            used: 88.,
+            upnl: btc_pnl + eth_pnl,
+        };
+        assert_eq!(e.store().balance(), &expected);
+        authenticate(&mut e, socket);
+        ws(
+            &mut e,
+            socket,
+            r#"{"timestamp":1700000001000000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"69"},{"currency":"USDC","accountBalanceRv":"200","totalUsedBalanceRv":"19"}]}"#,
+        );
+        assert_eq!(e.store().balance(), &expected);
+        // A fresh periodic REST snapshot after that push has equivalent values.
+        let a = refresh(&mut e, NOW + 2000.);
+        for (currency, total, used, row) in [("USDT", 1000., 69., &btc), ("USDC", 200., 19., &eth)]
+        {
+            response(
+                &mut e,
+                NOW + 2000.,
+                request(&a, &format!("currency={currency}")).id,
+                200,
+                &envelope(currency, total, used, row),
+            );
+        }
+        assert_eq!(e.store().balance(), &expected);
+        let a = refresh(&mut e, NOW + 4000.);
+        response(
+            &mut e,
+            NOW + 4000.,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1100., 69., &btc),
+        );
+        response(
+            &mut e,
+            NOW + 4000.,
+            request(&a, "currency=USDC").id,
+            503,
+            "unavailable",
+        );
+        assert_eq!(
+            e.store().balance(),
+            &Balance {
+                total: expected.total + 100.,
+                free: expected.free + 100.,
+                ..expected
+            }
+        );
+        assert_eq!(e.store().positions().len(), 2);
+    }
+}
+
+#[test]
 fn independent_currency_failure_keeps_prior_slice_and_flat_settings() {
     let (mut e, a, _) = started();
     seed(&mut e, &a);
-    assert_eq!(e.store().balance().total, 1200.);
+    assert_eq!(e.store().balance().total, 1090.);
     assert_eq!(e.store().balance().upnl, 110.);
     assert_eq!(e.store().positions().len(), 2);
     assert_eq!(
@@ -173,7 +257,7 @@ fn independent_currency_failure_keeps_prior_slice_and_flat_settings() {
         503,
         "unavailable",
     );
-    assert_eq!(e.store().balance().total, 700.);
+    assert_eq!(e.store().balance().total, 600.);
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].symbol, "ETHUSDC");
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.);
@@ -217,7 +301,7 @@ fn streamed_partial_success_never_publishes_before_valid_envelope() {
         200,
         &envelope("USDC", 200., 19., ETH),
     );
-    assert_eq!(e.store().balance().total, 200.);
+    assert_eq!(e.store().balance().total, 100.);
     assert_eq!(e.store().positions()[0].symbol, "ETHUSDC");
 }
 #[test]
@@ -375,7 +459,7 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
         200,
         &envelope("USDC", 999., 0., ETH),
     );
-    assert_eq!(e.store().balance().total, 1000.);
+    assert_eq!(e.store().balance().total, 990.);
     let a: Vec<_> = e.drain_actions().collect();
     e.handle(
         NOW + 22000.,
@@ -392,7 +476,7 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
         200,
         &envelope("USDC", 200., 19., ETH),
     );
-    assert_eq!(e.store().balance().total, 1200.);
+    assert_eq!(e.store().balance().total, 1090.);
 }
 #[test]
 fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
@@ -930,7 +1014,7 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
         &envelope("USDC", 200., 19., ETH),
     );
     let authoritative = e.store().balance().clone();
-    assert_eq!(authoritative.total, 3200.);
+    assert_eq!(authoritative.total, 3090.);
     e.handle(
         NOW + 2000.,
         Event::WsMessage {
@@ -953,5 +1037,5 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
     e.handle(NOW + 2000., Event::WsMessage { socket, text:
         r#"{"timestamp":1700000001500000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"4000","totalUsedBalanceRv":"30"}]}"# });
     assert_eq!(e.store().balance().used, 49.);
-    assert_eq!(e.store().balance().total, 4190.);
+    assert_eq!(e.store().balance().total, 4090.);
 }

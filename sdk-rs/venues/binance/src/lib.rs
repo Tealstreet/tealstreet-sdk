@@ -37,6 +37,7 @@ pub enum Variant {
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub variant: Variant,
     /// Markets, tickers, books and candles only; no account.
@@ -357,7 +358,16 @@ impl BinanceFutures {
         stream: Option<ArrayAt>,
         pending: Pending,
     ) {
-        let Some(credentials) = &self.credentials else {
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
+        let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
         let query = query.signed(credentials, cx.now);
@@ -1143,6 +1153,12 @@ impl Venue for BinanceFutures {
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.get_streamed(
             cx,
             self.paths.exchange_info,
@@ -1468,3 +1484,6 @@ impl Venue for BinanceFutures {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

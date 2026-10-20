@@ -66,6 +66,7 @@ fn ready_snapshot(
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
     let mut e = Engine::new(Backpack::new(Options {
+        read_credentials: None,
         public_data_only: false,
         key: Some("test-public-key".into()),
         secret: Some(secret),

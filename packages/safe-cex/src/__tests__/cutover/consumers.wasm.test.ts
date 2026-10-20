@@ -55,12 +55,13 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 function state(name: ExchangeName): Partial<StoreData> {
   const lots = native.includes(name);
+  const marketId = name.startsWith('okx') ? 'BTC-USDT-SWAP' : 'native-market';
   const coinM = name === 'binanceinverse';
   const inverse = coinM || name === 'bybitinverse' || name === 'bitgetinverse';
   return {
     markets: [
       {
-        id: 'native-market',
+        id: marketId,
         symbol: 'BTCUSDT',
         base: 'BTC',
         quote: 'USDT',
@@ -73,7 +74,7 @@ function state(name: ExchangeName): Partial<StoreData> {
     ],
     tickers: [
       {
-        id: 'native-market',
+        id: marketId,
         symbol: 'BTCUSDT',
         bid: coinM ? 9999 : 99,
         ask: coinM ? 10001 : 101,
@@ -533,7 +534,7 @@ describe.each(venues)('%s consumer conformance', (name) => {
     expect(notices.every((id) => id === beforeTags.orders + 1)).toBe(true);
     expect(exchangeUpdates).toHaveBeenCalledOnce();
     main.store.update({ activeChasers }, true);
-    main.store.updateTicker({ id: 'native-market' }, { last: 106 });
+    main.store.updateTicker({ id: state(name).markets![0].id }, { last: 106 });
     expect(main.store.updateIds.orders).toBe(beforeTags.orders + 1);
     unsubscribe();
     main.off('update', exchangeUpdates);

@@ -720,6 +720,86 @@ test('nested login signatures remain strict outside the ApeX descriptor opt-in',
   }
 });
 
+test('GRVT bare heartbeats are not subscriptions while all other raw identities remain visible', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('grvt');
+  for (const url of ['wss://trades.grvt.io/ws', 'wss://market-data.grvt.io/ws/full']) {
+    for (const text of ['ping', 'pong']) {
+      assert.equal(subscriptionKey(url, text, new Set(), venue), undefined);
+      assert.deepEqual(subscriptionKeys(url, text, new Set(), venue), []);
+      for (const options of [{}, { rust: 'bybit' }]) {
+        assert.match(subscriptionKey(url, text, new Set(), options), new RegExp(` ${text}$`));
+        assert.equal(subscriptionKeys(url, text, new Set(), options).length, 1);
+      }
+    }
+    for (const text of ['Ping', 'Pong', ' ping', 'pong ', 'ping\n', 'ping-other', 'status:ready', '"ping"', '"pong"']) {
+      assert.equal(typeof subscriptionKey(url, text, new Set(), venue), 'string', text);
+      assert.equal(subscriptionKeys(url, text, new Set(), venue).length, 1, text);
+    }
+  }
+});
+
+test('GRVT heartbeat identity correction preserves exact authentication and feed selectors', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('grvt');
+  const url = 'wss://trades.grvt.io/ws';
+  const keys = (message) => subscriptionKeys(url, JSON.stringify(message), new Set(), venue);
+  const auth = { type: 'auth', session_cookie: 'rm=true; gravity=fixture-session-1', account_id: 'fixture-account', testnet: false };
+  assert.equal(keys(auth).length, 1);
+  for (const changed of [
+    { session_cookie: 'rm=true; gravity=other-session' },
+    { account_id: 'other-account' },
+    { testnet: true },
+  ]) assert.notDeepEqual(keys(auth), keys({ ...auth, ...changed }));
+  const subscription = { method: 'subscribe', request_id: 1, stream: 'v1.order', feed: ['777'], is_full: false };
+  assert.equal(keys(subscription).length, 1);
+  for (const changed of [
+    { feed: ['778'] }, { stream: 'v1.fill' }, { is_full: true }, { method: 'unsubscribe' },
+  ]) assert.notDeepEqual(keys(subscription), keys({ ...subscription, ...changed }));
+  const publicUrl = 'wss://market-data.grvt.io/ws/full';
+  const ticker = (selector) => subscriptionKeys(publicUrl, JSON.stringify({
+    jsonrpc: '2.0', method: 'subscribe', params: { stream: 'v1.ticker.d', selectors: [selector] },
+  }), new Set(), venue);
+  assert.notDeepEqual(ticker('BTC_USDT_Call_25Dec26_50000@500'), ticker('BTC_USDT_Call_25Dec26_60000@500'));
+});
+
+test('GRVT independent socket audit still rejects missed wrong extra and unauthenticated heartbeat replies', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('grvt');
+  const url = 'wss://trades.grvt.io/ws';
+  const authenticated = () => {
+    const audit = venue.createSocketAudit('rust', { isPrivate: true, books: [] });
+    audit.connected(url, 1);
+    audit.sent(url, JSON.stringify({ type: 'auth', session_cookie: 'rm=true; gravity=fixture-session-1',
+      account_id: 'fixture-account', testnet: false }), 1);
+    audit.received(url, '{"type":"auth_success"}', 1);
+    for (const stream of ['v1.order', 'v1.position', 'v1.fill'])
+      audit.sent(url, JSON.stringify({ method: 'subscribe', stream, feed: ['777'], is_full: false }), 1);
+    return audit;
+  };
+  const valid = authenticated();
+  valid.sent(url, 'ping', 1);
+  valid.received(url, 'pong', 1);
+  valid.received(url, 'ping', 1);
+  valid.sent(url, 'pong', 1);
+  assert.deepEqual(valid.errors(), []);
+  const missing = authenticated();
+  missing.received(url, 'ping', 1);
+  assert.ok(missing.errors().includes('missing GRVT pong'));
+  const wrong = authenticated();
+  wrong.received(url, 'ping', 1);
+  wrong.sent(url, '{"op":"pong"}', 1);
+  assert.ok(wrong.errors().includes('missing GRVT pong'));
+  assert.ok(wrong.errors().some((message) => message.includes('changed selector')));
+  const extra = authenticated();
+  extra.sent(url, 'pong', 1);
+  assert.ok(extra.errors().includes('unexpected GRVT pong'));
+  const unauthenticated = venue.createSocketAudit('rust', { isPrivate: true, books: [] });
+  unauthenticated.connected(url, 1);
+  unauthenticated.sent(url, 'ping', 1);
+  assert.ok(unauthenticated.errors().includes('GRVT private first frame was not authentication'));
+});
+
 test('Coinbase channel product arrays expand exact topics and batch identities', () => {
   const url = 'wss://advanced-trade-ws.coinbase.com';
   const batch = { type: 'subscribe', channel: 'level2', product_ids: ['BTC-USD', 'ETH-USD'] };

@@ -20,8 +20,9 @@ GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack
 omitted/empty `k` to `PERPETUAL`; it does not mean all kinds. The generic mapper
 will accept injected Future/Call/Put rows, and native-ID ticker/book/order
 plumbing has no additional kind guard. These latent paths are not supported
-non-perpetual product lifecycles: signing metadata drops kind/expiry/strike and
-symbol cancellation explicitly filters perpetuals. Read-only production and
+non-perpetual product lifecycles: signing metadata drops kind/expiry/strike.
+Exact-symbol cancellation's snapshot safeguards do not enable new products.
+Read-only production and
 testnet probes on 2026-10-20 returned only perpetuals for `{}` and no rows for
 explicit `FUTURE/CALL/PUT` filters.
 
@@ -332,6 +333,11 @@ actionable error; it must never continue with the stale cookie.
 - `is_full: false` requests lite format for efficiency
 
 **Ping/Pong** (`grvt.ws-private.ts:48-53`): Sends string `"ping"`, expects string `"pong"` response.
+Both TS and Rust schedule a replaceable one-shot ping five seconds after a
+pong, independently of intervening account data. Rust fences that timer by
+socket and authenticated-session generation and clears it on retirement.
+Heartbeat timing is not subscription identity; replay protocol audits still
+require authentication before private sends and exact responses to server pings.
 
 **Stream Handling** (`grvt.ws-private.ts:199-217`):
 
@@ -436,7 +442,7 @@ Trigger metadata format:
 
 - **Single**: `cancelOrder()` via `grvtClient.tdgClient.cancelOrder()` with `sub_account_id` and `order_id`
 - **All**: `cancelAllOrders()` via `grvtClient.tdgClient.cancelAllOrders()` with `sub_account_id`
-- **By Symbol**: `cancelSymbolOrders()` via `cancelAllOrders` with additional `instrument_id`
+- **By Symbol**: `cancelSymbolOrders()` reads the complete authenticated subaccount open-orders snapshot, matches exact native leg instruments, and cancels the matching native IDs individually. It never uses broad kind/base/quote cancellation filters.
 - **Batch**: `cancelOrders()` loops sequentially, each failure logged but does not stop the batch
 
 ### Order Update (`grvt.exchange.ts:1459-1496`)
@@ -445,7 +451,31 @@ Regular entry TP/SL options create an ordinary entry followed by distinct
 opposite-side reduce-only trigger orders. Both protective legs are retained;
 a failure reports the IDs already created. A standalone SL/TP uses market
 execution and explicit non-split trigger metadata. Symbol cancel-all uses the
-native kind/base/quote filters, which survive the client conversion.
+complete native open-orders snapshot (`POST /lite/v1/open_orders`, `{sa}`),
+then exact native order IDs (or validated uint64 client IDs when the native ID
+is unassigned). The endpoint has no instrument filter, page cursor, limit or
+documented response cap; its documented result is a complete snapshot, excluding
+new orders still in flight. The raw read preserves error/truncation signals
+that SDK schema mapping would obscure. Malformed/ambiguous envelopes, partial
+responses, invalid or duplicate identities, account mismatches, and unsupported
+multi-leg orders fail before the first write.
+Client-ID fallback also fails if local order/lifecycle evidence changes during
+the snapshot or write-authentication awaits, rather than retargeting a reused
+ID. Disposing during reads/authentication stops writes; cancellation failures stop the sequence and
+are never retried on ambiguous network failure. Individual writes preserve
+raw responses too: they require an explicit accepted ACK or a returned order
+matching the requested native/client ID, account and instrument. Missing,
+false, malformed or mismatched acknowledgements stop all remaining writes.
+Explicit error/code aliases (`e`, `error`, `c`, `code`) invalidate both snapshot
+rows and returned Order proofs even alongside success fields; mixed Ack/Order
+objects are rejected regardless of the acknowledgement value;
+no local terminal state is inferred from an ACK. Client-only cancellations
+refuse the trading client's internal authentication resend; a fresh complete
+snapshot is required after session rejection. An exact native-ID cancellation
+may retain one definitive-auth retry only while the exchange is live and the
+same authenticated main account/subaccount is preserved. Global `cancelAllOrders()`
+retains the account-wide native request. See the current
+[official open-orders contract](https://api-docs.grvt.io/trading_api/#open-orders).
 
 GRVT does not support native order modification. `updateOrder()` builds and
 validates the full replacement *before* cancelling the live order, then

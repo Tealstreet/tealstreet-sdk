@@ -357,7 +357,7 @@ export class EngineHost {
     // packing it when the single-message entry point has identical input types;
     // unusual clocks/payloads retain the batch encoder's validation/coercion.
     if (messages.length === 3 && typeof messages[2] === 'string' && singletonClock) {
-      this.run(this.singleMessage(messages[0], messages[2], messages[1]));
+      this.run(this.singleMessage(messages[0], messages[2], messages[1], true));
       return;
     }
     if (messages.length === 3 && messages[2] instanceof Uint8Array && singletonClock) {

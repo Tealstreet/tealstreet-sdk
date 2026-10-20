@@ -1258,6 +1258,7 @@ mod tests {
                 cx,
                 text,
                 &Credentials {
+                    read: None,
                     key: "fixture".into(),
                     secret: "fixture".into(),
                 },

@@ -603,6 +603,7 @@ fn candle_ranges_use_history_shape_and_millisecond_to_seconds() {
     );
     let r = requests(&mut e).remove(0);
     assert!(r.url.starts_with("https://api-pub.woox.io/v1/hist/kline"));
+    assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
     assert!(r.url.contains("start_time=1600000000000"));
     response(
         &mut e,

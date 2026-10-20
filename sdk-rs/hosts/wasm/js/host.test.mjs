@@ -177,6 +177,54 @@ test('older binary engines retain ordered deferred actions without a mixed ABI',
   f.host.dispose();
 });
 
+test('scheduled text singletons prefer bytes and retain optional string fallbacks with raw clocks', () => {
+  const encoder = new TextEncoder();
+  for (const entry of ['bytes', 'actions', 'legacy']) {
+    const f = fixture();
+    const calls = [];
+    f.engine.wsMessages = () => assert.fail('a singleton must not use the batch ABI');
+    f.engine.wsMessage = function (socket, text, now) {
+      assert.equal(entry, 'legacy');
+      assert.equal(this, f.engine);
+      calls.push({ socket, text, now });
+      return '';
+    };
+    if (entry !== 'legacy') f.engine.wsMessageActions = function (socket, text, now) {
+      assert.equal(entry, 'actions');
+      assert.equal(this, f.engine);
+      calls.push({ socket, text, now });
+      return undefined;
+    };
+    if (entry === 'bytes') f.engine.wsMessageBytes = function (socket, bytes, now) {
+      assert.equal(this, f.engine);
+      calls.push({ socket, bytes: Uint8Array.from(bytes), now, buffer: bytes.buffer });
+      return undefined;
+    };
+    const messages = [['ASCII', 17.25], ['雪😀\n', -7], ['\ud800', -0], ['\udc00', 19], ['', 20]];
+    let scratch;
+    for (const [text, now] of messages) {
+      const before = calls.length;
+      f.arrivals.get('2').onMessage(text, now);
+      assert.equal(calls.length, before, 'one arrival still waits for its scheduled task');
+      assert.equal(f.tasks.size, 1);
+      f.tick();
+      const row = calls.at(-1);
+      assert.equal(row.socket, 2);
+      assert.ok(Object.is(row.now, now), 'raw finite time, including negative zero, is preserved');
+      if (entry === 'bytes') {
+        assert.deepEqual(row.bytes, encoder.encode(text));
+        scratch ??= row.buffer;
+        assert.equal(row.buffer, scratch, 'small singleton encodings reuse the same scratch');
+      } else assert.equal(row.text, text);
+      assert.equal(f.host.batchBuffer.byteLength, 0);
+      assert.equal(f.host.wsScratchBusy, false);
+    }
+    assert.equal(calls.length, messages.length);
+    f.host.dispose();
+    assert.equal(f.host.wsScratch, undefined);
+  }
+});
+
 test('singleton arrivals stay deferred and preserve their text and raw finite clocks', () => {
   const f = fixture();
   f.engine.wsMessages = () => assert.fail('a singleton must not be encoded');
@@ -195,42 +243,51 @@ test('singleton arrivals stay deferred and preserve their text and raw finite cl
   f.host.dispose();
 });
 
-test('singleton actions enqueue reentrant arrivals in a fresh scheduled task', () => {
-  const f = fixture();
-  f.engine.wsMessages = () => assert.fail('each captured queue has one arrival');
-  f.engine.wsMessage = (socket, text, now) => {
-    f.calls.push(['single', [[socket, now, text]]]);
-    return text === 'first' ? JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]) : '';
-  };
-  f.host.handlers.onLog = () => {
-    assert.equal(f.host.messages.length, 0);
-    assert.equal(f.host.batchTimer, undefined);
-    f.arrivals.get('2').onMessage('second', 18);
-  };
-  f.arrivals.get('1').onMessage('first', 17);
-  f.tick();
-  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]]]);
-  assert.equal(f.tasks.size, 1);
-  f.tick();
-  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]], ['single', [[2, 18, 'second']]]]);
-  f.host.dispose();
-});
+for (const entry of ['wsMessage', 'wsMessageBytes']) {
+  test(`singleton actions enqueue reentrant arrivals in a fresh task (${entry})`, () => {
+    const f = fixture();
+    f.engine.wsMessages = () => assert.fail('each captured queue has one arrival');
+    f.engine[entry] = (socket, data, now) => {
+      const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+      f.calls.push(['single', [[socket, now, text]]]);
+      return text === 'first' ? JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]) : '';
+    };
+    if (entry === 'wsMessageBytes') f.engine.wsMessage = () => assert.fail('byte entry must take precedence');
+    f.host.handlers.onLog = () => {
+      assert.equal(f.host.messages.length, 0);
+      assert.equal(f.host.batchTimer, undefined);
+      f.arrivals.get('2').onMessage('second', 18);
+    };
+    f.arrivals.get('1').onMessage('first', 17);
+    f.tick();
+    assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]]]);
+    assert.equal(f.tasks.size, 1);
+    f.tick();
+    assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]], ['single', [[2, 18, 'second']]]]);
+    f.host.dispose();
+  });
 
-test('singleton action disposal stops later resources and the enclosing flush', () => {
-  const f = fixture();
-  f.engine.wsMessage = () => {
-    f.calls.push(['single']);
-    return JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
-      { op: 'wsConnect', socket: 3, url: 'leak' }, { op: 'setTimer', timer: 9, at: 0 }]);
-  };
-  f.host.handlers.onLog = () => f.host.dispose();
-  f.send(1, 'pending');
-  f.host.flush();
-  f.tick();
-  assert.deepEqual(f.calls, [['single']]);
-  assert.equal(f.arrivals.has('leak'), false);
-  assert.equal(f.tasks.size, 0);
-});
+}
+
+for (const entry of ['wsMessage', 'wsMessageBytes']) {
+  test(`singleton action disposal stops later resources and its flush (${entry})`, () => {
+    const f = fixture();
+    f.engine[entry] = () => {
+      f.calls.push(['single']);
+      return JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+        { op: 'wsConnect', socket: 3, url: 'leak' }, { op: 'setTimer', timer: 9, at: 0 }]);
+    };
+    if (entry === 'wsMessageBytes') f.engine.wsMessage = () => assert.fail('byte entry must take precedence');
+    f.host.handlers.onLog = () => f.host.dispose();
+    f.send(1, 'pending');
+    f.host.flush();
+    f.tick();
+    assert.deepEqual(f.calls, [['single']]);
+    assert.equal(f.arrivals.has('leak'), false);
+    assert.equal(f.tasks.size, 0);
+  });
+
+}
 
 test('an oversized singleton crosses directly without allocating batch scratch', () => {
   const f = fixture();
@@ -638,74 +695,89 @@ for (const entry of ['legacy', 'actions', 'bytes']) {
   });
 }
 
-test('byte entry encodes complete Unicode messages with bounded reusable scratch and reentrant ownership', () => {
-  const encoder = new TextEncoder();
-  const received = [];
-  let receive;
-  const engine = {
-    wsMessage() { assert.fail('byte entry must take precedence'); },
-    wsMessageBytes(socket, bytes, now) {
-      assert.equal(this, engine);
-      assert.equal(socket, 7);
-      assert.equal(now, 123);
-      const before = Uint8Array.from(bytes);
-      received.push({ bytes: before, buffer: bytes.buffer });
-      if (new TextDecoder().decode(bytes) === 'outer') {
-        receive('nested é🦀');
-        assert.deepEqual(bytes, before, 'nested message must not overwrite borrowed outer bytes');
-      }
-      return undefined;
-    },
-  };
-  const host = new EngineHost(engine, {
-    now: () => 123,
-    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
-  }, {}, { batchMessages: false });
-  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
-  // Exact 1365-unit boundary, lone surrogates, paired surrogates, and large frames.
-  const messages = ['', 'ASCII', 'é漢🦀', '\ud800', '\udc00', '\ud800x\udc00', '漢'.repeat(1365), '\ud800'.repeat(1365), 'a'.repeat(1364) + '\ud800', '🦀'.repeat(683), '漢'.repeat(1366), 'small again'];
-  for (const text of messages) {
-    receive(text);
-    assert.deepEqual(received.at(-1).bytes, encoder.encode(text));
-  }
-  const scratch = received[0].buffer;
-  assert.equal(scratch.byteLength, 4096);
-  for (let i = 1; i < 9; i++) assert.equal(received[i].buffer, scratch);
-  assert.notEqual(received[9].buffer, scratch);
-  assert.notEqual(received[10].buffer, scratch);
-  assert.equal(received[11].buffer, scratch);
-  receive('outer');
-  assert.notEqual(received.at(-1).buffer, scratch);
-  assert.equal(host.wsScratchBusy, false);
-  // Minimal TextEncoder implementations may expose only encode().
-  host.wsEncoder = { encode: (text) => encoder.encode(text) };
-  receive('encode-only \ud800🦀');
-  assert.deepEqual(received.at(-1).bytes, encoder.encode('encode-only \ud800🦀'));
-  host.wsEncoder = { encode: (text) => encoder.encode(text), encodeInto: () => ({ read: 0, written: 0 }) };
-  receive('complete fallback 漢');
-  assert.deepEqual(received.at(-1).bytes, encoder.encode('complete fallback 漢'));
-  host.dispose();
-  const count = received.length;
-  receive('late');
-  assert.equal(received.length, count);
-});
+for (const batchMessages of [false, true]) {
+  test(`byte entry encodes complete Unicode messages with bounded scratch and reentry (scheduled=${batchMessages})`, () => {
+    const encoder = new TextEncoder();
+    const received = [];
+    let arrival;
+    const receive = (text) => {
+      arrival(text);
+      if (batchMessages) host.drainMessages();
+    };
+    const engine = {
+      wsMessage() { assert.fail('byte entry must take precedence'); },
+      wsMessageBytes(socket, bytes, now) {
+        assert.equal(this, engine);
+        assert.equal(socket, 7);
+        assert.equal(now, 123);
+        const before = Uint8Array.from(bytes);
+        received.push({ bytes: before, buffer: bytes.buffer });
+        if (new TextDecoder().decode(bytes) === 'outer') {
+          receive('nested é🦀');
+          assert.deepEqual(bytes, before, 'nested message must not overwrite borrowed outer bytes');
+        }
+        return undefined;
+      },
+    };
+    const host = new EngineHost(engine, {
+      now: () => 123,
+      setTimeout: () => 0,
+      clearTimeout() {},
+      connect: (_url, handlers) => { arrival = handlers.onMessage; return { close() {} }; },
+    }, {}, { batchMessages });
+    host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+    // Exact 1365-unit boundary, lone surrogates, paired surrogates, and large frames.
+    const messages = ['', 'ASCII', 'é漢🦀', '\ud800', '\udc00', '\ud800x\udc00', '漢'.repeat(1365), '\ud800'.repeat(1365), 'a'.repeat(1364) + '\ud800', '🦀'.repeat(683), '漢'.repeat(1366), 'small again'];
+    for (const text of messages) {
+      receive(text);
+      assert.deepEqual(received.at(-1).bytes, encoder.encode(text));
+    }
+    const scratch = received[0].buffer;
+    assert.equal(scratch.byteLength, 4096);
+    for (let i = 1; i < 9; i++) assert.equal(received[i].buffer, scratch);
+    assert.notEqual(received[9].buffer, scratch);
+    assert.notEqual(received[10].buffer, scratch);
+    assert.equal(received[11].buffer, scratch);
+    receive('outer');
+    assert.notEqual(received.at(-1).buffer, scratch);
+    assert.equal(host.wsScratchBusy, false);
+    // Minimal TextEncoder implementations may expose only encode().
+    host.wsEncoder = { encode: (text) => encoder.encode(text) };
+    receive('encode-only \ud800🦀');
+    assert.deepEqual(received.at(-1).bytes, encoder.encode('encode-only \ud800🦀'));
+    host.wsEncoder = { encode: (text) => encoder.encode(text), encodeInto: () => ({ read: 0, written: 0 }) };
+    receive('complete fallback 漢');
+    assert.deepEqual(received.at(-1).bytes, encoder.encode('complete fallback 漢'));
+    host.dispose();
+    const count = received.length;
+    receive('late');
+    assert.equal(received.length, count);
+  });
 
-test('byte scratch is released when a custom synchronous engine throws', () => {
-  let receive;
-  let calls = 0;
-  const host = new EngineHost({
-    wsMessageBytes() { if (calls++ === 0) throw new Error('test engine failure'); },
-  }, {
-    now: () => 123,
-    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
-  }, {}, { batchMessages: false });
-  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
-  assert.throws(() => receive('first'), /test engine failure/);
-  assert.equal(host.wsScratchBusy, false);
-  receive('second');
-  assert.equal(calls, 2);
-  host.dispose();
-});
+  test(`byte scratch is released when a synchronous engine throws (scheduled=${batchMessages})`, () => {
+    let arrival;
+    const receive = (text) => {
+      arrival(text);
+      if (batchMessages) host.drainMessages();
+    };
+    let calls = 0;
+    const failure = new Error('test engine failure');
+    const host = new EngineHost({
+      wsMessageBytes() { if (calls++ === 0) throw failure; },
+    }, {
+      now: () => 123,
+      setTimeout: () => 0,
+      clearTimeout() {},
+      connect: (_url, handlers) => { arrival = handlers.onMessage; return { close() {} }; },
+    }, {}, { batchMessages });
+    host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+    assert.throws(() => receive('first'), (error) => error === failure);
+    assert.equal(host.wsScratchBusy, false);
+    receive('second');
+    assert.equal(calls, 2);
+    host.dispose();
+  });
+}
 
 test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });

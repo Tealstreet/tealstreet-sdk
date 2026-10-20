@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod history;
+mod income;
 mod sign;
 mod trading;
 mod wire;
@@ -19,6 +20,7 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
 pub enum Pending {
     Markets(Vec<Market>, bool),
@@ -35,6 +37,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Income(income::Request),
 }
 #[derive(Default)]
 struct Connection {
@@ -72,6 +75,7 @@ impl BookState {
 pub struct PhemexPerpetuals {
     options: Options,
     credentials: Option<sign::Credentials>,
+    read_credentials: Option<sign::Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
@@ -82,6 +86,7 @@ pub struct PhemexPerpetuals {
     account: account::State,
     trading: trading::State,
     history: history::State,
+    income: income::State,
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
@@ -91,9 +96,17 @@ impl PhemexPerpetuals {
             .zip(options.secret.clone())
             .filter(|(k, s)| !k.is_empty() && !s.is_empty())
             .map(|(key, secret)| sign::Credentials { key, secret });
+        let read_credentials = options
+            .read_credentials
+            .as_ref()
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
         Self {
             options,
             credentials,
+            read_credentials,
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -104,6 +117,7 @@ impl PhemexPerpetuals {
             account: account::State::default(),
             trading: trading::State::default(),
             history: history::State::default(),
+            income: income::State::default(),
         }
     }
     fn native_symbol<'a>(&'a self, symbol: &'a str) -> &'a str {
@@ -137,9 +151,14 @@ impl PhemexPerpetuals {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) {
-        let headers = self
-            .credentials
-            .as_ref()
+        // A definitive lookup must query the account that placed the order.
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
+        let credentials = if matches!(method, Method::Get) && !primary {
+            self.read_credentials.as_ref().or(self.credentials.as_ref())
+        } else {
+            self.credentials.as_ref()
+        };
+        let headers = credentials
             .map(|c| c.headers(path, query, body.as_deref().unwrap_or(""), cx.now))
             .unwrap_or_default();
         let url = format!(
@@ -151,10 +170,13 @@ impl PhemexPerpetuals {
                 format!("?{query}")
             }
         );
-        if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending);
+        let id = if let Some(at) = stream {
+            cx.request_streamed_body(method, url, headers, body, at, pending)
         } else {
-            cx.request(method, url, headers, body, pending);
+            cx.request(method, url, headers, body, pending)
+        };
+        if primary {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -273,6 +295,7 @@ impl PhemexPerpetuals {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error),
             Pending::History(r) => self.history_failed(cx, r, error),
+            Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
                 if self
                     .books
@@ -304,6 +327,12 @@ fn apply(book: &mut Book, d: Depth) {
 impl Venue for PhemexPerpetuals {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if cx.now < self.paused_until {
             self.startup_retry = Some(cx.set_timer(self.paused_until - cx.now));
             return;
@@ -499,6 +528,7 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::Income(r) => self.income_item(cx, r, item),
             _ => {}
         }
     }
@@ -585,13 +615,17 @@ impl Venue for PhemexPerpetuals {
             Pending::Account(p) => self.account_response(cx, p, r),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
+            Pending::Income(p) => self.income_response(cx, p, r),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
         self.fail(cx, p, error)
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
+        if self.account_timer(cx, timer)
+            || self.history_timer(cx, timer)
+            || self.income_timer(cx, timer)
+        {
             return;
         }
         if self.startup_retry == Some(timer) {

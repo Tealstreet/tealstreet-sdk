@@ -277,7 +277,7 @@ fn seed(e: &mut Engine<Grvt>) {
     });
 }
 const OPEN: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}}"#;
-const OPEN_ORDERS: &str = r#"{"r":[{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}]}"#;
+const OPEN_ORDERS: &str = r#"{"r":[{"sa":"9007199254740993","oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"OPEN","ts":["0.2"],"ut":"1700000000000000000"}}]}"#;
 const CANCELED: &str = r#"{"r":{"oi":"0x1234","im":false,"ti":"GOOD_TILL_TIME","po":true,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"1","lp":"100","ib":true}],"m":{"co":"42","ct":"1699999999000000000"},"s1":{"s":"CANCELLED","ts":["0.2"],"ut":"1700000000001000000"}}}"#;
 #[test]
 fn signed_lite_order_preserves_large_native_account_and_caller_identity() {
@@ -668,7 +668,7 @@ fn uncertain_write_is_not_retried_and_exposes_reconciliation_identity() {
     );
 }
 #[test]
-fn cancellation_preflights_all_identities_and_symbol_filter_is_native() {
+fn cancellation_preflights_all_identities_and_symbol_snapshot_is_native() {
     let mut e = boot();
     seed(&mut e);
     let actions = command(
@@ -688,11 +688,13 @@ fn cancellation_preflights_all_identities_and_symbol_filter_is_native() {
                 symbol: "BTC_USDT_PERP".into(),
             },
         ),
-        "cancel_all_orders",
+        "open_orders",
     );
+    assert_eq!(r.body.as_deref(), Some(r#"{"sa":"9007199254740993"}"#));
+    let r = http(reply(&mut e, &r, 200, OPEN_ORDERS), "cancel_order");
     assert_eq!(
         r.body.as_deref(),
-        Some(r#"{"sa":"9007199254740993","k":["PERPETUAL"],"b":["BTC"],"q":["USDT"]}"#)
+        Some(r#"{"sa":"9007199254740993","oi":"0x1234"}"#)
     );
     let actions = reply(&mut e, &r, 200, r#"{"r":{"a":false}}"#);
     assert!(done(&actions, 8).unwrap().is_err());
@@ -711,8 +713,9 @@ fn symbol_cancellation_ack_requires_reconciliation_without_inventing_terminal_st
                     symbol: "BTC_USDT_PERP".into(),
                 },
             ),
-            "cancel_all_orders",
+            "open_orders",
         );
+        let r = http(reply(&mut e, &r, 200, OPEN_ORDERS), "cancel_order");
         let actions = reply(&mut e, &r, 200, body);
         assert!(done(&actions, 81).unwrap().is_ok());
         assert_eq!(

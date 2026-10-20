@@ -20,6 +20,7 @@ const MAX_BUFFER: usize = 2000;
 
 #[derive(Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
@@ -426,6 +427,18 @@ impl Backpack {
 impl Venue for Backpack {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = sign::Credentials::new(read.key.clone(), &read.secret)
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.seed_read(cx, SeedRead::Markets);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -932,3 +945,6 @@ impl Venue for Backpack {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

@@ -447,3 +447,51 @@ Next bounded phase: diagnose harness baseline lifetime with a strict invariant
 original reusable byte path. No new scored children until a source-backed repair
 plan and independent audit. Preserve all old inputs/results; declare any new
 collection after source changes and checks. Full task and PR remain unfinished.
+
+## Parity landing and bounded delivery/method repair
+
+Merge landing `df2d6a4a03` (PR #1340). Preserve secondary-read credentials and
+primary-only trading/history routes, atomic financial reconciliation, lookup
+contracts, and Phemex balance totals. Canonical family features and batching APIs
+remain. The incoming OKX cached ticker row/readiness lookup supersedes the older
+index-target cache and borrowed lookup optimization; use its complete library.
+Transport retains raw arrival reservations/timestamps and binary forwarding;
+requests tests keep both parent additions. Independent integration review passes.
+A new wrapper fixture needed the required batch method; retain the initial
+failed typecheck and its corrected rerun. Checks pass 2,731 Rust tests/209 groups,
+formatting/bans and strict native/WASM workspace Clippy; repository tasks pass
+44 typecheck, 28 lint and 27 tests. Full harness/host checks are running.
+
+Restore the original reusable UTF-8 byte path for scheduled text singletons;
+retain deferred delivery, raw clocks, FIFO barriers, optional legacy fallback
+and real multi-message batches. Four focused regressions fail before this
+one-line repair. Host tests pass 71, covering Unicode/lone surrogates, negative
+zero, scratch bounds/reuse, reentrancy, disposal and exact error identity.
+Independent source/evidence review passes. No CPU benefit is claimed yet.
+
+A single no-engine KuCoin fixture probe did not reproduce the heap release;
+the precise old owner remains unproven. Introduce explicit strong fixture
+ownership as a shared methodology correction: actual input buffer, decoded
+source, split lines and parsed records live through both GC samples and final
+serialization, with idempotent success/error cleanup. Parsing, initialization
+after baseline, CPU cutoffs, exact memory arithmetic and negative rejection
+remain unchanged. This retains more common input storage and may alter GC
+pressure; apply identically to both runtimes and both arms. All 32 focused
+memory/measurement/fixture tests pass. A deliberately weak-owner mutant fails
+its real-GC lifetime oracle; this proves the oracle, not the old heap diagnosis.
+Independent review passes. Declare one fixed KuCoin validity check after fresh
+release/checks with owned compilers quiet; retain its outcome without retry.
+
+The new CI roster is 39 public profiles/63 private variants, including distinct
+OKX inverse and EEA X-Perp fixtures. Identify public cases by profile ID rather
+than venue, preserving exact engine selector/books and fixed 20 AB/19 BA order.
+Regenerate only five changed private generators (GRVT and four OKX variants),
+reusing 58 tapes after content/dependency checks. Source/profile changes require
+a fresh collection; all prior negative inputs/results remain immutable.
+Original physical control is `df2d6a4a03`, with 429 Rust/config inputs and 33
+protected paths verified against Git. Its 29 internal crates compile freshly
+from the archive after explicit isolated workspace-artifact invalidation;
+nine aggregate bindings have equal browser/Node WASM, 11,732,506 bytes, SHA-256
+`e09563111217316847f13819b019b5a12089ce110530d1e020a64f07c00adc3d`.
+Independent original-control audit passes. New release, actual-WASM validation,
+KuCoin validity check, all final performance gates and PR landing remain pending.

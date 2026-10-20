@@ -1136,3 +1136,26 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - **USD-M** sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`; **PM** the same charset capped at 32. **Spot's documented legal range is narrower**, `^[A-Za-z0-9_-]{1,36}$` — `.`, `:` and `/` that USD-M accepts are rejected by Spot, so it has its own rule.
 - A caller ID replaces the generated `x-s3vFFRQp…` ID outright; no broker prefix is composed. PM and Spot return `newClientOrderId` as the order ID, so the placement result is the caller's ID there.
 - `updateOrder` is cancel+replace on all three; the replacement gets a generated ID (Spot refuses a reused ID until the old order fills).
+
+
+## Rust definitive client-ID lookup
+
+When secondary GET credentials are configured, TS and Rust bypass cached
+client-ID matches: that cache may contain another account's orders. Primary
+HTTP success, absence or failure determines the result without changing the
+cache. Without secondary credentials the existing cache shortcut is retained.
+PM lookup keeps `clientOrderId` as canonical `Order.id`, matching live orders
+and cancellation; the native numeric ID remains in `info.orderId`.
+
+USD-M and PM engine lookups query the primary placement account through the
+correct fapi/papi order endpoint, even when ordinary GET reads use secondary
+credentials. Only the venue's explicit order-not-found code on an accepted
+HTTP status establishes a definitive miss. Unknown markets are non-definitive;
+malformed, mismatched, authentication and transport failures are errors.
+`EXPIRED_IN_MATCH` is canceled, like `EXPIRED`, in both TS history/lookup and
+Rust; an STP expiration does not mean the order filled.
+
+Rust secondary GET parity includes Spot and COIN-M. Spot uses the selected GET
+client for unsigned catalog/ticker/candle reads, stripping credentials while
+retaining its egress. USD-M/PM/COIN-M separate public clients bypass account
+egress; signed GETs use read credentials and writes/WS auth stay primary.

@@ -1,4 +1,5 @@
-import type { Axios } from 'axios';
+import type { Axios, AxiosRequestConfig } from 'axios';
+import type { IApiCancelOrderRequest } from '@tealstreet/grvt-client/interfaces';
 import type { Store } from '../../store/store.interface';
 import type { GrvtInstrumentLite, GrvtKline, GrvtOrderSide, GrvtOrderType, GrvtTimeInForce } from './grvt.types';
 
@@ -1751,18 +1752,157 @@ export class GrvtExchange extends BaseExchange {
         throw new Error('Trading account ID required to cancel orders');
       }
 
-      // Convert uppercased symbol to GRVT format (e.g., BTC_USDT_PERP → BTC_USDT_Perp)
       const market = this.store.marketsBySymbol[symbol];
       if (!market) throw new Error('Unknown GRVT cancellation market');
-
-      // Native filters must survive the SDK's full-to-lite conversion.
-      await (this.grvtClient as any).tdgClient.cancelAllOrders(
-        {
-          sub_account_id: this.grvtTradingAccountId,
-          kind: ['PERPETUAL'], base: [market.base], quote: [market.quote],
-        },
-        await (this.grvtClient as any).authenticatedEndpoint(),
-      );
+      const account = grvtUint64(this.grvtTradingAccountId);
+      const client = this.grvtClient as unknown as {
+        authenticatedEndpoint(): Promise<AxiosRequestConfig>;
+      };
+      let accountIdentity = this.apiExtras?.accountId;
+      const ensureActive = () => {
+        if (this.isDisposed) throw new Error('GRVT exchange disposed during symbol cancellation');
+        if (this.grvtTradingAccountId !== account ||
+            (accountIdentity !== undefined && this.apiExtras?.accountId !== accountIdentity)) {
+          throw new Error('GRVT cancellation account changed');
+        }
+      };
+      ensureActive();
+      const orderVersion = this.store.updateIds.orders;
+      const nativeAtStart = new Map(this._nonceToOrderId);
+      const createdAtStart = new Map(this._nonceCreationTimes);
+      const ensureClientIdentity = (id: string | undefined) => {
+        if (id === undefined) return;
+        if (
+          this.store.updateIds.orders !== orderVersion ||
+          this._nonceToOrderId.get(id) !== nativeAtStart.get(id) ||
+          this._nonceCreationTimes.get(id) !== createdAtStart.get(id)
+        ) throw new Error('GRVT client cancellation identity changed during snapshot or authentication');
+      };
+      const readConfig = await client.authenticatedEndpoint();
+      ensureActive();
+      accountIdentity ??= this.apiExtras?.accountId;
+      // open_orders is a complete snapshot, without instrument/paging filters.
+      // Keep its raw envelope: the SDK schema mapper discards unknown field names.
+      const response = await this.tradingXhr.post<unknown>(ENDPOINTS.OPEN_ORDERS, { sa: account }, readConfig);
+      ensureActive();
+      const malformed = () => new Error('Incomplete or malformed GRVT cancellation snapshot');
+      const object = (value: unknown): Record<string, unknown> => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw malformed();
+        return value as Record<string, unknown>;
+      };
+      const field = (row: Record<string, unknown>, full: string, lite: string): unknown => {
+        if (full in row && lite in row) throw malformed();
+        return full in row ? row[full] : row[lite];
+      };
+      const envelope = object(response.data);
+      if (
+        response.status !== 200 ||
+        Object.keys(envelope).some((key) => !['r', 'result', 'ri', 'request_id'].includes(key))
+      ) {
+        throw malformed();
+      }
+      const rows = field(envelope, 'result', 'r');
+      if (!Array.isArray(rows)) throw malformed();
+      const payloads: IApiCancelOrderRequest[] = [];
+      const nativeIds = new Set<string>();
+      const clientIds = new Set<string>();
+      for (const value of rows) {
+        const row = object(value);
+        if (['e', 'error', 'c', 'code'].some((key) => key in row)) throw malformed();
+        if (field(row, 'sub_account_id', 'sa') !== account) throw malformed();
+        const legs = field(row, 'legs', 'l');
+        if (!Array.isArray(legs) || legs.length !== 1) throw malformed();
+        const instruments = legs.map((leg) => field(object(leg), 'instrument', 'i'));
+        if (instruments.some((instrument) => typeof instrument !== 'string' || !instrument)) throw malformed();
+        const matches = instruments.includes(market.id);
+        const rawNative = field(row, 'order_id', 'oi');
+        if (
+          rawNative !== undefined &&
+          (typeof rawNative !== 'string' || !/^(?:0|0x[0-9a-f]{1,32})$/i.test(rawNative))
+        ) {
+          throw malformed();
+        }
+        const native = typeof rawNative === 'string' && !/^(?:0|0x0+)$/i.test(rawNative) ? rawNative : undefined;
+        const nativeKey = native ? BigInt(native).toString() : undefined;
+        const metadata = field(row, 'metadata', 'm');
+        const rawClient = metadata === undefined ? undefined : field(object(metadata), 'client_order_id', 'co');
+        let clientId: string | undefined;
+        if (rawClient !== undefined) {
+          if (typeof rawClient !== 'string') throw malformed();
+          const parsed = grvtUint64(rawClient);
+          clientId = parsed === '0' ? undefined : parsed;
+        }
+        if (!native && clientId === undefined) throw malformed();
+        if ((nativeKey && nativeIds.has(nativeKey)) || (clientId !== undefined && clientIds.has(clientId))) {
+          throw malformed();
+        }
+        if (nativeKey) nativeIds.add(nativeKey);
+        if (clientId !== undefined) clientIds.add(clientId);
+        if (matches) {
+          payloads.push({
+            sub_account_id: account,
+            ...(native ? { order_id: native } : { client_order_id: clientId! }),
+          });
+        }
+      }
+      // Validate every row and fallback lifecycle before the first write.
+      for (const payload of payloads) ensureClientIdentity(payload.client_order_id);
+      for (const payload of payloads) {
+        ensureActive();
+        ensureClientIdentity(payload.client_order_id);
+        const config = await client.authenticatedEndpoint();
+        ensureActive();
+        ensureClientIdentity(payload.client_order_id);
+        const writeConfig = {
+          ...config,
+          grvtCancellationScope: { subAccountId: account, accountId: accountIdentity },
+          ...(payload.client_order_id !== undefined ? { grvtDisableReauthRetry: true } : {}),
+        };
+        const acknowledgement = await this.tradingXhr.post<unknown>(
+          ENDPOINTS.CANCEL_ORDER,
+          {
+            sa: account,
+            ...(payload.order_id !== undefined ? { oi: payload.order_id } : { co: payload.client_order_id }),
+          },
+          writeConfig,
+        );
+        const invalidAck = () => new Error('Invalid GRVT cancellation acknowledgement');
+        const ackEnvelope = object(acknowledgement.data);
+        if (
+          acknowledgement.status !== 200 ||
+          Object.keys(ackEnvelope).some((key) => !['r', 'result', 'ri', 'request_id'].includes(key))
+        ) throw invalidAck();
+        const ack = object(field(ackEnvelope, 'result', 'r'));
+        if (['e', 'error', 'c', 'code'].some((key) => key in ack)) throw invalidAck();
+        if ('ack' in ack || 'a' in ack) {
+          const accepted = field(ack, 'ack', 'a');
+          if (
+            Object.keys(ack).some((key) => !['a', 'ack'].includes(key)) ||
+            (accepted !== true && accepted !== 'true')
+          ) {
+            throw invalidAck();
+          }
+        } else {
+          // Official cancel_order may return the cancelled Order instead of Ack.
+          const ackLegs = field(ack, 'legs', 'l');
+          if (
+            field(ack, 'sub_account_id', 'sa') !== account ||
+            !Array.isArray(ackLegs) || ackLegs.length !== 1 ||
+            field(object(ackLegs[0]), 'instrument', 'i') !== market.id
+          ) throw invalidAck();
+          if (payload.order_id !== undefined) {
+            const native = field(ack, 'order_id', 'oi');
+            if (
+              typeof native !== 'string' || !/^0x[0-9a-f]{1,32}$/i.test(native) ||
+              BigInt(native) !== BigInt(payload.order_id)
+            ) throw invalidAck();
+          } else {
+            const metadata = object(field(ack, 'metadata', 'm'));
+            if (field(metadata, 'client_order_id', 'co') !== payload.client_order_id) throw invalidAck();
+          }
+        }
+      }
+      ensureActive();
 
       this.log(`All orders for ${symbol} cancelled successfully`, LogSeverity.Info);
     } catch (err: any) {

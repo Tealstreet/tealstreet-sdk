@@ -115,6 +115,14 @@ impl BitgetFutures {
             && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
     }
 
+    fn primary_balance_read(&self, path: &str) -> bool {
+        self.account.degraded
+            && matches!(
+                path.split('?').next().unwrap_or(path),
+                paths::BALANCE | paths::UTA_ASSETS
+            )
+    }
+
     pub(crate) fn signed_headers(
         &self,
         now: f64,
@@ -122,22 +130,33 @@ impl BitgetFutures {
         path: &str,
         body: &str,
     ) -> Result<Vec<(&'static str, String)>, String> {
+        let read = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get && !self.primary_balance_read(path));
         let key = self
             .options
             .key
             .as_deref()
+            .map(|primary| read.map_or(primary, |r| r.key.as_str()))
             .filter(|k| !k.is_empty())
             .ok_or("Bitget API key is required")?;
         let secret = self
             .options
             .secret
             .as_deref()
+            .map(|primary| read.map_or(primary, |r| r.secret.as_str()))
             .filter(|k| !k.is_empty())
             .ok_or("Bitget secret is required")?;
         let passphrase = self
             .options
             .passphrase
             .as_deref()
+            .map(|primary| {
+                read.and_then(|r| r.passphrase.as_deref())
+                    .unwrap_or(primary)
+            })
             .filter(|k| !k.is_empty())
             .ok_or("Bitget passphrase is required")?;
         Ok(sign::headers(
@@ -161,7 +180,7 @@ impl BitgetFutures {
         match self.signed_headers(cx.now, Method::Get, &path, "") {
             Ok(headers) => {
                 let url = format!("{}{path}", paths::REST);
-                if let Some(at) = at {
+                let id = if let Some(at) = at {
                     cx.request_streamed(
                         Method::Get,
                         url,
@@ -171,7 +190,7 @@ impl BitgetFutures {
                             generation: self.account.generation,
                             request,
                         },
-                    );
+                    )
                 } else {
                     cx.request(
                         Method::Get,
@@ -182,7 +201,10 @@ impl BitgetFutures {
                             generation: self.account.generation,
                             request,
                         },
-                    );
+                    )
+                };
+                if self.primary_balance_read(&path) {
+                    cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
                 }
             }
             Err(error) => cx.log(LogLevel::Error, error),
@@ -2022,5 +2044,40 @@ fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
             .0
             .filter(|v| *v > 0.0)
             .map(|v| ("ratio".to_owned(), v))
+    }
+}
+
+#[cfg(test)]
+mod secondary_policy_tests {
+    use super::*;
+    #[test]
+    fn degraded_balance_uses_primary_fast_client_but_other_gets_use_read_identity() {
+        let mut venue = BitgetFutures::new(crate::Options {
+            key: Some("primary-key".into()),
+            secret: Some("primary-secret".into()),
+            passphrase: Some("primary-pass".into()),
+            read_credentials: Some(safe_cex_engine::ReadCredentials {
+                key: "read-key".into(),
+                secret: "read-secret".into(),
+                passphrase: Some("read-pass".into()),
+            }),
+            ..crate::Options::default()
+        });
+        for degraded in [false, true] {
+            venue.account.degraded = degraded;
+            for path in [paths::BALANCE, paths::UTA_ASSETS, paths::POSITIONS] {
+                let headers = venue.signed_headers(1.0, Method::Get, path, "").unwrap();
+                let expected = if degraded && path != paths::POSITIONS {
+                    "primary-key"
+                } else {
+                    "read-key"
+                };
+                assert!(headers.contains(&("ACCESS-KEY", expected.into())));
+                assert_eq!(
+                    venue.primary_balance_read(path),
+                    degraded && path != paths::POSITIONS
+                );
+            }
+        }
     }
 }

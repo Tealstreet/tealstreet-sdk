@@ -182,7 +182,7 @@ impl PositionRow<'_> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
-    #[serde(rename = "orderID", borrow)]
+    #[serde(rename = "orderID", alias = "orderId", borrow)]
     pub order_id: Str<'a>,
     #[serde(borrow)]
     pub symbol: Str<'a>,
@@ -194,7 +194,7 @@ pub struct OrderRow<'a> {
     pub kind: Str<'a>,
     #[serde(default, borrow, rename = "ordStatus", alias = "orderStatus")]
     pub status: Str<'a>,
-    #[serde(default, borrow, rename = "clOrdID")]
+    #[serde(default, borrow, rename = "clOrdID", alias = "clOrdId")]
     pub client_order_id: Str<'a>,
     #[serde(default, deserialize_with = "optional_number")]
     pub order_qty: Option<f64>,

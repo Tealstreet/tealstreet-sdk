@@ -94,7 +94,16 @@ impl MexcFutures {
         streamed: bool,
         pending: Pending,
     ) {
-        let Some(c) = &self.credentials else {
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
+        let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
         let headers = c.headers(cx.now, &payload);
