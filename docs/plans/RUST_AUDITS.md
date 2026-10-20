@@ -376,3 +376,29 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   MEXC, KuCoin, Kraken, Orderly, Bybit): skip and log the row, keep the store's
   copy of that id.
 - Check every venue honours `SetTickerSymbols` (MEXC ignores it).
+
+### BingX
+Normal inputs send the same requests as TS; the risk is resilience.
+- High: one bad market/ticker row or failed funding read keeps the private side
+  from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
+  freezes that list (`account.rs:491,557`). (startup/row-tolerance lane)
+- Medium: `TRIGGER_MARKET` stops (attached brackets) can't be moved
+  (`trading.rs:842`); no one-shot resend on signature error 100001; multi-order
+  cancel sends nothing if any id is unknown (`trading.rs:780`).
+- Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
+  per-symbol leverage/margin not read; trigger move requires trigger_type;
+  bracket `workingType`; history fails on one bad row; WS message with one bad
+  field dropped.
+
+### WEEX
+- High: one `null` numeric field in a public row stops the venue, private start
+  gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
+  order/position row freezes the list, no `planType` fallback (`account.rs:335`).
+- Medium: failed config read backs off all polling to ~60 s (`account.rs:518`);
+  balance stops updating during active trading (revision discard,
+  `account.rs:408`); accepted conditional reported failed if the venue echoes
+  `clientAlgoId` (`trading.rs:1303`; verify live); imported limit with TP/SL
+  can't be amended (`trading.rs:343`); missing passphrase looks like a valid
+  empty account (`lib.rs:148`).
+- Low: isolated leverage sets both sides; index triggers rejected; fill without
+  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
