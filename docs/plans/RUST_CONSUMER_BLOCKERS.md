@@ -375,6 +375,32 @@ publish an empty snapshot or dispose the previous good engine.
   and rerun affected native/consumer/replay checks. Fixtures, thresholds and
   output oracles remain unchanged. Merge stays blocked on this gate.
 
+- Codec initialization follow-up: independent JS-path review found that the
+  fully lazy decoder moved construction from module import into the raw Hyro
+  replay's final string capture, which occurs before steady CPU measurement.
+  Constructor-count evidence is landing 1/1/1 versus lazy bridge 0/0/1 at
+  import / numeric frame / first string. Restore standard-host initialization
+  conditionally when `TextDecoder` exists, retaining the late fallback when
+  native hosts install codecs after import. No native, harness, fixture,
+  measurement-window or threshold changes. Independent correctness review
+  PASS; host 70 and actual mobile loading 2 PASS.
+- The matched fixed-JS Hyro three-run control passes on the unchanged canonical
+  Bybit solo artifact (`3b5a4917…b7631d`): main TS/Rust 22.7/18.9 ms,
+  steady 4.1/3.2, memory 13.5/0.8 MB. The pre-fix local control also passed
+  (steady 3.9/3.1), so do not claim a quantified CPU gain from these timings.
+  The deterministic initialization contract is repaired; fresh exact-head CI
+  still determines whether the tiny-fixture steady gate passes. Combined
+  `6afa3acf…94c34` bindings are restored with identical bytes.
+
+- Codec fix `be1dd2a5b0` is independently reviewed and committed. Fresh
+  compatibility checks PASS: SDK WASM 430 / 14 files, JS host 70, mobile 2,
+  CLI 2 and MCP 5 actual-WASM cases, explicit JS lint and isolated packaged
+  smoke (17 tools, Poseidon, native Coinbase outside checkout). Rebuilt MCP
+  package retains 131 JS / 353 Rust notices and exact `6afa3acf…94c34` WASM.
+  The native source and all replay fixtures/oracles are unchanged; prior native
+  and replay measurements remain scoped to their checkpoints, with fresh
+  full-venue exact-head CI required for this initialization repair.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
