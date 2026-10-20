@@ -16,6 +16,12 @@
       "ciHead": "2b10e43733a43f37c0ec4318b8144650ab2c1f3f",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39422195309",
       "note": "Exact newly observed paths independently classified from raw artifacts; KuCoin refreshed tape preserves the same 60 divergences. Corrected TxFlow startup-window fixture has exactly the prior three settings divergences in both local correctness replays; full exact-head CI must certify the refreshed hash. Coinbase ES256 private variants expose source-consistent terminal-retention/TIF paths, independently reviewed; no public own-audit failure is declared."
+    },
+    "finalRefresh": {
+      "ciRun": 39424799340,
+      "ciHead": "67cf7d9b2b0d98e9710524cd6729301e16408ed3",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39424799340",
+      "note": "Additional literal checkpoint paths independently classified from raw artifacts; no comparator, timing threshold, performance requirement or integrity protection relaxed. Prior observations remain declared."
     }
   },
   "failures": [
@@ -697,6 +703,12 @@
             "checkpoint 4 tickers[8].percentage",
             "checkpoint 4 tickers[90].percentage",
             "checkpoint 4 tickers[9].percentage"
+          ]
+        },
+        {
+          "divergence": "Asynchronous initial depth seed is visible in native startup snapshot before TS. Both terminal books are present, each depth read occurs once, and all seven measured transport receipts match their own audited receipt; BTC and SOL seed completion can change the literal startup path.",
+          "keys": [
+            "checkpoint 0 books.SOL_USDC_PERP"
           ]
         }
       ]
@@ -36290,6 +36302,12 @@
             "checkpoint 5 account.orders[1]",
             "checkpoint 8 account.orders.length",
             "checkpoint 8 account.orders[0]"
+          ]
+        },
+        {
+          "divergence": "TS drops native/caller client IDs; asynchronous cancel reconciliation determines whether this fixed boundary exposes the missing ID on placed-order or an entire retained/removed row. Tape boundaries, commands and transport receipts are unchanged.",
+          "keys": [
+            "checkpoint 5 account.orders[1].clientOrderId"
           ]
         }
       ]

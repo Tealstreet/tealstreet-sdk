@@ -284,3 +284,13 @@ never retry an unchanged failed performance measurement to obtain a pass.
   107 cases, 49 aliases and both combined artifacts; PR wording distinguishes
   measured standalone performance from combined size and lists the private
   terminal-retention/TIF divergences. Full updated-head CI is the landing gate.
+- Updated-head CI `39424799340` confirms the TxFlow fixture correction. Two
+  previously unseen literal paths were independently classified: KuCoin Spot
+  checkpoint-5 caller ID (TS omits it; asynchronous cancel reconciliation
+  determines whether the row still exists), and Backpack startup SOL book
+  visibility (the previous observation exposed BTC instead). Final books and
+  all fourteen Backpack measured/audited receipts agree. Added only these two
+  paths and evidence metadata; every earlier observation remains declared.
+  Independent refresh review PASS with ten adjacent/protected-error controls;
+  policy/verifier tests 9/9 PASS. No comparator or threshold changed. The full
+  matrix completes before the next certification push; base remains `702a62050c`.
