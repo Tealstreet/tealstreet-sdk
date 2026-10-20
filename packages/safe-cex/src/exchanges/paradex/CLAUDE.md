@@ -262,7 +262,7 @@ Execution-history behavior (`fetchHistoricalFills`):
 | `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (throttled 100ms in handler)                                     |
 | `trades.{market}`                                     | Automatic | Live last-price + drives in-memory OHLCV update from trade ticks                               |
 | `markets_summary`                                     | Automatic | Aggregate stream for volume_24h / open_interest / funding_rate (slow cadence)                  |
-| `order_book.{market}.snapshot@{depth}@{refresh_rate}` | On-demand | Orderbook snapshots (current implementation uses `snapshot@15@100ms`; no `@price_tick` suffix) |
+| `order_book.{market}.deltas` | On-demand | Full-depth initial snapshot, then incremental inserts/updates/deletes |
 
 **BBO handling** (`paradex.ws-public.ts`):
 
@@ -573,7 +573,7 @@ For order signatures, size and price are scaled by `1e8`:
 ### WebSocket
 
 - **Markets summary handler**: Throttled to 100ms (lodash `throttle` with leading+trailing)
-- **Orderbook handler**: Throttled to 100ms (lodash `throttle` with leading+trailing)
+- **Orderbook handler**: Every delta is applied; callbacks are throttled per symbol to 100ms (leading+trailing). Invalid updates or sequence gaps resubscribe and wait for a fresh snapshot; duplicate/older sequence numbers are ignored.
 - **Order fetch throttle**: 1-second debounce (`paradex.ws-private.ts:430-435`)
 - **Position fetch throttle**: 500ms minimum between fetches (`paradex.ws-private.ts:287-318`)
 
@@ -725,7 +725,7 @@ windowed request with their full history and no error.
 
 14. **Mark/last/bid/ask sources**: bid/ask come from `bbo.{symbol}` (broadcast at startup). `last` (and a synthetic `mark`) come from `trades.{symbol}` (also broadcast). `markets_summary` is reserved for slow-changing fields (volume_24h / open_interest / funding_rate). Do **not** route bid/ask/last back through `markets_summary` — its cadence is too slow for live UX, and an earlier attempt to consolidate everything into it visibly broke watchlist/positions PnL refresh.
 
-15. **Orderbook on-demand subscription**: Orderbook channels are only subscribed when `listenOrderBook()` is called, preventing subscription to 100+ unused orderbooks. Channel shape is `order_book.{market}.snapshot@15@100ms` (`paradex.ws-public.ts`).
+15. **Orderbook on-demand subscription**: Orderbook channels are only subscribed when `listenOrderBook()` is called, preventing subscription to 100+ unused orderbooks. `order_book.{market}.deltas` preserves full depth; the former `snapshot@15@100ms` feed truncated books to fifteen levels. A new socket or recovery requires a snapshot before any delta applies. The sequence check conservatively resubscribes on a nonconsecutive sequence rather than risk publishing an incomplete book. Official schema: `tradeparadex/paradex-docs`, `fern/apis/prod_ws/asyncapi-2.6.0.yaml`, `ResponsesPriceBookUpdate`.
 
 16. **Public/private mode detection**: Paradex must not be treated as public-only just because `secret` is empty. Runtime private-mode checks must use Paradex credentials (`key`, `paradexAddress`, `subkeyAddress`).
 

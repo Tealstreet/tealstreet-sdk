@@ -1,6 +1,6 @@
 import throttle from 'lodash/throttle';
 
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { ParadexExchange } from './paradex.exchange';
@@ -11,7 +11,7 @@ type MessageHandlers = {
   [topic: string]: Array<(json: Data) => void>;
 };
 
-const getOrderBookChannel = (symbol: string) => `order_book.${symbol}.snapshot@15@100ms`;
+const getOrderBookChannel = (symbol: string) => `order_book.${symbol}.deltas`;
 const OHLCV_POLL_INTERVAL_MS = 3_000;
 const OHLCV_TRADE_STALE_MS = 20_000;
 const OHLCV_RECOVERY_COOLDOWN_MS = 30_000;
@@ -23,10 +23,21 @@ type PendingSubscribeRequest = {
   attempt: number;
 };
 
+type DepthLevel = { side: 'BUY' | 'SELL'; price: number; size: number };
+type DepthState = {
+  sequence?: bigint;
+  initialized: boolean;
+  recovering: boolean;
+  bids: Map<number, number>;
+  asks: Map<number, number>;
+  emit: ReturnType<typeof throttle>;
+};
+
 export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   connectUrl = '';
   private pingInterval?: NodeJS.Timeout;
   private orderbookCallbacks: Map<string, Set<(orderbook: OrderBook) => void>> = new Map();
+  private orderbooks = new Map<string, DepthState>();
   private tradeSubscriptionCounts: Map<string, number> = new Map();
   private desiredTradeSymbols = new Set<string>();
   private sentTradeSymbols = new Set<string>();
@@ -78,6 +89,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       this.ping();
       this.sentTradeSymbols.clear();
       this.pendingSubscribeRequests.clear();
+      this.clearOrderbooks();
 
       // Verify websocket is still connected before subscribing
       if (!this.isConnected) {
@@ -93,7 +105,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   onMessage = (event: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      const data = jsonParse(event.data);
+      const data = bigIntAsStringJsonParse(event.data);
       if (!data) return;
 
       // Handle JSON-RPC 2.0 format
@@ -169,6 +181,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     this.subscriptionRetryTimeouts.clear();
     this.ohlcvPollingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
     this.ohlcvPollingTimeouts.clear();
+    this.clearOrderbooks();
     super.dispose();
   };
 
@@ -342,86 +355,110 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     { leading: true, trailing: true },
   );
 
-  private handleOrderbookUpdate = throttle(
-    (data: any) => {
-      try {
-        const rawData = Array.isArray(data?.data) ? data.data[0] : data?.data || data;
-        const channel = String(data?.channel || '');
-        const channelSymbol = channel.split('.')[1];
-        const orderbookData = rawData && typeof rawData === 'object' ? rawData : {};
-        const symbol = String(orderbookData.market || channelSymbol || '');
+  private clearOrderbooks = () => {
+    this.orderbooks.forEach((state) => state.emit.cancel());
+    this.orderbooks.clear();
+  };
 
-        if (!symbol) {
-          return;
+  private depthState = (symbol: string): DepthState => {
+    let state = this.orderbooks.get(symbol);
+    if (!state) {
+      state = {
+        initialized: false,
+        recovering: false,
+        bids: new Map(),
+        asks: new Map(),
+        emit: throttle(() => this.emitOrderbook(symbol), 100, { leading: true, trailing: true }),
+      };
+      this.orderbooks.set(symbol, state);
+    }
+    return state;
+  };
+
+  private emitOrderbook = (symbol: string) => {
+    const state = this.orderbooks.get(symbol);
+    const callbacks = this.orderbookCallbacks.get(symbol);
+    if (!state?.initialized || !callbacks?.size || this.isDisposed) return;
+    const levels = (side: Map<number, number>, descending: boolean) => [...side]
+      .sort(([a], [b]) => descending ? b - a : a - b)
+      .map(([price, amount]) => ({ price, amount, total: price * amount }));
+    const orderbook = { bids: levels(state.bids, true), asks: levels(state.asks, false) };
+    if (orderbook.bids.length && orderbook.asks.length) {
+      this.parent.store.updateTicker({ id: symbol }, {
+        bid: orderbook.bids[0].price,
+        ask: orderbook.asks[0].price,
+      });
+    }
+    callbacks.forEach((callback) => callback(orderbook));
+  };
+
+  private recoverOrderbook = (symbol: string, state: DepthState) => {
+    if (state.recovering) return;
+    state.initialized = false;
+    state.recovering = true;
+    state.emit.cancel();
+    if (this.isConnected) {
+      const channel = getOrderBookChannel(symbol);
+      this.sendJsonRpcSubscription('unsubscribe', channel);
+      this.sendJsonRpcSubscription('subscribe', channel);
+    }
+  };
+
+  private handleOrderbookUpdate = (data: Data) => {
+    const rows = Array.isArray(data?.data) ? data.data : [data?.data];
+    for (const row of rows) {
+      const channelSymbol = String(data?.channel || '').split('.')[1];
+      const symbol = String(row?.market || channelSymbol || '');
+      if (!symbol || symbol !== channelSymbol || !this.orderbookCallbacks.get(symbol)?.size) continue;
+      const state = this.depthState(symbol);
+      const sequenceText = String(row?.seq_no ?? '');
+      const sequenceValid = (typeof row?.seq_no === 'string' || Number.isSafeInteger(row?.seq_no)) && /^\d+$/.test(sequenceText);
+      const decode = (value: unknown): DepthLevel[] | undefined => {
+        if (!Array.isArray(value)) return;
+        const levels: DepthLevel[] = [];
+        for (const level of value) {
+          const price = Number(level?.price);
+          const size = Number(level?.size);
+          if (
+            !['BUY', 'SELL'].includes(level?.side) ||
+            !['string', 'number'].includes(typeof level?.size) || String(level.size).trim() === '' ||
+            !Number.isFinite(price) || price <= 0 || !Number.isFinite(size) || size < 0
+          ) return;
+          levels.push({ side: level.side, price, size });
         }
-
-        // Paradex typically sends inserts/updates/deletes deltas, but keep a fallback for bids/asks snapshots.
-        const inserts = Array.isArray(orderbookData.inserts) ? orderbookData.inserts : [];
-        const updates = Array.isArray(orderbookData.updates) ? orderbookData.updates : [];
-        const allLevels = [...inserts, ...updates];
-        const rawBids = Array.isArray(orderbookData.bids) ? orderbookData.bids : [];
-        const rawAsks = Array.isArray(orderbookData.asks) ? orderbookData.asks : [];
-
-        const normalizedBidLevels =
-          allLevels.length > 0
-            ? allLevels.filter((level: any) => level.side === 'BUY')
-            : rawBids.map((level: any) =>
-                Array.isArray(level)
-                  ? { side: 'BUY', price: level[0], size: level[1] }
-                  : { side: 'BUY', price: level?.price, size: level?.size || level?.amount },
-              );
-        const normalizedAskLevels =
-          allLevels.length > 0
-            ? allLevels.filter((level: any) => level.side === 'SELL')
-            : rawAsks.map((level: any) =>
-                Array.isArray(level)
-                  ? { side: 'SELL', price: level[0], size: level[1] }
-                  : { side: 'SELL', price: level?.price, size: level?.size || level?.amount },
-              );
-
-        // Update best bid/ask in ticker
-        if (normalizedBidLevels.length > 0 && normalizedAskLevels.length > 0) {
-          // Sort to get best prices
-          const sortedBids = normalizedBidLevels.sort((a: any, b: any) => parseFloat(b.price) - parseFloat(a.price));
-          const sortedAsks = normalizedAskLevels.sort((a: any, b: any) => parseFloat(a.price) - parseFloat(b.price));
-
-          const bestBid = parseFloat(sortedBids[0].price);
-          const bestAsk = parseFloat(sortedAsks[0].price);
-
-          this.parent.store.updateTicker(
-            { id: symbol },
-            {
-              bid: bestBid,
-              ask: bestAsk,
-            },
-          );
-        }
-
-        // Emit to registered callbacks
-        const callbacks = this.orderbookCallbacks.get(symbol);
-        if (callbacks && callbacks.size > 0) {
-          const orderbook: OrderBook = {
-            bids: normalizedBidLevels.map((level: any) => ({
-              price: parseFloat(level.price),
-              amount: parseFloat(level.size),
-              total: parseFloat(level.price) * parseFloat(level.size),
-            })),
-            asks: normalizedAskLevels.map((level: any) => ({
-              price: parseFloat(level.price),
-              amount: parseFloat(level.size),
-              total: parseFloat(level.price) * parseFloat(level.size),
-            })),
-          };
-
-          callbacks.forEach((callback) => callback(orderbook));
-        }
-      } catch (err) {
-        this.parent.log(`Error handling orderbook update: ${err}`, LogSeverity.Error);
+        return levels;
+      };
+      const inserts = decode(row?.inserts);
+      const updates = decode(row?.updates);
+      const deletes = decode(row?.deletes);
+      if (!sequenceValid || !['s', 'd'].includes(row?.update_type) || !inserts || !updates || !deletes) {
+        this.recoverOrderbook(symbol, state);
+        continue;
       }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+      const sequence = BigInt(sequenceText);
+      if (state.sequence !== undefined && (
+        sequence < state.sequence || (sequence === state.sequence && (row.update_type !== 's' || state.initialized))
+      )) continue;
+      if (row.update_type === 'd' && (!state.initialized || sequence !== state.sequence! + 1n)) {
+        this.recoverOrderbook(symbol, state);
+        continue;
+      }
+      if (row.update_type === 's') {
+        state.bids.clear();
+        state.asks.clear();
+      }
+      for (const level of [...inserts, ...updates]) {
+        const side = level.side === 'BUY' ? state.bids : state.asks;
+        if (level.size === 0) side.delete(level.price);
+        else side.set(level.price, level.size);
+      }
+      for (const level of deletes) (level.side === 'BUY' ? state.bids : state.asks).delete(level.price);
+      state.sequence = sequence;
+      state.initialized = true;
+      state.recovering = false;
+      state.emit();
+    }
+  };
 
   private handleTradesUpdate = (data: any) => {
     try {
@@ -598,8 +635,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
 
   subscribeToOrderBook = (symbol: string) => {
     if (this.isConnected) {
-      // Paradex uses JSON-RPC 2.0 format with channel format:
-      // Paradex public WS orderbook channel format: order_book.{market}.snapshot@{depth}@{refresh_rate}
+      // The deltas feed starts with a full-depth snapshot.
       const channel = getOrderBookChannel(symbol);
       this.sendJsonRpcSubscription('subscribe', channel);
       // this.parent.log(`Subscribing to orderbook: ${channel}`, LogSeverity.Debug);
@@ -661,6 +697,8 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       // Unsubscribe from orderbook if no more listeners
       if (callbacks.size === 0) {
         this.orderbookCallbacks.delete(symbol);
+        this.orderbooks.get(symbol)?.emit.cancel();
+        this.orderbooks.delete(symbol);
         this.unsubscribeFromOrderBook(symbol);
         this.cleanupMessageHandlerStats(`order_book.${symbol}`);
       }

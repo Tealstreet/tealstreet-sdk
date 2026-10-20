@@ -118,6 +118,9 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // Paired TS correction: old snapshot@15 dropped full depth, deletes and sequence
+  // checks. Both engines now consume the documented full-depth deltas feed.
+  paradex() {},
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
