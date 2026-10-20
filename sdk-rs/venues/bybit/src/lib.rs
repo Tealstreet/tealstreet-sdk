@@ -222,6 +222,10 @@ pub struct BybitLinear {
     ticker_seeds: HashMap<Category, Vec<Ticker>>,
     catalog_ready: bool,
     tickers_ready: bool,
+    /// The optional option product failed to load; the others publish without it.
+    option_degraded: bool,
+    published_catalogs: usize,
+    published_seeds: usize,
     classification: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
     wallet: Option<account::Wallet>,
@@ -351,6 +355,9 @@ impl BybitLinear {
             ticker_seeds: HashMap::new(),
             catalog_ready: false,
             tickers_ready: false,
+            option_degraded: false,
+            published_catalogs: 0,
+            published_seeds: 0,
             classification: HashMap::new(),
             derivatives: HashMap::new(),
             wallet: None,
@@ -736,6 +743,17 @@ impl BybitLinear {
             LogLevel::Error,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
+        if self.category == Category::Option && !self.option_degraded {
+            self.option_degraded = true;
+            // Publish the working products now; options join when they load.
+            let category = self.category;
+            for other in self.categories() {
+                self.select_category(other);
+                self.try_publish_catalogs(cx);
+                self.try_load_tickers(cx);
+            }
+            self.select_category(category);
+        }
         if self.startup.retry.is_some() {
             return;
         }
@@ -859,7 +877,34 @@ impl BybitLinear {
         if self.category == Category::Option {
             self.request_option_seeds(cx);
         }
-        if self.catalogs.len() == self.products.len() + 1 {
+        self.try_publish_catalogs(cx);
+    }
+
+    /// Categories whose public data must be in before publishing: every enabled
+    /// one, except a failed option product, which joins later.
+    pub(crate) fn required_categories(&self) -> Vec<Category> {
+        self.categories()
+            .into_iter()
+            .filter(|c| !(self.option_degraded && *c == Category::Option))
+            .collect()
+    }
+
+    fn try_publish_catalogs(&mut self, cx: &mut Cx<'_, Pending>) {
+        let complete = self.catalogs.len() == self.products.len() + 1;
+        let usable = self
+            .required_categories()
+            .iter()
+            .all(|c| self.catalogs.contains_key(c));
+        // Option sorts last, so a late option catalog only appends market indexes.
+        let late_option = self.catalog_ready && complete;
+        if !usable
+            || (self.catalog_ready && !late_option)
+            || self.published_catalogs == self.catalogs.len()
+        {
+            return;
+        }
+        self.published_catalogs = self.catalogs.len();
+        {
             let mut markets = Vec::new();
             for category in self.categories() {
                 markets.extend(self.catalogs.get(&category).into_iter().flatten().cloned());
@@ -960,11 +1005,38 @@ impl BybitLinear {
             })
             .collect();
         self.ticker_seeds.insert(self.category, tickers);
-        if self.ticker_seeds.len() != self.products.len() + 1 {
+        self.try_publish_tickers(cx);
+    }
+
+    fn try_publish_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
+        let usable = self
+            .required_categories()
+            .iter()
+            .all(|c| self.ticker_seeds.contains_key(c));
+        let late_option = self.tickers_ready
+            && self.ticker_seeds.len() == self.products.len() + 1
+            && self.published_seeds < self.ticker_seeds.len();
+        if !usable
+            || (self.tickers_ready && !late_option)
+            || self.published_seeds == self.ticker_seeds.len()
+        {
             return;
         }
-        let mut tickers = Vec::new();
+        self.published_seeds = self.ticker_seeds.len();
+        if late_option {
+            self.option_degraded = false;
+            cx.log(LogLevel::Info, "Bybit option markets recovered");
+        }
+        // Published categories keep their live rows; a late option only appends.
+        let mut tickers = if late_option {
+            cx.store.tickers().to_vec()
+        } else {
+            Vec::new()
+        };
         for category in self.categories() {
+            if late_option && category != Category::Option {
+                continue;
+            }
             tickers.extend(
                 self.ticker_seeds
                     .get(&category)
@@ -977,6 +1049,11 @@ impl BybitLinear {
         self.tickers_ready = true;
         let category = self.category;
         for other in self.categories() {
+            // A category without seeded data waits; a connected one is already live.
+            if !self.ticker_seeds.contains_key(&other) || (late_option && other != Category::Option)
+            {
+                continue;
+            }
             self.select_category(other);
             self.connect(cx, Channel::Public);
             if self.credentials.is_some() {

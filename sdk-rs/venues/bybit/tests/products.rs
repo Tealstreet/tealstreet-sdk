@@ -722,3 +722,87 @@ fn documented_option_ticker_frame_updates_quotes_and_change() {
     assert_eq!((t.bid, t.ask), (41000.0, 41001.0));
     assert!((t.percentage - 1.0).abs() < 1e-9);
 }
+
+#[test]
+fn failed_option_catalog_does_not_stall_linear_and_inverse_and_recovers_later() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    let failed = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("instruments-info") && r.url.contains("category=option"))
+        .unwrap();
+    let failed = h.requests.remove(failed);
+    h.reply(failed.id, 503, "upstream unavailable");
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    assert!(
+        h.engine.store().loaded().markets,
+        "option failure withheld working markets"
+    );
+    let linear_index = h
+        .engine
+        .store()
+        .markets()
+        .iter()
+        .position(|m| m.symbol == "BTCUSDT")
+        .unwrap();
+    respond(
+        &mut h,
+        "tickers",
+        "inverse",
+        None,
+        &support::TICKERS
+            .replace("BTCUSDT", "BTCUSD")
+            .replace("ETHUSDT", "ETHUSD"),
+    );
+    respond(&mut h, "tickers", "linear", None, support::TICKERS);
+    assert!(h.engine.store().loaded().tickers);
+    assert!(h.socket("public/linear").is_some() && h.socket("public/inverse").is_some());
+    assert!(h.socket("public/option").is_none());
+    assert!(h.logs.iter().any(|m| m.contains("Failed to fetch Bybit")));
+    // A live linear quote must survive the option catalog joining later.
+    let socket = h.socket("public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"41234"}}"#,
+    );
+    h.advance(1_000.0);
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    assert!(h.engine.store().market(OPTION).is_some());
+    assert_eq!(
+        h.engine
+            .store()
+            .markets()
+            .iter()
+            .position(|m| m.symbol == "BTCUSDT"),
+        Some(linear_index),
+        "late option catalog moved existing market indexes"
+    );
+    respond(&mut h, "tickers", "option", Some("baseCoin=ETH"), EMPTY);
+    respond(&mut h, "tickers", "option", Some("baseCoin=BTC"), QUOTE);
+    assert_eq!(h.engine.store().ticker(OPTION).unwrap().bid, 1000.0);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().bid, 41234.0);
+    assert!(h.socket("public/option").is_some());
+}

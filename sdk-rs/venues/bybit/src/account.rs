@@ -2128,7 +2128,11 @@ impl BybitLinear {
             cx.store.upsert_order(order);
         }
         self.orders_loaded.insert(self.category);
-        if self.orders_loaded.len() == self.products.len() + 1 {
+        if self
+            .required_categories()
+            .iter()
+            .all(|c| self.orders_loaded.contains(c))
+        {
             cx.store.set_orders(cx.store.orders().to_vec());
         }
     }
@@ -2232,7 +2236,11 @@ impl BybitLinear {
             cx.store.set_position_greeks(greek_rows);
         }
         self.positions_loaded.insert(self.category);
-        if self.positions_loaded.len() == self.products.len() + 1 {
+        if self
+            .required_categories()
+            .iter()
+            .all(|c| self.positions_loaded.contains(c))
+        {
             cx.store.set_positions(cx.store.positions().to_vec());
         }
         self.commit_balance(cx);
