@@ -603,6 +603,7 @@ async function runTs() {
           total: store.balance.total,
           upnl: store.balance.upnl,
           ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.currencyBalances && store.balance.currencies !== undefined ? { currencies: store.balance.currencies } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.

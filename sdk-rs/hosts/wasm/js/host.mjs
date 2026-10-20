@@ -72,6 +72,11 @@ export class EngineHost {
     return this.engine.snapshotFrame(this.transport.now()).buffer;
   }
 
+  accountId() {
+    if (this.disposed) throw new Error('engine disposed');
+    return this.engine.accountId?.();
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;

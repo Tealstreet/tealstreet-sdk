@@ -11,6 +11,7 @@ import { gunzipSync } from 'node:zlib';
 import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 
@@ -119,6 +120,10 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // Independent documented payload oracle; paired public spot reference repairs
+  // leave the real TS Store/worker serialization and measured CPU/memory intact.
+  coinbase: (ts) => fixCoinbase(ts, tapeRecords),
+  coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   // Independent documented-tape oracle; native request/protocol counters remain exact.
   orderly: (ts) => fixOrderly(ts, tapeRecords),
   lighter: {
@@ -499,7 +504,7 @@ for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
   if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
-  if (venue.family === 'orderly') KNOWN_TS_FIXES[values.venue](ts);
+  if (venue.family === 'orderly' || venue.family === 'coinbase') KNOWN_TS_FIXES[values.venue](ts);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -615,3 +620,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log('PASS');
+
+if (venue.family === 'coinbase') console.log(`(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; native JWT and independent oracles checked)`);

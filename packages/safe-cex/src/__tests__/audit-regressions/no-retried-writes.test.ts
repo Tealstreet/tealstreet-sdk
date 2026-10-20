@@ -20,7 +20,7 @@ import { createAPI as createBitunixAPI } from '../../exchanges/bitunix/bitunix.a
 import { createAPI as createBlofinAPI } from '../../exchanges/blofin/blofin.api';
 import { createAPI as createBreakoutAPI } from '../../exchanges/breakoutprop/breakoutprop.api';
 import { createAPI as createBybitAPI } from '../../exchanges/bybit/bybit.api';
-import { createAPI as createCoinbaseAPI } from '../../exchanges/coinbase/coinbase.api';
+import { createAPI as createCoinbaseAPI } from '../reference/coinbase/coinbase.api';
 import { createAPI as createGrvtAPI, createTradingAPI as createGrvtTradingAPI } from '../../exchanges/grvt/grvt.api';
 import { ENDPOINTS as GRVT } from '../../exchanges/grvt/grvt.types';
 import { createExchangeAPI, createInfoAPI } from '../../exchanges/hyperliquid/hyperliquid.api';

@@ -5,6 +5,7 @@
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
     feature = "bitrue",
+    feature = "coinbase",
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
@@ -21,7 +22,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, coinbase, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -42,6 +43,8 @@ use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+#[cfg(feature = "coinbase")]
+use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
@@ -62,6 +65,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
@@ -70,6 +74,9 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn account_id(&self) -> Option<String> {
+        Engine::account_id(self).map(str::to_owned)
+    }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
@@ -96,6 +103,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 }
 
 #[cfg(any(
+    feature = "coinbase",
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
@@ -115,6 +123,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    spot_only: bool,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -126,6 +137,7 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "coinbase",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -616,6 +628,7 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "coinbase",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -643,6 +656,17 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "coinbase")]
+            "coinbase" | "coinbasespot" => Box::new(Engine::new(
+                Coinbase::new(CoinbaseOptions {
+                    key: options.key.unwrap_or_default(),
+                    secret: options.secret.unwrap_or_default(),
+                    public_data_only: options.public_data_only,
+                    spot_only: venue == "coinbasespot" || options.spot_only,
+                    testnet: options.testnet,
+                })
+                .map_err(|error| JsError::new(&error))?,
+            )),
             #[cfg(feature = "orderly")]
             "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
                 Box::new(Engine::new(Orderly::new(OrderlyOptions {
@@ -889,6 +913,11 @@ impl WasmEngine {
         let command: CommandIn = serde_json::from_str(command_json)?;
         self.inner.handle(now, Event::Command(command.into()));
         Ok(self.flush())
+    }
+
+    #[wasm_bindgen(js_name = accountId)]
+    pub fn account_id(&self) -> Option<String> {
+        self.inner.account_id()
     }
 
     /// Everything that changed since the previous call as one flush frame

@@ -5,6 +5,17 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
 
+test('account identity is read from the live engine and unavailable after disposal', () => {
+  let account;
+  const host = new EngineHost({ accountId: () => account }, {});
+  assert.equal(host.accountId(), undefined);
+  account = 'selected-portfolio';
+  assert.equal(host.accountId(), 'selected-portfolio');
+  host.dispose();
+  assert.throws(() => host.accountId(), /disposed/);
+  assert.equal(new EngineHost({}, {}).accountId(), undefined);
+});
+
 test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening');

@@ -121,9 +121,14 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
 };
 
 export const subscriptionMessage = (message) => {
-  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? message.type ?? '').toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+    return { op, topics: ['heartbeats', 'user'].includes(message.channel)
+      ? [message.channel] : message.product_ids.map((product) => `${message.channel}.${product}`) };
+  }
+  if (typeof message.channel === 'string' && message.product_ids === undefined) return { op, topics: [message.channel] };
   const topics =
     message.params?.channels ??
     message.params ??
@@ -197,6 +202,11 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
   }
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
+    if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+      if (['heartbeats', 'user'].includes(message.channel)) return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
+      return message.product_ids.map((product) => subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options));
+    }
+    if (typeof message.channel === 'string' && message.product_ids === undefined) return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,
         { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));

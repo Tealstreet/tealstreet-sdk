@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
-import { callerIdsOf, canonicalUrl, isWriteRequest, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, canonicalUrl, isWriteRequest, requestKey, selectResponse, subscriptionMessage, subscriptionKey, subscriptionKeys } from './requests.mjs';
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
@@ -462,4 +462,20 @@ test('WOO native topics and auth identity remain exact while fresh clocks vary',
   const auth = (apikey, timestamp, sign) => keys({ event: 'auth', params: { apikey, timestamp, sign } });
   assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
   assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
+});
+
+
+test('Coinbase channel product arrays expand exact topics and batch identities', () => {
+  const url='wss://advanced-trade-ws.coinbase.com';
+  const batch={type:'subscribe',channel:'level2',product_ids:['BTC-USD','ETH-USD']};
+  assert.deepEqual(subscriptionMessage(batch),{op:'subscribe',topics:['level2.BTC-USD','level2.ETH-USD']});
+  assert.deepEqual(subscriptionMessage({...batch,type:'unsubscribe',product_ids:['ETH-USD']}),{op:'unsubscribe',topics:['level2.ETH-USD']});
+  const batched=subscriptionKeys(url,JSON.stringify(batch)).sort();
+  const individual=['BTC-USD','ETH-USD'].flatMap((product)=>subscriptionKeys(url,JSON.stringify({...batch,product_ids:[product]}))).sort();
+  assert.deepEqual(batched,individual);
+  assert.notDeepEqual(batched,subscriptionKeys(url,JSON.stringify({...batch,channel:'candles'})));
+  assert.notDeepEqual(batched,subscriptionKeys(url,JSON.stringify({...batch,product_ids:['BTC-USD','SOL-USD']})));
+  assert.deepEqual(subscriptionMessage({type:'subscribe',channel:'heartbeats',product_ids:['BTC-USD','ETH-USD']}),{op:'subscribe',topics:['heartbeats']});
+  assert.deepEqual(subscriptionMessage({type:'subscribe',channel:'user'}),{op:'subscribe',topics:['user']});
+  assert.equal(subscriptionKeys(url,JSON.stringify({type:'subscribe',channel:'heartbeats',product_ids:['BTC-USD','ETH-USD']})).length,1);
 });

@@ -110,3 +110,6 @@ opt-level = 3
 
 [profile.release.package.safe-cex-engine]
 opt-level = 3
+
+[profile.release.package.safe-cex-venue-coinbase]
+opt-level = "z"

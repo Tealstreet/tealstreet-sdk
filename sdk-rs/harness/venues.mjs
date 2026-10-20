@@ -1,6 +1,7 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
@@ -411,7 +412,38 @@ export const mexcRequestUrl = (url) => {
   return parsed.href;
 };
 
+const coinbase = (name) => ({
+  family: 'coinbase', currencyBalances: true, rust: name,
+  ts: { module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange', name },
+  publicOptions: { spotOnly: true, extra: { coinbasePublicSpot: true } },
+  options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
+  replayCredentials: COINBASE_REPLAY,
+  privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
+    .filter((key) => key.startsWith('level2.')).length >= count,
+  verifyRequest: verifyCoinbaseRequest,
+  verifySubscribe: verifyCoinbaseSubscribe,
+  subscriptionMessage: coinbaseSubscription,
+  createSocketAudit: createCoinbaseSocketAudit,
+  streamOf: (text) => {
+    try { const message = JSON.parse(text);
+      const channel = message.channel === 'l2_data' ? 'level2' : message.channel;
+      if (['heartbeats', 'user'].includes(channel)) return channel;
+      const product = message.events?.[0]?.product_id;
+      return product ? `${channel}.${product}` : undefined;
+    } catch { return undefined; }
+  },
+  subscriptionGenerations: true,
+  matchRequestBody: true, requestBodies: true, compareWriteOrder: true,
+  compareClientIds: true, compareFillPrices: true,
+  isWrite: (method) => method !== 'GET',
+  generatedBodyId: (key, value) => key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
+});
+
 export const VENUES = {
+  coinbase: coinbase('coinbase'),
+  coinbasespot: coinbase('coinbasespot'),
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',

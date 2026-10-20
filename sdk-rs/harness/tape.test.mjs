@@ -1090,3 +1090,29 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
+
+
+test('Coinbase same-URL sockets retain exact channel and product scope across batches and unsubscribe', async () => {
+  const url='wss://advanced-trade-ws.coinbase.com';
+  const tape=new Tape([],VENUES.coinbase,false,20);
+  const receivedA=[],receivedB=[];
+  const a=tape.connect(url,()=>{},(text)=>receivedA.push(JSON.parse(text)));
+  const b=tape.connect(url,()=>{},(text)=>receivedB.push(JSON.parse(text)));
+  await new Promise(setImmediate);
+  const send=(socket,channel,product_ids,type='subscribe')=>tape.send(socket,JSON.stringify({type,channel,product_ids}));
+  send(a,'level2',['BTC-USD','ETH-USD']);send(a,'heartbeats',[]);
+  send(b,'level2',['SOL-USD']);send(b,'candles',['ETH-USD']);
+  const frame=(channel,product)=>({url,text:JSON.stringify({channel,sequence_num:0,events:[{type:'snapshot',product_id:product,updates:[]}]})});
+  for(const product of ['BTC-USD','ETH-USD','SOL-USD']){
+    const record=frame('l2_data',product);const socket=await tape.socketFor(url,record.text);assert.equal(socket,product==='SOL-USD'?b:a);tape.deliver(socket,record.text);
+  }
+  const candle=frame('candles','ETH-USD');const candleSocket=await tape.socketFor(url,candle.text);assert.equal(candleSocket,b);tape.deliver(candleSocket,candle.text);
+  assert.deepEqual(receivedA.map((r)=>r.events[0].product_id),['BTC-USD','ETH-USD']);assert.deepEqual(receivedB.map((r)=>[r.channel,r.events[0].product_id]),[['l2_data','SOL-USD'],['candles','ETH-USD']]);
+  send(a,'level2',['ETH-USD'],'unsubscribe');
+  assert.equal(await tape.socketFor(url,frame('l2_data','BTC-USD').text),a);
+  assert.equal(await tape.socketFor(url,candle.text),b);
+  await assert.rejects(tape.socketFor(url,frame('l2_data','ETH-USD').text),/replay timeout/);
+  tape.close(a);
+  await assert.rejects(tape.socketFor(url,frame('l2_data','BTC-USD').text),/replay timeout/);
+  tape.close(b);
+});

@@ -41,6 +41,8 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
+  coinbase: 'coinbase',
+  coinbasespot: 'coinbasespot',
   binance: 'binance',
   backpack: 'backpack',
   'tealstreet-dex': 'tealstreet-dex',
@@ -77,7 +79,10 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
+const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  coinbase: coinbaseClientOrderIdRule,
+  coinbasespot: coinbaseClientOrderIdRule,
   'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,
   mode: orderlyClientOrderIdRule,
@@ -201,6 +206,11 @@ export class RustEngineExchange extends BaseExchange {
     }
   }
 
+  protected get canSign(): boolean {
+    if (['coinbase', 'coinbasespot'].includes(this.name)) return Boolean(this.options.key);
+    return super.canSign;
+  }
+
   get isPublicDataOnly(): boolean {
     if (this.name === 'lighter') {
       return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
@@ -227,7 +237,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'lighter'].includes(this.name) &&
+      !['hyperliquid', 'lighter', 'coinbase', 'coinbasespot'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key || !this.options.secret)
     ) {
@@ -275,6 +285,7 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
+        ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
         ...(orderlyNames.has(this.name) ? { tickInterval: this.options.extra?.tickInterval } : {}),
@@ -293,7 +304,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack' || orderlyNames.has(this.name)
+      ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
         ? { ...transport, now: virtualClock.getCurrentTimeMs }
         : transport,
       {
@@ -401,6 +412,11 @@ export class RustEngineExchange extends BaseExchange {
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
     if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
+    if (['coinbase', 'coinbasespot'].includes(this.name)) {
+      const invalid = (value: unknown): boolean => typeof value === 'number' ? !Number.isFinite(value)
+        : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
+      if (invalid(command)) return Promise.reject(new Error('Coinbase command numbers must be finite'));
+    }
     return this.host.command(command) as Promise<T>;
   };
 
@@ -439,6 +455,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   getAccount = async (): Promise<ExchangeAccount> => {
+    if (['coinbase', 'coinbasespot'].includes(this.name)) {
+      if (!this.host) await this.start();
+      await this.untilLoaded();
+      const userId = this.host?.accountId();
+      if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
+      return { userId };
+    }
     if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
     if (!this.host) await this.start();
     await this.untilLoaded();
@@ -485,6 +508,10 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
+    if (['coinbase', 'coinbasespot'].includes(this.name)
+      && [opts.from, opts.to].some((value) => value !== undefined && !Number.isFinite(value))) {
+      return Promise.reject(new Error('Coinbase history bounds must be finite'));
+    }
     const milliseconds = (value?: number) => {
       if (value === undefined || !Number.isFinite(value) || (this.name === 'woo' && value < 0)) return undefined;
       const alreadyMilliseconds = this.name === 'woo' ? value >= 1_000_000_000_000 : value > 1_000_000_000_000;
@@ -493,7 +520,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo', 'coinbase', 'coinbasespot'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -502,7 +529,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
+      if (['blofin', 'bitrue', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
@@ -518,6 +545,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (['coinbase', 'coinbasespot'].includes(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('Coinbase order history does not support orderId or status filters'));
+    }
     if (orderlyNames.has(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
       return Promise.reject(new Error('Orderly order history does not support orderId or status filters'));
     }

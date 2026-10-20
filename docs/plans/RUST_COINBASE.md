@@ -234,3 +234,30 @@ fail before network I/O. Independent transport review is clear. All 187 JS
 transport tests and 31 native-host tests pass; existing 48 routing-policy cases
 remain unchanged alongside four Coinbase cases. Repository typecheck (44 tasks)
 and lint (28 tasks) pass. No final acceptance claim yet.
+
+### Integration checkpoint
+
+Both SDK registries and WASM aliases now select the native crate. Replaced active
+TS modules moved to a test-only reference; inert Starbase contracts remain.
+Native credential import, private portfolio identity, caller IDs, economic order
+fields, unsigned public startup and independently verified JWTs pass five real
+WASM tests. Nonfinite optional command numbers reject before JSON can erase a
+bound or protection. All 27 repository test tasks pass (6958 safe-cex tests in
+each of its two tasks), and the generic harness passes 229 tests. Independent
+reviews fixed exact query-head/alias matching in the documented-input oracle;
+14 declared TS corrections retain strict native request/signature comparisons.
+
+The 20-second live capture has 666 messages and both full-depth spot books; its
+eight-second fixture retains 201 messages and all 925 products. Three-run public
+gate passes: CPU TS714.4ms/Rust272.3ms; steady CPU403.2/57.2ms; retained memory
+17.9/14.1MB including 12.0MB native linear memory. Coinbase-only WASM952808bytes
+is below the1258291byte budget. Both legacy INTX private algorithm tapes pass.
+CFM revealed recurring polling contention with its initial order scan; budgeted
+polling and timer-driven regression are in progress. Spot variants, Binance
+controls, combined WASM tests, latest landing merge and PR gates remain pending.
+
+History pagination is venue-bounded rather than transactional: Coinbase documents
+the fills sort cursor as unstable under concurrent activity. Conflicting repeated
+IDs reject, but no client can claim a server snapshot across external account
+changes. Crypto audit found no newly unused first-port helper from this port;
+the shared ES256 and Ed25519 modules are both used directly.
