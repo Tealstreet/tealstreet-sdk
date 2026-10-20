@@ -23,8 +23,10 @@ const { values } = parseArgs({
     out: { type: 'string' },
   },
 });
-for (const name of ['venue', 'tape', 'books', 'combined', 'family', 'out'])
+for (const name of ['venue', 'tape', 'combined', 'family', 'out'])
   if (!values[name]) throw new Error(`--${name} is required`);
+// Required but may be empty: '' replays no books, like rust:gate on private tapes.
+if (values.books === undefined) throw new Error('--books is required');
 const pairs = Number(values.pairs);
 if (!Number.isInteger(pairs) || pairs < 1) throw new Error('--pairs must be a positive integer');
 const venue = venueOf(values.venue);
@@ -123,7 +125,7 @@ const summary = (arm) => ({
 });
 const report = {
   venue: values.venue,
-  family: venueFamily(venue.rust),
+  familyName: venueFamily(venue.rust),
   pairs,
   differences,
   combined: summary('combined'),

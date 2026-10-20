@@ -73,11 +73,12 @@ combined, and ratios of medians are family over combined.
 - Cold load (fresh Node process, read and compile only): 7-16 ms CPU against
   65-134 ms, so each account start saves 58-121 ms; RSS 6-8 MB against 33 MB.
 - Replay CPU: medians across venues are 0.999 main and 0.987 steady; the same
-  Rust source compiles per venue with ±10% codegen variance. Five venues
+  Rust source compiles per venue with ±10% codegen variance. Six venues
   regress consistently on one metric: Paradex main +21 ms (its standalone
   size profile, `opt-level = "z"`, needed for the 1.2 MB budget), MEXC steady
-  +6 ms (+3.6%), Kraken main +6 ms, Backpack steady +3 ms, Phemex steady
-  +3 ms. Others gain consistently (OKX steady -18 ms, Crypto.com main -7 ms).
+  +6 ms (+3.6%), Kraken main +6 ms, Polymarket main +2 ms (+9%, all 7 pairs),
+  Backpack steady +3 ms (its main +5 ms is lower in 3 of 7 pairs), Phemex
+  steady +3 ms. Others gain consistently (OKX steady -18 ms, Crypto.com main -7 ms).
   Every venue's startup CPU still falls, because the cold-load saving is
   larger than any added replay cost.
 - Outputs: every pair produced identical replay state. The first run's check
@@ -88,7 +89,7 @@ combined, and ratios of medians are family over combined.
 
 Ship for browsers and Workers, where one or two venues load per realm: about
 2.3 MB less download (brotli), about 100 ms less compile CPU per venue, and
-15-30 MB less memory, with no aggregate replay CPU change. Node keeps the
+11-30 MB less memory, with no aggregate replay CPU change. Node keeps the
 combined engine, because a server hosting every venue would load more bytes
 across separate family modules than the one combined module.
 
