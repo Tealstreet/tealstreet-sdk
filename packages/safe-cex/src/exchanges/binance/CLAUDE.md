@@ -205,8 +205,8 @@ quantity, and position sizing are inverse-contract specific.
 Direct browser REST writes to `/dapi` are not CORS-safe: live testing saw
 `POST /dapi/v1/order` fail at the preflight with `OPTIONS 404` and no
 `Access-Control-Allow-Origin`. Keep `requiresCors: true` and the Tealstreet
-private proxy path forced unless Binance changes the `/dapi` CORS contract and
-order placement has been revalidated in a browser.
+HOW/tradetunnel path forced unless Binance changes the `/dapi` CORS contract
+and order placement has been revalidated in a browser.
 
 | Endpoint                     | Method      | Description                                                        |
 | ---------------------------- | ----------- | ------------------------------------------------------------------ |
