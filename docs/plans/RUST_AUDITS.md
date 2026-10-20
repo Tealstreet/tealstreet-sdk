@@ -345,3 +345,34 @@ The app sends stops with `triggerPrice` equal to `price`. Orderly rejected every
 such stop. Many venues test `trigger_price.is_some()` in placement (apexomni,
 backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 …); each must accept the app's exact payloads.
+
+### Phemex
+- High: `SetPositionMode` has no symbol (`engine/src/command.rs:95`), so Phemex
+  loops PUTs over every market and can half-switch (`phemex/src/trading.rs:858`);
+  one unknown order status/type drops the whole private frame incl. positions
+  and balances (`account_wire.rs:298`, `account.rs:601`).
+- Medium: one bad public row stops startup; one bad position row freezes a
+  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+  leverage context is uncached (`trading.rs:229,713`).
+- Low: cancel batch refused on one uncached id; index triggers refused; daily
+  candle `to`; no 1 s REST resync after terminal events.
+- Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
+  positions removed; amend re-places remainder; hedged margin per side; split
+  stops at first failure.
+
+### MEXC
+- High: live tickers only for the first 100 markets and `SetTickerSymbols`
+  ignored (`mexc/src/lib.rs:416`), so positions outside them keep startup prices
+  forever; one open order on an unloaded market blocks the order store for good
+  (`account.rs:618,850`).
+- Medium: full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
+  single order uses the batch path paced 1.5 s (`trading.rs:451`); startup halts
+  on tickers/markets/position-mode/plan-list failures.
+- Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
+  refused by the adapter.
+
+### Cross-venue: rows and subscriptions
+- One unmappable row discarding a whole snapshot/frame recurs (Bitget, Phemex,
+  MEXC, KuCoin, Kraken, Orderly, Bybit): skip and log the row, keep the store's
+  copy of that id.
+- Check every venue honours `SetTickerSymbols` (MEXC ignores it).
