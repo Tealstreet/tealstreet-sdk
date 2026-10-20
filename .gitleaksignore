@@ -31,3 +31,8 @@ a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/s
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:125
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:146
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:164
+
+# Polymarket actual-Wasm replay fixture only: base64 of the literal
+# "safe-fake-secret", paired with "documented-fake-api-key"; never an account.
+# Exact historical fingerprint only; production and future credential changes stay scanned.
+d2db97a4af1ad06a0b92f3bb4b8db4915ee01821:packages/safe-cex/src/__tests__/audit-regressions/polymarket.rust-boundary.wasm.test.ts:generic-api-key:23

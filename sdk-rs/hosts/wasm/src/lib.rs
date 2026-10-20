@@ -12,6 +12,7 @@
     feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -29,7 +30,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, coinbase, lighter, orderly, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -80,6 +81,10 @@ use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions,
 use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
 #[cfg(feature = "phemex")]
 use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
+#[cfg(feature = "polymarket")]
+use safe_cex_venue_polymarket::{
+    Options as PolymarketOptions, Polymarket, PolymarketOptions as PolymarketAccountOptions,
+};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -140,6 +145,7 @@ struct KucoinExtra {
     feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -163,6 +169,9 @@ struct EngineOptions {
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     spot_only: bool,
+    #[cfg(feature = "polymarket")]
+    #[serde(default)]
+    polymarket: Option<PolymarketAccountOptions>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -536,11 +545,11 @@ enum CommandIn {
     FetchStpMode {
         command: u32,
     },
-    #[cfg(feature = "asterdex")]
+    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
     FetchAccount {
         command: u32,
     },
-    #[cfg(feature = "asterdex")]
+    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
     FetchOrderBook {
         command: u32,
         symbol: String,
@@ -677,9 +686,9 @@ impl From<CommandIn> for Command {
             }
             #[cfg(feature = "asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(feature = "asterdex")]
+            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(feature = "asterdex")]
+            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -807,6 +816,7 @@ impl WasmEngine {
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
+        feature = "polymarket",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -855,6 +865,12 @@ impl WasmEngine {
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),
+            #[cfg(feature = "polymarket")]
+            "polymarket" => Box::new(Engine::new(Polymarket::new(PolymarketOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                polymarket: options.polymarket,
+            }))),
             #[cfg(feature = "paradex")]
             "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
                 testnet: options.testnet,
@@ -1240,7 +1256,10 @@ mod tests {
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [
             ("getAccount", cfg!(feature = "apexomni")),
-            ("fetchAccount", cfg!(feature = "asterdex")),
+            (
+                "fetchAccount",
+                cfg!(any(feature = "asterdex", feature = "polymarket")),
+            ),
         ] {
             let parsed =
                 serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
@@ -1399,9 +1418,7 @@ mod tests {
         );
     }
 
-    // These methods are exposed by the SDK only for Aster. Keep their wire
-    // parsers out of other single-venue builds while retaining the shared
-    // engine command types for native hosts.
+    // Compile command parsers only for venues that expose each SDK method.
     #[test]
     fn aster_commands_follow_the_compiled_venue_feature() {
         let commands = [
@@ -1452,10 +1469,26 @@ mod tests {
                 _ => panic!("Aster command {index} changed its wire mapping"),
             }
             #[cfg(not(feature = "asterdex"))]
-            assert!(
-                parsed.is_err(),
-                "unsupported Aster command {index} must reject"
-            );
+            if cfg!(feature = "polymarket") && matches!(index, 2 | 3) {
+                let command = Command::from(parsed.unwrap());
+                assert!(matches!(
+                    (index, command),
+                    (2, Command::FetchAccount { command: 19 })
+                        | (
+                            3,
+                            Command::FetchOrderBook {
+                                command: 19,
+                                symbol: _,
+                                limit: Some(50)
+                            }
+                        )
+                ));
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "unsupported venue command {index} must reject"
+                );
+            }
         }
     }
 
