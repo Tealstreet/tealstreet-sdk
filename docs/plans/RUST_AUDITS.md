@@ -663,10 +663,12 @@ Signing, integer scaling, tx encoding and nonces match TS.
 
 ### WOO
 No confirmed highs; valid data matches TS.
-- Medium: algo child rows don't inherit the parent's side/status/reduceOnly, so
+- Medium: ~~algo child rows don't inherit the parent's side/status/reduceOnly, so
   fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
   position row freezes positions (`account.rs:749,949`); one unmappable
-  fill/order-history/instrument/ticker row fails the read or startup.
+  fill/order-history/instrument/ticker row fails the read or startup.~~
+  Children inherit missing parent fields (snapshot and stream); bad rows are
+  skipped keeping stored copies; hidden exposure on unknown markets warns once.
 - Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
   readback can report a false error; isolated warning; stop without reference
   price rejects the snapshot.
