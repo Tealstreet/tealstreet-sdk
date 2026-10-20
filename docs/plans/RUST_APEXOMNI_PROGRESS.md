@@ -204,3 +204,17 @@ generated ID and preserves both virtual siblings when editing one leg.
   zero tick values, mixed-batch atomicity and queue recovery after rejection.
 - Post-merge harness: 242/242 passing; root typecheck: 44/44 tasks; lint:
   28/28 tasks. Native, combined WASM, root tests and replay gates continue.
+
+### Acceptance replay correction
+
+- Root repository checks pass 27/27 tasks; each SDK test task passes 7,026
+  tests. Combined SDK WASM tests pass 74 cases; host tests pass 45.
+  Workspace native tests pass 1,347 cases before the three new regressions.
+  Workspace all-target and default WASM clippy pass; secret scan finds no leaks.
+- The final private replay caught guarded snapshot replacement iterating a
+  hash map and reordering tied hedged sides. Replaced existing rows in place,
+  append omitted guarded live rows in Store order, then derive placeholders;
+  WS updates also preserve existing slots. No gate normalization changed.
+- All 27 account tests pass, including three exact-order/stale-close cases.
+  Independent code-correctness re-review, crate all-target clippy and default
+  WASM clippy pass. Combined WASM rebuilt; strict replay is repeating.

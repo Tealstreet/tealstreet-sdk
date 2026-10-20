@@ -787,7 +787,7 @@ impl ApexOmni {
             Request::Positions {
                 generation,
                 revision,
-                mut rows,
+                rows,
                 bad,
             } => {
                 self.account.positions_pending = false;
@@ -808,7 +808,6 @@ impl ApexOmni {
                             self.account.taker_fee.clone(),
                         )
                     });
-                self.placeholders(cx.store, &mut rows);
                 if let Some(generation) = generation {
                     if let Some(snapshot) = self
                         .account
@@ -977,12 +976,25 @@ impl ApexOmni {
         mut rows: Vec<Position>,
         revision: u64,
     ) {
-        for (id, (version, at, last)) in &self.account.position_versions {
-            if *version > revision || cx.now - at < 1000.0 {
-                rows.retain(|p| p.id != *id);
-                rows.push(cx.store.position(id).unwrap_or(last).clone());
+        for row in &mut rows {
+            if let Some((version, at, last)) = self.account.position_versions.get(&row.id)
+                && (*version > revision || cx.now - at < 1000.0)
+            {
+                *row = cx.store.position(&row.id).unwrap_or(last).clone();
             }
         }
+        for current in cx.store.positions() {
+            if !rows.iter().any(|row| row.id == current.id)
+                && self
+                    .account
+                    .position_versions
+                    .get(&current.id)
+                    .is_some_and(|(version, at, _)| *version > revision || cx.now - at < 1000.0)
+            {
+                rows.push(current.clone());
+            }
+        }
+        self.placeholders(cx.store, &mut rows);
         for row in &mut rows {
             if let Some((version, at, leverage)) = self.account.leverage_versions.get(&row.symbol)
                 && (*version > revision || cx.now - at < 5000.0)
@@ -1148,8 +1160,11 @@ impl ApexOmni {
                         position.id.clone(),
                         (self.account.revision, cx.now, position.clone()),
                     );
-                    rows.retain(|p| p.id != position.id);
-                    rows.push(position);
+                    if let Some(current) = rows.iter_mut().find(|row| row.id == position.id) {
+                        *current = position;
+                    } else {
+                        rows.push(position);
+                    }
                 }
             }
             self.placeholders(cx.store, &mut rows);

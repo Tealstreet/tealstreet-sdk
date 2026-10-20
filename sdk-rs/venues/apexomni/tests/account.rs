@@ -39,12 +39,15 @@ fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
     (e, socket.expect("private socket"), http)
 }
 fn ready() -> (TestEngine, SocketId) {
+    ready_with_account(ACCOUNT)
+}
+fn ready_with_account(account: &str) -> (TestEngine, SocketId) {
     let (mut e, socket, http) = seeded();
     e.handle(20.0, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
     for r in http {
         let body = if r.url.ends_with("/v3/account") {
-            ACCOUNT
+            account
         } else {
             ORDERS
         };
@@ -57,6 +60,55 @@ fn ready() -> (TestEngine, SocketId) {
     e.store_mut().update_ticker("BTCUSDT", |t| t.last = 102.0);
     response(&mut e, &balance, 40.0, BALANCE);
     (e, socket)
+}
+fn hedged_account(reverse: bool) -> String {
+    let long =
+        r#"{"symbol":"BTC-USDT","side":"LONG","entryPrice":"100","size":"2","customImr":"0.1"}"#;
+    let short =
+        r#"{"symbol":"BTC-USDT","side":"SHORT","entryPrice":"110","size":"1","customImr":"0.1"}"#;
+    let rows = if reverse {
+        format!("{short},{long}")
+    } else {
+        format!("{long},{short}")
+    };
+    format!(
+        r#"{{"code":0,"data":{{"id":"611779989544632629","positions":[{rows}],"contractAccount":{{"makerFeeRate":"0.0002","takerFeeRate":"0.0005"}}}}}}"#
+    )
+}
+fn position_ids(e: &TestEngine) -> Vec<&str> {
+    e.store()
+        .positions()
+        .iter()
+        .map(|position| position.id.as_str())
+        .collect()
+}
+fn position_update(e: &mut TestEngine, socket: SocketId, at: f64, side: &str, size: &str) {
+    ws(
+        e,
+        socket,
+        at,
+        &frame(
+            "delta",
+            &format!(
+                r#"{{"positions":[{{"symbol":"BTC-USDT","side":"{side}","entryPrice":"100","size":"{size}","customImr":"0.1"}}]}}"#
+            ),
+        ),
+    );
+}
+fn begin_position_heal(e: &mut TestEngine, socket: SocketId, at: f64) -> HttpRequest {
+    ws(e, socket, at, &frame("delta", r#"{"positions":[]}"#));
+    let timer = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms == at + 1000.0 => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at + 1000.0, Event::TimerFired { timer });
+    requests(e)
+        .into_iter()
+        .find(|request| request.url.ends_with("/v3/account"))
+        .unwrap()
 }
 struct DecodedFill {
     price: f64,
@@ -549,6 +601,77 @@ fn websocket_realized_pnl_alias_preserves_financial_value_and_current_field_prec
     assert_eq!(
         e.store().position("BTCUSDT:long").unwrap().realized_pnl,
         Some(0.0)
+    );
+}
+
+#[test]
+fn hedged_position_order_survives_side_updates_and_guarded_rest_healing() {
+    let (mut e, socket) = ready_with_account(&hedged_account(false));
+    let expected = ["BTCUSDT:long", "BTCUSDT:short"];
+    assert_eq!(position_ids(&e), expected);
+    position_update(&mut e, socket, 100.0, "LONG", "3");
+    assert_eq!(position_ids(&e), expected);
+    position_update(&mut e, socket, 110.0, "SHORT", "4");
+    assert_eq!(position_ids(&e), expected);
+    let stale = begin_position_heal(&mut e, socket, 120.0);
+    position_update(&mut e, socket, 1130.0, "LONG", "5");
+    position_update(&mut e, socket, 1140.0, "SHORT", "6");
+    response(&mut e, &stale, 3000.0, &hedged_account(false));
+    assert_eq!(position_ids(&e), expected);
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .map(|position| position.contracts)
+            .collect::<Vec<_>>(),
+        [5.0, 6.0]
+    );
+}
+
+#[test]
+fn guarded_snapshot_omissions_keep_live_store_order_and_closed_sides_stay_removed() {
+    let (mut e, socket) = ready_with_account(&hedged_account(true));
+    let expected = ["BTCUSDT:short", "BTCUSDT:long"];
+    let stale = begin_position_heal(&mut e, socket, 100.0);
+    position_update(&mut e, socket, 1110.0, "LONG", "3");
+    position_update(&mut e, socket, 1120.0, "SHORT", "4");
+    response(&mut e, &stale, 3000.0, EMPTY_ACCOUNT);
+    assert_eq!(position_ids(&e), expected);
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .map(|position| position.contracts)
+            .collect::<Vec<_>>(),
+        [4.0, 3.0]
+    );
+    let stale = begin_position_heal(&mut e, socket, 3100.0);
+    position_update(&mut e, socket, 4110.0, "LONG", "0");
+    position_update(&mut e, socket, 4120.0, "SHORT", "5");
+    response(&mut e, &stale, 6000.0, &hedged_account(false));
+    assert_eq!(position_ids(&e), ["BTCUSDT:short"]);
+    assert_eq!(e.store().positions()[0].contracts, 5.0);
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(10.0)
+    );
+}
+
+#[test]
+fn guarded_rest_rows_keep_the_provider_order_when_both_sides_are_present() {
+    let (mut e, socket) = ready_with_account(&hedged_account(false));
+    let stale = begin_position_heal(&mut e, socket, 100.0);
+    position_update(&mut e, socket, 1110.0, "LONG", "3");
+    position_update(&mut e, socket, 1120.0, "SHORT", "4");
+    response(&mut e, &stale, 3000.0, &hedged_account(true));
+    assert_eq!(position_ids(&e), ["BTCUSDT:short", "BTCUSDT:long"]);
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .map(|position| position.contracts)
+            .collect::<Vec<_>>(),
+        [4.0, 3.0]
     );
 }
 
