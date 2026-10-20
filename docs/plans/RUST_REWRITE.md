@@ -346,7 +346,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| TxFlow testnet perpetuals | implemented Rust default; [PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329), reviewed typed implementation; signing, frozen TS reference and gate evidence in `TXFLOW_RUST_PORT.md` |
+| TxFlow testnet perpetuals | implemented Rust default; [PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329), all local gates and independent code-correctness reviews pass; signing, frozen TS reference and measurements in `TXFLOW_RUST_PORT.md` |
 | BreakoutProp legacy DXtrade | implemented; [PR #1328](https://github.com/Tealstreet/tealstreet-sdk/pull/1328), documented public/private gates PASS (scripted public fixture accepted by Sam); live capture needs Sam's legacy DXtrade credentials (`RUST_BREAKOUTPROP.md`) |
 
 ### 9. Delete TypeScript and merge

@@ -593,3 +593,25 @@ Bitget routing and every delivery/audit hook remain intact. Independent review
 accepts the change; all 455 harness tests pass, including existing fanout and
 lifecycle proofs. No fixture or gate threshold changes. Final performance and
 correctness gates are still required on the resulting combined artifact.
+
+### Final local acceptance
+
+All local gates pass on the integrated implementation after the profiled replay
+fix. Final isolated three-run public gate: 527 replay frames, 78 markets/tickers,
+two books; TS/Rust CPU 76.1/57.1 ms (1.33x), steady CPU 12.2/9.4 ms (1.30x),
+retained memory 17.2/1.3 MB (12.97x), linear Wasm 0.5 MB. Wasm is 943,476 bytes
+against 1,258,291. Isolated private correctness passes all 35 frames.
+
+Final combined three-run public gate also passes: CPU 81.3/54.9 ms (1.48x),
+steady 12.9/8.9 ms (1.45x), memory 17.2/2.1 MB (7.99x). Binance public passes
+873 frames/three books: CPU 193.2/88.5 ms (2.18x), memory 17.9/4.8 MB (3.72x).
+Bitget public passes 39,457 frames: CPU 644.7/538.9 ms (1.20x), memory
+20.8/5.4 MB (3.85x). Combined TxFlow/Binance/Phemex/Bitget private correctness
+passes 35/14/14/12 frames without new output normalization.
+
+Native TxFlow 73 and engine 67 tests, bans, workspace formatting, strict venue
+and combined/isolated Wasm Clippy pass. Root typecheck/lint/tests pass (44/28/27
+tasks; safe-cex 7,396 tests in each run). Harness 455, host 65, real-Wasm wrapper
+110 pass. All independent reviews and accepted fixes are posted on PR #1329.
+Only exact-head CI, normal merge into feat/rust-rewrite, and a fresh branch
+remain. Existing testnet and measurement-gated feature limits still apply.
