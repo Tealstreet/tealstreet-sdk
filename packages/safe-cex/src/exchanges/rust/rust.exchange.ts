@@ -124,6 +124,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
+const LIGHTER_TIER_SYNC_MS = 15_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
@@ -394,6 +395,7 @@ export class RustEngineExchange extends BaseExchange {
     if (['lighter', 'lighter-robinhood'].includes(this.name)) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
         await this.command<null>({ op: 'setAccountTier', tier });
+        this.writeLighterTier(tier);
       };
       this.fetchAccountTier = async () =>
         (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
@@ -729,6 +731,30 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       this.dispose();
       throw error;
+    }
+    if (this.fetchAccountTier && !this.isPublicDataOnly) {
+      void this.syncLighterTier();
+      this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+  };
+
+  /** The web tier setting reads TS's `balance.info.lighterAccountLimits`; frames keep `info`. */
+  private writeLighterTier = (tier: LighterAccountTier) => {
+    if (this.isDisposed || this.store.balance.info?.lighterAccountLimits?.user_tier_name === tier) return;
+    this.store.update({
+      balance: {
+        ...this.store.balance,
+        info: { ...this.store.balance.info, lighterAccountLimits: { user_tier_name: tier } },
+      },
+    });
+  };
+
+  private syncLighterTier = async () => {
+    try {
+      const tier = await this.fetchAccountTier?.();
+      if (tier) this.writeLighterTier(tier);
+    } catch {
+      // The engine reports tier-read failures itself; the last known tier stays.
     }
   };
 

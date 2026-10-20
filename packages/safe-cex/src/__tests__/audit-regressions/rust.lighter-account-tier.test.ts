@@ -32,3 +32,23 @@ it('other Rust venues do not advertise a tier switch', () => {
     exchange.dispose();
   }
 });
+
+it('the tier reaches balance.info.lighterAccountLimits in the TS shape the settings page reads', async () => {
+  const store = new DefaultStore();
+  const exchange = new RustEngineExchange('lighter', { key: 'fixture-key', secret: 'fixture-secret' }, store);
+  const boundary = exchange as unknown as {
+    command: (input: unknown) => Promise<unknown>;
+    syncLighterTier: () => Promise<void>;
+  };
+  vi.spyOn(boundary, 'command').mockResolvedValueOnce('standard').mockResolvedValueOnce(null);
+  try {
+    store.update({ balance: { used: 1, free: 2, total: 3, upnl: 0 } });
+    await boundary.syncLighterTier();
+    expect(store.balance.info.lighterAccountLimits).toEqual({ user_tier_name: 'standard' });
+    expect(store.balance.total).toBe(3);
+    await exchange.changeAccountTier!('plus');
+    expect(store.balance.info.lighterAccountLimits).toEqual({ user_tier_name: 'plus' });
+  } finally {
+    exchange.dispose();
+  }
+});
