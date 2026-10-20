@@ -1,6 +1,6 @@
-# Published Binance Futures HMAC signing example, in a unit test in the
-# original rewrite history (before the nested workspace move):
-# https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info
+# Exact historical occurrence of Binance's published HMAC signing example.
+# This is a public documentation vector, not an account credential:
+# https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info#signed-endpoint-examples-for-post-fapiv1order---hmac-keys
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
 # Synthetic Phemex websocket HMAC vector, independently generated from literal
 # test key "key" and secret "secret"; the flagged hex string is a signature.

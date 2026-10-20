@@ -291,6 +291,13 @@ fn unsupported_or_invalid_queries_never_issue_io() {
         (false, fills()),
         (
             true,
+            Query::OrderByClientId {
+                symbol: "BTCUSDT".into(),
+                client_order_id: "caller-id".into(),
+            },
+        ),
+        (
+            true,
             Query::Income {
                 symbol: None,
                 kind: None,

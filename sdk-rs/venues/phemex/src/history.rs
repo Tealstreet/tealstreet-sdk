@@ -174,6 +174,13 @@ impl PhemexPerpetuals {
             return;
         }
         let (symbol, from, to, limit, order_id, rows) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("Phemex client-order-id query is not supported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,
