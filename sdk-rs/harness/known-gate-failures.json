@@ -9889,6 +9889,32 @@
             "checkpoint 9 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.upnl"
           ]
+        },
+        {
+          "divergence": "TS omits stop order 50 client ID tealstreet-stop; retaining closed order 40 at these boundaries moves the same stop row to index 5, exposing its client-ID omission.",
+          "keys": [
+            "checkpoint 6 account.orders[5].clientOrderId",
+            "checkpoint 7 account.orders[5].clientOrderId",
+            "checkpoint 8 account.orders[5].clientOrderId",
+            "checkpoint 9 account.orders[5].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "CFM asynchronous cancel/REST reconciliation and terminal-order retention differ at these fixed boundaries. Retaining or removing closed order 40 and canceled limit rows shifts later sorted rows; these literal paths do not establish same-order economic disagreement.",
+          "keys": [
+            "checkpoint 10 account.orders[1].status",
+            "checkpoint 10 account.orders[3].status",
+            "checkpoint 10 account.orders[4]",
+            "checkpoint 11 account.orders[1].status",
+            "checkpoint 11 account.orders[3].status",
+            "checkpoint 11 account.orders[4]",
+            "checkpoint 12 account.orders[1].status",
+            "checkpoint 12 account.orders[3].status",
+            "checkpoint 12 account.orders[4]",
+            "checkpoint 14 account.orders[1].id",
+            "checkpoint 14 account.orders[1].parentId",
+            "checkpoint 14 account.orders[4]"
+          ]
         }
       ]
     },

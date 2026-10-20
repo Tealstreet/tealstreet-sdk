@@ -1,15 +1,16 @@
 # Strict replay results
 
-The first complete **107-case** collection in
-[run 39422195309](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39422195309)
-reported **27 strict PASS / 80 strict FAIL**. The table below records that
-collection, not a claim of universal parity. It exposed two harness defects,
-subsequently corrected: Coinbase public book registration shifted its polling
-phase between audit/measured modes, and TxFlow's fixture assumed zero elapsed
-startup. Both corrections preserve exact request matching and receipt comparison.
-Updated-head certification and raw artifacts are attached to
-[PR #1346](https://github.com/Tealstreet/tealstreet-sdk/pull/1346); harness failures
-cannot be added to the venue exception list.
+The latest complete reviewed **107-case** collection at `67cf7d9b2b` in
+[run 39424799340](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39424799340)
+reported **27 strict PASS / 80 strict FAIL**. Its newly observed literal paths
+were independently classified and added to the manifest afterward; that run's
+verifier correctly rejected them until declared. The table records the reviewed
+collection, not universal parity. Earlier harness defects are corrected:
+Coinbase's seven TS and seven Rust measured receipts match their respective
+audits, and TxFlow's paced-startup fixture replays without unmatched requests.
+Exact merge-head certification and raw artifacts are attached to
+[PR #1346](https://github.com/Tealstreet/tealstreet-sdk/pull/1346).
+Harness integrity failures cannot enter the venue exception list.
 
 The sole machine-readable failure list is
 [`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json): exact venue,
@@ -44,7 +45,7 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
 | `bybitdemo` | 1 PASS | 1 FAIL | Interim execution count/arrival differs despite terminal agreement. |
 | `bybitinverse` | 1 PASS | 1 FAIL | Coin wallet/PnL conversion, order identity and execution sequencing. |
 | `bybitspot` | 1 FAIL | 1 FAIL | Legacy instrument precision/limits and protective order/execution mapping. |
-| `coinbase` | 1 FAIL | 6 FAIL | Raw market activation and ticker stats; INTX/CFM/spot wallet and currency state, client IDs and executions (ES256/EdDSA). Earlier native REST census removes closed order 40 while TS retains it, shifting later sorted rows; native REST TIF is absent from TS live views. |
+| `coinbase` | 1 FAIL | 6 FAIL | Raw market activation and ticker stats; INTX/CFM/spot wallet and currency state, client IDs and executions (ES256/EdDSA). Terminal retention and stale-open snapshots shift sorted rows; native REST TIF is absent from TS live views. |
 | `coinbasespot` | not separately gated | 2 FAIL | Spot wallet/currency state, client IDs, settings and executions (ES256/EdDSA); closed-order retention and REST-derived TIF differ, shifting sorted rows. |
 | `cryptocom` | 1 FAIL | 1 FAIL | Interim bid/ask, hedge state, IDs/fills; both replays also report missing required private subscription coverage. |
 | `grvt` | 1 PASS | 1 FAIL | Client/optimistic order state and execution identity; both replays report missing required GRVT private streams. |

@@ -294,3 +294,19 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Independent refresh review PASS with ten adjacent/protected-error controls;
   policy/verifier tests 9/9 PASS. No comparator or threshold changed. The full
   matrix completes before the next certification push; base remains `702a62050c`.
+- Completed `39424799340`: all 107 reports, 27 strict PASS / 80 strict FAIL.
+  Coinbase public has no performance/own-audit errors; independently inspected
+  all seven receipts for both implementations (201 frames each). The remaining
+  sixteen previously unseen CFM ES256 paths are independently source/raw
+  classified: four missing TS stop client IDs, nine stale-open/closed-row
+  lifecycle paths, and three shifted-row paths. Exact commands, writes, tape
+  boundaries and intrinsic receipts agree; all protocol counters are clean.
+  Added those literal fields with timing/alignment caveats. All 107 collected
+  reports now assess with zero unexpected diagnostics; policy/verifier 9/9 PASS.
+  Final certification reruns preserve all earlier observations, including the
+  historical Hyro performance miss; favorable samples never erase a failure.
+- Final CFM refresh adversarial review PASS: exactly sixteen evidenced literal
+  paths, no changed prior declarations; seven neighboring/hash/protected-error
+  probes reject. No harness code or threshold changed in this refresh. All
+  requested phase and PR reviews are recorded on #1346; merge still requires
+  green CI on the published final head.
