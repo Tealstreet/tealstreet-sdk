@@ -257,6 +257,13 @@ Three consequences worth knowing before debugging one:
   whole batch — the opposite of the "a single bad slice doesn't stop the rest"
   behaviour the comment above it promises.
 
+Rust Bybit discovery carries typed instrument labels through flush frames into
+the same `Market.info` fields read by `prepareCliOrder`. The native product
+semantics integration gate exercises that real preflight after buffer transfer:
+equity, ETF, commodity and FX refuse; empty/innovation crypto pass; absent and
+new venue labels retain their unknown classification. No additional venue read
+or agreement signing occurs during preflight.
+
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
 `TradingBaseCommand.notionalToSize` (and the `%bal` path beside it) must divide

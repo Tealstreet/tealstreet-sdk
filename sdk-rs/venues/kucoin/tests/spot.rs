@@ -394,7 +394,8 @@ fn hf_native_place_and_amend_keep_caller_identity_on_original() {
 }
 #[test]
 fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
-    for invalid in ["duplicate", "bracket", "type", "id"] {
+    assert!(!KucoinSpot::new(Options::default()).supports_options());
+    for invalid in ["duplicate", "bracket", "type", "id", "iv"] {
         let mut h = H::new(true);
         h.actions.clear();
         let mut a = place(None);
@@ -406,13 +407,18 @@ fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
             "bracket" => b.stop_loss = Some(80.0),
             "type" => b.kind = safe_cex_engine::model::OrderType::Conditional,
             "id" => b.client_order_id = Some("x".repeat(41)),
+            "iv" => b.implied_volatility = Some(0.5),
             _ => {}
         }
         h.command(Command::PlaceOrders {
             command: 1,
             orders: vec![a, b],
         });
-        assert!(h.done(1).is_err());
+        let result = h.done(1);
+        assert!(result.is_err());
+        if invalid == "iv" {
+            assert!(result.unwrap_err().contains("Options are not enabled"));
+        }
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }

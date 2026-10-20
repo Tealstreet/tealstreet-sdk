@@ -6,7 +6,7 @@ publish.workspace = true
 description = "Native (tokio) host for the sans-I/O exchange engine"
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["polling-control", "command-asterdex", "command-apexomni", "command-polymarket", "command-kucoinspot"] }
+safe-cex-engine = { workspace = true, features = ["polling-control", "command-asterdex", "command-apexomni", "command-polymarket", "command-kucoinspot", "command-options"] }
 safe-cex-venue-binance.workspace = true
 
 [lints]

@@ -598,6 +598,7 @@ impl Polymarket {
                         close: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+                        implied_volatility: None,
                     };
                     let prepared = self.prepare(cx, options.clone())?;
                     options.amount = prepared.amount;

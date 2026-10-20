@@ -4,7 +4,7 @@
 //! an open position and trailing stops go through `/v5/position/trading-stop`.
 use crate::sign::Body;
 use crate::wire::*;
-use crate::{BybitLinear, Pending, Rest, Then, venue_error};
+use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{
     MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
     StopTriggerType, TimeInForce,
@@ -223,6 +223,7 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
 
 /// One order's fields, for a batch item and, with `category`, a single create.
 pub(crate) struct Lot {
+    category: Category,
     item: Body,
     pub(crate) single: Body,
 }
@@ -233,7 +234,7 @@ impl BybitLinear {
     }
 
     fn variant_control(&self, command: &Command) -> Option<(CommandId, Result<(), String>)> {
-        if self.variant.is_spot() {
+        if self.variant.is_spot() || self.category == Category::Option {
             let id = match command {
                 Command::SetLeverage { command, .. }
                 | Command::SetMarginType { command, .. }
@@ -304,6 +305,24 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::PlaceOrders { command, orders } = &command {
+            for order in orders {
+                let category = self.category_for(&order.symbol);
+                let valid = if !self.category_enabled(category) {
+                    Err("Bybit product is not enabled".into())
+                } else if category != Category::Option && order.implied_volatility.is_some() {
+                    Err("impliedVolatility is supported only on Bybit options".into())
+                } else if category == Category::Option {
+                    self.format_option(cx, order).map(|_| ())
+                } else {
+                    Ok(())
+                };
+                if let Err(error) = valid {
+                    cx.done(*command, Err(error));
+                    return;
+                }
+            }
+        }
         // Validate the whole batch before mode reads or writes: an unpriced
         // protective order must never become an ordinary market order.
         if let Command::PlaceOrders { command, orders } = &command
@@ -350,17 +369,23 @@ impl BybitLinear {
             match &command {
                 Command::PlaceOrders { command, orders } => orders
                     .iter()
-                    .find(|o| !self.account.position_modes.contains_key(&o.symbol))
+                    .find(|o| self.symbol_mode(&o.symbol).is_none())
                     .map(|o| (*command, o.symbol.clone())),
                 Command::AmendOrder { command, id, .. } => cx
                     .store
                     .order(id)
-                    .filter(|o| !self.account.position_modes.contains_key(&o.symbol))
+                    .filter(|o| self.symbol_mode(&o.symbol).is_none())
                     .map(|o| (*command, o.symbol.clone())),
                 _ => None,
             }
         };
         if let Some((id, symbol)) = unresolved {
+            let category = self.category_for(&symbol);
+            if !self.category_enabled(category) {
+                cx.done(id, Err("Bybit product is not enabled".into()));
+                return;
+            }
+            self.select_category(category);
             if self.credentials.is_none() {
                 cx.done(id, Err("Bybit trading needs an API key".into()));
                 return;
@@ -494,7 +519,7 @@ impl BybitLinear {
                 )
             }
             Command::SetPositionMode { command, hedged } => {
-                if self.variant.is_inverse() {
+                if self.category == Category::Inverse {
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {
                         coins.insert(market.base.clone());
@@ -570,6 +595,20 @@ impl BybitLinear {
                 let step = job.steps.pop_front().expect("checked above");
                 job.outstanding = step.requests.len();
                 for planned in step.requests {
+                    #[derive(serde::Deserialize)]
+                    struct Routing<'a> {
+                        #[serde(borrow)]
+                        category: Option<&'a str>,
+                    }
+                    if let Ok(route) = serde_json::from_str::<Routing>(&planned.body)
+                        && let Some(category) = route.category.and_then(|value| {
+                            self.categories()
+                                .into_iter()
+                                .find(|category| category.as_str() == value)
+                        })
+                    {
+                        self.select_category(category);
+                    }
                     let local = self.local_order_lifecycle().then(|| LocalWrite {
                         path: planned.path,
                         body: planned.body.clone(),
@@ -863,6 +902,9 @@ impl BybitLinear {
                             MarginType::Cross
                         };
                         self.account.margin_type = Some(margin);
+                        for state in &mut self.products {
+                            state.account.margin_type = Some(margin);
+                        }
                         cx.store.update_positions(|p| p.margin_type = Some(margin));
                         self.fetch_positions(cx);
                     }
@@ -926,13 +968,7 @@ impl BybitLinear {
         if self.variant.is_spot() || self.variant.is_hyro() {
             return 0;
         }
-        if !self
-            .account
-            .position_modes
-            .get(symbol)
-            .copied()
-            .unwrap_or(false)
-        {
+        if !self.symbol_mode(symbol).unwrap_or(false) {
             return 0;
         }
         match (side, reduce) {
@@ -955,7 +991,7 @@ impl BybitLinear {
             p.symbol == opts.symbol
                 && p.side == side
                 && p.contracts != 0.0
-                && if self.variant.is_inverse() {
+                && if self.category_for(&opts.symbol) == Category::Inverse {
                     p.notional
                 } else {
                     p.contracts
@@ -971,6 +1007,23 @@ impl BybitLinear {
         };
         let mut lots = Vec::new();
         for opts in orders {
+            let category = self.category_for(&opts.symbol);
+            if !self.category_enabled(category) {
+                return Err("Bybit product is not enabled".into());
+            }
+            if category == Category::Option {
+                for lot in self.format_option(cx, opts)? {
+                    job.steps.push_back(Step {
+                        delay_ms: 0.0,
+                        requests: vec![Planned {
+                            path: "/v5/order/create",
+                            body: lot.single.finish(),
+                            call: Call::PlaceOne,
+                        }],
+                    });
+                }
+                continue;
+            }
             execution_params(opts, self.variant.is_spot(), self.variant.is_hyro())?;
             if !opts.amount.is_finite() || opts.amount < 0.0 {
                 return Err("Order quantity must be finite and nonnegative".into());
@@ -1016,24 +1069,29 @@ impl BybitLinear {
             }
             return Ok(job);
         }
-        for (index, chunk) in lots.chunks(BATCH_LIMIT).enumerate() {
-            let items: Vec<String> = chunk.iter().map(|lot| lot.item.clone().finish()).collect();
-            let body = Body::new()
-                .str("category", self.paths.category)
-                .raw("request", &format!("[{}]", items.join(",")))
-                .finish();
-            let fallback = chunk
-                .iter()
-                .map(|lot| lot.single.clone().finish())
-                .collect();
-            job.steps.push_back(Step {
-                delay_ms: if index > 0 { PLACE_BATCH_DELAY_MS } else { 0.0 },
-                requests: vec![Planned {
-                    path: "/v5/order/create-batch",
-                    body,
-                    call: Call::PlaceBatch { fallback },
-                }],
-            });
+        for category in self.categories() {
+            let category_lots: Vec<&Lot> =
+                lots.iter().filter(|lot| lot.category == category).collect();
+            for (index, chunk) in category_lots.chunks(BATCH_LIMIT).enumerate() {
+                let items: Vec<String> =
+                    chunk.iter().map(|lot| lot.item.clone().finish()).collect();
+                let body = Body::new()
+                    .str("category", category.as_str())
+                    .raw("request", &format!("[{}]", items.join(",")))
+                    .finish();
+                let fallback = chunk
+                    .iter()
+                    .map(|lot| lot.single.clone().finish())
+                    .collect();
+                job.steps.push_back(Step {
+                    delay_ms: if index > 0 { PLACE_BATCH_DELAY_MS } else { 0.0 },
+                    requests: vec![Planned {
+                        path: "/v5/order/create-batch",
+                        body,
+                        call: Call::PlaceBatch { fallback },
+                    }],
+                });
+            }
         }
         Ok(job)
     }
@@ -1065,6 +1123,16 @@ impl BybitLinear {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Lot>, String> {
+        let category = self.category_for(&opts.symbol);
+        if !self.category_enabled(category) {
+            return Err("Bybit product is not enabled".into());
+        }
+        if category == Category::Option {
+            return self.format_option(cx, opts);
+        }
+        if opts.implied_volatility.is_some() {
+            return Err("impliedVolatility is supported only on Bybit options".into());
+        }
         let execution = execution_params(opts, self.variant.is_spot(), self.variant.is_hyro())?;
         let market = cx
             .store
@@ -1073,7 +1141,7 @@ impl BybitLinear {
         let p_price = market.precision.price;
         let p_amount = market.precision.amount;
         let adjust_price = |p: f64| num::adjust(p, p_price);
-        let amount = if self.variant.is_inverse() {
+        let amount = if self.category_for(&opts.symbol) == Category::Inverse {
             opts.amount.round()
         } else {
             num::adjust(opts.amount, p_amount)
@@ -1146,7 +1214,8 @@ impl BybitLinear {
         if !max.is_finite() || max <= 0.0 {
             return Err("Market has no valid maximum order quantity".into());
         }
-        if self.variant.is_inverse() && amount < market.limits.amount.min {
+        if self.category_for(&opts.symbol) == Category::Inverse && amount < market.limits.amount.min
+        {
             return Err("Inverse order quantity is below the market minimum".into());
         }
         if [price, trigger_price, stop_loss, take_profit]
@@ -1166,7 +1235,7 @@ impl BybitLinear {
         let lot = |qty: f64, brackets: bool, category: bool| {
             let mut body = Body::new();
             if category {
-                body = body.str("category", self.paths.category);
+                body = body.str("category", self.category_for(&opts.symbol).as_str());
             }
             let sl = stop_loss.filter(|_| brackets);
             let tp = take_profit.filter(|_| brackets);
@@ -1225,10 +1294,107 @@ impl BybitLinear {
             .iter()
             .enumerate()
             .map(|(index, &qty)| Lot {
+                category: self.category_for(&opts.symbol),
                 item: lot(qty, index == 0, false),
                 single: lot(qty, index == 0, true),
             })
             .collect())
+    }
+
+    fn format_option(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Lot>, String> {
+        if !self.category_enabled(Category::Option) {
+            return Err("Options are not enabled on this Bybit account".into());
+        }
+        if !matches!(opts.kind, OrderType::Limit | OrderType::Market)
+            || opts.trigger_price.is_some()
+            || opts.stop_loss.is_some()
+            || opts.take_profit.is_some()
+            || opts.max_slippage_pct.is_some()
+            || opts.bybit_bbo.is_some()
+            || opts.bybit_slippage_tolerance_ticks.is_some()
+            || opts.close.is_some()
+            || opts.stp_mode.is_some()
+        {
+            return Err("Bybit options support plain limit/market orders without execution controls or protection".into());
+        }
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if !amount.is_finite()
+            || amount < market.limits.amount.min
+            || amount <= 0.0
+            || amount > market.limits.amount.max
+        {
+            return Err("Option quantity is outside the market limits".into());
+        }
+        if opts
+            .implied_volatility
+            .is_some_and(|iv| !iv.is_finite() || iv <= 0.0)
+        {
+            return Err("Implied volatility must be finite and positive".into());
+        }
+        if opts.kind == OrderType::Market && opts.implied_volatility.is_some() {
+            return Err("Bybit option implied volatility requires a limit order".into());
+        }
+        let price = opts
+            .price
+            .map(|price| num::adjust(price, market.precision.price));
+        if opts.kind == OrderType::Limit
+            && opts.implied_volatility.is_none()
+            && price.is_none_or(|price| !price.is_finite() || price <= 0.0)
+        {
+            return Err("A limit option needs a price or implied volatility".into());
+        }
+        let generated = if opts.client_order_id.is_none() {
+            Some(safe_cex_crypto::uuid::uuid()?)
+        } else {
+            None
+        };
+        let body = Body::new()
+            .str("category", "option")
+            .str("symbol", &opts.symbol)
+            .str("side", side_text(opts.side))
+            .str(
+                "orderType",
+                if opts.kind == OrderType::Limit {
+                    "Limit"
+                } else {
+                    "Market"
+                },
+            )
+            .str("qty", &number(amount))
+            .opt_str(
+                "price",
+                price
+                    .filter(|_| opts.kind == OrderType::Limit && opts.implied_volatility.is_none())
+                    .map(number)
+                    .as_deref(),
+            )
+            .opt_str("orderIv", opts.implied_volatility.map(number).as_deref())
+            .opt_str(
+                "timeInForce",
+                (opts.kind == OrderType::Limit)
+                    .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel))),
+            )
+            .bool("reduceOnly", opts.reduce_only == Some(true))
+            .str(
+                "orderLinkId",
+                opts.client_order_id
+                    .as_deref()
+                    .or(generated.as_deref())
+                    .expect("option identity"),
+            );
+        Ok(vec![Lot {
+            category: Category::Option,
+            item: body.clone(),
+            single: body,
+        }])
     }
 
     /// A TP/SL on the whole (or part of the) open position it closes.
@@ -1241,7 +1407,7 @@ impl BybitLinear {
         let amount = num::adjust(opts.amount, market.precision.amount);
         let partial = amount != 0.0;
         let mut body = Body::new()
-            .str("category", self.paths.category)
+            .str("category", self.category_for(&opts.symbol).as_str())
             .str("symbol", &opts.symbol)
             .int(
                 "positionIdx",
@@ -1275,7 +1441,7 @@ impl BybitLinear {
             market.precision.price,
         );
         Ok(Body::new()
-            .str("category", self.paths.category)
+            .str("category", self.category_for(&opts.symbol).as_str())
             .str("symbol", &opts.symbol)
             .int(
                 "positionIdx",
@@ -1303,7 +1469,7 @@ impl BybitLinear {
             .ok_or_else(|| format!("Market {} not found", order.symbol))?;
         let price = price.map(|p| num::adjust(p, market.precision.price));
         let amount = amount.map(|a| {
-            if self.variant.is_inverse() {
+            if self.category_for(&order.symbol) == Category::Inverse {
                 a.round()
             } else {
                 num::adjust(a, market.precision.amount)
@@ -1316,7 +1482,7 @@ impl BybitLinear {
         }
         let base = || {
             Body::new()
-                .str("category", self.paths.category)
+                .str("category", self.category_for(&order.symbol).as_str())
                 .str("symbol", &order.symbol)
         };
         let amend = |body: Body| Ok(single("/v5/order/amend", body.finish(), Call::Amend));
@@ -1351,6 +1517,7 @@ impl BybitLinear {
                 client_order_id: None,
                 close: None,
                 stp_mode: None,
+                implied_volatility: None,
                 max_slippage_pct: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
@@ -1375,7 +1542,7 @@ impl BybitLinear {
                 None => None,
             };
             let body = Body::new()
-                .str("category", self.paths.category)
+                .str("category", self.category_for(&order.symbol).as_str())
                 .str("symbol", &order.symbol)
                 .int(
                     "positionIdx",
@@ -1436,7 +1603,7 @@ impl BybitLinear {
                     .is_spot()
                     .then_some(spot_order_filter(order.kind));
                 let body = Body::new()
-                    .str("category", self.paths.category)
+                    .str("category", self.category_for(&order.symbol).as_str())
                     .str("symbol", &order.symbol)
                     .str("orderId", &order.id)
                     .opt_str("orderFilter", filter)
@@ -1454,34 +1621,41 @@ impl BybitLinear {
             }
             return job;
         }
-        for (index, chunk) in real.chunks(CANCEL_BATCH_LIMIT).enumerate() {
-            let items: Vec<String> = chunk
+        for category in self.categories() {
+            let category_orders: Vec<&Order> = real
                 .iter()
-                .map(|o| {
-                    Body::new()
-                        .str("symbol", &o.symbol)
-                        .str("orderId", &o.id)
-                        .finish()
-                })
+                .copied()
+                .filter(|order| self.category_for(&order.symbol) == category)
                 .collect();
-            let body = Body::new()
-                .str("category", self.paths.category)
-                .raw("request", &format!("[{}]", items.join(",")))
-                .finish();
-            job.steps.push_back(Step {
-                delay_ms: if index > 0 {
-                    CANCEL_BATCH_DELAY_MS
-                } else {
-                    0.0
-                },
-                requests: vec![Planned {
-                    path: "/v5/order/cancel-batch",
-                    body,
-                    call: Call::Cancel {
-                        ids: chunk.iter().map(|o| o.id.clone()).collect(),
+            for (index, chunk) in category_orders.chunks(CANCEL_BATCH_LIMIT).enumerate() {
+                let items: Vec<String> = chunk
+                    .iter()
+                    .map(|o| {
+                        Body::new()
+                            .str("symbol", &o.symbol)
+                            .str("orderId", &o.id)
+                            .finish()
+                    })
+                    .collect();
+                let body = Body::new()
+                    .str("category", category.as_str())
+                    .raw("request", &format!("[{}]", items.join(",")))
+                    .finish();
+                job.steps.push_back(Step {
+                    delay_ms: if index > 0 {
+                        CANCEL_BATCH_DELAY_MS
+                    } else {
+                        0.0
                     },
-                }],
-            });
+                    requests: vec![Planned {
+                        path: "/v5/order/cancel-batch",
+                        body,
+                        call: Call::Cancel {
+                            ids: chunk.iter().map(|o| o.id.clone()).collect(),
+                        },
+                    }],
+                });
+            }
         }
         job
     }

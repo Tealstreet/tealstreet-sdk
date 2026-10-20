@@ -267,6 +267,7 @@ impl Lighter {
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
+                    implied_volatility: None,
                 };
                 let mut steps = match self.prepare_orders(cx, vec![opts]) {
                     Ok(steps) => steps,

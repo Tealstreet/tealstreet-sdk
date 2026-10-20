@@ -591,3 +591,36 @@ landing checks. This PR's requested capability scope remains unchanged by
 the landing merge. Intentional TS capability skips and the unreviewed credentialed
 Spot live-smoke profile remain as documented above. Source, commands, logs,
 artifact/tape hashes and raw metrics are in the three adjacent proof files.
+
+## Product-semantics landing integration
+
+Head `06ba804dd3` passed all **40 CI checks**, but the target advanced to
+`5e92f93a8a` (product semantics, PR #1341), producing six shared engine/host
+conflicts. Preserve both command capability guards, option-query parser features,
+Spot context commands, cold subscription dispatch and delegated-signing lifecycle.
+Prediction and product-semantic Store features remain independent; Greek cleanup
+runs for all three position mutation paths even when prediction is disabled.
+A new regression covers each close/reopen path and exact native-ID retention.
+Removing the cleanup deliberately fails the regression; restoring it passes.
+Two independent merge reviews pass, including Store, both dispatch guards,
+Cargo features and the standalone-host test feature boundaries.
+
+Engine tests pass with no features and product-semantics (81 each), prediction
+and both features (83 each); KuCoin 143, standalone Paradex host 7, harness 583
+and typecheck 44 tasks pass. The mixed vanilla/IV Spot batch rejects centrally
+before HTTP. The incoming host test follows the shared decoder's compiled
+features; native targets avoid constructing JS-only errors, while WASM checks
+the actual rejection path.
+
+The unchanged standard Paradex profile initially grew to **1,259,060 bytes**,
+769 over the fixed budget. Its standalone engine now uses opt-level 2 alongside
+the existing host opt-level 2; combined and every other venue profile stay
+unchanged. The standard build is **1,246,685 bytes**, 11,606 below budget.
+A preliminary quiet public replay3 passes main CPU TS/Rust **512.8/494.8 ms**,
+steady **221.1/174.2 ms**, and retained memory **19.0/2.2 MB**; private33/15
+and actual SDK2 pass. An initial CLI-only packaging probe used the root Cargo
+working directory and was discarded; all accepted artifacts use the standard
+script and its 128 KiB stack configuration. No criterion or budget increase.
+
+Refresh full integration checks and all 22 replay gates on this committed merge;
+all preceding exact-source proofs remain historical checkpoints until refreshed.

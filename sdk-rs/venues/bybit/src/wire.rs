@@ -170,6 +170,16 @@ pub struct Instrument<'a> {
     pub price_filter: Option<PriceFilter<'a>>,
     #[serde(borrow, default)]
     pub lot_size_filter: Option<LotSizeFilter<'a>>,
+    #[serde(borrow, default)]
+    pub symbol_type: Opt<'a>,
+    #[serde(borrow, default)]
+    pub market_region: Opt<'a>,
+    #[serde(borrow, default)]
+    pub underlying_ticker: Opt<'a>,
+    #[serde(borrow, default)]
+    pub options_type: Opt<'a>,
+    #[serde(borrow, default)]
+    pub settle_coin: Opt<'a>,
 }
 
 #[derive(Deserialize)]
@@ -186,6 +196,8 @@ pub struct LeverageFilter<'a> {
 pub struct PriceFilter<'a> {
     #[serde(borrow, default)]
     pub tick_size: Opt<'a>,
+    #[serde(borrow, default)]
+    pub min_price: Opt<'a>,
 }
 
 #[derive(Deserialize)]
@@ -245,6 +257,22 @@ pub struct TickerRow<'a> {
     pub volume24h: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub turnover24h: Opt<'a>,
+    #[serde(borrow, default)]
+    pub delta: Opt<'a>,
+    #[serde(borrow, default)]
+    pub gamma: Opt<'a>,
+    #[serde(borrow, default)]
+    pub vega: Opt<'a>,
+    #[serde(borrow, default)]
+    pub theta: Opt<'a>,
+    #[serde(borrow, default)]
+    pub mark_iv: Opt<'a>,
+    #[serde(borrow, default)]
+    pub bid1_iv: Opt<'a>,
+    #[serde(borrow, default)]
+    pub ask1_iv: Opt<'a>,
+    #[serde(borrow, default)]
+    pub underlying_price: Opt<'a>,
 }
 
 #[derive(Deserialize)]
@@ -580,6 +608,14 @@ pub struct PositionRow<'a> {
     pub position_status: Opt<'a>,
     #[serde(borrow, default)]
     pub updated_time: Opt<'a>,
+    #[serde(borrow, default)]
+    pub delta: Opt<'a>,
+    #[serde(borrow, default)]
+    pub gamma: Opt<'a>,
+    #[serde(borrow, default)]
+    pub vega: Opt<'a>,
+    #[serde(borrow, default)]
+    pub theta: Opt<'a>,
 }
 
 /// One execution, from the `execution` topic or `/v5/execution/list`.
