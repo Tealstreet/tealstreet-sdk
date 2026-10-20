@@ -132,7 +132,7 @@ requests, authentication, token rotation and command/query results are exact.
 Selected browser and Node WASM are both 1,051,446 bytes, below 1,258,291.
 The TS book-readiness predicate waits for the startup-created socket after
 ticker seeding, preserving listeners across startup; the live replay exercises
-this lifecycle. Accepted Hyperliquid gates follow below; Binance final gates remain pending.
+this lifecycle. Accepted Hyperliquid and Binance gates follow below.
 
 - Final auth review: Hyperliquid spot rejects malformed or mismatched local
   API-wallet credentials before I/O; missing credentials keep public mode and
@@ -188,5 +188,28 @@ private generators contain 16 spot and 53 perpetual records.
 Rust linear memory is 1.2 MB for spot public, 1.6 MB for perpetual public and
 0.3 MB for both private fixtures. The native author additionally verifies
 88 crate tests (30 spot), including distinct executions sharing one order ID,
-plus strict Clippy and formatting. Binance final gates, combined-host checks,
-PR correctness review and green-CI landing remain pending.
+plus strict Clippy and formatting. Accepted Binance gates follow below;
+combined-host checks, PR correctness review and green-CI landing remain pending.
+
+
+## Accepted Binance regressions
+
+The existing Binance public fixture is unchanged (gzip SHA-256
+`cc3f426ededcee74edd3e70d4b20c564867a8009a325b43a422fbfd9f6460790`).
+The documented private generator produces 30 records. Both gates use the same
+selected Binance artifact, with no intervening build or threshold changes.
+
+| Gate | Frames | TS / Rust main CPU ms | TS / Rust steady CPU ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Binance public, three runs | 873 | 195.3 / 88.5 | 106.8 / 35.6 | 18.0 / 4.0 |
+| Binance private, one run | 14 | 59.6 / 44.5 | 21.8 / 22.0 | 13.0 / 1.1 |
+
+Both gates PASS. Public parity covers 917 markets, 783 tickers and three books
+(`BTCUSDT`, `ETHUSDT`, `SOLUSDT`); private parity covers two markets/tickers,
+account state, authentication and commands. Private performance is informational.
+Selected browser and Node WASM are both 902,790 bytes, below 1,258,291;
+SHA-256 is `c71f22e1086c5bbeb352938a9dcc824dd313c53aa7f5e63d5fb25c4478ccf5c7`.
+Rust linear memory is 1.5 MB for public and 0.3 MB for private replay.
+All touched Spot products, their parent perpetual products and Binance now pass
+the public/private gates. Combined-host validation, PR correctness reviews and
+green-CI landing remain pending.
