@@ -309,7 +309,7 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(1),
         from_ms: None,
         to_ms: None,
@@ -326,7 +326,7 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
     h.event(Event::Command(Command::FetchCandles {
         command: 8,
         symbol: "election-Yes".into(),
-        interval: "bad".into(),
+        interval: safe_cex_engine::model::Interval::S1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -369,7 +369,7 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: Some(100_500.0),
         to_ms: Some(102_000.0),
@@ -410,7 +410,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
         h.event(Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "election-Yes".into(),
-            interval: "5m".into(),
+            interval: safe_cex_engine::model::Interval::M5,
             limit: Some(2),
             from_ms: from,
             to_ms: to,
@@ -447,7 +447,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
     h.event(Event::Command(Command::FetchCandles {
         command: 8,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: Some(102000.0),
@@ -462,7 +462,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
             h.event(Event::Command(Command::FetchCandles {
                 command: 9,
                 symbol: "election-Yes".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: None,
                 from_ms: Some(from),
                 to_ms: to,
@@ -527,7 +527,7 @@ fn price_history_duplicate_timestamp_retains_last_sample() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,

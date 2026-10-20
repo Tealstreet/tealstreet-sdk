@@ -5,9 +5,13 @@ use crate::sign::Params;
 use crate::wire::*;
 use crate::{Backpack, Pending};
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::Serialize;
 use std::collections::HashSet;
+
+/// Requests per read before paging that still reports more is incomplete.
+const MAX_PAGES: u32 = 50;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -25,7 +29,7 @@ pub struct Request {
     to: Option<f64>,
     limit: usize,
     page_size: usize,
-    offset: usize,
+    walk: OffsetWalk,
     page_count: usize,
     oldest: f64,
     rows: Vec<Row>,
@@ -234,7 +238,7 @@ impl Backpack {
                 to,
                 limit,
                 page_size,
-                offset: 0,
+                walk: OffsetWalk::new(MAX_PAGES),
                 page_count: 0,
                 oldest: f64::INFINITY,
                 rows: vec![],
@@ -270,11 +274,11 @@ impl Backpack {
             Kind::Trades => "/api/v1/trades",
         };
         if request.kind == Kind::Trades {
-            self.get(cx, path, params, Pending::History(request), true);
+            self.get(cx, path, params, Pending::History(Box::new(request)), true);
         } else {
             params.insert("sortDirection".into(), "Desc".into());
-            if request.offset > 0 {
-                params.insert("offset".into(), request.offset.to_string());
+            if request.walk.offset() > 0 {
+                params.insert("offset".into(), request.walk.offset().to_string());
             }
             let command = request.command;
             if let Err(e) = self.signed(
@@ -283,7 +287,7 @@ impl Backpack {
                 path,
                 params,
                 None,
-                Pending::History(request),
+                Pending::History(Box::new(request)),
                 true,
             ) {
                 cx.done(command, Err(e));
@@ -456,20 +460,21 @@ impl Backpack {
             );
             return;
         }
-        let paged = r.kind != Kind::Trades;
-        if paged
+        let more = r.kind != Kind::Trades
             && r.page_count >= r.page_size
             && r.rows.len() < r.limit
-            && !r.from.is_some_and(|from| r.oldest < from)
-        {
-            if r.pages.len() >= 49 || !r.pages.insert(r.page_hash) {
+            && !r.from.is_some_and(|from| r.oldest < from);
+        // A page identical to one already read cannot advance the offset.
+        let progressed = !more || r.pages.insert(r.page_hash);
+        let step = r.walk.advance(r.page_count, r.page_count, more);
+        if more {
+            if !progressed || !matches!(step, OffsetStep::More(_)) {
                 cx.done(
                     r.command,
                     Err("Backpack history is incomplete: paging made no progress".into()),
                 );
                 return;
             }
-            r.offset += r.page_count;
             r.page_count = 0;
             r.page_fresh = 0;
             r.page_hash = 14695981039346656037;

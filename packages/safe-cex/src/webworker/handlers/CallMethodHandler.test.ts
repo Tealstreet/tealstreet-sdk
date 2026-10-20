@@ -6,6 +6,12 @@ import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { workerCallClientOrderIds } from '../../exchanges/base';
+import {
+  decodeWorkerOrderIds,
+  replacementClientOrderIdOf,
+  withReplacementClientOrderId,
+} from '../../exchanges/clientOrderId';
 import { OrderStopTriggerType } from '../../types';
 import { CallMethodHandler } from './CallMethodHandler';
 
@@ -358,6 +364,64 @@ describe('CallMethodHandler', () => {
     it('should clear throttle manager on dispose', () => {
       // Just ensure it doesn't throw
       expect(() => handler.dispose()).not.toThrow();
+    });
+  });
+  describe('main-thread trading methods', () => {
+    it('runs a trading method on the worker exchange and returns its IDs', async () => {
+      const order = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1, price: 2, clientOrderId: 'c-1' };
+      (mockExchange as unknown as Record<string, unknown>).placeOrders = vi.fn().mockResolvedValue(['1', '2']);
+      handler.handle({ op: 'callMethod', data: { requestId: 'trade-1', method: 'placeOrders', args: [[order]] } });
+      await vi.waitFor(() => {
+        expect(mockExchange.placeOrders).toHaveBeenCalledWith([order]);
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: { requestId: 'trade-1', result: ['1', '2'], success: true },
+        });
+      });
+    });
+
+    it('sends the replacement client ID of an amendment beside its IDs, surviving a JSON bridge', async () => {
+      (mockExchange as unknown as Record<string, unknown>).updateOrder = vi
+        .fn()
+        .mockResolvedValue(withReplacementClientOrderId(['9'], 'replacement-1'));
+      handler.handle({ op: 'callMethod', data: { requestId: 'amend-1', method: 'updateOrder', args: [{}] } });
+      await vi.waitFor(() => expect(mockPostMessage).toHaveBeenCalled());
+      const { result } = JSON.parse(JSON.stringify(mockPostMessage.mock.calls[0][0].data));
+      const decoded = decodeWorkerOrderIds(result);
+      expect([...decoded]).toEqual(['9']);
+      expect(replacementClientOrderIdOf(decoded)).toBe('replacement-1');
+    });
+
+    it('serializes a worker trading rejection with its outcome fields', async () => {
+      const failure = Object.assign(new Error('rejected by venue'), { outcome: 'rejected', clientOrderIds: ['c-1'] });
+      (mockExchange as unknown as Record<string, unknown>).cancelOrders = vi.fn().mockRejectedValue(failure);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      handler.handle({ op: 'callMethod', data: { requestId: 'cancel-1', method: 'cancelOrders', args: [[]] } });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'cancel-1',
+            success: false,
+            result: expect.objectContaining({
+              message: 'rejected by venue',
+              outcome: 'rejected',
+              clientOrderIds: ['c-1'],
+            }),
+          },
+        }),
+      );
+    });
+
+    it('reads caller client IDs only from placement arguments', () => {
+      expect(workerCallClientOrderIds('placeOrders', [[{ clientOrderId: 'a' }, {}, { clientOrderId: 'b' }]])).toEqual([
+        'a',
+        'b',
+      ]);
+      expect(workerCallClientOrderIds('placeOrderWithClientOrderId', [{ clientOrderId: 'c' }])).toEqual(['c']);
+      expect(workerCallClientOrderIds('cancelOrders', [[{ clientOrderId: 'd' }]])).toBeUndefined();
+      expect(workerCallClientOrderIds('placeOrder', [{}])).toBeUndefined();
+      expect(workerCallClientOrderIds('placeOrders', undefined)).toBeUndefined();
     });
   });
 });

@@ -1,6 +1,8 @@
 //! What a venue answers beyond the commands every venue implements. Hosts
-//! route their client surface from this record instead of venue names.
+//! route their client surface from this record instead of venue names. Snapshot
+//! frames carry it (`section::CAPABILITIES`), so frame consumers learn it too.
 
+use crate::wire::{FrameWriter, section};
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -29,12 +31,29 @@ pub struct Capabilities {
     pub order_book_query: bool,
     /// Option chains, greeks and IV-priced orders.
     pub options: bool,
+    /// The quantity convention of every market's orders and positions.
+    pub quantity_units: QuantityUnits,
     /// `FetchAccountTier` / `SetAccountTier` venue actions (Lighter).
     pub account_tier: bool,
     /// The `FetchClosedPositions` venue action: venue-reported closed-position rows.
     pub closed_positions: bool,
     /// The `FetchBalanceInfo` venue action: the raw account payload for `balance.info`.
     pub balance_info: bool,
+}
+
+/// How a market's order and position quantities relate to its placement units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuantityUnits {
+    Base,
+    /// Placement is in contracts of `contractSize` base; frames stay in base.
+    NativePlacement,
+    /// Inverse quantities are native quote contracts (Bitget inverse).
+    InverseNative,
+    /// Placement is in contract counts of `ctVal` (OKX).
+    ContractCount,
+    /// Inverse contracts of a fixed USD `contractSize` (Binance COIN-M).
+    InverseContractSized,
 }
 
 /// How the host cancels every open order.
@@ -98,6 +117,7 @@ impl Capabilities {
         amend_with_symbol: false,
         order_book_query: false,
         options: false,
+        quantity_units: QuantityUnits::Base,
         account_tier: false,
         closed_positions: false,
         balance_info: false,
@@ -115,5 +135,67 @@ impl Capabilities {
 impl Default for Capabilities {
     fn default() -> Self {
         Self::BASE
+    }
+}
+
+impl Capabilities {
+    /// Two words: boolean flags, then four-bit enum fields (layout in wire.mjs).
+    pub fn write(&self, w: &mut FrameWriter<'_>) {
+        let flags = [
+            self.client_order_lookup,
+            self.fill_history,
+            self.order_history,
+            self.income_history,
+            self.fills_by_order_id,
+            self.account_leverage,
+            self.account_margin_type,
+            self.cancel_with_symbols,
+            self.amend_with_symbol,
+            self.order_book_query,
+            self.options,
+            self.account_tier,
+            self.closed_positions,
+            self.balance_info,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0u32, |bits, (bit, set)| bits | (u32::from(*set) << bit));
+        let enums = self.account as u32
+            | (self.cancel_all as u32) << 4
+            | (self.leverage_query as u32) << 8
+            | (self.max_leverage as u32) << 12
+            | (self.quantity_units as u32) << 16;
+        w.begin(section::CAPABILITIES);
+        w.u32s([flags, enums]);
+        w.end();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::{FrameWriter, sections};
+
+    #[test]
+    fn the_wire_record_packs_flags_then_enum_fields() {
+        let record = Capabilities {
+            account: AccountLookup::AfterLoad,
+            client_order_lookup: true,
+            options: true,
+            closed_positions: true,
+            cancel_all: CancelAll::EachPlacedSymbol,
+            leverage_query: LeverageQuery::OnMetadata,
+            max_leverage: MaxLeverage::Unsupported,
+            quantity_units: QuantityUnits::InverseContractSized,
+            ..Capabilities::NO_HISTORY
+        };
+        let mut w = FrameWriter::new(vec![], 0.0);
+        record.write(&mut w);
+        let frame = w.finish();
+        let (kind, payload) = sections(&frame).next().unwrap();
+        assert_eq!(kind, section::CAPABILITIES);
+        let word = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
+        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12);
+        assert_eq!(word(4), 2 | 1 << 4 | 2 << 8 | 3 << 12 | 4 << 16);
     }
 }
