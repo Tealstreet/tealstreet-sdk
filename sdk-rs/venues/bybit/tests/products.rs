@@ -806,3 +806,64 @@ fn failed_option_catalog_does_not_stall_linear_and_inverse_and_recovers_later() 
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().bid, 41234.0);
     assert!(h.socket("public/option").is_some());
 }
+
+#[test]
+fn failed_option_seed_after_other_seeds_still_publishes_working_products() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    respond(
+        &mut h,
+        "tickers",
+        "inverse",
+        None,
+        &support::TICKERS
+            .replace("BTCUSDT", "BTCUSD")
+            .replace("ETHUSDT", "ETHUSD"),
+    );
+    respond(&mut h, "tickers", "linear", None, support::TICKERS);
+    respond(&mut h, "tickers", "option", Some("baseCoin=ETH"), EMPTY);
+    let failed = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
+        .unwrap();
+    let failed = h.requests.remove(failed);
+    h.reply(failed.id, 503, "upstream unavailable");
+    assert!(
+        h.engine.store().loaded().tickers,
+        "option seed failure withheld tickers"
+    );
+    assert!(h.socket("public/linear").is_some());
+    // Recovery publishes the option rows and clears the degraded state.
+    h.advance(1_000.0);
+    respond(&mut h, "tickers", "option", Some("baseCoin=BTC"), QUOTE);
+    assert_eq!(h.engine.store().ticker(OPTION).unwrap().bid, 1000.0);
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("option markets recovered"))
+    );
+}

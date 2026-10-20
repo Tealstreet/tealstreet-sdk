@@ -808,6 +808,8 @@ impl BybitLinear {
                 self.try_load_tickers(cx);
             }
             self.select_category(category);
+            // Seeds already loaded elsewhere skip try_load_tickers; publish them too.
+            self.try_publish_tickers(cx);
         }
         if self.startup.retry.is_some() {
             return;
@@ -1078,7 +1080,7 @@ impl BybitLinear {
             return;
         }
         self.published_seeds = self.ticker_seeds.len();
-        if late_option {
+        if self.option_degraded && self.ticker_seeds.contains_key(&Category::Option) {
             self.option_degraded = false;
             cx.log(LogLevel::Info, "Bybit option markets recovered");
         }
