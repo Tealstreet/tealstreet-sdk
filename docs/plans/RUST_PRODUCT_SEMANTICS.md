@@ -144,6 +144,8 @@ request/write/signature/protocol contracts.
 | `binancespot` | 7045 / 3729 / 2 | 939.4 / 598.7 | 471.9 / 238.9 | 27.4 / 10.8 | PASS / PASS |
 | `binanceinverse` | 202 / 20 / 2 | 238.4 / 95.1 | 166.1 / 51.6 | 13.7 / 1.9 | PASS / PASS |
 | `binancepm` | 873 / 917 / 3 | 254.3 / 127.6 | 152.0 / 57.6 | 17.7 / 4.0 | PASS / PASS |
+| `okx` | 22663 / 514 / 2 | 1279.5 / 1106.5 | 984.5 / 822.6 | 19.1 / 5.3 | PASS / PASS |
+| `okxeu` | 37817 / 755 / 2 | 2683.2 / 2351.6 | 2089.2 / 1763.7 | 21.6 / 6.7 | PASS / PASS |
 
 ### Final matrix findings retained
 
@@ -184,3 +186,19 @@ final verification evidence. The rebuilt combined artifact is required below.
 The earlier performance commit's phrase “no fixture changes” refers to the
 public benchmark fixtures. The scripted private tape was deliberately repaired;
 its changes and the two failed EU attempts are recorded above.
+
+Final repository rerun after the production blank-quote fix passes 44 typecheck
+tasks, 28 lint tasks and all 27 test tasks (safe-cex: 7,425 tests). Fresh combined
+WASM passes all 16 product integrations, 384 SDK tests / 12 files, 68 host
+tests, one frame-wire integration and all 560 harness tests. The scripted SDK
+account fixture now returns its actual empty FUTURES catalog/orders/positions
+rather than mislabeling its SWAP-only order as a second product.
+
+Final OKX artifact: 814,098 bytes (budget 1,258,291), SHA256
+`98e91d71fc120bb8aa5fa6d094dd35204d9640000fb865360c23c3fe24544f95`.
+Both fresh global/EU public gates and all four private profiles PASS. The final
+local matrix is 24 PASS: 11 public CPU/memory/correctness gates and 13 private
+correctness gates. No public fixture or performance threshold was changed after
+measurement. Native OKX final count is 90; final strict workspace/WASM Clippy,
+format, bans and gitleaks PASS. PR review, exact-head green CI and merge remain
+the final process steps.
