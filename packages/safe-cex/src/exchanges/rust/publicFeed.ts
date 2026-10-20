@@ -1,4 +1,13 @@
-import type { Candle, ExchangeName, ExchangeOptions, Market, OHLCVOptions, OrderBook, Ticker } from '../../types';
+import type {
+  Candle,
+  ExchangeName,
+  ExchangeOptions,
+  Market,
+  OHLCVOptions,
+  OrderBook,
+  PublicDataSource,
+  Ticker,
+} from '../../types';
 import type { RustEngineExchange } from './rust.exchange';
 
 /** Explicitly transfer the shared port when options cross a worker boundary. */
@@ -295,6 +304,7 @@ export class RustPublicFeedClient {
     private readonly identity: string,
     private readonly ingest: (update: FeedUpdate) => Promise<unknown>,
     private readonly fail: (error: Error) => void,
+    private readonly handshakeTimeoutMs = 10_000,
   ) {}
 
   connect(): Promise<void> {
@@ -304,7 +314,10 @@ export class RustPublicFeedClient {
       this.port.addEventListener('message', this.receive);
       this.port.addEventListener('messageerror', this.messageError);
       this.port.start();
-      this.timer = setTimeout(() => this.failed(new Error('Shared public feed handshake timed out')), 10_000);
+      this.timer = setTimeout(
+        () => this.failed(new Error('Shared public feed handshake timed out')),
+        this.handshakeTimeoutMs,
+      );
       this.send({ op: 'hello', identity: this.identity });
     });
   }
@@ -374,3 +387,196 @@ export class RustPublicFeedClient {
     this.port.close();
   }
 }
+
+type Listener = (event: MessageEvent) => void;
+
+/** One end of an in-memory port pair: same-realm hosts need no structured clone. */
+class InProcessPort {
+  peer?: InProcessPort;
+  private closed = false;
+  private readonly listeners = new Set<Listener>();
+  postMessage(data: unknown) {
+    if (this.closed) throw new Error('In-process public feed port closed');
+    const peer = this.peer;
+    // Asynchronous like a MessagePort, so neither side re-enters the other.
+    queueMicrotask(() => {
+      if (!peer || peer.closed) return;
+      for (const listener of [...peer.listeners]) listener({ data } as MessageEvent);
+    });
+  }
+  addEventListener(type: string, listener: Listener) {
+    if (type === 'message') this.listeners.add(listener);
+  }
+  removeEventListener(type: string, listener: Listener) {
+    if (type === 'message') this.listeners.delete(listener);
+  }
+  start() {}
+  close() {
+    this.closed = true;
+    this.listeners.clear();
+  }
+}
+
+/** A connected pair of in-memory ports for a same-realm public feed. */
+export const inProcessPortPair = (): [MessagePort, MessagePort] => {
+  const a = new InProcessPort();
+  const b = new InProcessPort();
+  a.peer = b;
+  b.peer = a;
+  return [a as unknown as MessagePort, b as unknown as MessagePort];
+};
+
+/** In-process sources load before handing data over; TS waits as long. */
+export const IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS = 30_000;
+const IN_PROCESS_TICKER_INTERVAL_MS = 250;
+
+/**
+ * Serves the shared-feed protocol from an in-process `PublicDataSource`
+ * (exchange-server's per-venue public exchange). The source survives its own
+ * restarts, so accounts keep running; catalog changes re-send `ready`.
+ */
+export const serveInProcessPublicData = (source: PublicDataSource, port: MessagePort): (() => void) => {
+  let ready = false;
+  let disposed = false;
+  let catalog = '';
+  let catalogSymbols = new Set<string>();
+  let lastMarkets: Market[] | undefined;
+  let tickerTimer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribeStore: (() => void) | undefined;
+  const subscriptions = new Map<string, () => void>();
+  const read = <T>(fn: () => T): T | undefined => {
+    try {
+      return fn();
+    } catch {
+      // The source throws while it restarts; the next notify retries.
+      return undefined;
+    }
+  };
+  const send = (message: Reply) => {
+    try {
+      port.postMessage(message);
+    } catch {
+      cleanup();
+    }
+  };
+  const loaded = () =>
+    read(() => source.store.loaded.markets && source.store.loaded.tickers && source.store.markets.length > 0);
+  const sendCatalog = () => {
+    const markets = read(() => source.store.markets);
+    if (!markets?.length || markets === lastMarkets) return;
+    lastMarkets = markets;
+    const next = markets.map(feedMarket);
+    const text = JSON.stringify(next);
+    if (text === catalog) return;
+    catalog = text;
+    catalogSymbols = new Set(next.map((market) => market.symbol));
+    send({ op: 'ready', markets: next });
+  };
+  const seed = () => {
+    tickerTimer = undefined;
+    if (!ready || disposed) return;
+    const tickers = read(() => source.store.tickers);
+    if (!tickers?.length) return;
+    send({
+      op: 'publicFeedUpdate',
+      tickers: tickers.map((ticker) => {
+        const row: NonNullable<FeedUpdate['tickers']>[number] = {
+          symbol: ticker.symbol,
+          midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
+        };
+        for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
+        return row;
+      }),
+    });
+  };
+  const scheduleSeed = () => {
+    tickerTimer ??= setTimeout(seed, IN_PROCESS_TICKER_INTERVAL_MS);
+  };
+  const becomeReady = () => {
+    if (ready || !loaded()) return;
+    ready = true;
+    sendCatalog();
+    seed();
+  };
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    clearTimeout(tickerTimer);
+    unsubscribeStore?.();
+    for (const stop of subscriptions.values()) read(stop);
+    subscriptions.clear();
+    port.removeEventListener('message', onMessage);
+    port.close();
+  };
+  const onMessage = (event: MessageEvent<Request>) => {
+    const data = event.data;
+    if (disposed || !data || typeof data !== 'object') return;
+    if (data.op === 'hello') {
+      unsubscribeStore ??= source.store.subscribe(() => {
+        if (disposed) return;
+        if (!ready) becomeReady();
+        else {
+          sendCatalog();
+          scheduleSeed();
+        }
+      });
+      becomeReady();
+    } else if (data.op === 'dispose') cleanup();
+    else if (data.op === 'ping') send({ op: 'pong' });
+    else if (ready && data.op === 'snapshot') seed();
+    else if (ready && (data.op === 'book' || data.op === 'candle')) {
+      const symbol = data.symbol;
+      // The announced catalog, not the live store, which is empty while the source restarts.
+      if (typeof symbol !== 'string' || !catalogSymbols.has(symbol)) {
+        send({ op: 'error', message: 'Shared public feed symbol unavailable' });
+        return;
+      }
+      const key = data.op === 'book' ? `book:${symbol}` : `candle:${symbol}:${data.interval}`;
+      if (!data.subscribe) {
+        read(() => subscriptions.get(key)?.());
+        subscriptions.delete(key);
+        return;
+      }
+      if (subscriptions.has(key)) return;
+      const stop =
+        data.op === 'book'
+          ? read(() =>
+              source.listenOrderBook(symbol, (book) =>
+                send({
+                  op: 'publicFeedUpdate',
+                  books: [
+                    {
+                      symbol,
+                      bids: book.bids.map(({ price, amount }) => [price, amount]),
+                      asks: book.asks.map(({ price, amount }) => [price, amount]),
+                    },
+                  ],
+                }),
+              ),
+            )
+          : read(() =>
+              source.listenOHLCV({ symbol, interval: data.interval }, (candle) =>
+                send({
+                  op: 'publicFeedUpdate',
+                  candles: [
+                    {
+                      symbol,
+                      interval: data.interval,
+                      timestamp: candle.timestamp,
+                      open: candle.open,
+                      high: candle.high,
+                      low: candle.low,
+                      close: candle.close,
+                      volume: candle.volume,
+                    },
+                  ],
+                }),
+              ),
+            );
+      if (stop) subscriptions.set(key, stop);
+    }
+  };
+  port.addEventListener('message', onMessage);
+  port.start();
+  return cleanup;
+};

@@ -79,7 +79,12 @@ interest from attached accounts; late book subscribers receive the native
 snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
-sections or account metadata. A running/loaded direct source is mandatory.
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`): no identity check, a 30 s load wait,
+ticker seeds coalesced to 250 ms, and a re-sent `ready` on catalog change, because
+the server's source re-attaches across public-exchange restarts. Websocket gateways
+still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means

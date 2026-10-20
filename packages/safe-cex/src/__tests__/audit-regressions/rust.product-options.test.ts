@@ -92,7 +92,7 @@ it('rejects legacy TS public providers before native product construction', asyn
     externalPublicData: { type: 'websocket', url: 'wss://fixture.invalid', exchangeId: 'bybit' },
   });
   await expect((exchange as unknown as { ensureHost(): Promise<void> }).ensureHost()).rejects.toThrow(
-    'Rust externalPublicData is unsupported',
+    'Rust externalPublicData websocket gateways are unsupported',
   );
   expect(constructor).not.toHaveBeenCalled();
 });
