@@ -6,6 +6,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId};
 use serde::{Deserialize, Serialize};
@@ -71,8 +72,7 @@ pub(crate) struct Account {
     ping_sent: bool,
     pong_ping: Option<(TimerId, SocketId, u64)>,
     request_id: u32,
-    health: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     tick: Option<TimerId>,
     login_retry: Option<TimerId>,
     builder_retry: Option<TimerId>,
@@ -196,6 +196,19 @@ impl Skipped {
                     self.count, self.first
                 ),
             );
+        }
+    }
+}
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                idle_timeout_ms: 90_000.,
+                ping_interval_ms: Some(15_000.),
+                ..Config::default()
+            }),
+            ..Self::default()
         }
     }
 }
@@ -731,9 +744,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         self.login(cx);
     }
     pub(crate) fn account_defer(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
@@ -758,6 +769,7 @@ impl Grvt {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.authentication_failed
             || self.account.socket.is_some()
+            || self.account.supervisor.is_waiting()
             || self.account.trading_account_id.is_none()
         {
             return;
@@ -785,7 +797,7 @@ impl Grvt {
         self.account.socket = Some(socket);
         self.account.last_received = cx.now;
         self.account.authenticated = false;
-        self.account.health = Some(cx.set_timer(15_000.));
+        self.account.supervisor.connecting(cx);
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -793,6 +805,7 @@ impl Grvt {
         }
         self.cancel_pong_ping(cx);
         self.account.last_received = cx.now;
+        self.account.supervisor.opened(cx);
         self.account.healthy_since = None;
         self.account.sequences.clear();
         self.account.first_sequence.clear();
@@ -837,6 +850,7 @@ impl Grvt {
             is_full: bool,
         }
         self.account.authenticated = true;
+        self.account.supervisor.authenticated(cx);
         for stream in ["v1.order", "v1.position", "v1.fill"] {
             self.account.request_id += 1;
             cx.send(
@@ -867,12 +881,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some(timer) = self.account.reconnect.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
@@ -901,9 +910,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         self.login(cx);
     }
     pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -917,11 +924,8 @@ impl Grvt {
         self.account.positions_revision += 1;
         self.account.sequences.clear();
         self.account.first_sequence.clear();
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
-        if !self.account.authentication_failed && self.account.reconnect.is_none() {
-            self.account.reconnect = Some(cx.set_timer(1_000.));
+        if !self.account.authentication_failed {
+            self.account.supervisor.retry(cx);
         }
         true
     }
@@ -1605,12 +1609,7 @@ impl Grvt {
                 if let Some(socket) = self.account.socket.take() {
                     cx.close(socket);
                 }
-                if let Some(timer) = self.account.health.take() {
-                    cx.clear_timer(timer);
-                }
-                if let Some(timer) = self.account.reconnect.take() {
-                    cx.clear_timer(timer);
-                }
+                self.account.supervisor.cancel(cx);
                 if self.account.started {
                     self.connect_private(cx);
                 }
@@ -1749,6 +1748,7 @@ impl Grvt {
             return false;
         }
         self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         self.account.ping_sent = false;
         if text == "pong" {
             self.cancel_pong_ping(cx);
@@ -1979,24 +1979,27 @@ impl Grvt {
         } else if self.account.login_retry == Some(timer) {
             self.account.login_retry = None;
             self.login(cx);
-        } else if self.account.health == Some(timer) {
-            self.account.health = None;
-            if let Some(socket) = self.account.socket {
-                let idle = cx.now - self.account.last_received;
-                if idle >= 90_000. {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                } else {
-                    if idle >= 60_000. && !self.account.ping_sent {
+        } else if self.account.supervisor.owns_timer(timer) {
+            match self.account.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect_private(cx),
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = self.account.socket {
+                        cx.close(socket);
+                        self.account_close(cx, socket);
+                    }
+                }
+                SocketTick::Ping
+                    if self.account.authenticated
+                        && cx.now - self.account.last_received >= 60_000.
+                        && !self.account.ping_sent =>
+                {
+                    if let Some(socket) = self.account.socket {
                         cx.send(socket, "ping");
                         self.account.ping_sent = true;
                     }
-                    self.account.health = Some(cx.set_timer(15_000.));
                 }
+                _ => {}
             }
-        } else if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.connect_private(cx);
         } else if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.summary(cx);
