@@ -820,3 +820,27 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     h.pace();
     assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
 }
+
+#[test]
+fn account_reconciliation_starts_without_the_private_socket() {
+    let mut h = Harness {
+        engine: Engine::new(Kucoin::new(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        })),
+        actions: vec![],
+        now: 1610000000000.0,
+        socket: SocketId(0),
+    };
+    h.engine.start(h.now);
+    h.collect();
+    h.reply("/contracts/active", MARKET);
+    h.reply("/allTickers", TICKERS);
+    let bullet = h.http("/bullet-private");
+    h.respond(&bullet, 503, "unavailable");
+    h.ready();
+    assert!(h.engine.store().loaded().positions);
+    assert!(h.engine.store().loaded().orders);
+}

@@ -553,12 +553,14 @@ TxFlow loses nothing (master TS was a placeholder).
 - High: ~~cancel-symbol also deletes the symbol's TP/SL stops
   (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`)~~ (stop-book deletion
   now only on account-wide cancel); one failed or
-  malformed markets/tickers read stops the venue, and futures private REST
-  waits for the private socket `welcome` (`lib.rs:767,954,1026`).
+  malformed markets/tickers read stops the venue (startup lane), ~~and futures
+  private REST waits for the private socket `welcome` (`lib.rs:767,954,1026`)~~
+  (reconciliation starts at launch).
 - Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
   (uncached IDs sent directly; later cancellations continue and failures surface);
-  one malformed REST row freezes reconciliation (`account.rs:652`); caller client
-  id on attached TP/SL rejected (`trading.rs:120`).
+  one malformed REST row freezes reconciliation (`account.rs:652`, rows lane);
+  ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
+  the client-ID contract honours caller IDs only on plain Limit/Market).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
   5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
 - Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
