@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketChannel,
-    SocketId, TimerId,
+    SocketId, TimerId, VenueError,
 };
 use safe_cex_venue_bybit::{BybitLinear, Options};
 
@@ -27,6 +27,8 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub startup_failures: Vec<VenueError>,
+    pub deactivated: bool,
 }
 
 impl Harness {
@@ -52,6 +54,8 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             logs: Vec::new(),
+            startup_failures: Vec::new(),
+            deactivated: false,
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -102,8 +106,15 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::StartupFailed { error }) => {
+                    self.startup_failures.push(error)
+                }
                 Action::Notice(Notice::Deactivate) => {
-                    panic!("unexpected Bybit account deactivation")
+                    assert!(
+                        !self.startup_failures.is_empty(),
+                        "unexpected Bybit account deactivation"
+                    );
+                    self.deactivated = true;
                 }
             }
         }

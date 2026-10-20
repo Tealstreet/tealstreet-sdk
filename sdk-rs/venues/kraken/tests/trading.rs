@@ -982,3 +982,35 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
         Action::Notice(Notice::CommandDone { result: Err(_), .. })
     )));
 }
+#[test]
+fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
+    for (command, kind) in [
+        (42, r#""type":"market""#),
+        (43, r#""type":"limit","price":100"#),
+    ] {
+        let (mut e, _) = ready();
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![serde_json::from_str(&format!(
+                    r#"{{"symbol":"PF_XBTUSD",{kind},"side":"buy","amount":1,"stopLoss":0,"takeProfit":0}}"#
+                ))
+                .unwrap()],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let writes = actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            .count();
+        assert_eq!(writes, 1, "{kind}: only the entry is sent");
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )),
+            "{kind}"
+        );
+    }
+}

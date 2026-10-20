@@ -434,7 +434,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).
-- High: per-coin balances never set (`account.rs:662`).
+- ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
+  (equity, else wallet balance; USD value, else amount) from every accepted wallet
+  read, merged from stream pushes with explicit zeros; failed reads keep holdings.
 - ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
   Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
   without a valid side, price, quantity or time are excluded from REST fills.
@@ -442,14 +444,25 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   income ids keep TS's shape; distinct native rows that would share one (same-
   instant hedge legs) get their native id, side and signed size appended, and
   exact page repeats still collapse.
-- Medium: option failures stall linear startup (`lib.rs:857`).
+- ~~Medium: option failures stall linear startup (`lib.rs:857`).~~ Fixed: a failed
+  option catalog or seed lets the other products publish (markets, tickers,
+  sockets, account); options join later by appending (stable indexes, live rows kept).
 - ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
   documentation explicitly permits `baseCoin=All` for `category=option`.
-- Medium: live candles lack trade aggregation and seconds intervals.
-- Medium: option WS ticker field names likely wrong.
-- Medium: no UNIFIED retry on the wallet call.
+- ~~Medium: live candles lack trade aggregation and seconds intervals.~~ Fixed:
+  `publicTrade` extends the native kline bar (every trade in a packet, in order;
+  Monday weeks, UTC months), seconds intervals are built from trades alone; Hyro
+  stays native-kline-only.
+- ~~Medium: option WS ticker field names likely wrong.~~ Fixed: documented option
+  `bidPrice`/`askPrice`/`change24h` (REST option rows: `change24h`) now update quotes.
+- ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
+  with `accountType only support UNIFIED` switches the account to UTA and retries
+  once; other errors never change the account type.
 - Medium: demo reduce-only fill check missing.
-- Medium: Hyro tears down on one bad poll (`account.rs:1838`).
+- ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
+  read failing in transport or at the venue keeps the ready stream and last-good
+  state and retries next tick; malformed content and initial snapshots still
+  reconnect.
 - ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
   every page up to TS's 20 × 50 per window (then warns and keeps the rows, as TS)
   instead of truncating to 50; explicit
@@ -458,7 +471,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
 - ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
   is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
-- Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).
+- ~~Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).~~
+  Fixed: a well-formed row of an unsupported type keeps its last known state (or is
+  reported as not shown) while other orders commit; malformed rows still preserve
+  the whole last-good snapshot. Hyro stays strict.
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
@@ -609,8 +625,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
   its executions still emit, the store keeps its copy).
-- Medium: one bad public row stops startup; one bad position row freezes a
-  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+- Medium: one bad public row stops startup; ~~one bad position row freezes a
+  currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
+  store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.
