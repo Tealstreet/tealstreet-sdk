@@ -294,7 +294,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Venue | State |
 | --- | --- |
 | Binance USD-M, Binance PM | done; regression gates retained by variants lane |
-| Binance Spot, COIN-M inverse | implementing in existing Binance crate (`feat/rust-binance-variants`); Hyro performance verification included |
+| Binance Spot, COIN-M inverse | port complete in existing Binance crate (`feat/rust-binance-variants`); all four Binance profiles and fresh Hyro regression gates pass |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |

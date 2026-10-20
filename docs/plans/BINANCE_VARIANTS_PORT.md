@@ -127,3 +127,42 @@ COIN-M public trades have a documented native regression. Unsupported private
 history remains the existing TS empty-result contract; no unverified history API
 expansion is claimed. Final replay rebuild is879753 bytes for Binance-only,
 below the unchanged1258291-byte limit. Final exact-head gates remain in progress.
+
+
+### Final integrated replay evidence
+
+Merged landing `373cc09864` (KuCoin) into this branch as `ddd5448fee`;
+independent integration audit preserved both venues' registrations, native frame
+units and protocol contracts. Merged harness helpers:262/262 pass. Binance native
+suite:96/96 pass; fmt, bans, crate Clippy and WASM-target Clippy pass. Root
+typecheck44 tasks and lint28 tasks pass. Host/wire45 tests pass.
+
+All eight Binance gates pass on that integrated source. Public gates use three
+runs and unchanged thresholds; every public Rust main/steady CPU and retained
+memory metric is below TS. Private gates use one run and assert correctness,
+including zero unserved requests, missing writes, bad signatures or protocol
+errors. Fresh private frame counts: USD-M14, PM6, Spot8, COIN-M6.
+
+| Profile | Frames | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 247.223/123.664 | 139.793/56.780 | 18.972/2.679 |
+| PM | 873 | 187.656/85.191 | 105.174/28.872 | 18.447/2.663 |
+| Spot | 7045 | 860.188/636.820 | 443.165/291.005 | 26.476/7.560 |
+| COIN-M | 202 | 211.746/88.434 | 143.736/54.779 | 15.554/1.524 |
+
+Binance-only WASM879753 bytes, limit1258291, SHA-256
+`b1d43b765c2d1c7d25fbbbb08f2275ad101e6a3b44dfc1be2e3f173cbf93395c`.
+
+Fresh Bybit-only rebuild also passes Hyro public160 frames (TS/Rust main
+21.0/15.7ms, steady4.7/2.6ms, retained16.2/0.8MB), Hyro private13 frames,
+Bybit public8743 frames and private18 frames. Hyro private main42.2/30.4ms and
+steady21.8/15.1ms are informational and also below TS. The earlier tiny Hyro
+misses did not reproduce on either the unchanged baseline or fresh integrated
+artifact. Diagnostic profiling identified shared URL canonicalization/scheduling
+overhead; it did not establish a production Rust handler regression. No threshold,
+measurement window or production Hyro code changed. Concurrent machine activity
+precludes claiming strict isolation; live Hyro origins remain unconfigured.
+
+Final combined WASM boundary suite79/79 passes across six files. Root test
+scripts both pass6972 safe-cex cases; all27 root test tasks pass. PR review
+publication and green CI remain the final landing checks.
