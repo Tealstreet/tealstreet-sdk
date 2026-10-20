@@ -36,7 +36,15 @@ mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
 let capturing = true;
-const write = (record) => { if (capturing) tape.write(`${JSON.stringify(policy.sanitize(timeline({ t: Date.now() - started, ...record }, loaded)))}\n`); };
+let recordingFailed = false;
+const write = (record) => {
+  if (!capturing) return;
+  try { tape.write(`${JSON.stringify(policy.sanitize(timeline({ t: Date.now() - started, ...record }, loaded)))}\n`); }
+  catch {
+    recordingFailed = true;
+    throw new Error('Recording refused a protocol record that was not replay-safe');
+  }
+};
 
 write({ type: 'meta', epoch: started, private: false });
 if (policy.replayOptions || options.endpoints) write({ type: 'config', options: policy.replayOptions ?? options });
@@ -150,7 +158,7 @@ const stop = () => {
   host.dispose();
   tape.end(() => {
     console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
-    process.exit((!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
+    process.exit(!recordingFailed && (!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
   });
 };
 const duration = Number(values.seconds) * 1000;

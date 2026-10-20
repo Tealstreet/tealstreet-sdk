@@ -1715,3 +1715,15 @@ integer-tick max-sized lots plus exact remainder, each≤market max and aligned
 to step; bound total resulting lots≤10,000, preserve full batch preflight and
 caller-ID split rejection. Prove nonmultiple/awkward-step conservation and
 boundaries with fail-before cases; independent venue audit after scopedchecks.
+
+Recorder fix reviewed PASS: restored sticky failure covering timeline,
+sanitization, serialization and write invocation, fixed safe diagnostic and
+nonzero exit even when prior readiness remains true. New production-slice
+tests use real EngineHost buffered+streamed paths: fail-before740PASS/1FAIL
+(incorrect exit0), after741/741PASS. Includes safe successful control,
+credential/serializer rejection, request cleanup, no unsafe record/diagnostic
+leak and later-safe-write stickiness. Logs /tmp/bitunix-recorder-{before,final}.log.
+All eight Coinbase private profiles + public PASS on reviewed sampler. Batch
+launcher alone paused after final replay completed to finish native fixes;
+no replay process/timer or gate policy paused/changed. Continue remaining
+venues only after native correction and independent audit.
