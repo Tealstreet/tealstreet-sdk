@@ -315,6 +315,11 @@ actionable error; it must never continue with the stale cookie.
 - `is_full: false` requests lite format for efficiency
 
 **Ping/Pong** (`grvt.ws-private.ts:48-53`): Sends string `"ping"`, expects string `"pong"` response.
+Both TS and Rust schedule a replaceable one-shot ping five seconds after a
+pong, independently of intervening account data. Rust fences that timer by
+socket and authenticated-session generation and clears it on retirement.
+Heartbeat timing is not subscription identity; replay protocol audits still
+require authentication before private sends and exact responses to server pings.
 
 **Stream Handling** (`grvt.ws-private.ts:199-217`):
 

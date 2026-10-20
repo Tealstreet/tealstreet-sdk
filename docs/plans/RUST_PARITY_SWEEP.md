@@ -385,3 +385,14 @@ than treating the original port boundary as a waiver.
   timer review PASS. Rebuilt mixed-product replay and final WASM Clippy follow.
 - All four OKX private profiles PASS on the combined artifact, covering native
   inverse counts and EEA X-Perp lifecycles without output normalization.
+- Final locked workspace2464+3doctests, native/WASM Clippy, fmt and bans PASS
+  on fd4d6e4156; rebuilt SDK379/379 and host68/68 PASS with the timer repair.
+- Rebuilt mixed GRVT replay isolated a harness identity error: optional bare
+  heartbeat timing reversed between implementations at the five-second tape
+  boundary. Exact GRVT ping/pong are now excluded from subscription identities,
+  as JSON heartbeats already were. Raw socket auditing still precedes this
+  comparison and rejects missing/wrong/extra pongs and pre-credential sends.
+  Auth/feed/strike identities and all financial/scoring/budget checks remain
+  exact. Negative controls fail without the fix; harness537/537 and independent
+  review PASS. Both original private failures remain recorded; final replay
+  follows this bounded harness correction.
