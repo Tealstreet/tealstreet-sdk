@@ -98,4 +98,9 @@ current upstream enum is likewise outside the existing TS discovery scope.
   or positions, change settings, emit fills or poison supported fill dedup.
   REST unknown-order/position snapshots fail atomically; leverage ignores
   undiscovered IDs. **22 account tests PASS**; independent phase review accepted.
-- Trading/query phase verification and landing evidence follow.
+- Trading phase: independent audit accepted the existing market preflight and
+  identity rules. Mixed catalogs plus native/canonical retired IDs prove whole
+  batches reject before writes, including symbol cancellation and leverage;
+  unsupported IDs cannot cancel/amend a perpetual. A subsequent valid order
+  still sends its exact perpetual instrument. **28 trading tests PASS**.
+- Query phase verification and landing evidence follow.
