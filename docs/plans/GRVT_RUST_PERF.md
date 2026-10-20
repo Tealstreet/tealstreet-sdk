@@ -105,7 +105,7 @@ corepack yarn -s node --expose-gc --import tsx --cpu-prof \
 The ordinary WASM build restores canonical artifacts before gates. Temporary
 profiles, timing wrappers and test output are outside the repository.
 
-### Final gates on unchanged runtime
+### Gates before landing integration (`7536117347`)
 
 Canonical combined default-feature release WASM build PASS. Bans, GRVT fmt,
 Clippy (all targets), 85 native tests and wasm32 host Clippy PASS. All four
@@ -123,3 +123,8 @@ comparisons against the earlier venue-only profile.
 
 Final documentation audit: clarified inclusive versus self sample counts and
 added exact named-WASM profiling/rebuild commands. Runtime diff is empty.
+
+Landing integration: merged `origin/feat/rust-rewrite` at `74b0a7dd14`
+(BreakoutProp) as `c3a5051ce2`. The diff against the new landing branch remains
+only this document and its roster link. Follow-up integration checks and
+independent review results are recorded on [PR #1331](https://github.com/Tealstreet/tealstreet-sdk/pull/1331).
