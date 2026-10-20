@@ -1160,6 +1160,10 @@ impl Venue for BreakoutProp {
             }
             Command::Query { command, query } => history::query(cx, command, query),
             Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
+            Command::FetchMaxLeverage { command, .. } => cx.done(
+                command,
+                Err("Maximum leverage queries are unavailable for DXtrade".into()),
+            ),
             Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }

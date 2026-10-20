@@ -1122,6 +1122,7 @@ impl Venue for Polymarket {
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
             | Command::FetchLeverage { .. }
+            | Command::FetchMaxLeverage { .. }
             | Command::FetchAccount { .. }
             | Command::FetchOrderBook { .. }
             | Command::FetchStpMode { .. }

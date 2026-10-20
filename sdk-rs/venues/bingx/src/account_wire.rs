@@ -129,6 +129,20 @@ pub struct PositionRow<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct PositionIdentity<'a> {
+    #[serde(default, borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default, borrow, rename = "positionSide")]
+    pub position_side: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct OrderIdentity<'a> {
+    #[serde(default, borrow, rename = "orderId", deserialize_with = "identifier")]
+    pub order_id: Str<'a>,
+}
+
+#[derive(Deserialize)]
 pub struct Protection {
     #[serde(default, rename = "stopPrice", deserialize_with = "number")]
     stop_price: f64,

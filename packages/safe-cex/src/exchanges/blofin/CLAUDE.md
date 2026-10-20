@@ -821,3 +821,21 @@ Terminal order rows remain until reconciliation, and cancel-all selects only ope
 orders in both TS and Rust. Rust additionally keeps terminal socket states
 monotonic and rejects amending or merging terminal protection, preventing late
 frames or retained canceled legs from creating new orders.
+
+Closed Rust symbols restore their margin setting to the confirmed account default
+on both REST and socket full snapshots (including explicit zero rows). Live
+positions keep their own margin mode; closing one must not make the next opening
+order inherit that old mode. Leverage remains cached across the close.
+
+The Rust login timestamp is a JSON integer, and its exact decimal text is used
+in the WS signature. BloFin's documented TPSL/algo examples contain null unused
+protection fields: Rust treats these as absent, likewise nullable client IDs,
+attachments and position leverage/liquidation metadata. Required quantities and
+identities are not defaulted from null. A malformed socket row is logged while
+valid siblings continue; malformed positions retain that symbol's known legs
+and account totals. A row without a usable position identity preserves the whole
+snapshot. Required-field corruption in REST private snapshots remains atomic.
+Initial ticker rows are independent: malformed rows are reported and skipped so
+other tickers and private startup can progress. The captured public tape currently
+has no null values, so null-quantity tests describe defensive behavior rather than
+claiming a captured exchange payload.

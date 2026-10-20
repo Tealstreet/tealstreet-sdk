@@ -47,13 +47,13 @@ pub enum Request {
         revision: u64,
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
-        failed: bool,
+        skipped: Vec<String>,
     },
     OpenOrders {
         revision: u64,
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
-        failed: bool,
+        skipped: Vec<String>,
     },
 }
 
@@ -91,7 +91,15 @@ pub struct Account {
     retained_terminals: VecDeque<String>,
     retained_executions: VecDeque<String>,
     observations: Vec<OrderMeta>,
+    // Markets whose contract rows were malformed; their rows are reported once.
+    skipped_markets: HashSet<String>,
+    reported_markets: HashSet<String>,
+    unidentified_positions: u32,
+    unidentified_orders: u32,
 }
+
+/// Consecutive snapshots carrying an unidentifiable row before it logs as an error.
+const UNIDENTIFIED_ESCALATION: u32 = 3;
 
 pub fn order_type(text: &str) -> Option<OrderType> {
     Some(match text {
@@ -122,6 +130,49 @@ pub fn position_id(symbol: &str, side: PositionSide, mode: PositionMode) -> Stri
             }
         ),
     }
+}
+
+/// A malformed position row's id, or its symbol when the side is unreadable;
+/// empty when even the symbol is.
+fn position_identity(item: &str, mode: PositionMode) -> String {
+    let Ok(row) = serde_json::from_str::<PositionIdentity<'_>>(item) else {
+        return String::new();
+    };
+    let symbol = row.symbol.replace('-', "");
+    match (mode, row.position_side.as_ref()) {
+        (_, _) if symbol.is_empty() => String::new(),
+        (PositionMode::Hedged, "LONG") => position_id(&symbol, PositionSide::Long, mode),
+        (PositionMode::Hedged, "SHORT") => position_id(&symbol, PositionSide::Short, mode),
+        _ => symbol,
+    }
+}
+/// Logs a committed snapshot's skipped rows; an unidentifiable row that persists
+/// keeps every known row, so it escalates to an error.
+fn log_snapshot_skips(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String], streak: &mut u32) {
+    *streak = if skipped.iter().any(String::is_empty) {
+        streak.saturating_add(1)
+    } else {
+        0
+    };
+    if *streak >= UNIDENTIFIED_ESCALATION {
+        crate::log_skipped_at(
+            cx,
+            LogLevel::Error,
+            kind,
+            skipped,
+            &format!(
+                "; an unidentifiable row for {streak} consecutive snapshots is keeping every known {kind}"
+            ),
+        );
+    } else {
+        crate::log_skipped(cx, kind, skipped);
+    }
+}
+/// A malformed order row's id; empty when even that is unreadable.
+fn order_identity(item: &str) -> String {
+    serde_json::from_str::<OrderIdentity<'_>>(item)
+        .map(|row| row.order_id.into_owned())
+        .unwrap_or_default()
 }
 
 fn margin_type(text: &str) -> MarginType {
@@ -197,6 +248,24 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
+    pub fn set_skipped_markets(&mut self, symbols: impl Iterator<Item = String>) {
+        self.skipped_markets = symbols.filter(|s| !s.is_empty()).collect();
+    }
+    /// Whether a row's market is unknown; a market dropped at startup is an error once.
+    fn untracked_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
+        if cx.store.market(symbol).is_some() {
+            return false;
+        }
+        if self.skipped_markets.contains(symbol) && self.reported_markets.insert(symbol.into()) {
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "BingX account data for {symbol} is hidden: its contract row was malformed"
+                ),
+            );
+        }
+        true
+    }
     pub fn drain_order_meta(&mut self) -> impl Iterator<Item = OrderMeta> + '_ {
         self.observations.drain(..)
     }
@@ -222,22 +291,27 @@ impl Account {
         cx: &mut Cx<'_, Pending>,
         credentials: &Credentials,
         method: Method,
-        path: &str,
+        path: &'static str,
         params: Params,
         request: Request,
         stream: bool,
     ) {
-        let (url, headers, body) = params.into_request(method, path, Some(credentials), cx.now);
-        if stream {
-            let at = if path == OPEN_ORDERS {
+        let at = stream.then(|| {
+            if path == OPEN_ORDERS {
                 ArrayAt::EnvelopeFieldOrNested("data", "orders")
             } else {
                 ArrayAt::EnvelopeField("data")
-            };
-            cx.request_streamed(method, url, headers, at, Pending::Account(request));
-        } else {
-            cx.request(method, url, headers, body, Pending::Account(request));
-        }
+            }
+        });
+        crate::issue(
+            cx,
+            Some(credentials),
+            method,
+            path,
+            params,
+            at,
+            Pending::Account(request),
+        );
     }
 
     fn fetch_key(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -309,7 +383,7 @@ impl Account {
                 revision: self.positions_revision,
                 rows: Vec::new(),
                 settings: Vec::new(),
-                failed: false,
+                skipped: Vec::new(),
             },
             true,
         );
@@ -329,7 +403,7 @@ impl Account {
                 revision: self.orders_revision,
                 rows: Vec::new(),
                 metas: Vec::new(),
-                failed: false,
+                skipped: Vec::new(),
             },
             true,
         );
@@ -481,23 +555,26 @@ impl Account {
             Request::Positions {
                 rows,
                 settings,
-                failed,
+                skipped,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
-                    *failed = true;
+                    skipped.push(position_identity(item, mode(cx)));
                     return;
                 };
                 let symbol = row.symbol.replace('-', "");
-                if cx.store.market(&symbol).is_none() {
-                    return;
-                }
-                if row.leverage <= 0.0 {
-                    *failed = true;
+                if self.untracked_market(cx, &symbol) {
                     return;
                 }
                 let mode = mode(cx);
                 let side = position_side(&row.position_side, row.position_amt, mode);
+                if row.leverage <= 0.0 {
+                    // A flat row closes its position whatever its leverage.
+                    if row.position_amt != 0.0 {
+                        skipped.push(position_id(&symbol, side, mode));
+                    }
+                    return;
+                }
                 let margin = if row.isolated {
                     MarginType::Isolated
                 } else {
@@ -560,18 +637,18 @@ impl Account {
             Request::OpenOrders {
                 rows,
                 metas,
-                failed,
+                skipped,
                 ..
             } => {
-                let Ok(native) = serde_json::from_str::<NativeOrder<'_>>(item) else {
-                    *failed = true;
+                let Some(order) = serde_json::from_str::<NativeOrder<'_>>(item)
+                    .ok()
+                    .and_then(|native| Some((map_order(&native, cx)?, native)))
+                else {
+                    skipped.push(order_identity(item));
                     return;
                 };
-                let Some(order) = map_order(&native, cx) else {
-                    *failed = true;
-                    return;
-                };
-                if cx.store.market(&order.symbol).is_none()
+                let (order, native) = order;
+                if self.untracked_market(cx, &order.symbol)
                     || self.terminal_orders.contains_key(&order.id)
                 {
                     return;
@@ -694,42 +771,48 @@ impl Account {
             }
             Request::Positions {
                 revision,
-                rows,
+                mut rows,
                 settings,
-                failed,
+                skipped,
             } => {
                 self.positions_in_flight = None;
-                if failed {
-                    cx.log(LogLevel::Error, "BingX malformed position snapshot");
-                    return;
-                }
                 if revision == self.positions_revision {
+                    let unidentified = skipped.iter().any(String::is_empty);
+                    log_snapshot_skips(cx, "position", &skipped, &mut self.unidentified_positions);
+                    // A malformed row never closes the known position it names
+                    // (by id, or by symbol when its side is unreadable).
+                    let kept: Vec<_> = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .filter(|p| {
+                            (unidentified || skipped.contains(&p.id) || skipped.contains(&p.symbol))
+                                && !rows.iter().any(|row| row.id == p.id)
+                        })
+                        .cloned()
+                        .collect();
+                    rows.extend(kept);
                     cx.store.set_positions(rows);
                     for (symbol, value) in settings {
                         cx.store.update_setting(&symbol, |s| *s = value);
                     }
                 } else {
+                    crate::log_skipped(cx, "position", &skipped);
                     self.schedule_repair(cx);
                 }
             }
             Request::OpenOrders {
                 revision,
-                rows,
+                mut rows,
                 metas,
-                failed,
+                skipped,
             } => {
                 self.orders_in_flight = None;
                 if revision != self.orders_revision {
                     self.fetch_orders(cx, credentials);
                     return;
                 }
-                if failed {
-                    cx.log(
-                        LogLevel::Error,
-                        "BingX invalid open order; retaining previous snapshot",
-                    );
-                    return;
-                }
+                log_snapshot_skips(cx, "open order", &skipped, &mut self.unidentified_orders);
                 // Startup history is a baseline; later REST reads cannot consume live executions.
                 if !self.orders_seeded {
                     for order in &rows {
@@ -743,6 +826,21 @@ impl Account {
                 }
                 self.orders_seeded = true;
                 self.observations.extend(metas);
+                // A malformed row never removes the known open order it names.
+                let unidentified = skipped.iter().any(String::is_empty);
+                let kept: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| {
+                        o.status == OrderStatus::Open
+                            && (unidentified || skipped.contains(&o.id))
+                            && !self.terminal_orders.contains_key(&o.id)
+                            && !rows.iter().any(|row| row.id == o.id)
+                    })
+                    .cloned()
+                    .collect();
+                rows.extend(kept);
                 cx.store.set_orders(rows);
             }
         }
@@ -1086,7 +1184,7 @@ impl Account {
             return;
         }
         let symbol = p.s.replace('-', "");
-        if cx.store.market(&symbol).is_none() {
+        if self.untracked_market(cx, &symbol) {
             return;
         }
         let current_mode = if self.mode_known {

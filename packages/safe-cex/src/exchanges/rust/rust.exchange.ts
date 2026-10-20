@@ -375,7 +375,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
+    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
@@ -590,7 +590,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -757,6 +757,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
+    if (this.name === 'bitrue') {
+      if (!this.isPublicDataOnly) await this.fetchSymbolMaxLeverage(symbol);
+      return;
+    }
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.applier.applyLeverage(symbol, rails);
@@ -1168,6 +1172,12 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'breakoutprop') throw new Error('Not implemented');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
+    if (this.name === 'bitrue' && !this.isPublicDataOnly) {
+      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
+      this.host?.flush();
+      return leverage;
+    }
     return market.limits.leverage.max;
   };
 

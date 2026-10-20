@@ -1348,3 +1348,56 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
         );
     }
 }
+
+#[test]
+fn websocket_login_timestamp_is_an_integer_matching_signed_bytes() {
+    use base64::Engine as _;
+    use safe_cex_crypto::{Encoding, hmac_sha256};
+    let mut h = Harness::new();
+    h.e.handle(1_700_000_000_123.875, Event::WsOpened { socket: h.private });
+    h.collect();
+    let login = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsSend { text, .. } if text.contains("\"op\":\"login\"") => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    let login: serde_json::Value = serde_json::from_str(login).unwrap();
+    let args = &login["args"][0];
+    let timestamp = args["timestamp"]
+        .as_u64()
+        .expect("timestamp must serialize as a JSON integer");
+    assert_eq!(timestamp, 1_700_000_000_123);
+    let signed = format!(
+        "/users/self/verifyGET{timestamp}{}",
+        args["nonce"].as_str().unwrap()
+    );
+    let expected = base64::engine::general_purpose::STANDARD.encode(hmac_sha256(
+        b"secret",
+        signed.as_bytes(),
+        Encoding::Hex,
+    ));
+    assert_eq!(args["sign"], expected);
+}
+
+#[test]
+fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(&order_event("123", "0", "live"));
+    let bad = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":null,"averagePrice":"100","state":"filled"}"#;
+    let sibling = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"456","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":"0","averagePrice":"0","state":"live"}"#;
+    h.ws(&format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{bad},{sibling}]}}"#
+    ));
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert!(h.e.store().order("456").is_some());
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            if message.contains("Malformed BloFin order row"))));
+}

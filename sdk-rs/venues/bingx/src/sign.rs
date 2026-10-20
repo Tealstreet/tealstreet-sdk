@@ -88,7 +88,7 @@ impl Params {
             let key = read.map_or(c.key.as_str(), |r| &r.key);
             let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
             headers.push(("X-BX-APIKEY", key.to_owned()));
-            if path != "/openApi/user/auth/userDataStream" {
+            if signs(path) {
                 self = self.num("timestamp", now.floor());
                 let signature =
                     hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
@@ -115,6 +115,11 @@ impl Params {
             )
         }
     }
+}
+
+/// Listen-key requests carry only the API key; every other path is signed.
+pub fn signs(path: &str) -> bool {
+    path != "/openApi/user/auth/userDataStream"
 }
 
 fn encode(value: &str) -> String {

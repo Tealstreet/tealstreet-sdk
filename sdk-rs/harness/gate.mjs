@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import {
   fixBlofinAccount,
@@ -144,8 +145,8 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
 //    Rust installs the seed before connecting. These cases have native regression
 //    coverage; the committed replay tapes require no normalization for them.
-//  - Bybit Partial TP/SL now follows the owner-selected TS replacement and
-//    missing-mark fallbacks; the former amend-in-place divergence is retired.
+//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
+//    Rust amends the existing native order ID.
 //  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
 //    large requests; Rust preserves the requested total in max lots + remainder.
 //  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using
@@ -456,10 +457,18 @@ const KNOWN_TS_FIXES = {
   // Fresh TS private rows now retain native/cached TIF and default to GTC,
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
-  // TS assigns a cumulative gap to the last native L and drops an older l/L
-  // execution. Only the exact private fixture and exact legacy TS fills may be
-  // corrected; the independent l/L table never reads or changes Rust output.
-  bitrue: (ts) => fixBitrue(ts, tapeRecords),
+  bitrue(ts) {
+    // Confirmed leverage survives flat/empty account metadata; TS clears that
+    // rail and blocks fresh-account orders. Native regression tests cover this
+    // correction; no account values or command results are normalized here.
+    // Flat rows may omit leverage until explicitly set; balance still commits.
+    // Cancellation continues after failures, including child fallbacks after a
+    // failed parent, and reports each failed ID. TS stops subsequent chunks.
+    // TS assigns a cumulative gap to the last native L and drops an older l/L
+    // execution. Only the exact private fixture and exact legacy TS fills may be
+    // corrected; the independent l/L table never reads or changes Rust output.
+    fixBitrue(ts, tapeRecords);
+  },
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.
@@ -495,7 +504,13 @@ const KNOWN_TS_FIXES = {
     // Native failure tests prove this; no replay liveness output is rewritten.
     if (ts.account) fixBlofinAccount(ts.account);
   },
-  mexc: () => {
+  mexc: (ts) => {
+    // The official sub.tickers sparse all-contract feed prevents stale prices
+    // past the first 100 detailed subscriptions. Add that exact expected TS
+    // subscription; prices and Rust output remain independently compared.
+    ts.subscriptions = withMexcMiniTickerSubscription(ts.subscriptions);
+    // A singleton skips TS placeOrders' market-maker batch probe; its exact
+    // rejected TS-only attempt is declared in the tape, not normalized away.
     // TS only logs rejected rs.login; Rust closes/backoffs and bounds auth
     // independently of rs.ping. Native regressions cover the failure path.
     // Full incremental depth, rather than replacing a 20-level snapshot.
@@ -561,8 +576,6 @@ const KNOWN_TS_FIXES = {
   //   instead targets c, which can be the cancellation request's client ID.
   // - Spot/COIN-M duplicate cumulative executions can emit fills again and
   //   stale NEW events reopen terminal orders; Rust fences by native order ID.
-  //   Spot also deduplicates the latest 16,384 native (symbol, order, trade) IDs,
-  //   independently of ACK totals and terminal lifecycle (native/SDK proofs).
   // - COIN-M malformed openOrders responses become authoritative empty in TS;
   //   Rust preserves the previous order state and retries reconciliation.
   // - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its

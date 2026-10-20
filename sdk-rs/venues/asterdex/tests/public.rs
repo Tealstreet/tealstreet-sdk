@@ -547,6 +547,35 @@ fn disconnect_clears_visible_book_until_a_new_partial_snapshot() {
 }
 
 #[test]
+fn malformed_market_and_ticker_rows_are_skipped_without_halting_startup() {
+    let mut h = Harness::start(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    if h.requests.iter().any(|r| r.url.ends_with("/time")) {
+        h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    }
+    h.reply(
+        "/exchangeInfo",
+        200,
+        &MARKETS.replace(
+            r#"{"symbol":"OLDUSDT""#,
+            r#"{"symbol":"BADUSDT","status":"TRADING","pricePrecision":"x"},{"symbol":"OLDUSDT""#,
+        ),
+    );
+    h.reply("/leverageBracket", 200, "[]");
+    h.reply(
+        "/ticker/24hr",
+        200,
+        &DAILY.replace('[', r#"[{"symbol":"BADUSDT","lastPrice":1},"#),
+    );
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+    assert!(h.engine.store().market("BADUSDT").is_none());
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 4.000002);
+    assert!(h.requests.iter().any(|r| r.url.contains("/openInterest")));
+}
+
+#[test]
 fn supervisor_backs_off_open_flaps_and_retires_a_connection_that_never_opens() {
     let mut h = Harness::ready();
     let mut previous = 0.0;

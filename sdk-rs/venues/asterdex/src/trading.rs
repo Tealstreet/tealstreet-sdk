@@ -5,7 +5,7 @@ use crate::sign::{Query, Version};
 use crate::{AsterDex, Options, Pending};
 use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
-    StopTriggerType, StpMode, TimeInForce,
+    PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::Deserialize;
@@ -16,7 +16,10 @@ pub struct Request {
     call: Call,
 }
 enum Call {
-    Place(String),
+    Place {
+        symbol: String,
+        position_side: Option<PositionSide>,
+    },
     Cancel {
         id: String,
         filled_at_amend: Option<f64>,
@@ -170,6 +173,14 @@ struct StpResponse {
 impl AsterDex {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let (id, job) = match command {
+            Command::PlaceOrders { command, .. } | Command::AmendOrder { command, .. }
+                if self.position_mode_pending() =>
+            {
+                (
+                    command,
+                    Err("Aster position mode has not loaded yet; order placement is held until it does".into()),
+                )
+            }
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
                 let mut error = None;
@@ -353,7 +364,7 @@ impl AsterDex {
                 job.reserved_places = job
                     .steps
                     .iter()
-                    .filter(|step| matches!(step.call, Call::Place(_)))
+                    .filter(|step| matches!(step.call, Call::Place { .. }))
                     .count();
                 let reserved = self
                     .trading
@@ -425,7 +436,7 @@ impl AsterDex {
         response: Result<Response<'_>, &str>,
     ) {
         let command = request.command;
-        let was_place = matches!(&request.call, Call::Place(_));
+        let was_place = matches!(&request.call, Call::Place { .. });
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.to_owned())),
@@ -447,7 +458,13 @@ impl AsterDex {
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
-            (Call::Place(symbol), Ok(body)) => {
+            (
+                Call::Place {
+                    symbol,
+                    position_side,
+                },
+                Ok(body),
+            ) => {
                 let ack = serde_json::from_str::<PlaceAck>(body).map_err(|e| (0, e.to_string()));
                 ack.and_then(|ack| {
                     ack.order_id
@@ -462,6 +479,9 @@ impl AsterDex {
                     });
                     if cx.store.order(&id).is_none() && !self.account.terminal.contains_key(&id) {
                         self.trading.acknowledged.insert(id.clone(), symbol);
+                    }
+                    if let Some(side) = position_side {
+                        self.record_order_position_side(&id, side);
                     }
                     placed = Some(id);
                     self.account.order_revision = self.account.order_revision.wrapping_add(1);
@@ -642,6 +662,15 @@ impl AsterDex {
             return Err(format!("Aster order {id} is no longer open"));
         }
         let conditional = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        // Hedge rows report reduceOnly=false, so re-deriving the leg could open the opposite side.
+        let position_side = if cx.store.hedged() {
+            Some(
+                self.order_position_side(id)
+                    .ok_or_else(|| format!("Aster order {id} has no known hedge position side"))?,
+            )
+        } else {
+            None
+        };
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -655,7 +684,7 @@ impl AsterDex {
             ..empty_order()
         };
         // Format and validate before canceling the live order.
-        let place = self.plan_place_inner(cx, &[replacement], Some(id))?;
+        let place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
         if let Some(error) = place.error {
             return Err(error);
         }
@@ -664,7 +693,7 @@ impl AsterDex {
         Ok(job)
     }
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
-        self.plan_place_inner(cx, orders, None)
+        self.plan_place_inner(cx, orders, None, None)
     }
 
     fn plan_place_inner(
@@ -672,6 +701,7 @@ impl AsterDex {
         cx: &Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
         replacing: Option<&str>,
+        position_side: Option<PositionSide>,
     ) -> Result<Job, String> {
         // This venue does not honor caller IDs. Check the entire batch before I/O.
         if orders.iter().any(|o| o.client_order_id.is_some()) {
@@ -761,14 +791,18 @@ impl AsterDex {
                 continue;
             }
             for child in children {
-                match self.format_order(cx, &child, builder.as_ref()) {
+                let position_side = hedge_position_side(cx, &child, position_side);
+                match self.format_order(cx, &child, builder.as_ref(), position_side) {
                     Ok(queries) => {
                         for query in queries {
                             job.steps.push_back(Planned {
                                 method: Method::Post,
                                 endpoint: "order",
                                 query,
-                                call: Call::Place(child.symbol.clone()),
+                                call: Call::Place {
+                                    symbol: child.symbol.clone(),
+                                    position_side,
+                                },
                             });
                         }
                     }
@@ -783,6 +817,7 @@ impl AsterDex {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
         builder: Option<&Builder>,
+        position_side: Option<PositionSide>,
     ) -> Result<Vec<Query>, String> {
         let market = cx
             .store
@@ -825,11 +860,11 @@ impl AsterDex {
                 base = base.str("builder", &builder.address).str("feeRate", fee);
             }
         }
-        if cx.store.hedged() {
-            let closes = conditional || opts.reduce_only == Some(true);
-            let side = match (opts.side, closes) {
-                (OrderSide::Buy, false) | (OrderSide::Sell, true) => "LONG",
-                _ => "SHORT",
+        if let Some(side) = position_side {
+            let side = if side == PositionSide::Long {
+                "LONG"
+            } else {
+                "SHORT"
             };
             base = base.str("positionSide", side);
         }
@@ -902,6 +937,22 @@ impl AsterDex {
             })
             .collect()
     }
+}
+/// The hedge leg an order targets; an amend passes the replaced order's leg.
+fn hedge_position_side(
+    cx: &Cx<'_, Pending>,
+    opts: &PlaceOrderOpts,
+    replaced: Option<PositionSide>,
+) -> Option<PositionSide> {
+    if !cx.store.hedged() {
+        return None;
+    }
+    let closes = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
+        || opts.reduce_only == Some(true);
+    Some(replaced.unwrap_or(match (opts.side, closes) {
+        (OrderSide::Buy, false) | (OrderSide::Sell, true) => PositionSide::Long,
+        _ => PositionSide::Short,
+    }))
 }
 fn empty_order() -> PlaceOrderOpts {
     PlaceOrderOpts {

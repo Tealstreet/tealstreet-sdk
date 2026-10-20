@@ -275,6 +275,11 @@ pub enum Command {
         command: CommandId,
         symbol: String,
     },
+    /// Refresh the venue/account's maximum leverage without assuming flat leverage.
+    FetchMaxLeverage {
+        command: CommandId,
+        symbol: String,
+    },
     /// A rare request/response read (history, income, trades); the result is
     /// JSON in [`Notice::CommandDone`] and never enters the frame.
     Query {
@@ -309,6 +314,7 @@ impl Command {
             | Self::FetchAccount { command }
             | Self::FetchOrderBook { command, .. }
             | Self::FetchLeverage { command, .. }
+            | Self::FetchMaxLeverage { command, .. }
             | Self::Query { command, .. }
             | Self::FetchCandles { command, .. }
             | Self::FetchOptionChain { command, .. }
@@ -3408,6 +3414,23 @@ mod signing_tests {
                 ..
             })]
         ));
+        // A newly added read must not complete an older write with the same ID.
+        engine.handle(
+            1.5,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 1,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        assert!(matches!(
+            engine.drain_actions().collect::<Vec<_>>().as_slice(),
+            [Action::Notice(Notice::Log {
+                level: LogLevel::Error,
+                ..
+            })]
+        ));
+        assert!(engine.io.active_commands.contains(&1));
+        assert!(engine.io.order_locks.contains(1));
         engine.handle(
             2.,
             Event::Command(Command::CancelOrders {

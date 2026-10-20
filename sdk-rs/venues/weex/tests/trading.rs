@@ -1091,7 +1091,7 @@ fn imported_algo_bracket_children_preserve_both_working_types_on_amend() {
     assert_eq!(body(&replacement)["SlWorkingType"], "CONTRACT_PRICE");
 }
 #[test]
-fn unknown_imported_bracket_source_fails_before_cancel() {
+fn imported_regular_order_with_brackets_amends_with_row_or_default_working_types() {
     let mut e = engine();
     let mut old = order("1", OrderType::Limit);
     old.take_profit = Some(70000.0);
@@ -1106,13 +1106,67 @@ fn unknown_imported_bracket_source_fails_before_cancel() {
             amount: None,
         },
     );
-    assert!(writes(&actions).is_empty());
-    assert!(
-        done(&actions)
-            .unwrap_err()
-            .contains("cannot preserve imported")
+    let cancel = writes(&actions).pop().unwrap();
+    assert_eq!(cancel.method, Method::Delete);
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    let payload = body(&replacement);
+    assert_eq!(payload["tpTriggerPrice"], "70000");
+    assert_eq!(payload["slTriggerPrice"], "58000");
+    assert_eq!(payload["TpWorkingType"], "CONTRACT_PRICE");
+    assert_eq!(payload["SlWorkingType"], "MARK_PRICE");
+    let ack = single_ack(&replacement, 2);
+    assert_eq!(
+        done(&response(&mut e, &replacement, ack)).unwrap(),
+        r#"["2"]"#
     );
-    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+}
+#[test]
+fn imported_regular_order_amend_keeps_row_reported_leg_working_types() {
+    let mut e = engine();
+    import_orders(
+        &mut e,
+        json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"NEW","origQty":"0.2","executedQty":"0","price":"59000","tpTriggerPrice":"50000","slTriggerPrice":"61000","tpOrderType":"MARK_PRICE","workingType":"CONTRACT_PRICE","updateTime":1773295700000u64}]),
+        json!([]),
+    );
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(59500.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    assert_eq!(body(&replacement)["TpWorkingType"], "MARK_PRICE");
+    assert_eq!(body(&replacement)["SlWorkingType"], "CONTRACT_PRICE");
+}
+#[test]
+fn accepted_conditional_echoing_algo_identity_is_reported_accepted() {
+    for ack in [
+        |client: &Value| json!({"algoId":"77","clientAlgoId":client,"success":true}),
+        |_: &Value| json!({"orderId":"77","success":true}),
+    ] {
+        let mut e = engine();
+        let mut conditional = opts("");
+        conditional.kind = OrderType::Conditional;
+        conditional.trigger_price = Some(68900.0);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![conditional],
+            },
+        );
+        let r = writes(&actions).pop().unwrap();
+        assert!(r.url.ends_with("/algoOrder"));
+        let actions = response(&mut e, &r, ack(&body(&r)["clientAlgoId"]));
+        assert_eq!(done(&actions).unwrap(), r#"["77"]"#);
+        assert_eq!(e.store().order("77").unwrap().kind, OrderType::Conditional);
+    }
 }
 #[test]
 fn price_only_amend_replaces_only_the_unfilled_quantity() {
