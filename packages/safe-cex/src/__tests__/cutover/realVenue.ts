@@ -34,6 +34,8 @@ type PredictionInput = {
   negRisk: boolean;
 };
 
+type GrvtInstrumentInput = { i: string; b: string; q: string; k: string; ms: string; ts: string };
+
 const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
@@ -142,6 +144,24 @@ export const realVenue = (name: ExchangeName) => {
         : {}),
     }));
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
+  // GRVT's Lite REST instruments retain their native mixed-case ID while
+  // the SDK symbol is uppercase. Keep the precision oracle in raw API units.
+  const grvtMarkets =
+    name === 'grvt'
+      ? records
+          .filter((row) => row.type === 'http' && new URL(row.url!).pathname === '/lite/v1/all_instruments')
+          .flatMap((row) =>
+            (JSON.parse(row.body!).r as GrvtInstrumentInput[])
+              .filter((instrument) => instrument.k === 'PERPETUAL')
+              .map((instrument) => ({
+                id: instrument.i,
+                symbol: instrument.i.toUpperCase(),
+                base: instrument.b,
+                quote: instrument.q,
+                precision: { amount: Number(instrument.ms), price: Number(instrument.ts) },
+              })),
+          )
+      : [];
   // Derive the prediction oracle from raw recorded Gamma fields, independently
   // of the Rust model, frame writer and SDK FrameApplier.
   const predictionMarkets =
@@ -228,6 +248,7 @@ export const realVenue = (name: ExchangeName) => {
     errors,
     source,
     predictionMarkets,
+    grvtMarkets,
     publicBookSymbols,
     connectedSocketUrls,
     canonicalConnectedSocketUrls,

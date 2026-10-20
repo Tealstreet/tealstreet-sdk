@@ -148,6 +148,15 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       if (name === 'bitgetinverse' || name === 'bybitinverse')
         expect(lateStore.markets.every((row) => row.isInverse)).toBe(true);
       if (name === 'bitgetusdc') expect(lateStore.markets.every((row) => row.quote === 'USDC')).toBe(true);
+      if (name === 'grvt') {
+        expect(input.grvtMarkets.length).toBeGreaterThan(0);
+        for (const store of [worker.store, lateStore]) {
+          expect(
+            store.markets.map(({ id, symbol, base, quote, precision }) => ({ id, symbol, base, quote, precision })),
+          ).toEqual(input.grvtMarkets);
+          expect(store.markets.every((row) => row.isPerpetual && row.symbol.endsWith('_PERP'))).toBe(true);
+        }
+      }
       if (name === 'polymarket') {
         expect(input.predictionMarkets).toHaveLength(4);
         expect(new Set(input.predictionMarkets.map((row) => row.info.negRisk))).toEqual(new Set([false, true]));

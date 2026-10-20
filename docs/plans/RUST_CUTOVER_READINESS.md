@@ -111,3 +111,24 @@ consumer adoption remain explicit blockers.
   The native proof/inventory review is also clear after adding the metadata
   conformance file to the caller inventory. Remaining independent PR review and
   exact-head CI are in progress.
+- GRVT landed as `5d7589f296` during PR CI. Merge `836bbbec96` preserves its
+  fill-verification query hook and all four OKX native-unit flags. The matrix
+  now enumerates 40 Rust aliases; native GRVT assertions independently decode
+  its recorded Lite instruments and check identity/precision through the worker
+  and late snapshot. Inventory is 49 registered / 40 Rust / eight defaults /
+  32 opt-in / nine absent names. A seventh deletion blocker records Rust's
+  perpetual-only GRVT catalog against TS's other instrument kinds. Independent
+  integration review is clear after adding five test-caller rows and fixing a
+  table break. Rebuilding combined WASM and repeating affected acceptance gates
+  before the final PR checkpoint.
+- GRVT acceptance passes: 353 SDK/WASM tests (40 native aliases and 210
+  independent consumer/metadata cases), 7,283 SDK unit tests across 502 files,
+  five lint-rule tests and the other 25 workspace test tasks. Native workspace
+  passes 2,168 tests across 176 suites; harness 386 and JS host 65 pass. Root
+  typecheck 44 tasks, lint 28 tasks, explicit fixture lint, Rust bans/format,
+  strict WASM Clippy and combined build pass (10,367,335 bytes). Binance public
+  and regenerated private controls pass: public main CPU TS/Rust 288.1/173.6 ms,
+  steady 162.6/79.5 ms, retained memory 16.9/3.7 MB including 2.0 MB Rust linear
+  memory. All independent integration findings are resolved. Push the refreshed
+  PR checkpoint, publish this review/gate update and merge only on green CI for
+  its exact head.

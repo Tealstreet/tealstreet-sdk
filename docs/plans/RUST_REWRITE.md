@@ -354,9 +354,9 @@ work with its frames. The implementation/checkpoints are in
 each direct `BaseExchange`/venue/registry importer across `packages/` and
 `apps/`, including type-only callers, tests and dynamic reference loaders.
 
-The SDK has 49 registered names: 39 in `RUST_VENUES`, eight already defaulting
-to Rust (Coinbase's two and Orderly's six), 31 with opt-in Rust adapters but
-TS defaults, and 10 without a Rust registration. `createExchange` now honors
+The SDK has 49 registered names: 40 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 32 with opt-in Rust adapters but
+TS defaults, and nine without a Rust registration. `createExchange` now honors
 explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
 registries remains a separate cutover decision.
 
@@ -423,7 +423,8 @@ ported. The linked inventory records exact callers and product constraints.
 | `weex` | Opt-in; preserve host/header/routing evidence. |
 | `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
-| `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `grvt`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
+| `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
 
@@ -443,6 +444,10 @@ cutover or deletion:
   exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
   starts are empty and forced refresh does not refresh native metadata. Define
   and test explicit startup/refresh semantics before adopting this factory.
+- GRVT's Rust discovery retains `PERPETUAL` only, while the TS catalog mapper
+  also accepts non-perpetual instrument kinds. Resolve retained Future/Call/Put
+  product and semantic metadata coverage explicitly before deleting that TS
+  path; perpetual fixtures and registration do not prove those products.
 
 Deletion proceeds in separate, reviewable PRs:
 
