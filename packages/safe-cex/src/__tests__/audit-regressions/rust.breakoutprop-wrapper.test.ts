@@ -1,0 +1,109 @@
+import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
+import type { ExchangeOptions } from '../../types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { DefaultStore } from '../../store/store.base';
+import { isInertCapability } from '../../exchanges/base';
+import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
+import { OrderSide, OrderType } from '../../types';
+
+const running: RustEngineExchange[] = [];
+const fixture = (options: Partial<ExchangeOptions> = {}, startupActions: unknown[] = [], loaded = true) => {
+  const commands: Array<Record<string, unknown>> = [];
+  const noActions = () => '[]';
+  const engine: WasmEngineLike = {
+    start: () => JSON.stringify(startupActions),
+    command(json) { commands.push(JSON.parse(json)); return '[]'; },
+    takeFrame: () => undefined,
+    snapshotFrame: () => new Uint8Array(),
+    wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
+    httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
+  };
+  const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
+  setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
+  const store = new DefaultStore();
+  if (loaded) store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const exchange = new RustEngineExchange('breakoutprop', { key: 'username', secret: 'password', ...options }, store);
+  exchange.emitter.on('error', () => {});
+  running.push(exchange);
+  return { exchange, construct, commands };
+};
+
+afterEach(() => { setTickIntervalMultipliers(undefined); for (const exchange of running.splice(0)) exchange.dispose(); vi.restoreAllMocks(); });
+
+describe('BreakoutProp Rust wrapper session and account boundary', () => {
+  it('registers the venue and preserves account selection, pacing and timeout options', async () => {
+    const { exchange, construct, commands } = fixture({ subaccount: '00002', extra: { tickInterval: 5000, recvWindow: 9000 } });
+    expect(isRustVenue('breakoutprop')).toBe(true);
+    await exchange.start();
+    expect(construct.mock.calls[0][0]).toBe('breakoutprop');
+    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', tickInterval: 5000, recvWindow: 9000 });
+    expect(commands).toContainEqual({ op: 'setTickerSymbols', symbols: [] });
+  });
+  it('forwards initial and live incident slowdowns and unsubscribes on disposal', async () => {
+    setTickIntervalMultipliers({ '*': 4 });
+    const { exchange, construct, commands } = fixture({ extra: { tickInterval: 5000 } });
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).tickInterval).toBe(20000);
+    setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
+    expect(commands.at(-1)).toEqual({ op: 'setTickInterval', interval: 10000 });
+    setTickIntervalMultipliers(undefined);
+    expect(commands.at(-1)).toEqual({ op: 'setTickInterval', interval: 5000 });
+    exchange.dispose();
+    const count = commands.length;
+    setTickIntervalMultipliers({ '*': 3 });
+    expect(commands).toHaveLength(count);
+  });
+  it('preserves an explicitly paused polling interval across JSON', async () => {
+    const { exchange, construct } = fixture({ extra: { tickInterval: Number.POSITIVE_INFINITY } });
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ pollingEnabled: false, tickInterval: null });
+  });
+  it('requires session credentials even for market-data-only mode', async () => {
+    const { exchange, construct } = fixture({ key: '', secret: '', publicDataOnly: true });
+    await expect(exchange.start()).rejects.toThrow('legacy DXtrade username and password');
+    expect(construct).not.toHaveBeenCalled();
+  });
+  it('settles account selection startup failures without waiting forever', async () => {
+    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    await expect(exchange.start()).rejects.toThrow('Multiple accounts found');
+    expect(exchange.isDisposed).toBe(true);
+  });
+  it('settles definitive login rejection through the shared deactivation contract', async () => {
+    const { exchange } = fixture({}, [{ op: 'deactivate' }], false);
+    await expect(exchange.start()).rejects.toThrow('credentials were rejected');
+    expect(exchange.isDisposed).toBe(true);
+  });
+  it('does not advertise the market maximum as a writable account leverage', async () => {
+    const { exchange } = fixture();
+    await expect(exchange.fetchLeverageForSymbol('ETHUSD')).resolves.toBeNull();
+    await expect(exchange.fetchSymbolMaxLeverage('ETHUSD')).rejects.toThrow('Not implemented');
+  });
+  it('retains branded empty history capabilities before startup without I/O', async () => {
+    const { exchange, construct } = fixture();
+    expect(isInertCapability(exchange.fetchHistoricalFills, 'fetchHistoricalFills')).toBe(true);
+    expect(isInertCapability(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
+    expect(isInertCapability(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
+    expect(isInertCapability(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+    await expect(exchange.fetchHistoricalFills({})).resolves.toEqual([]);
+    await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
+    await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
+    await expect(exchange.fetchIncomeHistoryRange(0, 1000)).resolves.toEqual([]);
+    expect(construct).not.toHaveBeenCalled();
+  });
+  it('validates a loaded public-only legacy session without private portfolio data', async () => {
+    const { exchange } = fixture({ publicDataOnly: true });
+    exchange.store.update({ loaded: { markets: true, tickers: true, balance: false, positions: false, orders: false } });
+    await expect(exchange.validateAccount()).resolves.toMatchObject({ error: '' });
+  });
+  it('rejects caller client IDs before any batch write', async () => {
+    const { exchange, commands } = fixture();
+    await exchange.start();
+    await expect(exchange.placeOrders([
+      { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1 },
+      { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1, clientOrderId: 'caller' },
+    ])).rejects.toThrow(/clientOrderId/i);
+    expect(commands.every(({ op }) => op === 'setTickerSymbols')).toBe(true);
+  });
+});

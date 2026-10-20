@@ -255,12 +255,14 @@ export type PORTFOLIO_RESPONSE = {
       instrument: string;
       status: string;
       finalStatus: boolean;
+      limitPrice?: number;
+      stopPrice?: number;
       legs: {
         instrument: string;
         positionEffect: string;
         positionCode: string;
         side: string;
-        price: number;
+        price?: number;
         legRatio: number;
         quantity: number;
         filledQuantity: number;

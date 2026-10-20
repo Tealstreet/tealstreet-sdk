@@ -12,6 +12,7 @@ import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
+import { deterministicReplay, replayTransportReady } from './polling.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -186,7 +187,7 @@ async function runRust() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
-  const clock = isPrivate && !venue.virtualPrivateClock ? undefined : new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate);
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -293,7 +294,7 @@ async function runRust() {
         host.flush();
         return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && (!tape.audit || tape.audit.ready());
       }, 'Rust startup');
-      await until(() => tape.open.size > 0, 'Rust initial socket');
+      await until(() => replayTransportReady(venue, tape.open.size), 'Rust initial transport');
     },
     (record) => {
       const { op, ...rest } = record;
@@ -559,7 +560,7 @@ async function runTs() {
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
     const base = config.baseURL ?? '';
-    const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
+    const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
     const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
     if (serializer) {
       for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
@@ -607,7 +608,7 @@ async function runTs() {
   await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
-  const clock = isPrivate && !venue.virtualPrivateClock ? undefined : new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate);
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
 
   const store = new DefaultStore();
@@ -664,13 +665,13 @@ async function runTs() {
       }
     },
     async (accountReady) => {
-      await (accountReady ? Promise.all([started, subscribed]) : subscribed);
+      await (accountReady || venue.polling ? Promise.all([started, subscribed]) : subscribed);
       await venue.prepareTsReady?.(exchange, { isPrivate });
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
       const loaded = () =>
         accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
-      await until(() => !isPrivate || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);
-      await until(() => tape.open.size > 0, 'TS initial socket');
+      await until(() => !(isPrivate || venue.polling) || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);
+      await until(() => replayTransportReady(venue, tape.open.size), 'TS initial transport');
     },
     (record) => tsCommand(exchange, store, record),
     clock,

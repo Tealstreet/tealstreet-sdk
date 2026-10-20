@@ -518,3 +518,19 @@ The private userAssetData event now follows its paced subscription at 600 ms,
 chronologically after the 400 ms command; frame/command/write counts unchanged.
 Binance combined public/private gates passed after the GRVT lifecycle change:
 CPU 266.4/137.7 ms (1.93x), memory 17.9/4.8 MB (3.72x), three books.
+
+### BreakoutProp landing integration
+
+Merged landing `74b0a7dd14` after it advanced during final CI. Preserve polling
+transport readiness/timelines alongside TxFlow's explicit private virtual-clock
+opt-in and startup freeze; both runners still capture comparisons before memory
+collection and retain the incoming setup baseline. Keep recorder session policy,
+HTTP counters and TxFlow's explicit public CORS egress; both roster/feature/CI
+entries survive. Independent staged integration review accepts the union.
+
+Immediately before this integration: TxFlow 71 native tests, harness 405, host
+65 and real-Wasm wrapper 105 pass; strict native/combined/isolated Wasm Clippy,
+formatting and bans pass. TxFlow-only Wasm is 893,268 bytes. Root tests are being
+rerun after the merge so modules and newly added polling tests share one settled
+source snapshot. Refreshed combined TxFlow public/private and fixed Phemex
+private gates pass; merged harness/build/replay checks remain before landing.

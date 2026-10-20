@@ -32,7 +32,7 @@ export const TEALSTREET_REST_HEADERS = {
 };
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
-  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex'
+  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex' || exchange === 'breakoutprop'
     ? 'Tealstreet-Authorization' : 'Authorization';
 
 const isTealstreetWebSocketUrl = (url: string): boolean => {
@@ -86,7 +86,7 @@ export const tealstreetTransport: TransportProvider = {
         const token = await getProxyToken();
 
         // Use Tealstreet-Authorization when the venue has its own Authorization
-        // semantics. MEXC futures uses Authorization for WEB/APP sessions, while
+        // semantics. Breakout DXtrade and MEXC WEB/APP sessions own Authorization; MEXC
         // OPEN-API auth rides on ApiKey/Request-Time/Signature headers.
         // The proxy will check Tealstreet-Authorization first, then fall back to Authorization
         //
