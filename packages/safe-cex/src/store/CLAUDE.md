@@ -7,7 +7,7 @@ throttled postMessage.
 Rust frames keep the venue adapter's published SDK quantity units. COIN-M
 orders carry native contract counts while positions carry base quantity; the
 COIN-M applier preserves the USD contract multiplier in native sizing extras.
-For MEXC, BloFin and KuCoin futures,
+For MEXC, BloFin, KuCoin futures, Coinbase and the OKX family,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic

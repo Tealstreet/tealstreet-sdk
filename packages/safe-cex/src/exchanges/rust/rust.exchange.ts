@@ -282,7 +282,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(
       store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
+      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
       this.name === 'bitgetinverse',
       this.name === 'binanceinverse',
     );
