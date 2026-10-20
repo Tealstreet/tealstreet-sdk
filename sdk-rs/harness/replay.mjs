@@ -153,7 +153,7 @@ class Tape extends SharedTape {
     super(records, { ...venue, deferResponseAudit: true, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
       responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance' || venue.family === 'okx' || ['kucoin', 'kucoinspot'].includes(values.venue) || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue) || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
-        venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
+        venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url), impl),
       prepareFrame: (r) => {
         if (r.type !== 'ws' || typeof r.text !== 'string') return r;
         const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};

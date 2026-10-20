@@ -335,8 +335,6 @@ impl Kucoin {
         }
         if self.credentials.is_some() {
             self.connections.push(Connection::new(Role::Private));
-            // REST reconciliation must not depend on the private socket connecting.
-            self.account_start(cx);
         } else {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
@@ -344,6 +342,11 @@ impl Kucoin {
         }
         for channel in 0..self.connections.len() {
             self.token(cx, channel);
+        }
+        // REST reconciliation must not depend on the private socket connecting;
+        // it queues after the bullet tokens so sockets keep the first budget slots.
+        if self.credentials.is_some() {
+            self.account_start(cx);
         }
     }
     fn subscription(
