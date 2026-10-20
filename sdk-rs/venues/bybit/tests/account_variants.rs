@@ -623,3 +623,40 @@ fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
         "inverse fills stay in native contract units"
     );
 }
+
+#[test]
+fn hyro_transient_periodic_read_failure_keeps_the_ready_stream_and_last_good_state() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    for failure in [
+        "upstream timeout",
+        r#"{"retCode":10016,"retMsg":"Server error"}"#,
+    ] {
+        h.advance(5000.0);
+        h.respond("/v5/order/realtime", 502, failure);
+        h.respond("/v5/position/list", 200, POSITIONS);
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+        assert!(
+            h.closed.is_empty(),
+            "a transient poll failure tore down the stream"
+        );
+        assert_eq!(h.socket("/v5/private"), Some(socket));
+        assert_eq!(h.engine.store().positions().len(), 1);
+        assert_eq!(h.engine.store().balance().total, 1000.0);
+    }
+    // The next tick repairs.
+    h.advance(5000.0);
+    hyro_snapshot(&mut h);
+    assert!(h.closed.is_empty());
+    assert!(h.engine.store().loaded().orders);
+}
+
+#[test]
+fn hyro_initial_snapshot_transport_failure_still_recovers_the_session() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 502, "upstream timeout");
+    assert!(!h.closed.is_empty());
+}

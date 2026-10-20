@@ -1329,3 +1329,186 @@ fn omitted_order_history_limit_reads_every_page_instead_of_fifty() {
         3
     );
 }
+
+fn coins(h: &Harness) -> Vec<(String, f64, f64)> {
+    let mut coins: Vec<_> = h
+        .engine
+        .store()
+        .coin_balances()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| (c.base.clone(), c.amount, c.notional))
+        .collect();
+    coins.sort_by(|a, b| a.0.cmp(&b.0));
+    coins
+}
+
+#[test]
+fn per_coin_holdings_follow_rest_snapshots_and_merge_stream_pushes() {
+    let mut h = ready();
+    assert_eq!(coins(&h), [("USDT".to_owned(), 1010.5, 1010.5)]);
+    let push = |coin: &str, equity: &str, wallet: &str, usd: &str| {
+        format!(
+            r#"{{"topic":"wallet","id":"w","creationTime":1,"data":[{{"accountType":"UNIFIED","totalEquity":"1010.5","totalWalletBalance":"1000.5","totalMarginBalance":"1010.5","totalAvailableBalance":"915.5","totalInitialMargin":"95","totalMaintenanceMargin":"5","coin":[{{"coin":"{coin}","equity":"{equity}","walletBalance":"{wallet}","usdValue":"{usd}"}}]}}]}}"#
+        )
+    };
+    h.message("/v5/private", &push("BTC", "0.5", "0.4", "30000"));
+    assert_eq!(
+        coins(&h),
+        [
+            ("BTC".to_owned(), 0.5, 30000.0),
+            ("USDT".to_owned(), 1010.5, 1010.5)
+        ]
+    );
+    // Missing equity falls back to wallet balance, missing USD value to the amount.
+    h.message("/v5/private", &push("ETH", "", "2", ""));
+    assert!(coins(&h).contains(&("ETH".to_owned(), 2.0, 2.0)));
+    h.message("/v5/private", &push("BTC", "0", "0", "0"));
+    assert!(coins(&h).contains(&("BTC".to_owned(), 0.0, 0.0)));
+    // A failed periodic REST read keeps holdings; a full one replaces them.
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond("/v5/account/wallet-balance", 500, "upstream");
+    assert_eq!(coins(&h).len(), 3);
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert_eq!(coins(&h), [("USDT".to_owned(), 1010.5, 1010.5)]);
+}
+
+#[test]
+fn stale_classic_metadata_retries_the_unified_wallet_once() {
+    let mut h = Harness::started(credentials());
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond(
+        "/v5/account/info",
+        200,
+        &support::ACCOUNT_INFO.replace("\"unifiedMarginStatus\":4", "\"unifiedMarginStatus\":1"),
+    );
+    h.load_public();
+    let refused = r#"{"retCode":10001,"retMsg":"accountType only support UNIFIED.","result":{},"retExtInfo":{},"time":1}"#;
+    h.respond(
+        "/v5/account/wallet-balance?accountType=CONTRACT",
+        200,
+        refused,
+    );
+    let retry = h.take("/v5/account/wallet-balance");
+    assert!(retry.url.ends_with("accountType=UNIFIED"), "{}", retry.url);
+    h.reply(retry.id, 200, WALLET);
+    assert_eq!(h.engine.store().balance().free, 915.5);
+    // A later refusal on UNIFIED is reported, not retried in a loop.
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond(
+        "/v5/account/wallet-balance?accountType=UNIFIED",
+        200,
+        refused,
+    );
+    assert!(!h.has_request("/v5/account/wallet-balance"));
+    assert_eq!(h.engine.store().balance().free, 915.5);
+}
+
+#[test]
+fn ordinary_wallet_errors_do_not_switch_account_type() {
+    let mut h = Harness::started(credentials());
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond(
+        "/v5/account/info",
+        200,
+        &support::ACCOUNT_INFO.replace("\"unifiedMarginStatus\":4", "\"unifiedMarginStatus\":1"),
+    );
+    h.load_public();
+    h.respond(
+        "/v5/account/wallet-balance?accountType=CONTRACT",
+        200,
+        r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    assert!(!h.has_request("/v5/account/wallet-balance"));
+    h.requests.clear();
+    h.advance(5_000.0);
+    assert!(h.has_request("/v5/account/wallet-balance?accountType=CONTRACT"));
+}
+
+#[test]
+fn an_unsupported_order_type_keeps_its_last_state_without_starving_other_orders() {
+    let mut h = ready();
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    let row = |id: &str, kind: &str| {
+        let list = OPEN_ORDERS.split("\"list\":[").nth(1).unwrap();
+        let row = &list[..list.find("}],").unwrap() + 1];
+        row.replace(ORDER_ID, id).replace(
+            "\"orderType\":\"Limit\"",
+            &format!("\"orderType\":\"{kind}\""),
+        )
+    };
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    let page = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{},{},{}],"nextPageCursor":"","category":"linear"}}}}"#,
+        row(ORDER_ID, "FutureType"),
+        row("new-1", "Limit"),
+        row("unseen-2", "FutureType"),
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(
+        h.engine.store().order("new-1").is_some(),
+        "healthy order starved"
+    );
+    assert!(
+        h.engine.store().order(ORDER_ID).is_some(),
+        "known exposure erased"
+    );
+    assert!(h.engine.store().order("unseen-2").is_none());
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("unseen-2") && m.contains("not shown"))
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains(ORDER_ID) && m.contains("last known state"))
+    );
+}
+
+#[test]
+fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    let list = OPEN_ORDERS.split("\"list\":[").nth(1).unwrap();
+    let good = &list[..list.find("}],").unwrap() + 1];
+    let bad = good
+        .replace(ORDER_ID, "bad-1")
+        .replace("\"qty\":\"0.10\"", "\"qty\":\"NaN\"");
+    let page = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{},{}],"nextPageCursor":"","category":"linear"}}}}"#,
+        good.replace(ORDER_ID, "new-1"),
+        bad,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert!(h.engine.store().order("new-1").is_none());
+}

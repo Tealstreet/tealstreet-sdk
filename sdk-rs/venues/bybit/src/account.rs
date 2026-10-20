@@ -5,8 +5,8 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{
-    Balance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus, OrderType,
-    Position, PositionGreeks, PositionMode, PositionSide, RejectReason, StopTriggerType,
+    Balance, CoinBalance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus,
+    OrderType, Position, PositionGreeks, PositionMode, PositionSide, RejectReason, StopTriggerType,
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
@@ -32,6 +32,7 @@ pub enum Request {
         coin: &'static str,
         cursor: String,
         rows: Vec<Mapped>,
+        unsupported: Vec<String>,
         invalid: bool,
     },
     Positions {
@@ -88,6 +89,7 @@ struct OrdersJoin {
     issued_at: f64,
     pending: usize,
     rows: Vec<Mapped>,
+    unsupported: Vec<String>,
     failed: bool,
     cursors: HashSet<String>,
 }
@@ -111,11 +113,17 @@ struct HyroSnapshot {
     orders: Option<Vec<Mapped>>,
     positions: Option<Vec<MappedPosition>>,
     wallet: Option<Wallet>,
+    coins: Vec<CoinBalance>,
 }
 
 #[derive(Default)]
 pub struct AccountState {
     started: bool,
+    unsupported_logged: HashSet<String>,
+    /// A Hyro reconciliation read failed in transport or at the venue, not on content.
+    hyro_transient: bool,
+    /// Per-coin holdings; `None` until a wallet read or push is accepted.
+    coins: Option<Vec<CoinBalance>>,
     pub authed: bool,
     pub session_version: u32,
     pub orders_snapshot_version: u32,
@@ -158,6 +166,11 @@ impl AccountState {
     pub(crate) fn has_hedged(&self) -> bool {
         self.position_modes.values().any(|hedged| *hedged)
     }
+}
+
+/// The engine reports a valid envelope missing its list through the failure path.
+fn malformed_stream(message: &str) -> bool {
+    message.starts_with("response did not contain the expected list")
 }
 
 fn finite(value: f64) -> Option<f64> {
@@ -672,6 +685,24 @@ pub fn map_position(
     }
 }
 
+/// TS `formatBalance`: amount is equity (else wallet balance), notional its USD value.
+fn coin_balances(account: &WalletAccount<'_>) -> Vec<CoinBalance> {
+    account
+        .coin
+        .iter()
+        .filter_map(|coin| {
+            let base = present(&coin.coin)?;
+            let amount =
+                finite(float_of(&coin.equity)).or(finite(float_of(&coin.wallet_balance)))?;
+            Some(CoinBalance {
+                base: base.to_owned(),
+                amount,
+                notional: finite(float_of(&coin.usd_value)).unwrap_or(amount),
+            })
+        })
+        .collect()
+}
+
 impl Wallet {
     fn from_wire(account: &WalletAccount<'_>) -> Self {
         let mut used = None::<f64>;
@@ -991,7 +1022,19 @@ impl BybitLinear {
         }
     }
 
+    /// A periodic read that failed in transport keeps the healthy stream and the
+    /// last good state; the next tick retries. Bad content still reconnects.
+    fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        if std::mem::take(&mut self.account.hyro_transient) && self.account.ready {
+            cx.log(LogLevel::Warning, format!("HyroTrader {message}; retrying"));
+            self.account.snapshot = None;
+            return;
+        }
+        self.fail_hyro(cx, message);
+    }
+
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        self.account.hyro_transient = false;
         cx.log(LogLevel::Error, format!("HyroTrader {message}"));
         if let Some(socket) = self.private.socket {
             cx.close(socket);
@@ -1039,6 +1082,7 @@ impl BybitLinear {
             orders: None,
             positions: None,
             wallet: None,
+            coins: Vec::new(),
         });
         self.fetch_orders(cx);
         self.fetch_positions(cx);
@@ -1124,6 +1168,7 @@ impl BybitLinear {
         );
         cx.store.set_hedged(false);
         self.account.wallet = snapshot.wallet;
+        self.account.coins = Some(snapshot.coins);
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
@@ -1199,6 +1244,7 @@ impl BybitLinear {
             coin,
             cursor,
             rows: Vec::new(),
+            unsupported: Vec::new(),
             invalid: false,
         };
         self.send(
@@ -1248,6 +1294,7 @@ impl BybitLinear {
             issued_at: cx.now,
             pending: coins.len(),
             rows: Vec::new(),
+            unsupported: Vec::new(),
             failed: false,
             cursors: HashSet::new(),
         });
@@ -1444,6 +1491,15 @@ impl BybitLinear {
                         return;
                     }
                     self.account.wallet = Some(Wallet::from_wire(account));
+                    // A push may list only changed coins; merge, keeping explicit zeros.
+                    let mut coins = self.account.coins.take().unwrap_or_default();
+                    for coin in coin_balances(account) {
+                        match coins.iter_mut().find(|c| c.base == coin.base) {
+                            Some(known) => *known = coin,
+                            None => coins.push(coin),
+                        }
+                    }
+                    self.account.coins = Some(coins);
                     self.commit_balance(cx);
                 } else if self.variant.is_hyro() {
                     self.fail_hyro(cx, "malformed private wallet event");
@@ -1641,6 +1697,9 @@ impl BybitLinear {
     fn commit_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.category == self.primary_category {
             self.wallet = self.account.wallet;
+            if let Some(coins) = &self.account.coins {
+                cx.store.set_coin_balances(coins.clone());
+            }
         }
         if let Some(wallet) = self.wallet {
             cx.store.set_balance(wallet.balance(open_upnl(cx.store)));
@@ -1654,7 +1713,12 @@ impl BybitLinear {
         item: &str,
     ) {
         match request {
-            Request::Orders { rows, invalid, .. } => {
+            Request::Orders {
+                rows,
+                unsupported,
+                invalid,
+                ..
+            } => {
                 let Ok(row) = serde_json::from_str::<OrderRow>(item) else {
                     *invalid = true;
                     return;
@@ -1667,7 +1731,27 @@ impl BybitLinear {
                     return;
                 }
                 let mapped = map_order(&row, cx.store, cx.now);
-                if (self.variant.is_hyro() && !valid_hyro_order(&row))
+                let well_formed = !(self.variant.is_hyro() && !valid_hyro_order(&row))
+                    && float_of(&row.qty).is_finite()
+                    && float_of(&row.qty) >= 0.0
+                    && order_status(&row.order_status).is_some()
+                    && [
+                        &row.price,
+                        &row.cum_exec_qty,
+                        &row.cum_exec_value,
+                        &row.leaves_qty,
+                        &row.avg_price,
+                        &row.trigger_price,
+                        &row.stop_loss,
+                        &row.take_profit,
+                    ]
+                    .into_iter()
+                    .all(optional_numeric);
+                // A sound row of a type the store cannot hold must not block every
+                // other order; finish_orders keeps its last known state and says so.
+                if well_formed && mapped.is_none() && !self.variant.is_hyro() {
+                    unsupported.push(row.order_id.to_string());
+                } else if (self.variant.is_hyro() && !valid_hyro_order(&row))
                     || !float_of(&row.qty).is_finite()
                     || float_of(&row.qty) < 0.0
                     || order_status(&row.order_status).is_none()
@@ -1788,13 +1872,14 @@ impl BybitLinear {
                 coin,
                 cursor,
                 rows,
+                unsupported,
                 invalid,
             } => {
-                let outcome = if invalid
+                let malformed = invalid
                     || outcome
                         .as_ref()
-                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor))
-                {
+                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor));
+                let outcome = if malformed {
                     Err("Malformed Bybit private snapshot".to_owned())
                 } else {
                     outcome
@@ -1814,6 +1899,7 @@ impl BybitLinear {
                 match outcome {
                     Ok(_) => {
                         join.rows.extend(rows);
+                        join.unsupported.extend(unsupported);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
@@ -1827,6 +1913,7 @@ impl BybitLinear {
                     Err(message) => {
                         cx.log(LogLevel::Error, format!("Bybit orders: {message}"));
                         join.failed = true;
+                        self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
                 self.finish_orders(cx);
@@ -1838,11 +1925,11 @@ impl BybitLinear {
                 rows,
                 invalid,
             } => {
-                let outcome = if invalid
+                let malformed = invalid
                     || outcome
                         .as_ref()
-                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor))
-                {
+                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor));
+                let outcome = if malformed {
                     Err("Malformed Bybit private snapshot".to_owned())
                 } else {
                     outcome
@@ -1875,6 +1962,7 @@ impl BybitLinear {
                     Err(message) => {
                         cx.log(LogLevel::Error, format!("Bybit positions: {message}"));
                         join.failed = true;
+                        self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
                 self.finish_positions(cx);
@@ -1884,34 +1972,55 @@ impl BybitLinear {
                     return;
                 }
                 self.account.wallet_in_flight = false;
-                if std::mem::take(&mut self.account.wallet_follow_up) {
+                // Stale account info can call a migrated account classic; TS retries UNIFIED once.
+                let retired = self.account.classic
+                    && outcome
+                        .as_ref()
+                        .is_err_and(|m| m.contains("accountType only support UNIFIED"));
+                if retired {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Bybit wallet refused CONTRACT; reading the UNIFIED wallet",
+                    );
+                    self.account.classic = false;
+                    for state in &mut self.products {
+                        state.account.classic = false;
+                    }
+                }
+                if std::mem::take(&mut self.account.wallet_follow_up) || retired {
                     self.fetch_wallet(cx);
                 }
+                if retired {
+                    return;
+                }
+                self.account.hyro_transient |= outcome.is_err();
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
                         .and_then(|w| w.result)
                         .and_then(|r| r.list.into_iter().next())
                         .filter(|account| !self.variant.is_hyro() || valid_hyro_wallet(account))
-                        .map(|account| Wallet::from_wire(&account))
+                        .map(|account| (Wallet::from_wire(&account), coin_balances(&account)))
                         .ok_or_else(|| "Invalid or empty balance data received".to_owned())
                 });
                 match account {
-                    Ok(wallet) => {
+                    Ok((wallet, coins)) => {
                         if self.variant.is_hyro() {
                             if let Some(snapshot) = &mut self.account.snapshot {
                                 snapshot.wallet = Some(wallet);
+                                snapshot.coins = coins;
                             }
                             self.finish_hyro_snapshot(cx);
                         } else {
                             self.account.wallet = Some(wallet);
+                            self.account.coins = Some(coins);
                             self.commit_balance(cx);
                         }
                     }
                     Err(message) => {
                         cx.log(LogLevel::Error, format!("Bybit balance: {message}"));
                         if self.variant.is_hyro() {
-                            self.fail_hyro(cx, "wallet reconciliation failed");
+                            self.hyro_read_failed(cx, "wallet reconciliation failed");
                         }
                     }
                 }
@@ -1935,7 +2044,7 @@ impl BybitLinear {
         if join.failed {
             self.account.orders_stale = true;
             if self.variant.is_hyro() {
-                self.fail_hyro(cx, "orders reconciliation failed");
+                self.hyro_read_failed(cx, "orders reconciliation failed");
             }
             return;
         }
@@ -1986,6 +2095,26 @@ impl BybitLinear {
                 merged.push((*order).clone());
             }
         }
+        for id in &join.unsupported {
+            let known = cx.store.order(id).filter(|o| self.owns_symbol(&o.symbol));
+            if let Some(order) = known
+                && !merged.iter().any(|o| o.id == *id)
+            {
+                merged.push(order.clone());
+            }
+            if self.account.unsupported_logged.insert(id.clone()) {
+                cx.log(
+                    LogLevel::Error,
+                    if known.is_some() {
+                        format!(
+                            "Bybit order {id} has an unsupported type; its last known state is kept"
+                        )
+                    } else {
+                        format!("Bybit order {id} has an unsupported type and is not shown")
+                    },
+                );
+            }
+        }
         let old: Vec<String> = cx
             .store
             .orders()
@@ -2033,7 +2162,7 @@ impl BybitLinear {
         }
         if join.failed {
             if self.variant.is_hyro() {
-                self.fail_hyro(cx, "positions reconciliation failed");
+                self.hyro_read_failed(cx, "positions reconciliation failed");
             }
             return;
         }

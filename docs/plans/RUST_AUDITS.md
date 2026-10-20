@@ -424,7 +424,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).
-- High: per-coin balances never set (`account.rs:662`).
+- ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
+  (equity, else wallet balance; USD value, else amount) from every accepted wallet
+  read, merged from stream pushes with explicit zeros; failed reads keep holdings.
 - ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
   Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
   without a valid side, price, quantity or time are excluded from REST fills.
@@ -436,9 +438,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   documentation explicitly permits `baseCoin=All` for `category=option`.
 - Medium: live candles lack trade aggregation and seconds intervals.
 - Medium: option WS ticker field names likely wrong.
-- Medium: no UNIFIED retry on the wallet call.
+- ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
+  with `accountType only support UNIFIED` switches the account to UTA and retries
+  once; other errors never change the account type.
 - Medium: demo reduce-only fill check missing.
-- Medium: Hyro tears down on one bad poll (`account.rs:1838`).
+- ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
+  read failing in transport or at the venue keeps the ready stream and last-good
+  state and retries next tick; malformed content and initial snapshots still
+  reconnect.
 - ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
   every page (up to TS's 20 × 50 per window) instead of truncating to 50; explicit
   limits still cap after every category. Income caps match TS (unchanged).
@@ -446,7 +453,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
 - ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
   is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
-- Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).
+- ~~Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).~~
+  Fixed: a well-formed row of an unsupported type keeps its last known state (or is
+  reported as not shown) while other orders commit; malformed rows still preserve
+  the whole last-good snapshot. Hyro stays strict.
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
