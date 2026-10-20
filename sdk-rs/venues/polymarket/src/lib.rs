@@ -1,4 +1,5 @@
 //! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
+mod account;
 pub mod sign;
 mod wire;
 
@@ -37,6 +38,7 @@ pub struct Options {
     pub polymarket: Option<PolymarketOptions>,
 }
 pub enum Pending {
+    Account(account::Request),
     Markets {
         offset: usize,
         count: usize,
@@ -79,6 +81,9 @@ struct CandleSubscription {
 }
 pub struct Polymarket {
     pub(crate) options: Options,
+    pub(crate) account: account::Account,
+    pub(crate) credentials: Option<sign::Credentials>,
+    pub(crate) address: Option<String>,
     pub(crate) connections: [Connection; 2],
     books: HashMap<String, BookState>,
     market_ids: HashSet<String>,
@@ -123,8 +128,15 @@ fn tick_supported(tick: f64) -> bool {
 }
 impl Polymarket {
     pub fn new(options: Options) -> Self {
+        let address = options
+            .key
+            .as_deref()
+            .and_then(|k| safe_cex_crypto::ethereum::private_key_address(k).ok());
         Self {
             options,
+            address,
+            credentials: None,
+            account: Default::default(),
             market_ids: Default::default(),
             market_symbols: Default::default(),
             connections: Default::default(),
@@ -197,11 +209,14 @@ impl Polymarket {
         if !self.books.is_empty() {
             self.connect(cx, 0);
         }
-        // Account startup is added in the private phase.
-        if self.options.public_data_only || self.options.key.is_none() {
+        if self.options.public_data_only
+            || (self.options.key.is_none() && self.options.polymarket.is_none())
+        {
             cx.store.set_balance(Default::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
+        } else {
+            self.start_private(cx);
         }
     }
     pub(crate) fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
@@ -535,6 +550,11 @@ impl Venue for Polymarket {
                 .filter_map(|s| cx.store.market(s).map(|m| m.id.clone()))
                 .collect();
             self.subscription(cx, ids, None);
+        } else {
+            if let Some(subscription) = self.private_subscription() {
+                cx.send(socket, subscription);
+            }
+            self.account_reconcile(cx);
         }
         cx.send(socket, "PING");
         self.connections[i].awaiting_pong = true;
@@ -554,6 +574,8 @@ impl Venue for Polymarket {
         }
         if i == 0 {
             self.public_message(cx, text);
+        } else {
+            self.private_message(cx, text);
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -581,11 +603,16 @@ impl Venue for Polymarket {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = pending {
+            self.account_response(cx, request, response);
+            return;
+        }
         if let Err(e) = success(response) {
             self.on_request_failed(cx, pending, &e);
             return;
         }
         match pending {
+            Pending::Account(_) => unreachable!(),
             Pending::Markets {
                 offset,
                 count,
@@ -694,6 +721,7 @@ impl Venue for Polymarket {
     }
     fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(_cx, request, item),
             Pending::Markets {
                 count,
                 rows,
@@ -799,6 +827,10 @@ impl Venue for Polymarket {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let retry = match pending {
+            Pending::Account(request) => {
+                self.account_failed(cx, request);
+                return;
+            }
             Pending::Candles {
                 command: Some(c), ..
             } => {
@@ -821,6 +853,9 @@ impl Venue for Polymarket {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if self.public_retry.as_ref().is_some_and(|(t, _)| *t == timer) {
             let (_, offset) = self.public_retry.take().expect("matching retry");
             if let Some(offset) = offset {

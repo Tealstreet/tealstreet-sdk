@@ -123,3 +123,20 @@ price_change updated tickers without depth and throttled away intermediate
 updates; unsorted snapshot levels; stale quote/tick rollback; missing tick size
 updates; fidelity60 misread as1minute. The Rust behavior follows official raw
 CLOB protocol and retains all full-depth changes. Private implementation next.
+
+### Private phase checkpoint
+
+Implemented supplied L2 or fresh-server-time L1 credential derivation, all
+private socket/auth/reconnect hooks, signed paginated orders, Data holdings and
+pUSD balance reconciliation, fail-closed partial/failed snapshots, order revision
+and terminal fences, holdings trade fences, maker/taker execution attribution,
+settlement deduplication, and valid zero resolution prices.
+
+Independent private review confirmed the aggregate balance PnL omission: fixed
+both read completion orders and added a regression; failed positions preserve
+last known PnL and an early holding response cannot mark balance loaded.
+Cancellation notifications retain their final cumulative matched high watermark
+for the following trading phase without emitting cumulative fills. Verification:
+15 account + 8 public + 6 signing tests PASS, native crate clippy PASS. No
+remaining P1/P2 findings in reviewed private scope. Trading implementation is
+prepared in separate uncommitted files and is integrated after this checkpoint.
