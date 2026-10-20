@@ -412,7 +412,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   without sending (`trading.rs:224`)~~ (explicit errors; see
   [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
-  unsupported~~; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
+  unsupported~~; ~~USD-M journal (`fetchHistoricalPositions`) not wired in the host~~ (folds
+  per-symbol fills as TS).
 - Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
   STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
 - Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
