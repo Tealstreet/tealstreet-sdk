@@ -1,5 +1,6 @@
 import { serializeCommandError } from '../../commandOutcome';
-import { CallableMethodsInWorker } from '../../exchanges/base';
+import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
+import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -25,6 +26,14 @@ export class CallMethodHandler extends BaseHandler {
       console.log('Calling method', method);
     }
     try {
+      if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
+        const call = (this._exchange as unknown as Record<string, unknown>)[method];
+        if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
+        result = await (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
+        this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+        return;
+      }
       switch (method) {
         case 'setLeverage':
           result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));

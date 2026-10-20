@@ -35,6 +35,13 @@ const side = (s) => {
   assert.ok(['BUY', 'SELL'].includes(s), 'invalid Coinbase oracle side');
   return s.toLowerCase();
 };
+// The comparison snapshot carries numeric wire strings as numbers. Keep this
+// legacy-shape assertion compatible without changing the tape-derived price.
+const comparisonPrice = (value) => {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const sameOrChange = (object, key, legacy, expected, label) => {
   if (isDeepStrictEqual(object[key], expected)) return false;
   assert.deepEqual(object[key], legacy, `unexpected TS Coinbase ${label}`);
@@ -123,7 +130,8 @@ function correctFills(account, records, markets) {
     }
   }
   if (!isDeepStrictEqual(account.fills, expected)) {
-    assert.deepEqual(account.fills, legacy, 'unexpected TS Coinbase terminal fill emission');
+    const priceShape = (rows) => rows.map((row) => ({ ...row, price: comparisonPrice(row.price) }));
+    assert.deepEqual(priceShape(account.fills), priceShape(legacy), 'unexpected TS Coinbase terminal fill emission');
     account.fills = expected;
   }
 }

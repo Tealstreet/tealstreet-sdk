@@ -31,8 +31,8 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker } from '../base';
-import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
+import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
@@ -57,7 +57,15 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange, type ExchangeCapabilities, markBaseCapabilityFallback } from '../base';
+import {
+  BaseExchange,
+  CAPABILITY_METHODS,
+  type ExchangeCapabilities,
+  markBaseCapabilityFallback,
+  WORKER_FORWARDED_METHODS,
+  WORKER_WRITE_METHODS,
+  workerCallClientOrderIds,
+} from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -65,14 +73,25 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../bybit/bybit.types';
-import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
+import {
+  decodeWorkerOrderIds,
+  isRegularClientOrderShape,
+  patternClientOrderIdRule,
+  withReplacementClientOrderId,
+} from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import {
+  IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from './publicFeed';
 
 /** Exchange names the Rust engine runs; the engine takes the same name. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
@@ -242,6 +261,15 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
+const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
+  'cancelAllOrders',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+]);
+const MULTI_COMMAND_WAIT_FACTOR = 5;
+const WORKER_CAPABILITY_RETRY_MS = 30_000;
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 
@@ -263,8 +291,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
-    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    if (this.options.publicFeed?.mode === 'shared' || this.usesInProcessPublicData) return 'shared';
+    // exchange-server keys its shared source by venue only, so testnet runs its own feed.
+    if (this.options.externalPublicData?.type === 'in-process' && this.options.testnet) return 'direct';
     return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  private get usesInProcessPublicData() {
+    return this.options.externalPublicData?.type === 'in-process' && !this.options.testnet;
   }
 
   override disablePublicWebsockets(): void {
@@ -272,6 +306,7 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
   private sharedValidatedMarkets?: Store['markets'];
@@ -315,8 +350,41 @@ export class RustEngineExchange extends BaseExchange {
   fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
-    await this.ensureHost();
+    // A main-thread mirror asks the worker's engine rather than building its own.
+    if (this.routesToWorker && !this.host) await this.loadWorkerCapabilities();
+    else await this.ensureHost();
     return this.capabilities;
+  };
+
+  /** Worker side of `loadCapabilities` for a main-thread mirror. */
+  fetchEngineCapabilities = async (): Promise<EngineCapabilities | undefined> => {
+    await this.ensureHost();
+    return this.capabilityRecord;
+  };
+
+  private workerCapabilities?: Promise<void>;
+  private workerCapabilityRetryAt = 0;
+  private stopWorkerCapabilitySync?: () => void;
+
+  private loadWorkerCapabilities = (): Promise<void> =>
+    (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
+      (record) => {
+        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
+      },
+      (error: unknown) => {
+        this.workerCapabilities = undefined;
+        this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
+        throw error;
+      },
+    ));
+
+  // A mirror learns capability-defined methods (Lighter tiers, history axes) once the worker has loaded.
+  private syncWorkerCapabilities = () => {
+    if (this.capabilityRecord || this.host || this.workerCapabilities || this.isDisposed) return;
+    if (!this.store.loaded.markets || !this.routesToWorker || Date.now() < this.workerCapabilityRetryAt) return;
+    void this.loadWorkerCapabilities().catch(() => {
+      /* Retried on a later store update; explicit loadCapabilities callers see the failure. */
+    });
   };
 
   /** What the venue answers, as its engine reports it; unknown until the engine exists. */
@@ -332,8 +400,10 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   // History axes the engine lacks take the branded base fallbacks, which
-  // `exchange.capabilities` reports absent.
-  private adoptCapabilities(capabilities: EngineCapabilities) {
+  // `exchange.capabilities` reports absent. A main-thread mirror adopts the
+  // record from the worker's snapshot frame; the record never changes.
+  protected override adoptEngineCapabilities(capabilities: EngineCapabilities) {
+    if (this.capabilityRecord) return;
     this.capabilityRecord = capabilities;
     if (!capabilities.fillHistory)
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
@@ -346,11 +416,17 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
+        if (this.routesToWorker) {
+          await this.callWorker('changeAccountTier', tier);
+          return;
+        }
         await this.command<null>({ op: 'setAccountTier', tier });
         this.writeLighterTier(tier);
       };
-      this.fetchAccountTier = async () =>
-        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      this.fetchAccountTier = async () => {
+        if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
+        return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      };
     }
   }
 
@@ -379,13 +455,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
-    this.applier = new FrameApplier(
-      store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
       this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
@@ -411,6 +481,8 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
+    this.forwardToWorker();
+    this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
   get isPublicDataOnly(): boolean {
@@ -468,10 +540,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
-    if (this.options.externalPublicData) {
+    if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
-        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+        'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
+    }
+    if (this.options.externalPublicData && this.options.publicFeed) {
+      throw new Error('externalPublicData conflicts with publicFeed policy');
     }
     if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
@@ -689,7 +764,7 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptCapabilities(host.capabilities());
+      this.adoptEngineCapabilities(host.capabilities());
     } catch (error) {
       host.dispose();
       throw error;
@@ -697,16 +772,59 @@ export class RustEngineExchange extends BaseExchange {
     this.host = host;
   };
 
-  protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
+  // Nuke and cancel-all run several engine commands in sequence on the worker.
+  protected override workerCommandTimeoutMs = (method: CallableMethodsInWorker) =>
+    Math.min(
+      (MULTI_COMMAND_WORKER_METHODS.has(method) ? MULTI_COMMAND_WAIT_FACTOR : 1) * this.commandTimeoutMs + 1000,
+      2_147_483_647,
+    );
 
-  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker): Error =>
-    Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
       code: 'COMMAND_TIMEOUT',
       command: method,
-      ...(['setLeverage', 'scheduleCancel', 'changePositionMode', 'changeMarginType'].includes(method)
-        ? { outcome: 'unknown' as const }
-        : {}),
+      ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'unknown' as const } : {}),
+      ...(clientOrderIds ? { clientOrderIds } : {}),
     });
+  };
+
+  /**
+   * The host's worker bridge listens for `callMethod` on a main-thread instance;
+   * the worker's instance owns the engine and never has that listener. Trading
+   * runs there whole, so preflight, placement scopes and nuke retries see the
+   * authoritative state, even if a main-thread read started a local engine.
+   */
+  private get routesToWorker(): boolean {
+    return this.emitter.hasListeners('callMethod');
+  }
+
+  /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+
+  private forwardToWorker() {
+    // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
+    const capabilities = this.capabilities;
+    const inert = new Set<string>(
+      Object.entries(CAPABILITY_METHODS)
+        .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
+        .map(([, method]) => method),
+    );
+    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const];
+    for (const method of methods) {
+      if (inert.has(method)) continue;
+      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions', unknown>)[method] = async (
+        ...args: unknown[]
+      ) => {
+        if (!this.routesToWorker) return local(...args);
+        const result = await this.callWorker(method, ...args);
+        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+      };
+    }
+  }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
     if (this.isDisposed || this.engineFailure) return;
@@ -737,12 +855,25 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
+  private openSharedFeedPort = ():
+    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
+    | undefined => {
+    if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
+    const external = this.options.externalPublicData;
+    if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
+    const [port, sourcePort] = inProcessPortPair();
+    this.stopInProcessFeed = serveInProcessPublicData(external.source, sourcePort);
+    return { port, policy: { handshakeTimeoutMs: IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS, inProcess: true } };
+  };
+
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
-    if (this.options.publicFeed?.mode === 'shared') {
+    const sharedFeed = this.openSharedFeedPort();
+    if (sharedFeed) {
       this.sharedPublicFeed = new RustPublicFeedClient(
-        this.options.publicFeed.port,
+        sharedFeed.port,
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
@@ -762,6 +893,7 @@ export class RustEngineExchange extends BaseExchange {
           this.emitAndLogError(error);
           this.dispose();
         },
+        sharedFeed.policy,
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -770,6 +902,8 @@ export class RustEngineExchange extends BaseExchange {
         throw error;
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+      if (!this.sharedPublicFeed.isReady)
+        this.log('In-process public data has not loaded; continuing private startup', LogSeverity.Warning);
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
@@ -1418,17 +1552,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
-    this.name === 'asterdex' &&
-    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
-      ? '1h'
-      : interval;
-
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: this.candleInterval(opts.interval),
+      interval: opts.interval,
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -1569,7 +1697,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const interval = this.candleInterval(opts.interval);
+    const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     const first = !listeners;
@@ -1594,8 +1722,6 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
-  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
-
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
     this.feedCandleListeners.add(listener);
@@ -1607,8 +1733,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopWorkerCapabilitySync?.();
+    this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
+    this.stopInProcessFeed?.();
+    this.stopInProcessFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();

@@ -8,6 +8,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
+import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
@@ -778,7 +779,7 @@ export class ExchangeWorker {
       name: 'EngineDisposedError',
       code: 'ENGINE_DISPOSED',
     });
-    this._messageBuffer = [];
+    this._dropMessageBuffer();
     // Bump the token so any in-flight start() observes the change after its
     // next await and bails instead of proceeding to clobber state.
     this._startupToken++;
@@ -835,6 +836,7 @@ export class ExchangeWorker {
       if (this._messageBuffer.length < MAX_BUFFER_SIZE) {
         this._messageBuffer.push(payload);
       } else {
+        this._rejectNeverSent(payload, 'Worker startup queue is full; nothing was sent.');
         // Send warning through proper logging infrastructure
         this.logError(
           `Message buffer full for ${this._exchangeName}, dropping message`,
@@ -970,16 +972,37 @@ export class ExchangeWorker {
         // Only these RPC methods dispatch venue writes. An executor's text and
         // caller IDs cannot be inferred here; actual native errors win first.
         const method = request.payload.op === 'callMethod' ? request.payload.data?.method : undefined;
+        const clientOrderIds = workerCallClientOrderIds(method, request.payload.data?.args);
         const details: SerializedCommandError = {
           ...fallback,
           ...(typeof method === 'string' && { command: method }),
-          ...(['setLeverage', 'changeMarginType', 'changePositionMode', 'scheduleCancel'].includes(method) && {
-            outcome: 'unknown' as const,
-          }),
+          ...(WORKER_WRITE_METHODS.has(method) && { outcome: 'unknown' as const }),
+          ...(clientOrderIds && { clientOrderIds }),
         };
         this._rejectUnavailablePayload(request.payload, fallback.message, details);
       }
     }, 0);
+  }
+
+  /** A request still buffered when the account stops was never dispatched; answer it rather than leave it pending. */
+  private _rejectNeverSent(
+    payload: StoreWorkerPayload,
+    message = 'Exchange stopped before this operation was sent; nothing was sent.',
+  ) {
+    if (!this._requestKey(payload)) return;
+    const method = payload.op === 'callMethod' ? payload.data?.method : undefined;
+    this._rejectUnavailablePayload(payload, message, {
+      message,
+      name: 'EngineUnavailableError',
+      outcome: 'notSent',
+      ...(typeof method === 'string' && { command: method }),
+    });
+  }
+
+  private _dropMessageBuffer() {
+    const dropped = this._messageBuffer;
+    this._messageBuffer = [];
+    for (const payload of dropped) this._rejectNeverSent(payload);
   }
 
   private _rejectUnavailablePayload(
@@ -1075,7 +1098,7 @@ export class ExchangeWorker {
       chaserOrderManagerInstance.cleanupExchange(this._exchange);
       this._exchange.dispose();
     }
-    this._messageBuffer = [];
+    this._dropMessageBuffer();
     this._invalidateReadiness();
     this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
       reason: error.message,

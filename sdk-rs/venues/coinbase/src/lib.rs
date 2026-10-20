@@ -79,7 +79,7 @@ impl Coinbase {
             read_supplied: read_credentials.is_some(),
             read_credentials,
             rest: rest::Rest::default(),
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
         })
@@ -110,6 +110,7 @@ impl Venue for Coinbase {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             ..safe_cex_engine::Capabilities::BASE
