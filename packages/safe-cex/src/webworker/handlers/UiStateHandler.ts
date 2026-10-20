@@ -35,34 +35,33 @@ export class UiStateHandler extends BaseHandler {
 
     // Only fetch if we don't already have leverage for this symbol and it's not currently being fetched
     if (activeMarginSymbol && !existing && !isFetching) {
-      // Mark as being fetched by storing a placeholder
+      const placeholder: FetchedLeverage = { buyLeverage: 0, sellLeverage: 0, isFetching: true };
       this._exchange.store.update(
         {
           fetchedLeverage: {
             ...this._exchange.store.fetchedLeverage,
-            [activeMarginSymbol]: { buyLeverage: 0, sellLeverage: 0, isFetching: true },
+            [activeMarginSymbol]: placeholder,
           },
         },
         true,
       );
 
-      // Call fetchLeverageForSymbol on the exchange
+      // A frame may confirm leverage while the fetch is in flight; only our own placeholder may be cleared.
+      const clearPlaceholder = () => {
+        const { [activeMarginSymbol]: current, ...rest } = this._exchange.store.fetchedLeverage;
+        if (current === placeholder) this._exchange.store.update({ fetchedLeverage: rest }, true);
+      };
+
       this._exchange
         .fetchLeverageForSymbol(activeMarginSymbol)
         .then((leverageObj) => {
           if (leverageObj) {
             this.updatePositionsWithLeverage(activeMarginSymbol, leverageObj);
           } else {
-            // Remove the fetching marker if fetch failed
-            const { [activeMarginSymbol]: _, ...rest } = this._exchange.store.fetchedLeverage;
-            this._exchange.store.update({ fetchedLeverage: rest }, true);
+            clearPlaceholder();
           }
         })
-        .catch(() => {
-          // Remove the fetching marker on error
-          const { [activeMarginSymbol]: _, ...rest } = this._exchange.store.fetchedLeverage;
-          this._exchange.store.update({ fetchedLeverage: rest }, true);
-        });
+        .catch(clearPlaceholder);
     }
   }
 
