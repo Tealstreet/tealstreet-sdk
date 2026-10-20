@@ -350,6 +350,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         self.send(client, Outgoing::Text(text));
                     }
                 }
+                Notice::AccountAuth {
+                    credential,
+                    scope,
+                    outcome,
+                } => self.broadcast(Outgoing::Text(encode_notice(ServerNotice::AccountAuth {
+                    credential,
+                    scope,
+                    outcome,
+                }))),
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
@@ -689,6 +698,11 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ServerNotice<'a> {
+    AccountAuth {
+        credential: safe_cex_engine::CredentialSlot,
+        scope: safe_cex_engine::AccountReadScope,
+        outcome: safe_cex_engine::AuthOutcome,
+    },
     CommandError {
         command: u32,
         message: &'a str,
@@ -905,6 +919,21 @@ mod tests {
             cx.done(socket.0, Ok("[]".into()));
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            if text == "auth" {
+                let request = cx.request(
+                    safe_cex_engine::Method::Get,
+                    "https://fixture/account".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                cx.tag_account_read(
+                    request,
+                    safe_cex_engine::CredentialSlot::Secondary,
+                    safe_cex_engine::AccountReadScope::Orders,
+                );
+                return;
+            }
             if let Some(command) = text.strip_prefix("error:") {
                 let command = command.parse().expect("error command");
                 cx.command_error(command, "placement rejected");
@@ -922,6 +951,13 @@ mod tests {
         }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn account_auth_outcome(
+            &self,
+            _: &(),
+            _: &Response<'_>,
+        ) -> Option<safe_cex_engine::AuthOutcome> {
+            Some(safe_cex_engine::AuthOutcome::Rejected)
+        }
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
         fn on_command(&mut self, _: &mut Cx<'_, ()>, command: Command) {
@@ -940,6 +976,73 @@ mod tests {
             mpsc::unbounded_channel().0
         }
         fn request(&self, _: HttpRequest, _: Events) {}
+    }
+
+    #[test]
+    fn credential_evidence_reaches_all_account_peers_without_command_ownership_or_cross_account_leaks()
+     {
+        let mut actors = Vec::new();
+        let mut receivers = Vec::new();
+        for _ in 0..2 {
+            let mut actor = Account::new(
+                Host::new(
+                    Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                    NoTransport,
+                ),
+                ServerConfig::default(),
+            );
+            let mut peers = Vec::new();
+            for client in [1, 2] {
+                let (outgoing, receiver) = mpsc::channel(8);
+                let (cancel, _) = watch::channel(false);
+                actor.peers.insert(
+                    client,
+                    Peer {
+                        outgoing,
+                        cancel,
+                        books: HashSet::new(),
+                        candles: HashSet::new(),
+                        tickers: None,
+                    },
+                );
+                peers.push(receiver);
+            }
+            receivers.push(peers);
+            actors.push(actor);
+        }
+        actors[0].host.engine.handle(
+            0.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "auth",
+            },
+        );
+        actors[0].host.engine.handle(
+            1.,
+            Event::HttpResponse {
+                request: safe_cex_engine::RequestId(1),
+                response: Response {
+                    status: 401,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        actors[0].execute();
+        for peer in &mut receivers[0] {
+            let Ok(Outgoing::Text(message)) = peer.try_recv() else {
+                panic!("account auth notice")
+            };
+            assert_eq!(
+                message.as_ref(),
+                r#"{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"}"#
+            );
+            assert!(peer.try_recv().is_err());
+        }
+        for peer in &mut receivers[1] {
+            assert!(peer.try_recv().is_err());
+        }
+        assert!(actors.iter().all(|actor| actor.pending.is_empty()));
     }
 
     #[test]

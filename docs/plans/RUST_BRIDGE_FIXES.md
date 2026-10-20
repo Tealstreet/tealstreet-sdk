@@ -948,3 +948,33 @@ reviews PASS; strict scoped lint PASS with ignored tests explicitly included. In
 legs; no production assertion was weakened. Logs: /tmp/bridge-phase4a-nuke-*.log
 and /tmp/bridge-phase4a-sizing-policy-tests.log. This is current engine state,
 not proof of network resynchronization or a new unknown-outcome classifier.
+
+## Phase 6b authentication feedback foundation checkpoint
+
+Core captures signer slot and read scope on the existing in-flight continuation.
+The pure venue hook observes one complete final response before the unchanged
+callback. Missing expected streamed lists cannot report Accepted; invalid UTF-8,
+truncated streams, transport/signature failure and untagged requests emit no
+auth notice. Notices carry only bounded typed context through WASM and native
+account broadcasts. SDK counters isolate all ten slot/scope contexts, aggregate
+their maximum under Base's existing cap, and send the resolved polling policy.
+Throwing host consumers preserve the action tail and known command outcomes.
+NativeFrameSession strictly validates and orders optional account callbacks.
+
+194 core/native cases in nine nonempty suites PASS, including seven new core
+completion-path controls and an actual two-account/two-peer broadcast control.
+The standalone Backpack host encoder exact-JSON control PASS. Full host153,
+SDK102 and native-session129 controls PASS; package types, scoped strict lint,
+all-feature core/hosts/venue compilation, strict Clippy, fmt and bans PASS.
+Independent Rust and JS/TS correctness reviews PASS. Logs:
+/tmp/bridge-auth-{core-focused,foundation-*,host-all,sdk-*,session-*}.log.
+These checks prove the foundation, not the remaining venue classifiers or
+rebuilt-WASM native credential feedback.
+
+Coinbase and coinbasespot now drop any defined saved read-credential fields and
+their proxy from an immutable effective option copy, with one warning before
+host startup. Partial/empty saved read fields no longer fail the primary-only
+JWT signer; proxy-only settings without read fields retain their old policy.
+342 wrapper controls (six new functions including 12 partial/empty variants),
+types and strict lint PASS; independent review PASS. Logs:
+/tmp/bridge-coinbase-read-options-*.log. Caller/saved options remain unchanged.

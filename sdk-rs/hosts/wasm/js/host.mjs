@@ -29,6 +29,9 @@ class CommandDiagnosticCallbackError extends Error {
 class CommandProgressCallbackError extends Error {
   constructor(cause) { super('Command progress callback failed', { cause }); }
 }
+class AccountAuthCallbackError extends Error {
+  constructor(cause) { super('Account authentication callback failed', { cause }); }
+}
 let nextReceiptSession = 0;
 
 function receiptSession() {
@@ -421,7 +424,7 @@ export class EngineHost {
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
       catch (error) {
-        if (error instanceof CommandProgressCallbackError || error instanceof CommandDiagnosticCallbackError) { callbackFailure ??= error; continue; }
+        if (error instanceof CommandProgressCallbackError || error instanceof CommandDiagnosticCallbackError || error instanceof AccountAuthCallbackError) { callbackFailure ??= error; continue; }
         if (!(error instanceof UnknownEngineActionError)) throw error;
         unknown ??= error;
       }
@@ -431,7 +434,7 @@ export class EngineHost {
       // ordinary rejection that a caller could mistake for a safe retry.
       // Diagnostic listeners may have already displayed the command error
       // before throwing. Reporting their own failure must not add another toast.
-      const level = callbackFailure instanceof CommandDiagnosticCallbackError ? 'warning' : 'error';
+      const level = callbackFailure instanceof CommandProgressCallbackError ? 'error' : 'warning';
       let reported = false;
       try {
         if (this.handlers.onLog) {
@@ -552,6 +555,18 @@ export class EngineHost {
       case 'deactivate':
         this.handlers.onDeactivate?.();
         break;
+      case 'accountAuth': {
+        if (!['primary', 'secondary'].includes(action.credential)
+          || !['account', 'balance', 'orders', 'positions', 'settings'].includes(action.scope)
+          || !['accepted', 'rejected'].includes(action.outcome)
+          || Object.keys(action).some((key) => !['op', 'credential', 'scope', 'outcome'].includes(key))) {
+          throw new UnknownEngineActionError('Invalid account authentication action');
+        }
+        try {
+          this.handlers.onAccountAuth?.(Object.freeze({ credential: action.credential, scope: action.scope, outcome: action.outcome }));
+        } catch (cause) { throw new AccountAuthCallbackError(cause); }
+        break;
+      }
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;

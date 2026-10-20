@@ -53,6 +53,9 @@ export interface EngineHandlers {
   /** Called once after a WASM trap makes this host terminal and releases its I/O. */
   onDead?(error: EngineDeadError): void;
   onDeactivate?(): void;
+  /** Typed native evidence for one configured signer and private-read scope.
+   * No transport/body inference, command ownership or implicit error reporting. */
+  onAccountAuth?(result: AccountAuthResult): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   /** Associated native command errors arrive as warning diagnostics. Known
@@ -64,6 +67,12 @@ export interface EngineHandlers {
    * retain the same key after a deadline; consumers may merge receipt tuples.
    * Complete events are idempotent and may repeat for duplicate native done. */
   onCommandProgress?(event: CommandProgress): void;
+}
+
+export interface AccountAuthResult {
+  readonly credential: 'primary' | 'secondary';
+  readonly scope: 'account' | 'balance' | 'orders' | 'positions' | 'settings';
+  readonly outcome: 'accepted' | 'rejected';
 }
 
 export interface OrderIdentityReceipt {

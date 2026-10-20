@@ -1,4 +1,4 @@
-import type { CommandProgress, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { AccountAuthResult, CommandProgress, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
@@ -297,13 +297,29 @@ export class RustEngineExchange extends BaseExchange {
   private stopPollingConfig?: () => void;
   private pollingPolicy?: { interval: number | null; promise?: Promise<void> };
   private syncingAccountState = false;
+  private warnIgnoredCoinbaseReadOptions = false;
+  private readonly accountAuthStreaks = new Uint8Array(10);
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    const ignoredCoinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName) &&
+      [options.secondary_key, options.secondary_secret, options.secondary_passphrase].some((value) => value !== undefined);
+    if (ignoredCoinbaseReadOptions) {
+      // The native JWT signer uses primary credentials; its egress must use the same account policy.
+      const {
+        secondary_key: _readKey,
+        secondary_secret: _readSecret,
+        secondary_passphrase: _readPassphrase,
+        secondaryProxyUrl: _readProxy,
+        ...effectiveOptions
+      } = options;
+      options = effectiveOptions;
+    }
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
+    this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
     this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
       exchangeName,
@@ -431,14 +447,21 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override recordAuthFailure(): void {
-    super.recordAuthFailure();
-    this.updatePollingPolicy();
+    this.receiveAccountAuth({ credential: 'primary', scope: 'account', outcome: 'rejected' });
   }
 
   override recordAuthSuccess(): void {
-    super.recordAuthSuccess();
-    this.updatePollingPolicy();
+    this.receiveAccountAuth({ credential: 'primary', scope: 'account', outcome: 'accepted' });
   }
+
+  private receiveAccountAuth = ({ credential, scope, outcome }: AccountAuthResult): void => {
+    if (this.isDisposed || this.engineFailure) return;
+    const index = (credential === 'secondary' ? 5 : 0) + ['account', 'balance', 'orders', 'positions', 'settings'].indexOf(scope);
+    // Reuse Base's cap for each context, then expose their maximum to its policy.
+    this.accountAuthStreaks[index] = this.setAuthFailureStreak(outcome === 'accepted' ? 0 : this.accountAuthStreaks[index] + 1);
+    this.setAuthFailureStreak(Math.max(...this.accountAuthStreaks));
+    this.updatePollingPolicy();
+  };
 
   private syncPollingPolicy = (): Promise<void> | undefined => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
@@ -477,6 +500,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
+    if (this.warnIgnoredCoinbaseReadOptions) {
+      this.warnIgnoredCoinbaseReadOptions = false;
+      this.log('Saved read credentials and their proxy are ignored; Coinbase private reads use primary credentials.', LogSeverity.Warning);
+    }
     if (this.options.externalPublicData) {
       throw new Error(
         'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
@@ -678,6 +705,7 @@ export class RustEngineExchange extends BaseExchange {
         onLog: this.receiveLog,
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
+        onAccountAuth: this.receiveAccountAuth,
         onDeactivate: () => {
           this.startupFailure = new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();

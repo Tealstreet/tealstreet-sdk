@@ -1,3 +1,5 @@
+import type { AccountAuthResult } from '@tealstreet/safe-cex-wasm/host';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NativeFrameSession, type NativeFrameSessionOptions, type NativeFrameSocket } from './NativeFrameSession';
@@ -73,6 +75,71 @@ async function microtasks() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('NativeFrameSession', () => {
+  it('delivers typed account auth before raw notices in serialized order without command ownership', async () => {
+    const events: string[] = [];
+    const wait = deferred();
+    const onAccountAuth = vi.fn(async (result: AccountAuthResult) => {
+      expect(Object.isFrozen(result)).toBe(true);
+      events.push(`${result.credential}/${result.scope}/${result.outcome}`);
+      await wait.promise;
+    });
+    const sink = {
+      onFrame: vi.fn(), onClose: vi.fn(), onAccountAuth,
+      onNotice: vi.fn((raw: string) => { events.push(JSON.parse(raw).type); }),
+    };
+    const { session, socket } = await connected({ sink });
+    socket.message('{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"}');
+    socket.message('{"type":"done","command":99,"result":"[]"}');
+    await microtasks();
+    expect(events).toEqual(['secondary/orders/rejected']);
+    expect(sink.onNotice).not.toHaveBeenCalled();
+    wait.resolve();
+    await vi.waitFor(() => expect(events).toEqual(['secondary/orders/rejected', 'accountAuth', 'done']));
+    expect(onAccountAuth).toHaveBeenCalledExactlyOnceWith({ credential: 'secondary', scope: 'orders', outcome: 'rejected' });
+    expect(session.ready).toBe(true);
+    expect(socket.sent).toEqual([]);
+    session.close();
+    socket.message('{"type":"accountAuth","credential":"secondary","scope":"orders","outcome":"accepted"}');
+    await microtasks();
+    expect(onAccountAuth).toHaveBeenCalledOnce();
+  });
+
+  it('keeps every signer/scope verdict on its owning connection and supports all enum values', async () => {
+    const onAccountAuth = vi.fn();
+    const siblingAuth = vi.fn();
+    const own = await connected({ sink: { onFrame() {}, onNotice() {}, onClose() {}, onAccountAuth } });
+    const sibling = await connected({ sink: { onFrame() {}, onNotice() {}, onClose() {}, onAccountAuth: siblingAuth } });
+    const expected = [];
+    for (const credential of ['primary', 'secondary']) {
+      for (const scope of ['account', 'balance', 'orders', 'positions', 'settings']) {
+        for (const outcome of ['accepted', 'rejected']) {
+          const result = { credential, scope, outcome };
+          expected.push(result);
+          own.socket.message(JSON.stringify({ type: 'accountAuth', ...result }));
+        }
+      }
+    }
+    await vi.waitFor(() => expect(onAccountAuth).toHaveBeenCalledTimes(20));
+    expect(onAccountAuth.mock.calls.map(([result]) => result)).toEqual(expected);
+    expect(siblingAuth).not.toHaveBeenCalled();
+    own.session.close();
+    sibling.session.close();
+  });
+
+  it('contains a throwing typed account consumer using the existing terminal session boundary', async () => {
+    const onClose = vi.fn();
+    const onNotice = vi.fn();
+    const { session, socket } = await connected({ sink: {
+      onFrame() {}, onNotice, onClose,
+      onAccountAuth() { throw new Error('private consumer detail'); },
+    } });
+    socket.message('{"type":"accountAuth","credential":"primary","scope":"settings","outcome":"accepted"}');
+    await microtasks();
+    expect(session.closed).toBe(true);
+    expect(onNotice).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose.mock.calls[0][0].message).toBe('Native frame session closed');
+  });
   it('authenticates with subprotocols, accepts preceding notices, and preserves raw frames and command IDs', async () => {
     const { socket, sink, socketFactory, promise } = setup();
     expect(socketFactory).toHaveBeenCalledWith(URL, [PROTOCOL, `bearer.${TOKEN}`]);
@@ -351,6 +418,16 @@ describe('NativeFrameSession', () => {
 
   it.each([
     'not-json', 'null', '[]', '{}', '{"type":"other"}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders"}',
+    '{"type":"accountAuth","credential":"unknown","scope":"orders","outcome":"rejected"}',
+    '{"type":"accountAuth","credential":["primary"],"scope":"orders","outcome":"rejected"}',
+    '{"type":"accountAuth","credential":"primary","scope":"public","outcome":"accepted"}',
+    '{"type":"accountAuth","credential":"primary","scope":["orders"],"outcome":"accepted"}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":true}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":"success"}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":"rejected","command":1}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":"rejected","account":"other"}',
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":"rejected","key":"secret"}',
     '{"type":"done","command":1}',
     '{"type":"done","command":1,"result":"[]","error":"bad"}',
     '{"type":"done","command":-1,"result":"[]"}',
@@ -382,6 +459,8 @@ describe('NativeFrameSession', () => {
   });
 
   it.each([
+    '{"type":"accountAuth","credential":"primary","scope":"orders","outcome":"rejected"}',
+    '{"type":"accountAuth","credential":"secondary","scope":"balance","outcome":"accepted"}',
     '{"type":"done","command":0,"error":"unsupported"}',
     '{"type":"error","error":"invalid command"}',
     '{"type":"error","command":3,"error":"invalid command"}',

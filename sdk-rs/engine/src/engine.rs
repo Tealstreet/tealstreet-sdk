@@ -116,8 +116,39 @@ pub enum LogLevel {
     Error,
 }
 
+/// Construction-time signer slot, captured before dispatching an account read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CredentialSlot {
+    Primary,
+    Secondary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountReadScope {
+    Account,
+    Balance,
+    Orders,
+    Positions,
+    Settings,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthOutcome {
+    Accepted,
+    Rejected,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
+    /// Definitive evidence from a credential-bearing private account read.
+    AccountAuth {
+        credential: CredentialSlot,
+        scope: AccountReadScope,
+        outcome: AuthOutcome,
+    },
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
     Log {
@@ -463,10 +494,42 @@ struct PollTimer {
     physical: Option<TimerId>,
 }
 
+#[derive(Clone, Copy)]
+struct ReadAuth {
+    credential: CredentialSlot,
+    scope: AccountReadScope,
+}
+
+struct PendingHttp<P> {
+    value: P,
+    auth: Option<ReadAuth>,
+}
+
+fn observe_account_auth<V: Venue>(
+    venue: &V,
+    pending: &PendingHttp<V::Pending>,
+    response: &Response<'_>,
+    expected_list_present: bool,
+    actions: &mut Vec<Action>,
+) {
+    let Some(auth) = pending.auth else { return };
+    let Some(outcome) = venue.account_auth_outcome(&pending.value, response) else {
+        return;
+    };
+    if outcome == AuthOutcome::Accepted && !expected_list_present {
+        return;
+    }
+    actions.push(Action::Notice(Notice::AccountAuth {
+        credential: auth.credential,
+        scope: auth.scope,
+        outcome,
+    }));
+}
+
 struct Io<P> {
     actions: Vec<Action>,
     public_feed_policy: PublicFeedPolicy,
-    pending: HashMap<RequestId, P>,
+    pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     streams: HashMap<RequestId, ArrayAt>,
     incoming: HashMap<RequestId, Incoming>,
@@ -722,7 +785,13 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> RequestId {
         let id = RequestId(self.io.next());
-        self.io.pending.insert(id, pending);
+        self.io.pending.insert(
+            id,
+            PendingHttp {
+                value: pending,
+                auth: None,
+            },
+        );
         self.io.actions.push(Action::Http(HttpRequest {
             id,
             method,
@@ -734,6 +803,18 @@ impl<P> Cx<'_, P> {
             body,
         }));
         id
+    }
+
+    /// Tag only credential-bearing private account reads, after signer selection.
+    pub fn tag_account_read(
+        &mut self,
+        request: RequestId,
+        credential: CredentialSlot,
+        scope: AccountReadScope,
+    ) {
+        if let Some(pending) = self.io.pending.get_mut(&request) {
+            pending.auth = Some(ReadAuth { credential, scope });
+        }
     }
 
     /// Hold a request until its host returns the delegated signature.
@@ -760,7 +841,8 @@ impl<P> Cx<'_, P> {
                 .io
                 .pending
                 .remove(&id)
-                .expect("new request continuation"));
+                .expect("new request continuation")
+                .value);
         }
         let timeout_ms = http.timeout_ms.unwrap_or(20_000).max(1);
         self.io.signatures.push((
@@ -991,6 +1073,15 @@ pub trait Venue {
     }
     /// Per-request continuation: what to do with the response.
     type Pending;
+    /// Observe typed final authentication evidence without changing retry or state.
+    /// Unknown, malformed, stale and intermediate retry responses return `None`.
+    fn account_auth_outcome(
+        &self,
+        _pending: &Self::Pending,
+        _response: &Response<'_>,
+    ) -> Option<AuthOutcome> {
+        None
+    }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
         &mut self,
@@ -1392,7 +1483,7 @@ impl<V: Venue> Engine<V> {
                     Err(error) => {
                         cx.io.streams.remove(&request);
                         if let Some(pending) = cx.io.pending.remove(&request) {
-                            self.venue.on_sign_failed(&mut cx, pending, error);
+                            self.venue.on_sign_failed(&mut cx, pending.value, error);
                         }
                     }
                 }
@@ -1401,7 +1492,7 @@ impl<V: Venue> Engine<V> {
                 if cx.io.take_signature(request).is_some() {
                     cx.io.streams.remove(&request);
                     if let Some(pending) = cx.io.pending.remove(&request) {
-                        self.venue.on_sign_failed(&mut cx, pending, error);
+                        self.venue.on_sign_failed(&mut cx, pending.value, error);
                     }
                 }
             }
@@ -1410,7 +1501,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
-                    self.venue.on_request_failed(&mut cx, pending, error);
+                    self.venue.on_request_failed(&mut cx, pending.value, error);
                 }
             }
             Event::TimerFired { timer } => {
@@ -1499,7 +1590,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         let venue = &mut self.venue;
-        splitter.feed(data, |item| venue.on_item(&mut cx, &mut pending, item));
+        splitter.feed(data, |item| {
+            venue.on_item(&mut cx, &mut pending.value, item)
+        });
         self.io.pending.insert(request, pending);
         if let Some(incoming) = self.io.incoming.get_mut(&request) {
             incoming.splitter = Some(splitter);
@@ -1525,29 +1618,37 @@ impl<V: Venue> Engine<V> {
             if !splitter.finished() {
                 let body = splitter.envelope();
                 if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
-                    self.venue.on_stream_error(
-                        &mut cx,
-                        pending,
-                        Response {
-                            status: incoming.status,
-                            headers: &incoming.headers,
-                            body,
-                        },
+                    let response = Response {
+                        status: incoming.status,
+                        headers: &incoming.headers,
+                        body,
+                    };
+                    observe_account_auth(
+                        &self.venue,
+                        &pending,
+                        &response,
+                        false,
+                        &mut cx.io.actions,
                     );
+                    self.venue.on_stream_error(&mut cx, pending.value, response);
                     return;
                 }
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
-                self.venue.on_request_failed(&mut cx, pending, &message);
+                self.venue
+                    .on_request_failed(&mut cx, pending.value, &message);
                 return;
             }
             // Every selector retains the fully validated envelope, with its array emptied.
             let body = match std::str::from_utf8(outside) {
                 Ok(body) => body,
                 Err(_) => {
-                    self.venue
-                        .on_request_failed(&mut cx, pending, "stream envelope is not UTF-8");
+                    self.venue.on_request_failed(
+                        &mut cx,
+                        pending.value,
+                        "stream envelope is not UTF-8",
+                    );
                     return;
                 }
             };
@@ -1556,22 +1657,24 @@ impl<V: Venue> Engine<V> {
                 headers: &incoming.headers,
                 body,
             };
-            self.venue.on_response(&mut cx, pending, response);
+            observe_account_auth(&self.venue, &pending, &response, true, &mut cx.io.actions);
+            self.venue.on_response(&mut cx, pending.value, response);
             return;
         }
         match std::str::from_utf8(&incoming.body) {
-            Ok(body) => self.venue.on_response(
-                &mut cx,
-                pending,
-                Response {
+            Ok(body) => {
+                let response = Response {
                     status: incoming.status,
                     headers: &incoming.headers,
                     body,
-                },
-            ),
-            Err(_) => self
-                .venue
-                .on_request_failed(&mut cx, pending, "response body is not UTF-8"),
+                };
+                observe_account_auth(&self.venue, &pending, &response, true, &mut cx.io.actions);
+                self.venue.on_response(&mut cx, pending.value, response);
+            }
+            Err(_) => {
+                self.venue
+                    .on_request_failed(&mut cx, pending.value, "response body is not UTF-8")
+            }
         }
     }
 

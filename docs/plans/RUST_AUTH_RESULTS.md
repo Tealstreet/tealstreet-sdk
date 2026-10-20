@@ -1,7 +1,7 @@
 # Rust account authentication results — Phase 6b plan
 
-Status: **PLAN ONLY. No authentication-result implementation or end-to-end proof
-is claimed by this document.** Phase 6a's scheduler and SDK option propagation
+Status: **The core/host/SDK foundation is implemented and reviewed; venue
+classifiers and end-to-end native credential proof are still pending.** Phase 6a's scheduler and SDK option propagation
 are separate work. Calling Base auth methods manually does not prove native
 credential backoff. Phase 4 getAccount inventory and its future implementation
 batches also remain separate; this plan implements neither getAccount nor

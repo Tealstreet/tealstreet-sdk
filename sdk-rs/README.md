@@ -109,3 +109,12 @@ events report net realized PnL (`closedPnl - fee`) and the execution fee; openin
 fills omit both. MEXC and WEEX retain their live realized-PnL fields and absolute
 fees. This does not change the separate gross realized-PnL convention used by
 historical execution queries.
+
+
+Private account-read dispatchers may call `Cx::tag_account_read` after selecting
+the signer. The pure `Venue::account_auth_outcome` hook returns only definitive
+final evidence, respecting typed validity, existing retry admission and session
+generation fences. Core preserves captured slot/scope through streamed and
+buffered continuations, suppresses recovery on missing lists, and emits ordered
+`Notice::AccountAuth` context to the host. Public/unsigned/trading requests remain
+untagged; generic HTTP or business success is not credential evidence.

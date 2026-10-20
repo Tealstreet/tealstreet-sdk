@@ -1102,3 +1102,15 @@ Custom provider upgrade headers require a capable host and are checked before
 engine construction. History `orderId`/`status` filters fail explicitly rather
 than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
 for native IDs, margin modes, caller IDs and socket capacity.
+
+
+## Native credential polling feedback
+
+Rust account-read notices carry the construction-time signer slot and read
+scope, never credentials or response bodies. Bounded counters isolate primary
+and secondary Account/Balance/Orders/Positions/Settings failures; only matching
+accepted evidence clears a counter. Their maximum drives the existing Base
+polling policy, including server slowdown and Infinity. Unknown, public,
+unsigned and retry-intermediate results do not clear or create failures.
+Coinbase currently uses primary JWT credentials only: saved read fields and
+their proxy are dropped from effective options with a warning before startup.

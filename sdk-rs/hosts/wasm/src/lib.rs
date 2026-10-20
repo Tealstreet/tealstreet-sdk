@@ -435,6 +435,11 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    AccountAuth {
+        credential: safe_cex_engine::CredentialSlot,
+        scope: safe_cex_engine::AccountReadScope,
+        outcome: safe_cex_engine::AuthOutcome,
+    },
     Deactivate,
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
@@ -582,6 +587,15 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::AccountAuth {
+                credential,
+                scope,
+                outcome,
+            }) => ActionOut::AccountAuth {
+                credential: *credential,
+                scope: *scope,
+                outcome: *outcome,
+            },
             Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::CommandError { command, message }) => ActionOut::CommandError {
                 command: *command,
@@ -1295,6 +1309,31 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn account_auth_serializes_scoped_credential_evidence_before_following_actions() {
+        use safe_cex_engine::{AccountReadScope, Action, AuthOutcome, CredentialSlot, Notice};
+        let encoded = super::encode(&[
+            Action::Notice(Notice::AccountAuth {
+                credential: CredentialSlot::Secondary,
+                scope: AccountReadScope::Orders,
+                outcome: AuthOutcome::Rejected,
+            }),
+            Action::Notice(Notice::AccountAuth {
+                credential: CredentialSlot::Primary,
+                scope: AccountReadScope::Balance,
+                outcome: AuthOutcome::Accepted,
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 7,
+                result: Ok("[]".into()),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"accountAuth","credential":"secondary","scope":"orders","outcome":"rejected"},{"op":"accountAuth","credential":"primary","scope":"balance","outcome":"accepted"},{"op":"done","command":7,"result":"[]"}]"#
+        );
+    }
+
     #[test]
     fn command_progress_serializes_native_identity_namespaces_in_action_order() {
         use safe_cex_engine::{Action, Notice, OrderIdentityKind, OrderIdentityReceipt};

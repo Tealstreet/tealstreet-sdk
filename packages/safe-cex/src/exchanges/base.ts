@@ -569,6 +569,12 @@ export class BaseExchange implements Exchange {
     this._authFailureStreak = 0;
   }
 
+  /** Native adapters aggregate fixed signer/scope streaks under the same Base cap. */
+  protected setAuthFailureStreak(streak: number): number {
+    if (!Number.isFinite(streak)) throw new RangeError('Authentication streak must be finite');
+    return (this._authFailureStreak = Math.max(0, Math.min(AUTH_FAILURE_MAX_STREAK, Math.trunc(streak))));
+  }
+
   /** Test/diagnostic accessor — not part of the consumer contract. */
   get authFailureStreak() {
     return this._authFailureStreak;
