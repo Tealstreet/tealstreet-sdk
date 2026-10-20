@@ -1,5 +1,52 @@
 # Binance Exchange Integration
 
+## Rust profiles
+
+`sdk-rs/venues/binance` implements all four profiles through `Options.variant`
+and one endpoint table. The legacy `portfolio_margin` flag remains compatible.
+`binance`, `binancepm`, `binanceinverse` and `binancespot` select the corresponding
+profile through the WASM host and worker adapter.
+
+COIN-M placement and order amounts are native contract counts; market
+`contractSize` is USD per contract. Position `contracts` remains base quantity
+at the mark price, `notional` is native quantity times contract size, and
+position PnL/margin remains in collateral coin. Aggregate wallet balances are
+USD-valued; an unpriced coin retains its native balance without inventing a USD
+price. Stops, trailing orders and regular orders share COIN-M's regular order
+endpoints. COIN-M caller client IDs remain unsupported and reject the entire
+batch before writes.
+
+Spot uses signed `userDataStream.subscribe.signature`, checks the matching
+subscription ACK and subscription ID, and checks `session.subscriptions` for
+liveness. It exposes native per-asset free/used/total currency balances alongside
+USD totals and coin amounts. Full snapshots replace assets; partial socket
+updates retain untouched assets and explicit zeros. It has no derivative positions/settings. Spot
+order identity is the native client ID. A cancel/replace preserves time in
+force but generates a new client ID. Spot/COIN-M cancellation replies must prove
+native identity, terminal status and cumulative quantity before replacement.
+Amendment recomputes the remaining size after the acknowledgement and racing
+fills; Filled wins, and ambiguous/unknown cancellation never places a replacement.
+Cancel-all handles Spot order-list/OCO replies atomically and preserves native
+terminal fences against stale replicas and reused client IDs. Whole-batch validation rejects unsupported
+trailing/conditional parameters, derivative execution flags, invalid triggers
+and client IDs before cancellation or placement.
+
+The shared engine STP option is currently AsterDEX-only: every Binance profile
+rejects it for the whole batch before any action. Newly shared STP, native
+account/book and symbol-aware cancel commands complete with an explicit
+unsupported error instead of leaving their command pending.
+
+Spot public ticker streams use individual `@ticker` topics, with bid/ask from
+the same event, split into sockets of at most 1024 topics with stable feed
+identities. Each control frame is capped at 128 topics and 4096 UTF-8 bytes,
+paced at 400 ms per socket: Node WebSocket compression otherwise caused live
+`Payload too long` policy closes. The retired `!bookTicker` and `!ticker@arr` topics are not used.
+Depth and candles use a separate feed; Spot continuity uses the `U`/`u` range,
+while futures additionally require `pu` continuity after synchronization.
+Sources: [Spot changelog](https://developers.binance.com/docs/binance-spot-api-docs/CHANGELOG),
+[Spot user-data requests](https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/user-data-stream-requests),
+[COIN-M orders](https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/New-Order).
+
 This directory contains four Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, and **Portfolio Margin**. All variants share the same directory rather than having separate subdirectories.
 
 ## Exchange Information
@@ -1094,3 +1141,8 @@ HTTP status establishes a definitive miss. Unknown markets are non-definitive;
 malformed, mismatched, authentication and transport failures are errors.
 `EXPIRED_IN_MATCH` is canceled, like `EXPIRED`, in both TS history/lookup and
 Rust; an STP expiration does not mean the order filled.
+
+Rust secondary GET parity includes Spot and COIN-M. Spot uses the selected GET
+client for unsigned catalog/ticker/candle reads, stripping credentials while
+retaining its egress. USD-M/PM/COIN-M separate public clients bypass account
+egress; signed GETs use read credentials and writes/WS auth stay primary.

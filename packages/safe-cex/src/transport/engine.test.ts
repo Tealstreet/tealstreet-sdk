@@ -449,6 +449,31 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     });
   });
 
+  it.each([
+    ['direct', false, false],
+    ['proxy', true, false],
+    ['HOW', true, true],
+  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
+    const raw = makeRaw();
+    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
+    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
+    const opts = options({ tealstreetProxy, tealstreetTunnel });
+    const routed = createEngineTransport('breakoutprop', opts, raw);
+    try {
+      await routed.request(input);
+      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
+      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
+      expect(headers.Authorization).toBe('DXAPI documented-session');
+      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
+      expect(headers['Coinbase-Authorization']).toBeUndefined();
+      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
+      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
+      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
+      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
+      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
+    } finally { routed.dispose!(); }
+  });
+
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
     mocks.adapter.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 9007199254740992 } });
     await expect(
@@ -1367,6 +1392,8 @@ describe('secondary GET identity egress', () => {
   const venues: Array<[ExchangeName, string]> = [
     ['binance', 'X-MBX-APIKEY'],
     ['binancepm', 'X-MBX-APIKEY'],
+    ['binancespot', 'X-MBX-APIKEY'],
+    ['binanceinverse', 'X-MBX-APIKEY'],
     ['bybit', 'X-BAPI-API-KEY'],
     ['bybitinverse', 'X-BAPI-API-KEY'],
     ['bybitspot', 'X-BAPI-API-KEY'],
@@ -1419,12 +1446,13 @@ describe('secondary GET identity egress', () => {
         expect(raw.request.mock.lastCall![0].url).toBe(primaryUrl);
       }
       await routed.request({ ...input, headers: {} });
-      if (venue === 'binance' || venue === 'binancepm')
+      if (['binance', 'binancepm', 'binanceinverse'].includes(venue))
         expect(raw.request.mock.lastCall![0].url).not.toContain('secondary.example');
       else expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
       expect(raw.request.mock.lastCall![0].headers[header.toLowerCase()]).toBeUndefined();
       const plan = resolveEngineRoutingPlan(venue, opts, 'https://venue.example');
       expect(plan.readHeader).toBe(header);
+      expect(plan.readPublic).toBe(!['binance', 'binancepm', 'binanceinverse'].includes(venue));
       expect(plan.readHttp?.prefix).toBe('https://secondary.example/egress');
       expect(JSON.stringify({ readHeader: plan.readHeader, readHttp: plan.readHttp })).not.toMatch(
         /read-secret|read-pass|venue-key/,

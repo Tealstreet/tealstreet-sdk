@@ -1427,6 +1427,7 @@ export class BaseExchange implements Exchange {
       ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
       this.name === 'bitgetinverse',
       ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
+      this.name === 'binanceinverse',
     );
     const frame = new Frame(buffer);
     this.workerFrameApplier.apply(frame);

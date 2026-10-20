@@ -1,5 +1,4 @@
-//! Binance USD-M futures, and portfolio margin's USD-M side, on the sans-I/O
-//! engine. Both use USD-M public data; their accounts differ (see `paths`).
+//! Binance market and account families on the sans-I/O engine.
 mod account;
 mod history;
 mod paths;
@@ -14,7 +13,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use wire::*;
 
 const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
@@ -27,10 +26,20 @@ const SILENCE_LIMIT_MS: f64 = 20_000.0;
 const WEIGHT_PAUSE_THRESHOLD: f64 = 1_920.0;
 const WEIGHT_PAUSE_MS: f64 = 60_000.0;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Variant {
+    #[default]
+    UsdM,
+    PortfolioMargin,
+    CoinM,
+    Spot,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
+    pub variant: Variant,
     /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -52,17 +61,17 @@ impl Urls {
     fn for_options(options: &Options, paths: &paths::Paths) -> Self {
         if options.testnet {
             Self {
-                rest: "https://demo-fapi.binance.com",
-                public_ws: "wss://demo-fstream.binance.com/public/ws",
-                market_ws: "wss://demo-fstream.binance.com/market/ws",
+                rest: paths.public_rest_testnet,
+                public_ws: paths.public_ws_testnet,
+                market_ws: paths.market_ws_testnet,
                 account_rest: paths.rest_testnet,
                 private_ws: paths.private_ws_testnet,
             }
         } else {
             Self {
-                rest: "https://fapi.binance.com",
-                public_ws: "wss://fstream.binance.com/public/ws",
-                market_ws: "wss://fstream.binance.com/market/ws",
+                rest: paths.public_rest,
+                public_ws: paths.public_ws,
+                market_ws: paths.market_ws,
                 account_rest: paths.rest,
                 private_ws: paths.private_ws,
             }
@@ -79,7 +88,7 @@ pub enum Pending {
     PremiumIndex,
     DepthSnapshot {
         symbol: String,
-        generation: u32,
+        generation: u64,
     },
     Klines {
         command: CommandId,
@@ -95,6 +104,7 @@ enum Channel {
     Public,
     Market,
     Private,
+    SpotTicker(usize),
 }
 
 struct Connection {
@@ -105,6 +115,10 @@ struct Connection {
     watchdog: Option<TimerId>,
     last_received: f64,
     next_request_id: u64,
+    subscriptions: Vec<u64>,
+    send_queue: VecDeque<(String, Vec<String>)>,
+    send_timer: Option<TimerId>,
+    next_send_at: f64,
 }
 
 impl Connection {
@@ -117,6 +131,10 @@ impl Connection {
             watchdog: None,
             last_received: 0.0,
             next_request_id: 10,
+            subscriptions: Vec::new(),
+            send_queue: VecDeque::new(),
+            send_timer: None,
+            next_send_at: 0.0,
         }
     }
 }
@@ -148,7 +166,7 @@ struct BookState {
     subscribers: u32,
     book: Book,
     sync: Sync,
-    generation: u32,
+    generation: u64,
     failures: u32,
 }
 
@@ -185,7 +203,10 @@ pub struct BinanceFutures {
     public: Connection,
     market: Connection,
     private: Connection,
+    spot_tickers: Vec<Connection>,
     books: HashMap<String, BookState>,
+    /// Removing and re-adding a book must not reuse an in-flight snapshot ID.
+    snapshot_generation: u64,
     candles: HashMap<(String, String), u32>,
     ticker_seed: TickerSeed,
     /// Depth snapshots are paused until this time after a 418 or 429.
@@ -198,11 +219,16 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
-    pub fn new(options: Options) -> Self {
-        let paths = if options.portfolio_margin {
-            &paths::PORTFOLIO_MARGIN
-        } else {
-            &paths::USD_M
+    pub fn new(mut options: Options) -> Self {
+        if options.variant == Variant::UsdM && options.portfolio_margin {
+            options.variant = Variant::PortfolioMargin;
+        }
+        options.portfolio_margin = options.variant == Variant::PortfolioMargin;
+        let paths = match options.variant {
+            Variant::UsdM => &paths::USD_M,
+            Variant::PortfolioMargin => &paths::PORTFOLIO_MARGIN,
+            Variant::CoinM => &paths::COIN_M,
+            Variant::Spot => &paths::SPOT,
         };
         let urls = Urls::for_options(&options, paths);
         let credentials = match (&options.key, &options.secret) {
@@ -222,7 +248,9 @@ impl BinanceFutures {
             public: Connection::new(),
             market: Connection::new(),
             private: Connection::new(),
+            spot_tickers: Vec::new(),
             books: HashMap::new(),
+            snapshot_generation: 0,
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
             rest_paused_until: 0.0,
@@ -233,17 +261,39 @@ impl BinanceFutures {
         }
     }
 
+    fn is_spot(&self) -> bool {
+        self.options.variant == Variant::Spot
+    }
+
+    fn is_inverse(&self) -> bool {
+        self.options.variant == Variant::CoinM
+    }
+
+    fn shared_public_socket(&self) -> bool {
+        self.urls.public_ws == self.urls.market_ws
+    }
+
+    fn candle_channel(&self) -> Channel {
+        if self.shared_public_socket() {
+            Channel::Public
+        } else {
+            Channel::Market
+        }
+    }
+
     fn connection(&mut self, channel: Channel) -> &mut Connection {
         match channel {
             Channel::Public => &mut self.public,
             Channel::Market => &mut self.market,
             Channel::Private => &mut self.private,
+            Channel::SpotTicker(index) => &mut self.spot_tickers[index],
         }
     }
 
     fn channel_of(&self, socket: SocketId) -> Option<Channel> {
         [Channel::Public, Channel::Market, Channel::Private]
             .into_iter()
+            .chain((0..self.spot_tickers.len()).map(Channel::SpotTicker))
             .find(|&channel| self.connection_ref(channel).socket == Some(socket))
     }
 
@@ -252,6 +302,7 @@ impl BinanceFutures {
             Channel::Public => &self.public,
             Channel::Market => &self.market,
             Channel::Private => &self.private,
+            Channel::SpotTicker(index) => &self.spot_tickers[index],
         }
     }
 
@@ -329,14 +380,20 @@ impl BinanceFutures {
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
-        let socket = cx.connect_channel(
-            url,
-            if matches!(channel, Channel::Private) {
-                safe_cex_engine::SocketChannel::Private
-            } else {
-                safe_cex_engine::SocketChannel::Public
-            },
-        );
+        let role = if matches!(channel, Channel::Private) {
+            safe_cex_engine::SocketChannel::Private
+        } else {
+            safe_cex_engine::SocketChannel::Public
+        };
+        let socket = if self.is_spot() && channel != Channel::Private {
+            let feed = match channel {
+                Channel::SpotTicker(index) => format!("spot-ticker-{index}"),
+                _ => "spot-books".to_owned(),
+            };
+            cx.connect_feed(url, role, feed, false)
+        } else {
+            cx.connect_channel(url, role)
+        };
         let connection = self.connection(channel);
         connection.socket = Some(socket);
         connection.open = false;
@@ -344,7 +401,7 @@ impl BinanceFutures {
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
         let url = match channel {
-            Channel::Public => self.urls.public_ws,
+            Channel::Public | Channel::SpotTicker(_) => self.urls.public_ws,
             Channel::Market => self.urls.market_ws,
             Channel::Private => return self.request_listen_key(cx),
         };
@@ -399,8 +456,15 @@ impl BinanceFutures {
             self.on_socket_closed(cx, channel, 4000);
             return;
         }
+        if matches!(channel, Channel::Public | Channel::SpotTicker(_)) && self.is_spot() {
+            cx.send(socket, "{\"id\":0,\"method\":\"LIST_SUBSCRIPTIONS\"}");
+        }
         if channel == Channel::Private {
-            cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}");
+            if self.is_spot() {
+                self.ping_spot_account(cx);
+            } else {
+                cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}");
+            }
         }
         self.watch(cx, channel);
     }
@@ -409,6 +473,12 @@ impl BinanceFutures {
         let connection = self.connection(channel);
         connection.socket = None;
         connection.open = false;
+        connection.subscriptions.clear();
+        connection.send_queue.clear();
+        if let Some(timer) = connection.send_timer.take() {
+            cx.clear_timer(timer);
+        }
+        connection.next_send_at = 0.0;
         connection.attempts += 1;
         if let Some(watchdog) = connection.watchdog.take() {
             cx.clear_timer(watchdog);
@@ -417,6 +487,7 @@ impl BinanceFutures {
         let timer = cx.set_timer(delay);
         self.connection(channel).reconnect = Some(timer);
         if channel == Channel::Private {
+            self.reset_spot_subscription(cx);
             self.account.resync_orders_on_open = true;
         }
         cx.log(
@@ -425,7 +496,70 @@ impl BinanceFutures {
         );
     }
 
+    /// Keep Spot control frames below the native WebSocket server's payload
+    /// limit and its five inbound messages per second budget.
     fn send_subscribe(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        channel: Channel,
+        method: &str,
+        params: &[String],
+    ) {
+        if !self.is_spot() || channel == Channel::Private {
+            self.send_subscription(cx, channel, method, params);
+            return;
+        }
+        if !self.connection_ref(channel).open {
+            return;
+        }
+        let mut chunk = Vec::new();
+        let mut bytes = 128; // Envelope, method, request ID and punctuation.
+        for topic in params {
+            let encoded = serde_json::to_string(topic).expect("string");
+            if encoded.len() + 128 >= 4096 {
+                cx.log(
+                    LogLevel::Error,
+                    "Binance Spot stream name exceeds the control frame limit",
+                );
+                return;
+            }
+            if chunk.len() == 128 || bytes + encoded.len() + 1 >= 4096 {
+                self.connection(channel)
+                    .send_queue
+                    .push_back((method.to_owned(), std::mem::take(&mut chunk)));
+                bytes = 128;
+            }
+            bytes += encoded.len() + 1;
+            chunk.push(topic.clone());
+        }
+        if !chunk.is_empty() {
+            self.connection(channel)
+                .send_queue
+                .push_back((method.to_owned(), chunk));
+        }
+        self.pump_subscriptions(cx, channel);
+    }
+
+    fn pump_subscriptions(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        let now = cx.now;
+        let connection = self.connection(channel);
+        if !connection.open || connection.send_timer.is_some() || connection.send_queue.is_empty() {
+            return;
+        }
+        if now < connection.next_send_at {
+            connection.send_timer = Some(cx.set_timer(connection.next_send_at - now));
+            return;
+        }
+        let (method, params) = connection.send_queue.pop_front().expect("nonempty queue");
+        connection.next_send_at = now + 400.0;
+        self.send_subscription(cx, channel, &method, &params);
+        let connection = self.connection(channel);
+        if !connection.send_queue.is_empty() {
+            connection.send_timer = Some(cx.set_timer(400.0));
+        }
+    }
+
+    fn send_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         channel: Channel,
@@ -441,14 +575,13 @@ impl BinanceFutures {
         }
         connection.next_request_id += 1;
         let id = connection.next_request_id;
-        let params = params
-            .iter()
-            .map(|p| format!("\"{p}\""))
-            .collect::<Vec<_>>()
-            .join(",");
+        if self.options.variant == Variant::Spot {
+            self.connection(channel).subscriptions.push(id);
+        }
+        let params = serde_json::to_string(params).expect("string list");
         cx.send(
             socket,
-            format!("{{\"method\":\"{method}\",\"params\":[{params}],\"id\":{id}}}"),
+            format!("{{\"method\":\"{method}\",\"params\":{params},\"id\":{id}}}"),
         );
     }
 
@@ -496,19 +629,22 @@ impl BinanceFutures {
             failed: false,
         };
         cx.store.set_markets(markets);
-        if self.credentials.is_some() {
+        if self.credentials.is_some() && !self.is_spot() {
             self.request_leverage_brackets(cx);
         }
-        self.get_streamed(cx, "/fapi/v1/ticker/24hr", ArrayAt::Root, Pending::Daily);
+        self.get_streamed(cx, self.paths.daily, ArrayAt::Root, Pending::Daily);
+        if self.is_spot() {
+            return;
+        }
         self.get_streamed(
             cx,
-            "/fapi/v1/ticker/bookTicker",
+            self.paths.book_tickers,
             ArrayAt::Root,
             Pending::BookTickers,
         );
         self.get_streamed(
             cx,
-            "/fapi/v1/premiumIndex",
+            self.paths.premium_index,
             ArrayAt::Root,
             Pending::PremiumIndex,
         );
@@ -553,7 +689,12 @@ impl BinanceFutures {
     }
 
     fn try_seed_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.ticker_seed.finished != source::ALL {
+        let required = if self.is_spot() {
+            source::DAILY
+        } else {
+            source::ALL
+        };
+        if self.ticker_seed.finished != required {
             return;
         }
         let seed = std::mem::take(&mut self.ticker_seed);
@@ -563,7 +704,7 @@ impl BinanceFutures {
             seed.tickers
                 .into_iter()
                 .zip(seed.reported)
-                .filter(|(_, reported)| *reported == source::ALL)
+                .filter(|(_, reported)| *reported == required)
                 .map(|(ticker, _)| ticker)
                 .collect()
         };
@@ -583,12 +724,21 @@ impl BinanceFutures {
             cx.store.set_balance(Default::default());
         }
         self.connect(cx, Channel::Public);
-        self.connect(cx, Channel::Market);
+        if self.is_spot() {
+            self.spot_tickers = (0..cx.store.markets().len().div_ceil(1_024))
+                .map(|_| Connection::new())
+                .collect();
+            for index in 0..self.spot_tickers.len() {
+                self.connect(cx, Channel::SpotTicker(index));
+            }
+        } else if !self.shared_public_socket() {
+            self.connect(cx, Channel::Market);
+        }
     }
 
     fn on_public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         match event_type(text) {
-            Some("bookTicker") => {
+            Some("bookTicker") | None if self.is_spot() || event_type(text).is_some() => {
                 if let Ok(event) = serde_json::from_str::<BookTickerEvent>(text) {
                     let (bid, ask) = (num::parse(&event.b), num::parse(&event.a));
                     cx.store.update_ticker(&event.s, |t| {
@@ -606,21 +756,45 @@ impl BinanceFutures {
         }
     }
 
+    fn apply_ticker(&self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+        let last = num::parse(&event.c);
+        let percentage = num::parse(&event.percentage);
+        let volume = num::parse(&event.v);
+        let quote_volume = num::parse(
+            event
+                .q
+                .as_deref()
+                .or(event.base_volume.as_deref())
+                .unwrap_or("0"),
+        );
+        cx.store.update_ticker(&event.s, |t| {
+            t.last = last;
+            if self.is_spot() {
+                t.mark = last;
+                t.index = last;
+                if let Some(bid) = event.bid.as_deref() {
+                    t.bid = num::parse(bid);
+                }
+                if let Some(ask) = event.ask.as_deref() {
+                    t.ask = num::parse(ask);
+                }
+            }
+            t.percentage = percentage;
+            t.volume = volume;
+            t.quote_volume = quote_volume;
+        });
+    }
+
     fn on_market_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         match event_type(text) {
             Some("24hrTicker") => {
-                if let Ok(events) = serde_json::from_str::<Vec<TickerEvent>>(text) {
+                if self.is_spot() && !text.trim_start().starts_with('[') {
+                    if let Ok(event) = serde_json::from_str::<TickerEvent>(text) {
+                        self.apply_ticker(cx, event);
+                    }
+                } else if let Ok(events) = serde_json::from_str::<Vec<TickerEvent>>(text) {
                     for event in events {
-                        let last = num::parse(&event.c);
-                        let percentage = num::parse(&event.percentage);
-                        let volume = num::parse(&event.v);
-                        let quote_volume = num::parse(&event.q);
-                        cx.store.update_ticker(&event.s, |t| {
-                            t.last = last;
-                            t.percentage = percentage;
-                            t.volume = volume;
-                            t.quote_volume = quote_volume;
-                        });
+                        self.apply_ticker(cx, event);
                     }
                 }
             }
@@ -664,10 +838,14 @@ impl BinanceFutures {
             Sync::Idle if paused => {}
             Sync::Idle => {
                 state.sync = Sync::Buffering(vec![buffered(&event)]);
-                state.generation += 1;
+                self.snapshot_generation += 1;
+                state.generation = self.snapshot_generation;
                 let generation = state.generation;
                 let symbol = event.s.to_string();
-                let path = format!("/fapi/v1/depth?symbol={symbol}&limit={DEPTH_SNAPSHOT_LIMIT}");
+                let path = format!(
+                    "{}?symbol={symbol}&limit={DEPTH_SNAPSHOT_LIMIT}",
+                    self.paths.depth
+                );
                 self.get(cx, &path, Pending::DepthSnapshot { symbol, generation });
             }
             Sync::Buffering(updates) if updates.len() >= MAX_BUFFERED_DIFFS => {
@@ -682,7 +860,7 @@ impl BinanceFutures {
                 if event.final_update_id <= last {
                     return;
                 }
-                let continuous = if *awaiting_first {
+                let continuous = if *awaiting_first || self.options.variant == Variant::Spot {
                     event.first_update_id <= last + 1
                 } else {
                     event.pu == Some(last)
@@ -724,7 +902,7 @@ impl BinanceFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        generation: u32,
+        generation: u64,
         status: u16,
         body: &str,
     ) {
@@ -779,7 +957,7 @@ impl BinanceFutures {
             .into_iter()
             .filter(|u| u.last > snapshot.last_update_id)
         {
-            let continuous = if awaiting_first {
+            let continuous = if awaiting_first || self.options.variant == Variant::Spot {
                 update.first <= last_applied + 1
             } else {
                 update.previous == Some(last_applied)
@@ -806,6 +984,16 @@ impl BinanceFutures {
     }
 
     fn subscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        if self.is_spot()
+            && !self.books.contains_key(&symbol)
+            && self.books.len() + self.candles.len() >= 1_024
+        {
+            cx.log(
+                LogLevel::Error,
+                "Binance Spot supports at most 1024 combined book/candle streams per account",
+            );
+            return;
+        }
         let state = self
             .books
             .entry(symbol.clone())
@@ -861,7 +1049,9 @@ fn filter_value<'a>(filter: Option<&Filter<'a>>, pick: fn(&Filter<'a>) -> Option
     filter.and_then(pick).unwrap_or(f64::NAN)
 }
 
-fn market_from_wire(m: &SymbolInfo<'_>) -> Market {
+fn market_from_wire(m: &SymbolInfo<'_>, variant: Variant) -> Market {
+    let spot = variant == Variant::Spot;
+    let inverse = variant == Variant::CoinM;
     let filter = |kind: &str| m.filters.iter().find(|f| f.filter_type == kind);
     let price = filter("PRICE_FILTER");
     let lot = filter("LOT_SIZE");
@@ -869,28 +1059,63 @@ fn market_from_wire(m: &SymbolInfo<'_>) -> Market {
     let min_qty: fn(&Filter<'_>) -> Option<f64> = |f| f.min_qty.as_deref().map(num::parse);
     let max_qty: fn(&Filter<'_>) -> Option<f64> = |f| f.max_qty.as_deref().map(num::parse);
     Market {
-        id: format!("{}/{}:{}", m.base_asset, m.quote_asset, m.margin_asset),
+        id: if spot {
+            format!("{}/{}", m.base_asset, m.quote_asset)
+        } else {
+            format!("{}/{}:{}", m.base_asset, m.quote_asset, m.margin_asset)
+        },
         symbol: m.symbol.to_string(),
         pretty_symbol: None,
         base: m.base_asset.to_string(),
         quote: m.quote_asset.to_string(),
         active: m.status == "TRADING",
         precision: Precision {
-            amount: filter_value(lot, |f| f.step_size.as_deref().map(num::parse)),
-            price: filter_value(price, |f| f.tick_size.as_deref().map(num::parse)),
+            amount: {
+                let step = filter_value(lot, |f| f.step_size.as_deref().map(num::parse));
+                if step > 0.0 {
+                    step
+                } else if spot {
+                    10f64.powi(-m.base_asset_precision)
+                } else if inverse {
+                    1.0
+                } else {
+                    step
+                }
+            },
+            price: {
+                let step = filter_value(price, |f| f.tick_size.as_deref().map(num::parse));
+                if spot && (!step.is_finite() || step <= 0.0) {
+                    10f64.powi(-m.quote_asset_precision)
+                } else {
+                    step
+                }
+            },
         },
         limits: Limits {
             amount: MinMax {
-                min: filter_value(lot, min_qty).max(filter_value(market_lot, min_qty)),
-                max: filter_value(lot, max_qty).min(filter_value(market_lot, max_qty)),
+                min: if spot {
+                    filter_value(lot, min_qty).max(0.0)
+                } else {
+                    filter_value(lot, min_qty).max(filter_value(market_lot, min_qty))
+                },
+                max: if spot {
+                    let max = filter_value(lot, max_qty);
+                    if max > 0.0 { max } else { 999_999_999.0 }
+                } else {
+                    filter_value(lot, max_qty).min(filter_value(market_lot, max_qty))
+                },
             },
             leverage: MinMax { min: 1.0, max: 1.0 },
             price: None,
         },
-        contract_size: None,
+        contract_size: inverse.then_some(if m.contract_size > 0.0 {
+            m.contract_size
+        } else {
+            1.0
+        }),
         is_expiring: None,
-        is_inverse: None,
-        is_spot: None,
+        is_inverse: inverse.then_some(true),
+        is_spot: spot.then_some(true),
         is_perpetual: None,
         is_read_only: None,
         taker_fee: None,
@@ -936,7 +1161,7 @@ impl Venue for BinanceFutures {
         }
         self.get_streamed(
             cx,
-            "/fapi/v1/exchangeInfo",
+            self.paths.exchange_info,
             ArrayAt::Field("symbols"),
             Pending::ExchangeInfo(Vec::new()),
         );
@@ -963,6 +1188,14 @@ impl Venue for BinanceFutures {
                     state.book.clear();
                     state.sync = Sync::Idle;
                 }
+                if self.is_spot() {
+                    topics.clear();
+                    topics.extend(self.kline_topics());
+                } else if self.shared_public_socket() {
+                    topics.push("!ticker@arr".to_owned());
+                    topics.push("!markPrice@arr@1s".to_owned());
+                    topics.extend(self.kline_topics());
+                }
                 topics.extend(self.depth_topics());
                 self.send_subscribe(cx, Channel::Public, "SUBSCRIBE", &topics);
             }
@@ -972,6 +1205,17 @@ impl Venue for BinanceFutures {
                 self.send_subscribe(cx, Channel::Market, "SUBSCRIBE", &topics);
             }
             Channel::Private => self.on_private_open(cx),
+            Channel::SpotTicker(index) => {
+                let topics: Vec<_> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .skip(index * 1_024)
+                    .take(1_024)
+                    .map(|market| format!("{}@ticker", market.symbol.to_lowercase()))
+                    .collect();
+                self.send_subscribe(cx, channel, "SUBSCRIBE", &topics);
+            }
         }
     }
 
@@ -980,9 +1224,39 @@ impl Venue for BinanceFutures {
             return;
         };
         self.connection(channel).last_received = cx.now;
+        if self.is_spot() && channel != Channel::Private {
+            if event_type(text) == Some("serverShutdown") {
+                cx.close(socket);
+                self.on_socket_closed(cx, channel, 4000);
+                return;
+            }
+            if event_type(text).is_none()
+                && let Ok(ack) = serde_json::from_str::<SubscriptionAck>(text)
+                && let Some(id) = ack.id
+            {
+                let pending = &mut self.connection(channel).subscriptions;
+                if let Some(at) = pending.iter().position(|request| *request == id) {
+                    pending.swap_remove(at);
+                    if ack.code.is_some_and(|code| code != 0) {
+                        cx.log(
+                            LogLevel::Error,
+                            format!("Binance Spot subscription rejected: {}", ack.msg),
+                        );
+                        cx.close(socket);
+                        self.on_socket_closed(cx, channel, 4000);
+                    }
+                    return;
+                }
+            }
+        }
         match channel {
-            Channel::Public => self.on_public_frame(cx, text),
-            Channel::Market => self.on_market_frame(cx, text),
+            Channel::Public => {
+                self.on_public_frame(cx, text);
+                if self.shared_public_socket() {
+                    self.on_market_frame(cx, text);
+                }
+            }
+            Channel::Market | Channel::SpotTicker(_) => self.on_market_frame(cx, text),
             Channel::Private => self.on_user_event(cx, text),
         }
     }
@@ -1015,19 +1289,36 @@ impl Venue for BinanceFutures {
         match pending {
             Pending::ExchangeInfo(markets) => {
                 if let Ok(m) = serde_json::from_str::<SymbolInfo>(item)
-                    && matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
-                    && matches!(&*m.margin_asset, "USDT" | "USDC")
+                    && (self.is_spot()
+                        || if self.is_inverse() {
+                            m.contract_type == "PERPETUAL" && m.status == "TRADING"
+                        } else {
+                            matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
+                                && matches!(&*m.margin_asset, "USDT" | "USDC")
+                        })
                 {
-                    markets.push(market_from_wire(&m));
+                    markets.push(market_from_wire(&m, self.options.variant));
                 }
             }
             Pending::Daily => {
                 if let Ok(d) = serde_json::from_str::<Daily>(item) {
+                    let inverse = self.is_inverse();
+                    let spot = self.is_spot();
                     self.seed(cx, &d.symbol, source::DAILY, |t| {
                         t.last = num::parse(&d.last_price);
                         t.percentage = num::parse(&d.price_change_percent);
                         t.volume = num::parse(&d.volume);
-                        t.quote_volume = num::parse(&d.quote_volume);
+                        t.quote_volume = num::parse(if inverse {
+                            &d.base_volume
+                        } else {
+                            &d.quote_volume
+                        });
+                        if spot {
+                            t.bid = num::parse(&d.bid_price);
+                            t.ask = num::parse(&d.ask_price);
+                            t.mark = t.last;
+                            t.index = t.last;
+                        }
                     });
                 }
             }
@@ -1088,13 +1379,21 @@ impl Venue for BinanceFutures {
                 state.sync = Sync::Idle;
             }
         }
-        for channel in [Channel::Public, Channel::Market, Channel::Private] {
+        let channels = [Channel::Public, Channel::Market, Channel::Private]
+            .into_iter()
+            .chain((0..self.spot_tickers.len()).map(Channel::SpotTicker))
+            .collect::<Vec<_>>();
+        for channel in channels {
             if self.connection(channel).reconnect == Some(timer) {
                 self.connection(channel).reconnect = None;
                 self.connect(cx, channel);
             }
             if self.connection(channel).watchdog == Some(timer) {
                 self.on_watchdog(cx, channel);
+            }
+            if self.connection(channel).send_timer == Some(timer) {
+                self.connection(channel).send_timer = None;
+                self.pump_subscriptions(cx, channel);
             }
         }
         self.on_account_timer(cx, timer);
@@ -1107,6 +1406,15 @@ impl Venue for BinanceFutures {
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {
+                if self.is_spot()
+                    && !self
+                        .candles
+                        .contains_key(&(symbol.clone(), interval.clone()))
+                    && self.books.len() + self.candles.len() >= 1_024
+                {
+                    cx.log(LogLevel::Error, "Binance Spot supports at most 1024 combined book/candle streams per account");
+                    return;
+                }
                 let count = self
                     .candles
                     .entry((symbol.clone(), interval.clone()))
@@ -1114,7 +1422,7 @@ impl Venue for BinanceFutures {
                 *count += 1;
                 if *count == 1 {
                     let topic = format!("{}@kline_{interval}", symbol.to_lowercase());
-                    self.send_subscribe(cx, Channel::Market, "SUBSCRIBE", &[topic]);
+                    self.send_subscribe(cx, self.candle_channel(), "SUBSCRIBE", &[topic]);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1124,7 +1432,7 @@ impl Venue for BinanceFutures {
                     if *count == 0 {
                         self.candles.remove(&key);
                         let topic = format!("{}@kline_{}", key.0.to_lowercase(), key.1);
-                        self.send_subscribe(cx, Channel::Market, "UNSUBSCRIBE", &[topic]);
+                        self.send_subscribe(cx, self.candle_channel(), "UNSUBSCRIBE", &[topic]);
                     }
                 }
             }
@@ -1137,7 +1445,8 @@ impl Venue for BinanceFutures {
                 to_ms,
             } => {
                 let mut path = format!(
-                    "/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={}",
+                    "{}?symbol={symbol}&interval={interval}&limit={}",
+                    self.paths.klines,
                     limit.unwrap_or(500)
                 );
                 if let Some(from) = from_ms {

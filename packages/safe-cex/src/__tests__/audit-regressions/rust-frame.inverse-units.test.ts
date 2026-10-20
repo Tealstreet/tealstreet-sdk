@@ -70,6 +70,43 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
 };
 
 describe('Rust frames preserve inverse native units', () => {
+  it('converts COIN-M USD notionals to native contract counts in worker and main stores', () => {
+    const value = fixture({
+      contractSize: 100,
+      native: true,
+      positions: true,
+      orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
+    });
+    const workerStore = new DefaultStore();
+    const applier = new FrameApplier(workerStore, false, false, false, true);
+    applier.apply(value);
+    applier.apply(
+      fixture({
+        markets: false,
+        positions: true,
+        native: true,
+        orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
+      }),
+    );
+    const mainStore = new DefaultStore();
+    const exchange = new BaseExchange('binanceinverse', { key: '', secret: '' }, mainStore);
+    exchange.applyWorkerFrame(value.buffer);
+    for (const store of [workerStore, mainStore]) {
+      expect(store.positions[0]).toMatchObject({
+        notional: 1000,
+        extra: { contractsNative: 10, unrealizedPnlNative: 0.002 },
+      });
+      expect(store.orders[0]).toMatchObject({
+        amount: 7,
+        filled: 2,
+        remaining: 5,
+        extra: { remainingNative: 5, remainingNotional: 500 },
+      });
+    }
+    exchange.dispose();
+  });
+
+
   it('decodes legacy seven-column frames and leaves unknown native quantities absent', () => {
     const frame = fixture({ orders: [{ id: 'full-stop', amount: 0, filled: 0, remaining: 0.00013 }] });
     expect(frame.orders()!.remainingNative).toBeUndefined();

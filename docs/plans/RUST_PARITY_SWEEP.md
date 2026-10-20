@@ -301,3 +301,26 @@ than treating the original port boundary as a waiver.
 - New roster PRs Coinbase1325/Polymarket1327/Breakout1328/perf-docs1331 were
   independently audited: no additional declared supported gap; live-key and
   TS-unsupported limitations are preserved in the census/PR draft.
+
+### Landing integration: Binance profiles and Breakout
+
+- Merged landinge391337054 (Breakout1328, BinanceSpot/COIN-M1326, GRVTperf-docs1331)
+  after checkpointing GRVT. Separate constructor flags retain OKX contract-count
+  units and Binance inverse contract multipliers in worker and main-thread
+  appliers. Coinbase, Polymarket and Bitget frame contracts stay covered.
+- Secondary GET support extends to the newly landed Binance profiles. Spot's
+  single dynamic client strips public auth while retaining read egress; COIN-M
+  keeps its separate direct public client. Native four-profile HMAC controls
+  and actual SDK transport tests preserve primary writes/auth/lookup exceptions.
+- Integration review caught Spot being swallowed by the futures public bypass.
+  Corrected that policy; provider-derived matrix then exposed different signed
+  and public Spot prefixes. Optional native-host `readPublicHttp` preserves that
+  distinction after credentials are stripped, with no WASM/engine-frame growth.
+- Binance+OKX198/198 native PASS. Final331/331 focused SDK/frame/transport tests,
+  full SDK typecheck/lint and independent integration review PASS. Frozen golden
+  has56existing entries unchanged,0removed,4new Spot/COIN-M +/-secondary cases;
+  each uses the actual TS provider, then native tests consume the exact fixture.
+- Final plan is57local replays (27public/30private),11contract controls and
+  all25venue WASM ceilings. Merged CI preserves both OKX public additions and
+  all Binance variants:91replays(34public/57private),25venue/30Rustjobs.
+  Final root/compiled-WASM/size/replay verification follows on this union.

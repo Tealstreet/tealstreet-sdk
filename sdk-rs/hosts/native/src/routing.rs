@@ -128,6 +128,8 @@ pub struct RoutingPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_public_http: Option<HttpRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_header: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub read_public: bool,
@@ -206,7 +208,11 @@ impl RoutingState {
                     }));
         Ok(
             if let Some(route) = self.plan.read_http.as_ref().filter(|_| read) {
-                route
+                if public {
+                    self.plan.read_public_http.as_ref().unwrap_or(route)
+                } else {
+                    route
+                }
             } else if public {
                 self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
             } else {
@@ -804,6 +810,53 @@ mod tests {
     }
 
     #[test]
+    fn secondary_public_route_preserves_policy_after_credentials_are_removed() {
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary-private".into(),
+                ..HttpRoute::default()
+            },
+            public_http: Some(HttpRoute {
+                prefix: "primary-public".into(),
+                ..HttpRoute::default()
+            }),
+            read_http: Some(HttpRoute {
+                prefix: "read-private".into(),
+                ..HttpRoute::default()
+            }),
+            read_public_http: Some(HttpRoute {
+                prefix: "read-public".into(),
+                ..HttpRoute::default()
+            }),
+            public_header: Some("X-MBX-APIKEY".into()),
+            read_header: Some("X-MBX-APIKEY".into()),
+            read_public: true,
+            ..RoutingPlan::default()
+        });
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.test/catalog".into(),
+            headers: vec![],
+            body: None,
+        };
+        assert_eq!(state.http(&request).unwrap().prefix, "read-public");
+        request
+            .headers
+            .push(("x-mbx-apikey".into(), "read-key".into()));
+        assert_eq!(state.http(&request).unwrap().prefix, "read-private");
+        request.route = Some(safe_cex_engine::RequestRoute::Primary);
+        assert_eq!(state.http(&request).unwrap().prefix, "primary-private");
+        request.route = None;
+        request.method = Method::Post;
+        assert_eq!(state.http(&request).unwrap().prefix, "primary-private");
+        request.headers.clear();
+        assert_eq!(state.http(&request).unwrap().prefix, "primary-public");
+    }
+
+    #[test]
     fn secondary_read_route_applies_only_to_signed_gets() {
         let state = state(RoutingPlan {
             http: HttpRoute {
@@ -1044,7 +1097,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 52);
+        assert_eq!(examples.len(), 56);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
@@ -1059,6 +1112,9 @@ mod tests {
                 };
                 if let Some(key) = http.request.headers.get("x-mbx-apikey") {
                     request.headers.push(("x-mbx-apikey", key.clone()));
+                }
+                if let Some(session) = http.request.headers.get("Authorization") {
+                    request.headers.push(("Authorization", session.clone()));
                 }
                 let actual = state.http(&request).unwrap();
                 let rewritten = if actual.prefix.is_empty() {

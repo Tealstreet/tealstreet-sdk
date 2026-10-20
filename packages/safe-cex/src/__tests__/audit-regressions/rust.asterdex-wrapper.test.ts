@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, OHLCVOptions, Order } from '../../types';
+import type { ExchangeName, ExchangeOptions, OHLCVOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +14,7 @@ const SIGNER = '0x2222222222222222222222222222222222222222';
 const PRIVATE = `0x${'12'.repeat(32)}`;
 const running: RustEngineExchange[] = [];
 
-const fixture = (options: Partial<ExchangeOptions> = {}) => {
+const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'asterdex') => {
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
@@ -59,7 +59,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   const exchange = new RustEngineExchange(
-    'asterdex',
+    name,
     { key: SIGNER, secret: PRIVATE, applicationId: USER, ...options },
     store,
   );
@@ -147,6 +147,34 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
       { op: 'fetchStpMode' },
       { op: 'setStpMode', mode: 'EXPIRE_TAKER' },
     ]);
+  });
+
+  it.each(['binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'kucoin'] as const)(
+    'rejects Aster-only STP intent on %s before any single or mixed-batch engine command',
+    async (name) => {
+      const { exchange, commands } = fixture({}, name);
+      await exchange.start();
+      const order = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
+      const stpOrder = { ...order, stpMode: 'EXPIRE_BOTH' as const };
+      await expect(exchange.placeOrder(stpOrder)).rejects.toThrow(/does not support.*stpMode/i);
+      await expect(exchange.placeOrders([order, stpOrder])).rejects.toThrow(/does not support.*stpMode/i);
+      expect(commands).toEqual([]);
+      await expect(exchange.placeOrder(order)).resolves.toEqual(['newly-acked']);
+      expect(commands).toMatchObject([{ op: 'placeOrders', orders: [order] }]);
+    },
+  );
+
+  it('validates every Aster per-order STP option before a mixed-batch engine command', async () => {
+    const order = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
+    const v1 = fixture({ key: 'legacy', secret: 'secret', applicationId: undefined, extra: { asterdexApiVersion: 'v1' } });
+    await v1.exchange.start();
+    await expect(v1.exchange.placeOrders([order, { ...order, stpMode: 'EXPIRE_BOTH' }])).rejects.toThrow(/requires API v3/);
+    expect(v1.commands).toEqual([]);
+
+    const v3 = fixture();
+    await v3.exchange.start();
+    await expect(v3.exchange.placeOrders([order, { ...order, stpMode: 'NONE' as 'EXPIRE_BOTH' }])).rejects.toThrow(/Invalid AsterDEX/);
+    expect(v3.commands).toEqual([]);
   });
 
   it('rejects unsupported caller IDs before submitting an engine command', async () => {

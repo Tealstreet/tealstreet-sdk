@@ -21,7 +21,7 @@ export class FrameApplier {
   private marketSymbols: string[] = [];
   private contractSizes: number[] = [];
 
-  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false, private readonly contractCountAmounts = false) {}
+  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false, private readonly contractCountAmounts = false, private readonly inverseContractSized = false) {}
 
   /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
   apply(frame: Frame): void {
@@ -131,7 +131,7 @@ export class FrameApplier {
                 }
               : undefined
           : market?.isInverse && native !== undefined && Number.isFinite(native)
-            ? { remainingNative: native, remainingNotional: native }
+            ? { remainingNative: native, remainingNotional: native * (this.inverseContractSized ? this.contractSizes[orders.market[i]] : 1) }
             : this.inverseNativeAmounts
               ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
               : undefined;
@@ -209,7 +209,7 @@ export class FrameApplier {
             }),
             ...(this.contractCountAmounts
               ? { contractsNative: divide(market?.isInverse ? positions.notional[i] : positions.contracts[i], this.contractSizes[positions.market[i]]) }
-              : (market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] }),
+              : (market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i] / (this.inverseContractSized ? this.contractSizes[positions.market[i]] : 1), unrealizedPnlNative: positions.unrealizedPnl[i] }),
           } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),

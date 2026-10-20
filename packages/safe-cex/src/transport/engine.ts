@@ -43,6 +43,7 @@ export interface EngineRoutingPlan {
   http: EngineHttpRoute;
   publicHttp?: EngineHttpRoute;
   readHttp?: EngineHttpRoute;
+  readPublicHttp?: EngineHttpRoute;
   readHeader?: string;
   readPublic?: boolean;
   publicCorsHttp?: EngineHttpRoute;
@@ -75,6 +76,8 @@ const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): v
 const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   binance: 'X-MBX-APIKEY',
   binancepm: 'X-MBX-APIKEY',
+  binancespot: 'X-MBX-APIKEY',
+  binanceinverse: 'X-MBX-APIKEY',
   asterdex: 'X-MBX-APIKEY',
   bybit: 'X-BAPI-API-KEY',
   bybitinverse: 'X-BAPI-API-KEY',
@@ -206,6 +209,9 @@ export const resolveEngineRoutingPlan = (
       ...(how ? { tunnelUrl: routing.howEgress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS } : {}),
     };
   };
+  const readPlan = options.secondary_key
+    ? resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL)
+    : undefined;
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
     ...(publicCorsProxy
@@ -219,11 +225,12 @@ export const resolveEngineRoutingPlan = (
           },
         }
       : {}),
-    ...(options.secondary_key
+    ...(readPlan
       ? {
           readHeader: secondaryReadHeaders[exchange],
-          readPublic: !['binance', 'binancepm', 'asterdex'].includes(exchange),
-          readHttp: resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL).http,
+          readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
+          readHttp: readPlan.http,
+          ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
       : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
@@ -241,10 +248,10 @@ export const resolveEngineRoutingPlan = (
 const hasHeader = (headers: Record<string, string>, name: string): boolean =>
   Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase() && Boolean(headers[key]));
 
-// Match the public Binance client, which deliberately bypasses ordinary proxy
-// routing. Private/listen-key requests carry the key even when they are unsigned.
+// Futures profiles use a separate public client that bypasses account routing.
+// Spot keeps its selected GET client and only removes public auth headers.
 const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean =>
-  exchange.startsWith('binance') && !hasHeader(request.headers, 'X-MBX-APIKEY');
+  ['binance', 'binancepm', 'binanceinverse'].includes(exchange) && !hasHeader(request.headers, 'X-MBX-APIKEY');
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
@@ -522,7 +529,7 @@ export const createEngineTransport = (
           : Promise.reject(new Error('Public CORS request routing is not configured'));
       return readHttp &&
         request.method.toUpperCase() === 'GET' &&
-        (!['binance', 'binancepm', 'asterdex'].includes(exchange) ||
+        (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
         : http.request(nativeRequest);

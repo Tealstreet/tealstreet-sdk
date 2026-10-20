@@ -45,42 +45,59 @@ impl Venue for Probe {
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(Probe(BinanceFutures::new(options())));
-    engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
+    for variant in [
+        Variant::UsdM,
+        Variant::PortfolioMargin,
+        Variant::Spot,
+        Variant::CoinM,
+    ] {
+        let mut opts = options();
+        opts.variant = variant;
+        let mut engine = Engine::new(Probe(BinanceFutures::new(opts)));
+        engine.start(1700000000000.0);
+        let requests: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| {
+                if let Action::Http(r) = a {
+                    Some(r)
+                } else {
+                    None
+                }
+            })
+            .filter(|r| r.url.contains("secondary-test"))
+            .collect();
+        assert_eq!(requests.len(), 4);
+        for request in requests {
+            let expected = if request.method == Method::Get {
+                "read-key"
             } else {
-                None
-            }
-        })
-        .filter(|r| r.url.contains("secondary-test"))
-        .collect();
-    assert_eq!(requests.len(), 4);
-    for request in requests {
-        let expected = if request.method == Method::Get {
-            "read-key"
-        } else {
-            "primary-key"
-        };
-        let opts = options();
-        let secret = if request.method == Method::Get {
-            opts.read_credentials.as_ref().unwrap().secret.as_str()
-        } else {
-            opts.secret.as_deref().unwrap()
-        };
-        let credentials = sign::Credentials {
-            key: expected.into(),
-            secret: secret.into(),
-        };
-        assert!(
-            request
-                .url
-                .ends_with(&sign::Query::new().signed(&credentials, 1700000000000.0))
-        );
-        assert!(request.headers.iter().any(|(name,value)| name.eq_ignore_ascii_case("X-MBX-APIKEY") && value==expected), "{:?}", request);
+                "primary-key"
+            };
+            let opts = options();
+            let secret = if request.method == Method::Get {
+                opts.read_credentials.as_ref().unwrap().secret.as_str()
+            } else {
+                opts.secret.as_deref().unwrap()
+            };
+            let credentials = sign::Credentials {
+                key: expected.into(),
+                secret: secret.into(),
+            };
+            assert!(
+                request
+                    .url
+                    .ends_with(&sign::Query::new().signed(&credentials, 1700000000000.0))
+            );
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, value)| name.eq_ignore_ascii_case("X-MBX-APIKEY")
+                        && value == expected),
+                "{:?}",
+                request
+            );
+        }
     }
 }
 

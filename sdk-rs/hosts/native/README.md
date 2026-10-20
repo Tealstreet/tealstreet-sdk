@@ -39,7 +39,9 @@ the plan support older untagged effects. The engine continues to sign and emit
 the venue's actual URLs and headers.
 
 Optional `readHttp`, `readHeader` and `readPublic` fields preserve the TS
-secondary client's GET-only egress. The engine selects its read credentials;
+secondary client's GET-only egress. Optional `readPublicHttp` preserves a distinct
+public route after the selected client removes authentication headers (Binance
+Spot); absent fields retain the previous read route. The engine selects its read credentials;
 this routing policy contains no read key or secret. Explicit `primary` request
 hints retain the account route for definitive order lookups and independent
 primary-only reads. Mutations and posted reads never select `readHttp`.
