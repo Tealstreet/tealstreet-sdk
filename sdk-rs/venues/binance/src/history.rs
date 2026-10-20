@@ -5,7 +5,7 @@ use crate::sign::{Query, Signed};
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::model::{Order, OrderStatus};
-use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
+use safe_cex_engine::paging::{self, PageRow, RangeWalk, Step, WindowOrder};
 use safe_cex_engine::{
     CommandId, Cx, LogLevel, Method, Query as Read, Response, TimerId, json, num,
 };
@@ -664,13 +664,13 @@ impl BinanceFutures {
                     });
                     self.next_fills_window(cx, command);
                 }
+                // A failed window leaves its fills unknown, not absent.
                 Err(message) => {
-                    cx.log(
-                        LogLevel::Error,
-                        format!("Error fetching executions: {message}"),
-                    );
                     self.history.reads.remove(&command);
-                    cx.done(command, Ok("[]".into()));
+                    cx.done(
+                        command,
+                        Err(format!("Error fetching executions: {message}")),
+                    );
                 }
             },
             InFlight::Orders => {
@@ -806,17 +806,20 @@ impl BinanceFutures {
     }
 }
 
-/// Split `[from, to]` into windows the venue accepts.
+/// Split `[from, to]` into windows the venue accepts, oldest first.
 fn split(from: f64, to: f64) -> VecDeque<(Option<f64>, Option<f64>)> {
-    let mut windows = VecDeque::new();
-    let mut start = from;
-    while start < to {
-        let end = (start + MAX_WINDOW_MS).min(to);
-        windows.push_back((Some(start), Some(end)));
-        start = end + 1.0;
+    match paging::windows(
+        from,
+        to,
+        MAX_WINDOW_MS,
+        WindowOrder::OldestFirst,
+        usize::MAX,
+    ) {
+        Some(windows) => windows
+            .into_iter()
+            .map(|(a, b)| (Some(a), Some(b)))
+            .collect(),
+        // An inverted range keeps its single window for the venue to reject.
+        None => VecDeque::from([(Some(from), Some(to))]),
     }
-    if windows.is_empty() {
-        windows.push_back((Some(from), Some(to)));
-    }
-    windows
 }

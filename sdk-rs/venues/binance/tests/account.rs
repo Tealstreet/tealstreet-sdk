@@ -711,3 +711,85 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         );
     }
 }
+
+fn fills_over(h: &mut Harness, command: u32, days: f64) {
+    h.event(Event::Command(Command::Query {
+        command,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(days * 86_400_000.0),
+            limit: Some(10),
+        },
+    }));
+}
+
+const TRADE: &str = r#"[{"symbol":"BTCUSDT","id":7,"orderId":8,"side":"BUY","price":"100","qty":"1","realizedPnl":"0","commission":"0.1","commissionAsset":"USDT","time":1000,"positionSide":"BOTH","maker":false}]"#;
+
+/// Pins the exact request sequence of windowed fills: one request per
+/// 7-day window, oldest first. Paging refactors keep it.
+#[test]
+fn windowed_fills_request_sequence_is_pinned() {
+    let mut h = ready();
+    fills_over(&mut h, 22, 10.0);
+    let mut sent = Vec::new();
+    for _ in 0..2 {
+        let r = h.take("/fapi/v1/userTrades");
+        sent.push(
+            r.url
+                .split_once('?')
+                .unwrap()
+                .1
+                .split('&')
+                .filter(|p| {
+                    !p.starts_with("timestamp=")
+                        && !p.starts_with("signature=")
+                        && !p.starts_with("recvWindow=")
+                })
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
+        h.reply(r.id, 200, "", TRADE);
+    }
+    assert!(h.result(22).unwrap().is_ok());
+    assert_eq!(
+        sent,
+        [
+            "symbol=BTCUSDT&limit=10&startTime=0&endTime=604800000",
+            "symbol=BTCUSDT&limit=10&startTime=604800001&endTime=864000000",
+        ]
+    );
+}
+
+#[test]
+fn a_failed_fills_window_fails_the_read_instead_of_an_empty_success() {
+    let mut h = ready();
+    fills_over(&mut h, 23, 10.0);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 200, "", TRADE);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 503, "", "unavailable");
+    assert!(h.result(23).unwrap().is_err(), "{:?}", h.result(23));
+}
+
+#[test]
+fn fills_windows_cover_the_last_millisecond_of_the_range() {
+    // [0, 7d] then the single millisecond 7d + 1, which the old split dropped.
+    let mut h = ready();
+    h.event(Event::Command(Command::Query {
+        command: 24,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(604_800_001.0),
+            limit: Some(10),
+        },
+    }));
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 200, "", "[]");
+    let r = h.take("/fapi/v1/userTrades");
+    assert_eq!(param(&r.url, "startTime").as_deref(), Some("604800001"));
+    assert_eq!(param(&r.url, "endTime").as_deref(), Some("604800001"));
+}
