@@ -221,3 +221,47 @@ fn primary_execution_fields_win_over_conflicting_aliases_including_zero_fee() {
     assert_eq!(rows[0]["side"], "buy");
     assert_eq!(rows[0]["commission"], 0.0);
 }
+
+/// Pins the exact request sequence of id-cursor paging. Paging refactors
+/// keep it.
+#[test]
+fn id_cursor_request_sequence_is_pinned() {
+    let mut h = Harness::new();
+    h.seed();
+    query(
+        &mut h,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let page = |base: u32| {
+        (0..100)
+            .map(|i| {
+                format!(
+                    r#"{{"instId":"BTC-USDT","tradeId":"{}","ts":"1700000000000","fillPnl":"1"}}"#,
+                    base - i
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut sent = Vec::new();
+    for body in [page(1000), page(900), String::new()] {
+        let r = h.take("fills-history");
+        sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+        h.respond(r, &format!("{{\"code\":\"0\",\"data\":[{body}]}}"));
+    }
+    assert!(result(&h).is_ok());
+    assert_eq!(
+        sent,
+        [
+            "v1/trade/fills-history?limit=100",
+            "v1/trade/fills-history?limit=100&after=901",
+            "v1/trade/fills-history?limit=100&after=801",
+        ]
+    );
+}

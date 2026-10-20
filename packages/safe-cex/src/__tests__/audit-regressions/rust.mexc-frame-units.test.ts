@@ -9,10 +9,11 @@ const numbers = (values: Record<string, number>) => Object.fromEntries(
 );
 
 // Frame readers expose typed columns; quantities here are published base units.
-const frame = () => ({
+// `units` is the market's QUANTITY_UNITS index (1 = nativePlacement), in flag bits 8..12.
+const frame = (units = 0) => ({
   markets: () => ({
     count: 1, id: () => 'BTC_USDT', symbol: () => 'BTCUSDT', base: () => 'BTC', quote: () => 'USDT',
-    flags: Uint32Array.of(1),
+    flags: Uint32Array.of(1 | (units << 8)),
     ...numbers({ precisionAmount: 0.0001, precisionPrice: 0.1, minAmount: 0.0001, maxAmount: 40,
       minLeverage: 1, maxLeverage: 500, minPrice: NaN, contractSize: 0.0001, makerFee: 0, takerFee: 0.0002 }),
   }),
@@ -27,13 +28,13 @@ const frame = () => ({
 describe('native placement quantity bridge', () => {
   it('reconstructs MEXC chaser quantities from base-sized frame columns', () => {
     const store = new DefaultStore();
-    new FrameApplier(store, true).apply(frame());
+    new FrameApplier(store).apply(frame(1));
     expect(store.orders[0].extra).toMatchObject({ remainingNative: 40, filledInPlacementUnits: 20 });
     expect(store.orders[0].amount).toBe(0.006);
   });
 
   it('preserves exact MEXC native leaves instead of reconstructing a fractional contract', () => {
-    const value = frame();
+    const value = frame(1);
     const order = value.orders()!;
     value.orders = () => ({
       ...order,
@@ -43,7 +44,7 @@ describe('native placement quantity bridge', () => {
       remainingNative: Float64Array.of(1),
     });
     const store = new DefaultStore();
-    new FrameApplier(store, true).apply(value);
+    new FrameApplier(store).apply(value);
     expect(store.orders[0].extra?.remainingNative).toBe(1);
   });
 
@@ -55,10 +56,10 @@ describe('native placement quantity bridge', () => {
 });
 
 it('preserves separate hedge leverage rails in the store metadata', () => {
-  const value = frame();
+  const value = frame(1);
   value.settings = () => ({ count: 1, market: Uint32Array.of(0), leverage: Float64Array.of(20),
     buyLeverage: Float64Array.of(10), sellLeverage: Float64Array.of(15), marginType: () => 'cross' });
   const store = new DefaultStore();
-  new FrameApplier(store, true).apply(value);
+  new FrameApplier(store).apply(value);
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 15 });
 });

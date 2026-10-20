@@ -14,6 +14,7 @@ pub struct Harness {
     pub e: Engine<Paradex>,
     pub pending: Vec<HttpRequest>,
     pub actions: Vec<Action>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub receipt_trace: Vec<ReceiptTrace>,
     pub public: SocketId,
     pub now: f64,
@@ -26,6 +27,7 @@ impl Harness {
             e,
             pending: vec![],
             actions: vec![],
+            failures: vec![],
             receipt_trace: vec![],
             public: SocketId(0),
             now: 1_700_000_000_000.,
@@ -68,10 +70,17 @@ impl Harness {
                     .push(ReceiptTrace::Progress(*command, receipts.clone())),
                 _ => {}
             }
-            if let Action::Http(r) = a {
-                self.pending.push(r);
-            } else {
-                self.actions.push(a);
+            match a {
+                Action::Http(r) => self.pending.push(r),
+                // Failures as the plain text the host renders.
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.actions.push(Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    }));
+                    self.failures.push(error);
+                }
+                a => self.actions.push(a),
             }
         }
     }
