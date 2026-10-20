@@ -341,7 +341,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| TxFlow testnet perpetuals | implemented Rust default ([PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329)); all local gates and phase reviews pass; frozen TS test reference, PR correctness reviews/CI next (`TXFLOW_RUST_PORT.md`) |
+| TxFlow testnet perpetuals | implemented Rust default; [PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329), all local gates and independent code-correctness re-reviews pass; frozen TS test reference and measurements in `TXFLOW_RUST_PORT.md` |
 | GRVT, BreakoutProp, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge

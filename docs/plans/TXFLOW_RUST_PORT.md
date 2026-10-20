@@ -5,10 +5,10 @@ Branch: `feat/rust-txflow`, based on `origin/feat/rust-rewrite` at
 Mainnet, preview and production availability remain disabled. Do not stash,
 rebase, force-push, or target master.
 
-Status: production registries select Rust, all local gates and independent
-phase reviews pass. Open the PR into `feat/rust-rewrite`, post fresh independent
-code-correctness reviews, fix/review as needed, wait for green exact-head CI,
-merge, then create a fresh follow-up branch. Measurements are below.
+Status: production registries select Rust; all local gates, phase reviews and
+fresh PR code-correctness re-reviews pass. [PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329)
+targets `feat/rust-rewrite`. Require green exact-head CI, merge, then create a
+fresh follow-up branch. Latest post-review measurements are at the end.
 
 ## Initial audit and verification constraint
 
@@ -440,3 +440,32 @@ during measurement; captured results remain unchanged. Complete Node 22 harness
 passes 387/387. No fixture padding, Phemex normalization or gate relaxation.
 The exact CI log cannot distinguish a pre-boundary REST overwrite from the
 confirmed post-boundary exposure; rebuilt Phemex private replay is still required.
+
+### Post-review acceptance
+
+All reviewer findings and the adjacent REST settings fence are corrected and
+accepted. Refreshed the actual 20-second live public recording: 202 retained
+records (79 HTTP, 120 WS, two opens and metadata), `includeDelisted:true`, 78
+tradable markets/tickers and two books. No recorded request was fabricated.
+
+- Native TxFlow 67/67 and engine 67/67; bans, workspace formatting, strict venue
+  Clippy and combined/isolated Wasm Clippy: PASS.
+- Root typecheck/lint/tests: PASS, 44/28/27 tasks; safe-cex 7,308 tests twice.
+- Harness 387/387, host 64/64, real-Wasm wrapper 101/101: PASS.
+- Combined TxFlow public/private: PASS; public CPU TS/Rust 84.7/67.5 ms (1.26x),
+  retained memory 14.3/2.1 MB (6.79x). Private still has 35 frames, 15 commands,
+  eight signed writes and one execution.
+- Binance public/private: PASS; public CPU 280.4/167.6 ms (1.67x), memory
+  20.9/4.8 MB (4.34x), three books; private 14 frames.
+- Phemex private regression: PASS twice at unchanged output, resolving the
+  initial CI failure without venue normalization or fixture padding.
+- Final TxFlow-only Wasm: 887,206 bytes (budget 1,258,291).
+- Final isolated public, three runs: PASS, 122 replay frames; TS/Rust CPU
+  67.1/46.8 ms (1.43x), steady 8.2/6.3 ms (1.29x), retained memory 14.3/1.3 MB
+  (10.65x), linear Wasm 0.5 MB. Final isolated private: PASS.
+
+Independent findings and passing re-reviews are posted on PR #1329. Remaining
+work is exact-head CI, merge into `feat/rust-rewrite`, and a fresh branch.
+Native order-history ID/status options explicitly reject before dispatch;
+the previously documented measurement-gated and unavailable endpoint limits
+remain unchanged.
