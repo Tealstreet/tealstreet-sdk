@@ -311,6 +311,19 @@ publish an empty snapshot or dispose the previous good engine.
   checksum is unchanged. Independent review and fresh exact-head CI govern
   landing; native replay controls remain valid for this build-only fix.
 
+- Product-semantics integration plan: landing advanced to PR #1341
+  (`5e92f93a8a`) during final CI. Merge preserves typed classification,
+  derivative terms/Greeks, combined Bybit selectors, OKX products and the new
+  cold-subscription path alongside native public-feed ingress and worker
+  readiness/callback behavior. Both CI consumer and product-preflight steps
+  are retained. Independent merge reviews identified semantic catalog identity
+  and selector-specific factory cache isolation as integration fixes; add
+  focused regressions and replace the incoming stale legacy-provider test.
+  Then rebuild actual combined bytes, rerun native/consumer/store checks and
+  canonical replay controls, and obtain fresh exact-head CI before landing.
+  Previous artifact metrics below remain evidence for the pre-integration head
+  until replaced by the new acceptance checkpoint.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current

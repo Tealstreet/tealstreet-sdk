@@ -858,6 +858,7 @@ impl Blofin {
             max_slippage_pct: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
         };
         self.placement(cx, &raw, source)
     }

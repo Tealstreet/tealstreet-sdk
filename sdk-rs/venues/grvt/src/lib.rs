@@ -1043,6 +1043,14 @@ impl Venue for Grvt {
             return;
         }
         match command {
+            Command::FetchOptionChain { command, .. }
+            | Command::FetchOptionExpiries { command, .. }
+            | Command::FetchAccountGreeks { command } => {
+                cx.done(
+                    command,
+                    Err("Options are not enabled on this account".into()),
+                );
+            }
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 let key = cx

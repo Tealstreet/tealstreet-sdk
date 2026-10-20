@@ -25,6 +25,12 @@ pub fn envelope(text: &str) -> Result<&str, String> {
 #[serde(rename_all = "camelCase", default)]
 pub struct Instrument<'a> {
     pub inst_id: &'a str,
+    pub inst_type: &'a str,
+    pub rule_type: &'a str,
+    pub uly: &'a str,
+    pub inst_family: &'a str,
+    pub base_ccy: &'a str,
+    pub quote_ccy: &'a str,
     pub ct_type: &'a str,
     pub ct_val: &'a str,
     pub ct_val_ccy: &'a str,
@@ -119,6 +125,9 @@ pub struct Config<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PositionRow<'a> {
+    pub inst_type: &'a str,
+    pub mark_px: &'a str,
+    pub ccy: &'a str,
     pub inst_id: &'a str,
     pub pos: &'a str,
     pub pos_side: &'a str,
@@ -128,12 +137,14 @@ pub struct PositionRow<'a> {
     pub liq_px: &'a str,
     pub mgn_mode: &'a str,
     pub imr: &'a str,
-    pub mmr: &'a str,
+    pub margin: &'a str,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrderRow<'a> {
+    pub inst_type: &'a str,
+    pub avg_px: &'a str,
     pub inst_id: &'a str,
     pub ord_id: &'a str,
     pub algo_id: &'a str,

@@ -2,6 +2,7 @@ import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@t
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
+  AccountGreeks,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
@@ -12,6 +13,8 @@ import type {
   IncomeHistoryOptions,
   IncomeRecord,
   OHLCVOptions,
+  OptionChainQuery,
+  OptionChainRow,
   Order,
   OrderBook,
   OrderHistoryOptions,
@@ -575,6 +578,12 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)
+          ? {
+              enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
+              enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
+            }
+          : {}),
         ...(this.name === 'grvt'
           ? {
               grvtTradingAccountId: this.options.grvtTradingAccountId,
@@ -846,6 +855,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    for (const order of orders) {
+      if (order.impliedVolatility === undefined) continue;
+      if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
+        this.rejectPreflight('Options are not enabled on this account');
+      }
+      if (typeof order.impliedVolatility !== 'number' || !Number.isFinite(order.impliedVolatility) || order.impliedVolatility <= 0) {
+        this.rejectPreflight('impliedVolatility must be finite and positive');
+      }
+    }
     if (this.name !== 'asterdex' && orders.some((order) => order.stpMode !== undefined)) {
       this.rejectPreflight(`${this.name} does not support AsterDEX stpMode`);
     }
@@ -989,6 +1007,33 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Native reconciliation owns refresh; account consumers read the current balance. */
   fetchBalance = async () => this.store.balance;
+
+  fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
+    this.assertOptionQueries();
+    for (const field of ['expiry', 'strikeMin', 'strikeMax'] as const) {
+      const value = query[field];
+      if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+        this.rejectPreflight(`Option query ${field} must be finite`);
+      }
+    }
+    return this.command({ op: 'fetchOptionChain', query });
+  };
+
+  fetchOptionExpiries = (underlying: string): Promise<number[]> => {
+    this.assertOptionQueries();
+    return this.command({ op: 'fetchOptionExpiries', underlying });
+  };
+
+  fetchAccountGreeks = (): Promise<AccountGreeks[]> => {
+    this.assertOptionQueries();
+    return this.command({ op: 'fetchAccountGreeks' });
+  };
+
+  private assertOptionQueries = (): void => {
+    if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
+      this.rejectPreflight('Options are not enabled on this account');
+    }
+  };
 
   fetchOrders = async (symbols?: string[]) =>
     symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;

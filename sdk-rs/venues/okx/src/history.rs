@@ -1,5 +1,5 @@
-//! Typed, streamed rare reads. Native SWAP quantities are contract counts.
-use crate::{Okx, Pending, scaled};
+//! Typed, streamed rare reads. Native derivative quantities are contract counts.
+use crate::{Okx, Pending, contracts_to_base};
 use safe_cex_engine::{CommandId, Cx, LogLevel, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,6 +17,8 @@ pub struct Request {
     endpoint: &'static str,
     symbol: Option<String>,
     instrument: Option<String>,
+    inst_type: &'static str,
+    next_type: bool,
     order_id: Option<String>,
     income_kind: Option<String>,
     from: Option<f64>,
@@ -88,6 +90,8 @@ struct HistoricalOrder {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Income {
+    #[serde(skip)]
+    bill: String,
     symbol: String,
     income_type: &'static str,
     income: f64,
@@ -292,6 +296,14 @@ impl Request {
             }
             Rows::Income(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+                let mut bills = std::collections::HashSet::new();
+                for row in rows.iter() {
+                    if bills.len() >= self.limit && !bills.contains(&row.bill) {
+                        break;
+                    }
+                    bills.insert(row.bill.clone());
+                }
+                rows.retain(|row| bills.contains(&row.bill));
                 serde_json::to_string(rows)
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
@@ -406,6 +418,11 @@ impl Okx {
             cx.done(command, Ok("[]".into()));
             return;
         }
+        let inst_type = instrument
+            .as_ref()
+            .and_then(|id| self.instruments.get(id))
+            .map_or("SWAP", |i| i.inst_type);
+        let next_type = self.options.eea && instrument.is_none();
         self.history_request(
             cx,
             Request {
@@ -413,6 +430,8 @@ impl Okx {
                 endpoint,
                 symbol,
                 instrument,
+                inst_type,
+                next_type,
                 order_id,
                 income_kind,
                 from,
@@ -440,7 +459,7 @@ impl Okx {
         };
         let mut path = format!("{}?", r.endpoint);
         if !matches!(r.rows, Rows::Trades(_)) {
-            path.push_str("instType=SWAP&");
+            path.push_str(&format!("instType={}&", r.inst_type));
         }
         if let Some(id) = &r.instrument {
             path.push_str(&format!("instId={id}&"));
@@ -509,7 +528,7 @@ impl Okx {
                 {
                     return;
                 }
-                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                let qty = contracts_to_base(m, size, price);
                 if !qty.is_finite() || qty <= 0.0 {
                     return;
                 }
@@ -575,8 +594,20 @@ impl Okx {
                     },
                     price: positive(row.px),
                     average_price: positive(row.avg_px),
-                    amount: scaled(num::parse(row.sz), m.contract_size.unwrap_or(1.0)),
-                    filled: scaled(num::parse(row.acc_fill_sz), m.contract_size.unwrap_or(1.0)),
+                    amount: contracts_to_base(
+                        m,
+                        num::parse(row.sz),
+                        positive(row.avg_px)
+                            .or_else(|| positive(row.px))
+                            .unwrap_or_else(|| cx.store.ticker(&m.symbol).map_or(0.0, |t| t.mark)),
+                    ),
+                    filled: contracts_to_base(
+                        m,
+                        num::parse(row.acc_fill_sz),
+                        positive(row.avg_px)
+                            .or_else(|| positive(row.px))
+                            .unwrap_or_else(|| cx.store.ticker(&m.symbol).map_or(0.0, |t| t.mark)),
+                    ),
                     reduce_only: matches!(
                         row.reduce_only,
                         Some(Bool::Flag(true) | Bool::Text("true"))
@@ -639,6 +670,7 @@ impl Okx {
                         continue;
                     }
                     let record = Income {
+                        bill: bill_id.into(),
                         symbol: symbol.into(),
                         income_type: income_type(category),
                         income: amount,
@@ -672,7 +704,7 @@ impl Okx {
                 {
                     return;
                 }
-                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                let qty = contracts_to_base(m, size, price);
                 if !qty.is_finite() || qty <= 0.0 || !(price * qty).is_finite() {
                     return;
                 }
@@ -722,10 +754,27 @@ impl Okx {
             Rows::Fills(_) => unreachable!(),
         };
         if r.count < PAGE || enough {
+            if r.next_type {
+                r.next_type = false;
+                r.inst_type = "FUTURES";
+                r.after = None;
+                r.oldest = None;
+                r.pages = 0;
+                r.rows_seen = 0;
+                self.history_request(cx, r);
+                return;
+            }
             r.finish(cx);
             return;
         }
         if r.pages >= cap {
+            if self.options.eea && r.instrument.is_none() {
+                cx.done(
+                    r.command,
+                    Err("OKX composite history hit page cap; incomplete source".into()),
+                );
+                return;
+            }
             cx.log(
                 LogLevel::Warning,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
@@ -739,6 +788,13 @@ impl Okx {
                 .as_deref()
                 .is_some_and(|old| !id_cmp(next, old).is_lt())
         }) {
+            if self.options.eea && r.instrument.is_none() {
+                cx.done(
+                    r.command,
+                    Err("OKX composite history cursor did not advance; incomplete source".into()),
+                );
+                return;
+            }
             cx.log(
                 LogLevel::Warning,
                 "OKX history cursor did not advance; older rows were not fetched",

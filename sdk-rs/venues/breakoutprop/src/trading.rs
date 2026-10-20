@@ -576,6 +576,7 @@ impl BreakoutProp {
             stp_mode: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
         };
         if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit) {
             opts.trigger_price = opts.price;

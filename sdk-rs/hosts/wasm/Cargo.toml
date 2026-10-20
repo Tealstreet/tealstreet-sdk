@@ -8,7 +8,9 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
+# Polling-only builds trade parser bytes for lower first-subscription CPU.
+cold-subscriptions = []
+breakoutprop = ["dep:safe-cex-venue-breakoutprop", "cold-subscriptions"]
 grvt = ["dep:safe-cex-venue-grvt"]
 polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymarket"]
 coinbase = ["dep:safe-cex-venue-coinbase"]
