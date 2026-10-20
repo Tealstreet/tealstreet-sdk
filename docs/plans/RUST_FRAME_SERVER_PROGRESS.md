@@ -295,3 +295,38 @@ Registration fix checks pass: default engine68 tests, tracking-only69, both
 native features72; all three all-target clippy profiles; full native host54
 tests and all-target clippy. New registration test runs among13 real loopback
 and lifecycle cases. Incoming-GRVT/default-WASM and final replay checks continue.
+
+### Final local acceptance — bd0eebf6ff
+
+All local gates pass on the integrated twenty-four-venue tree:
+
+- Engine default68 / tracking69 / tracking-plus-delta72 tests, each profile's
+  all-target clippy; native host54 (including13 real loopback/lifecycle tests)
+  and all-target clippy. GRVT85, Bybit lib12 and standalone GRVT parser6 pass.
+- Default full-venue WASM clippy, format and banned-pattern checks pass. Metadata
+  confirms workspace WASM enables neither book-deltas nor command-tracking.
+  Earlier full workspace native proof is2,100 tests (170 groups), all-target
+  clippy and workspace wasm32 build/clippy; affected code was rechecked above.
+- Combined release WASM build passes; SDK/WASM103 tests across7 files, complete
+  host/decoder/Workers68, actual cross-wire reconstruction1 pass.
+- Root typecheck44 tasks; lint28; tests27. Both SDK runners freshly execute and
+  pass7,295 tests across503 files each. Focused SDK/transport/frame331 across15
+  files and harness386 pass. No timeout, performance threshold or budget changed.
+- Binance isolated web/Node artifacts: **773,102 bytes**, below1,258,291. Public
+  standard three-run gate: **PASS**,873 frames,917 markets,783 tickers,3 books.
+  Median main-thread CPU **TS292.8 / Rust163.4ms** (1.79x); steady CPU
+  **171.7 /79.1ms** (2.17x); process CPU338.9/227.0ms; retained memory
+  **16.4 /2.5MB** (6.51x); Rust linear memory1.5MB.
+- Generated Binance private tape: **PASS**,14 frames,2 markets/tickers, no books;
+  state/command/request correctness matches. Private CPU/memory are informational
+  only and were not used as performance acceptance criteria.
+- Two1,000-level-per-side books remain **96,064→704 payload bytes/frame** for
+  forty changed levels,99.267% reduction; at4Hz unmasked WebSocket headers give
+  **384,296→2,832B/s**. No compression/TCP/TLS/IP or live-feed extrapolation.
+
+All phase and correctness re-reviews pass after fixes for reset generations,
+unread baselines, join boundaries, lifecycle/backpressure, zero prices and
+pre-registration command IDs. No TS venue bug fix is introduced by this PR;
+the existing GRVT base gap remains documented above. Private cases are synthetic
+and network tests use loopback, without funded/live private account access.
+PR correctness reviews and full green CI remain the landing gates.
