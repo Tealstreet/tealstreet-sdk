@@ -192,10 +192,11 @@ impl Backpack {
                 format!("?{query}")
             }
         );
+        let headers = vec![("X-Broker-Id", "1200".into())];
         if stream {
-            cx.request_streamed(Method::Get, url, vec![], ArrayAt::Root, pending);
+            cx.request_streamed(Method::Get, url, headers, ArrayAt::Root, pending);
         } else {
-            cx.request(Method::Get, url, vec![], None, pending);
+            cx.request(Method::Get, url, headers, None, pending);
         }
     }
 

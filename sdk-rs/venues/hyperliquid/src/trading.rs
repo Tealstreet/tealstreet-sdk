@@ -177,14 +177,24 @@ impl Hyperliquid {
                 }
                 (command, orders.into_iter().map(Step::Place).collect())
             }
-            Command::CancelOrders { command, ids } => (
-                command,
-                VecDeque::from([Step::Cancel(
-                    ids.iter()
-                        .filter_map(|id| cx.store.order(id).cloned())
-                        .collect(),
-                )]),
-            ),
+            Command::CancelOrders { command, ids } => {
+                let orders = ids
+                    .iter()
+                    .map(|id| {
+                        cx.store.order(id).cloned().ok_or_else(|| {
+                            format!("Order {id} not found; cancellation requires its market")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>();
+                let orders = match orders {
+                    Ok(orders) => orders,
+                    Err(error) => {
+                        cx.done(command, Err(error));
+                        return;
+                    }
+                };
+                (command, VecDeque::from([Step::Cancel(orders)]))
+            }
             Command::CancelSymbolOrders { command, symbol } => (
                 command,
                 VecDeque::from([Step::Cancel(

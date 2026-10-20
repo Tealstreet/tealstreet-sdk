@@ -155,7 +155,7 @@ impl BitgetFutures {
         cx.request_streamed(
             Method::Get,
             format!("{}{path}", paths::REST),
-            vec![],
+            vec![("X-CHANNEL-API-CODE", "Tealstreet".into())],
             ArrayAt::Envelope(&[&["data"]]),
             pending,
         );

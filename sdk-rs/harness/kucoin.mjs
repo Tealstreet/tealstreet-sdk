@@ -5,8 +5,6 @@ const pendingReads = new WeakMap();
 export const kucoin = {
   rust: 'kucoin',
   ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoin.exchange.ts', className: 'KucoinExchange', name: 'kucoin' },
-  // KNOWN_TS_FIXES: cancelSymbolOrders omits the stop book. Exercise the
-  // existing signed transport for that missing half as cancelAllOrders does.
   configureTs(exchange) {
     // Track before the 3 RPS queue: accelerated frames can finish while cached
     // depth recovery reads are still waiting to be issued.
@@ -18,12 +16,6 @@ export const kucoin = {
       pending.add(promise);
       promise.then(() => pending.delete(promise), () => pending.delete(promise));
       return promise;
-    };
-    const cancel = exchange.cancelSymbolOrders;
-    exchange.cancelSymbolOrders = async (symbol) => {
-      await cancel(symbol);
-      const { data } = await exchange.unlimitedXHR.delete('/api/v1/stopOrders', { params: { symbol: exchange.toApiSymbol(symbol) } });
-      if (data.code !== '200000') throw new Error(data.msg || data.code);
     };
   },
   async settleTs(exchange, { isPrivate, clock }) {
