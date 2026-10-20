@@ -95,7 +95,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
-| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss |
+| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss; optional trailing f64 column remainingNative (NaN when absent per row) |
 | 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
@@ -295,6 +295,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | --- | --- |
 | Binance USD-M, Binance PM | done |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
+| Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
@@ -303,11 +304,12 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | BloFin | done (#1300) |
 | Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
-| Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
+| Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
+| Bitrue futures | done (#1314) |
 | Bitunix | wave 1, PR in review |
-| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
-| WOO | Implemented; [PR #1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316), adversarial fixes and gates passing |
-| KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
+| WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
+| KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
 | Kraken futures | implemented on `feat/rust-kraken`; phase code-correctness reviews accepted, harness gates in progress (`KRAKEN_RUST_PORT.md`) |

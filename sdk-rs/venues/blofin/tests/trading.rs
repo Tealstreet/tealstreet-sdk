@@ -25,6 +25,35 @@ fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
 }
 #[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for (field, value) in [
+        (
+            "bybitBbo",
+            serde_json::json!({"sideType":"Queue","level":1}),
+        ),
+        ("bybitSlippageToleranceTicks", serde_json::json!(2)),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        let mut orders = serde_json::json!([
+            {"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":"first"},
+            {"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":"second"}
+        ]);
+        orders[1][field] = value;
+        place(&mut h, &orders.to_string());
+        assert!(h.pending.is_empty());
+        assert!(h.e.store().orders().is_empty());
+        assert!(h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 7,
+                result: Err(error)
+            }) if error.contains("Bybit")
+        )));
+    }
+}
+
+#[test]
 fn invalid_final_caller_id_rejects_whole_batch_before_any_write() {
     let mut h = Harness::new();
     h.seed();

@@ -173,3 +173,20 @@ wrapper. The generic base otherwise throws an unsupported-path error. A real
 shared-fold regression failed before, passes after, and was independently rerun
 and accepted in code-correctness review; it asserts a closed round trip and its
 account, symbol, PnL, fills provenance and single account-wide warmup fetch.
+
+### Bybit variants landing integration
+
+Pre-integration final proofs: 84 Kraken tests; 1,251 workspace tests; native and
+Wasm Clippy, bans, formatting, 44 typecheck and 28 lint tasks pass. Kraken public
+PASS: 9,641 frames, 207 markets/tickers, two books; CPU 1,866.6/415.2 ms (4.50x),
+steady 1,399.8/257.7 ms (5.43x), retained 3.7/1.7 MB (2.13x). Single-venue Wasm
+844,826 bytes. Private 49-frame correctness PASS. Binance public/private PASS;
+public CPU 245.9/104.8 ms and retained 4.2/2.4 MB. Real Wasm boundary 53 tests pass.
+One memory-baseline settling failure passed on an unchanged rerun. Root tests
+hit unrelated cold-import five-second timeouts under concurrent local load;
+repeat with bounded workers before acceptance.
+
+Fetched landing advanced to 922b5fdc89 (Bybit variants). Preserve its shared
+engine, wrapper, request/gate and host changes; union Kraken normalization once
+with the incoming generic fix dispatcher, and retain both constructor tests.
+Independent merge review and affected final gate reruns follow this checkpoint.
