@@ -530,7 +530,8 @@ cutover or deletion:
   direct/disabled/shared feed policy and transferred-port `RustPublicFeedProvider`
   fan-out retain private metadata/settings, ingest public data natively, and
   keep shared fields authoritative across local polling. Tests cover real
-  private workers, native snapshots, identity/catalog checks and disposal.
+  `ExchangeWorker` instances with transferred ports, native snapshots,
+  identity/catalog checks and disposal.
   Rust rejects legacy TS `externalPublicData`; application/gateway owners must
   migrate to the explicit policy before changing their account defaults.
 - Rust frames carry typed Polymarket prediction/holding metadata, reconstructed

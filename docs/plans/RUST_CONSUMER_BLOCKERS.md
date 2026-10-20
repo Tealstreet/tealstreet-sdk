@@ -144,3 +144,21 @@ publish an empty snapshot or dispose the previous good engine.
   RN loader 2/2 PASS. MCP final build and isolated package smoke PASS: 17 protocol
   tools, Poseidon and actual native Coinbase startup outside the checkout;
   131 JavaScript and 353 Rust dependency notices.
+
+- Integrated companion server-adapter PR #1334 (`c10f7e190a`) as `e8c62f4d23`.
+  Factory APIs stay unchanged; the adapter delegates the exact stable handle,
+  while its native session path bypasses TS creation. The only native addition
+  is a typed offline fixture example, so the verified production WASM checksum
+  remains valid. Full integrated Rust workspace: 2,463 tests / 202 suites PASS;
+  native session example/integration and expanded server tests are checked next.
+
+- Final store-contract audit found unrelated book/candle packets forcibly replayed
+  quote valuation, producing false position update IDs in venues whose existing
+  position mutator marks the section dirty. Shared-only fix `12d8c71421` forces
+  restoration only for accepted known-symbol ticker values; pending native
+  ticker revisions still restore provider authority. Both independent reviews
+  PASS. Prove-fail: old force flag failed the book-only hook count; corrected
+  engine all-feature suite 81 tests and strict Clippy PASS.
+- Fan-out proof uses actual `ExchangeWorker` instances, real MessagePorts and
+  structured-clone transfers in Node; it is not a separate browser-worker
+  process or deployed-gateway acceptance test.
