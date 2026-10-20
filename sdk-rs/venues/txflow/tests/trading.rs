@@ -403,7 +403,36 @@ fn fetch_leverage_returns_confirmed_account_rails_in_wrapper_json_shape() {
     let rails: Value = serde_json::from_str(&result).unwrap();
     assert_eq!(
         rails,
-        json!({"buyLeverage":5,"sellLeverage":8,"marginType":"isolated"})
+        json!({"buyLeverage":5.0,"sellLeverage":8.0,"marginType":"isolated"})
     );
     assert_eq!(e.store().positions().len(), 1);
+}
+
+#[test]
+fn caller_id_preflight_preserves_shared_shape_duplicate_and_split_errors() {
+    let cases = [
+        (
+            vec![opts(
+                json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":0.01,"price":50000,"stopLoss":45000,"takeProfit":55000,"clientOrderId":"bracket"}),
+            )],
+            "TxFlow clientOrderId cannot be honored for this order shape (type=limit +stopLoss +takeProfit); caller client order IDs are supported only on plain Limit/Market orders",
+        ),
+        (
+            vec![limit("duplicate"), limit("duplicate")],
+            "TxFlow clientOrderId duplicate is duplicated in one batch",
+        ),
+        (
+            vec![opts(
+                json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":101,"price":50000,"clientOrderId":"oversized"}),
+            )],
+            "TxFlow order exceeds the market's max size for one order; a caller clientOrderId cannot span several orders",
+        ),
+    ];
+    for (orders, expected) in cases {
+        let mut e = engine();
+        place(&mut e, 7, orders);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error == expected)), "{actions:?}");
+    }
 }

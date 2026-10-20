@@ -21,6 +21,8 @@ export class TxFlowExchange extends BaseExchange {
   apiSocket: TxFlowWebSocket;
   private accountTimer?: ReturnType<typeof setTimeout>;
   protected readonly clientOrderIdRule = txflowClientOrderIdRule;
+  get isPublicDataOnly(): boolean { return this.options.publicDataOnly === true; }
+  protected override get canSign(): boolean { return Boolean(this.options.secret && this.options.applicationId); }
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);

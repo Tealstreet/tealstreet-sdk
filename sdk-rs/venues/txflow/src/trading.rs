@@ -332,7 +332,9 @@ impl TxFlow {
         // evaluating venue shape controls or minting any native identities.
         let mut caller_ids = HashSet::new();
         for opts in orders {
-            let Some(id) = &opts.client_order_id else { continue; };
+            let Some(id) = &opts.client_order_id else {
+                continue;
+            };
             if !matches!(opts.kind, OrderType::Limit | OrderType::Market)
                 || opts.trigger_price.is_some()
                 || opts.stop_loss.is_some()
@@ -346,20 +348,43 @@ impl TxFlow {
                     OrderType::TakeProfit => "take_profit_market",
                     OrderType::TrailingStopLoss => "trailing_stop_market",
                 };
-                return Err(format!("TxFlow clientOrderId cannot be honored for this order shape (type={kind}{}{}{}{}); caller client order IDs are supported only on plain Limit/Market orders",
-                    if opts.stop_loss.is_some() { " +stopLoss" } else { "" },
-                    if opts.take_profit.is_some() { " +takeProfit" } else { "" },
-                    if opts.trigger_price.is_some() { " +triggerPrice" } else { "" },
-                    if opts.close == Some(true) { " +close" } else { "" }));
+                return Err(format!(
+                    "TxFlow clientOrderId cannot be honored for this order shape (type={kind}{}{}{}{}); caller client order IDs are supported only on plain Limit/Market orders",
+                    if opts.stop_loss.is_some() {
+                        " +stopLoss"
+                    } else {
+                        ""
+                    },
+                    if opts.take_profit.is_some() {
+                        " +takeProfit"
+                    } else {
+                        ""
+                    },
+                    if opts.trigger_price.is_some() {
+                        " +triggerPrice"
+                    } else {
+                        ""
+                    },
+                    if opts.close == Some(true) {
+                        " +close"
+                    } else {
+                        ""
+                    }
+                ));
             }
             if !valid_cloid(id) {
                 return Err("TxFlow clientOrderId must be nonempty, at most 64 UTF-8 bytes and not start with 0x".into());
             }
-            if cx.store.market(&opts.symbol).is_some_and(|market| market.limits.amount.max > 0.0 && num::adjust(opts.amount, market.precision.amount) > market.limits.amount.max) {
+            if cx.store.market(&opts.symbol).is_some_and(|market| {
+                market.limits.amount.max > 0.0
+                    && num::adjust(opts.amount, market.precision.amount) > market.limits.amount.max
+            }) {
                 return Err("TxFlow order exceeds the market's max size for one order; a caller clientOrderId cannot span several orders".into());
             }
             if !caller_ids.insert(id) {
-                return Err(format!("TxFlow clientOrderId {id} is duplicated in one batch"));
+                return Err(format!(
+                    "TxFlow clientOrderId {id} is duplicated in one batch"
+                ));
             }
         }
         let mut ids = HashSet::new();

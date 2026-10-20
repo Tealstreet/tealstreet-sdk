@@ -243,6 +243,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'txflow') return this.options.publicDataOnly === true;
     if (this.name === 'lighter') {
       return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
     }
@@ -254,6 +255,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   protected override get canSign(): boolean {
+    if (this.name === 'txflow') return Boolean(this.options.secret && this.options.applicationId);
     if (this.name !== 'asterdex') return super.canSign;
     if (!this.options.key) return false;
     if (this.options.remoteSigner) return true;

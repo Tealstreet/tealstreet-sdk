@@ -68,15 +68,16 @@ export async function bodyBytes(body) {
 }
 
 export class ReplayClock {
-  constructor(epoch) {
+  constructor(epoch, freezeStartup = false) {
     this.epoch = epoch;
     this.time = epoch;
     this.active = false;
+    this.freezeStartup = freezeStartup;
     this.timers = new Map();
     this.original = { now: Date.now, setTimeout, clearTimeout, setInterval, clearInterval };
   }
   install() {
-    Date.now = () => (this.active ? this.time : this.original.now());
+    Date.now = () => (this.active || this.freezeStartup ? this.time : this.original.now());
     globalThis.setTimeout = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, false);
     globalThis.setInterval = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, true);
     globalThis.clearTimeout = globalThis.clearInterval = (timer) => {
@@ -113,7 +114,7 @@ export class ReplayClock {
     timer.fn(...timer.args);
   }
   start() {
-    const wall = this.original.now();
+    const wall = this.freezeStartup ? this.epoch : this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
       timer.at = this.epoch + Math.max(0, timer.at - wall);
@@ -190,8 +191,8 @@ export class Tape {
       passphrase: 'replay-passphrase',
       ...venue.replayCredentials,
     };
-    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.callerIds = callerIdsOf(records);
+    this.validateRequest = venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest;
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.generated = new Set();
@@ -719,7 +720,7 @@ export class Tape {
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (this.isPrivate) {
+      if (this.isPrivate && !clock) {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }

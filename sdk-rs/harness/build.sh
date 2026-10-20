@@ -9,7 +9,7 @@ if [[ $# -gt 0 ]]; then
     exit 2
   fi
   case "$2" in
-    asterdex|binance|kucoin|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|woo|lighter|kraken) build_args+=(--no-default-features --features "$2") ;;
+    asterdex|binance|kucoin|bybit|hyperliquid|txflow|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|woo|lighter|kraken) build_args+=(--no-default-features --features "$2") ;;
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
     *) echo "Unsupported venue: $2 (expected asterdex, binance, kucoin, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, woo, lighter, kraken or orderly)" >&2; exit 2 ;;
   esac

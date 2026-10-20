@@ -32,6 +32,7 @@
     "rust:private-tape-kraken": "node sdk-rs/harness/private-tape-kraken.mjs",
     "rust:private-tape-lighter": "node sdk-rs/harness/private-tape-lighter.mjs",
     "rust:private-tape-hyperliquid": "node sdk-rs/harness/private-tape-hyperliquid.mjs",
+    "rust:private-tape-txflow": "node sdk-rs/harness/private-tape-txflow.mjs",
     "rust:private-tape-mexc": "node sdk-rs/harness/private-tape-mexc.mjs",
     "rust:private-tape-bingx": "node sdk-rs/harness/private-tape-bingx.mjs",
     "rust:private-tape:blofin": "node sdk-rs/harness/private-tape-blofin.mjs",

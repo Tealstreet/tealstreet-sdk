@@ -179,7 +179,7 @@ async function runRust() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
-  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  const clock = isPrivate && !venue.virtualPrivateClock ? undefined : new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate);
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -570,7 +570,7 @@ async function runTs() {
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
-  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  const clock = isPrivate && !venue.virtualPrivateClock ? undefined : new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate);
   clock?.install();
 
   const store = new DefaultStore();
