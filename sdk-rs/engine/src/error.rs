@@ -30,13 +30,16 @@ pub enum Outcome {
     Unknown,
 }
 
-/// Orders a batch placed before it stopped at `failed_index`.
+/// Orders a batch placed before it stopped at `failed_index`. A venue that
+/// cannot map its requests back to the caller's orders leaves the counts unset.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Partial {
     pub order_ids: Vec<String>,
-    pub total: usize,
-    pub failed_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_index: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -92,7 +95,21 @@ impl VenueError {
     }
 
     /// Records accepted orders; an empty list leaves the error whole.
-    pub fn partial(mut self, order_ids: &[String], total: usize, failed_index: usize) -> Self {
+    pub fn partial(self, order_ids: &[String], total: usize, failed_index: usize) -> Self {
+        self.partial_with(order_ids, Some(total), Some(failed_index))
+    }
+
+    /// Records accepted orders whose position in the caller's batch is unknown.
+    pub fn partial_ids(self, order_ids: &[String]) -> Self {
+        self.partial_with(order_ids, None, None)
+    }
+
+    fn partial_with(
+        mut self,
+        order_ids: &[String],
+        total: Option<usize>,
+        failed_index: Option<usize>,
+    ) -> Self {
         if !order_ids.is_empty() {
             self.partial = Some(Box::new(Partial {
                 order_ids: order_ids.to_vec(),
@@ -115,8 +132,10 @@ impl VenueError {
             message: &'a str,
             partial_order_ids: &'a [String],
             partial_order_count: usize,
-            total_order_count: usize,
-            failed_order_index: usize,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            total_order_count: Option<usize>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            failed_order_index: Option<usize>,
         }
         serde_json::to_string(&Legacy {
             message: &self.message,
@@ -180,6 +199,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"leg 3 rejected","partial":{"orderIds":["a","b"],"total":4,"failedIndex":2}}"#
+        );
+    }
+
+    #[test]
+    fn unmapped_partials_omit_the_counts_they_cannot_know() {
+        let ids = ["a".to_owned()];
+        let error = VenueError::new("leg rejected").partial_ids(&ids);
+        assert_eq!(
+            error.legacy_text(),
+            r#"{"message":"leg rejected","partialOrderIds":["a"],"partialOrderCount":1}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"message":"leg rejected","partial":{"orderIds":["a"]}}"#
         );
     }
 
