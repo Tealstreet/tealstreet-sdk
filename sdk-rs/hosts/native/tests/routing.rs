@@ -955,7 +955,7 @@ async fn feed_connection(
     transport: &NetworkTransport,
     url: String,
     channel: safe_cex_engine::SocketChannel,
-    feed: Option<&'static str>,
+    feed: Option<&str>,
     recover: bool,
 ) -> Vec<String> {
     let (send, mut events) = mpsc::unbounded_channel();

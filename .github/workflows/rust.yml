@@ -128,6 +128,9 @@ jobs:
           - venue: mexc
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-mexc
+          - venue: kucoin
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-kucoin
           - venue: bingx
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bingx

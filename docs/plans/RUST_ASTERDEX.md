@@ -330,3 +330,26 @@ harness tests pass. Independent reviewer verified repeated Rust/TS initializatio
 loads ethers exactly once, unchanged checksum literals/signature/economic oracles,
 and9 focused tests. Selected Lighter private replay now passes with1.1MB positive
 Rust retention; a3-run stability gate is running before rebuilt Aster/Binance gates.
+
+### Review fixes and KuCoin landing checkpoint
+
+All six original code-correctness findings and cancellation tombstone follow-up
+are independently re-reviewed clear; reports are posted on PR1322. Rebuilt Aster
+WASM passed all four original cancel/amend reproductions (including typed external
+identity and ordinary unknown-cancel idempotency), with artifactSHA256
+119da517fe34dc6dce055fd44db8bd59aa754f2bd75e7e8c948966e4348f2731.
+99Aster/1377workspace tests and all native/WASM clippy/fmt/bans passed atcb94d9bc36.
+Selected Aster1032368bytes; public3runs and V1/V3/native gates passed again.
+Public TS/Rust main262.5/128.7ms, steady109.9/60.9ms, process376.7/223.5ms,
+retained23.1/2.3MB. Binance public/private also passed before the superseded
+remaining combined-build pipeline was stopped to integrate the new landing.
+
+Landing373cc09864 (KuCoin) made the PR temporarily conflicting and prevented PR
+CI from starting. Integrated it keeping incoming structure and all reviewed fixes.
+Only three additive feature/registration conflicts; two independent reviewers
+compared both parents and cleared them. One new KuCoin replacement literal now
+defaults Aster STP absent. Default17-feature WASM native3/3, selected Aster/KuCoin
+clippy, safe-cex typecheck, shellsyntax/fmt pass. Merged harness256/256 passes,
+including oracle-loading isolation. Root audited incoming frame units and
+KuCoin-only request corrections: Aster's currency/orphan and strict oracles stay
+unchanged. Final post-integration gate chain and green exact-head PR CI follow.

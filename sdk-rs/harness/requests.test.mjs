@@ -607,6 +607,22 @@ test('caller IDs are collected from every command shape without collecting tape 
 });
 
 
+test('KuCoin topic batches and acknowledgement preferences retain exact token and channel identity', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('kucoin');
+  const url = 'wss://bullet.test/socket?token=public&connectId=runtime';
+  const keys = (topic, response, route = url, type = 'subscribe') => subscriptionKeys(route,
+    { type, id: 'generated', topic, privateChannel: false, response }, new Set(), venue);
+  assert.deepEqual(keys('/contractMarket/snapshot:A,B', false), [
+    ...keys('/contractMarket/snapshot:A', true, url.replace('runtime', 'recorded')),
+    ...keys('/contractMarket/snapshot:B', true),
+  ]);
+  assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/snapshot:A', false, url.replace('token=public', 'token=private')));
+  assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/level2:A', false));
+  assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/snapshot:A', false, url, 'unsubscribe'));
+  assert.deepEqual(subscriptionKeys(url, '{"type":"ping","id":1}', new Set(), venue), []);
+});
+
 test('WOO native topics and auth identity remain exact while fresh clocks vary', () => {
   const url = 'wss://wss.woox.io/v2/ws/private/stream/app';
   const options = { wooProtocol: true };

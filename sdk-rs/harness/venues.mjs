@@ -3,6 +3,7 @@
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
+import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
@@ -1053,6 +1054,10 @@ export const VENUES = {
     privateSocket: '/private/ws',
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
+  kucoin: {
+    ...kucoin,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),

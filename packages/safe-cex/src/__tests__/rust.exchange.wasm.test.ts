@@ -2,6 +2,7 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHmac } from 'node:crypto';
 
 import { BaseExchange } from '../exchanges/base';
 import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybit/bybit.types';
@@ -1189,6 +1190,80 @@ describe('RustEngineExchange', () => {
     exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
     const result = await exchange.validateAccount();
     expect(result.error).toContain('Invalid API-key');
+  });
+  it('runs KuCoin futures through bullet tokens with API-v2 passphrase and broker signing', async () => {
+    const requests: Array<{ method: string; url: string; headers: Record<string, string>; body?: string }> = [];
+    const topics: string[] = [];
+    let token = 0;
+    const transport: Transport = {
+      now: () => Date.now(),
+      connect: (url, handlers) => {
+        expect(url).toMatch(/^wss:\/\/kucoin.test\/socket\?token=token-/);
+        setTimeout(() => { handlers.onOpen(); handlers.onMessage(JSON.stringify({ type: 'welcome', id: 'fixture' })); }, 0);
+        return { close: () => {}, send: (text) => {
+          const message = JSON.parse(text) as { type: string; topic?: string; id?: string };
+          expect(message.type).not.toBe('login');
+          if (message.topic) topics.push(message.topic);
+          if (message.type === 'ping') setTimeout(() => handlers.onMessage(JSON.stringify({ type: 'pong', id: message.id })), 0);
+        } };
+      },
+      request: async (request) => {
+        requests.push(request);
+        const name = new URL(request.url).pathname.split('/').pop()!;
+        const data: Record<string, unknown> = {
+          active: [{ symbol: 'XBTUSDTM', baseCurrency: 'XBT', settleCurrency: 'USDT', status: 'Open', lotSize: 1, tickSize: 0.1, multiplier: 0.1, maxOrderQty: 1000, maxLeverage: 100 }],
+          allTickers: [{ symbol: 'XBTUSDTM', price: '100', bestBidPrice: '99', bestAskPrice: '101' }],
+          positions: [{ symbol: 'XBTUSDTM', currentQty: 10, avgEntryPrice: '90', markPrice: '100', leverage: '10', marginMode: 'CROSS', positionMode: 0, unrealisedPnl: '0.1' }],
+          'account-overview': { accountEquity: '1000', availableBalance: '900', orderMargin: '100', unrealisedPNL: '0.1' },
+          getPositionMode: { positionMode: 0 },
+          getMarginMode: { marginMode: 'CROSS' },
+          getCrossUserLeverage: { leverage: '10' },
+          orders: request.method === 'POST' ? { orderId: 'native-order' } : { currentPage: 1, totalPage: 1, totalNum: 1, items: [{ id: 'existing-native', symbol: 'XBTUSDTM', side: 'buy', type: 'limit', status: 'open', price: '95', size: 7, filledSize: 3, remainSize: 4, createdAt: 1700000000000 }] },
+          stopOrders: { currentPage: 1, totalPage: 1, totalNum: 0, items: [] },
+          snapshot: { sequence: 100, bids: [[99, 3]], asks: [[101, 4]] },
+        };
+        const payload = name.startsWith('bullet-') ? { token: `token-${++token}`, instanceServers: [{ endpoint: 'wss://kucoin.test/socket', pingInterval: 18000, pingTimeout: 10000 }] } : data[name];
+        if (payload === undefined) throw new Error(`Untaped KuCoin request ${request.url}`);
+        return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify({ code: '200000', data: payload })) };
+      },
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('kucoin', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase', extra: { kucoinBroker: { partner: 'partner', brokerKey: 'broker-fixture', brokerName: 'tealstreet' } } }, store);
+    const main = new BaseExchange('kucoin', { key: '', secret: '' }, new DefaultStore());
+    const books: OrderBook[] = [];
+    main.emitter.on('listenOrderBook', ({ orderbook }: { orderbook: OrderBook }) => books.push(orderbook));
+    exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
+    await exchange.start();
+    await until(() => main.store.orders.length === 1 && main.store.positions.length === 1);
+    expect(store.marketsBySymbol.BTCUSDT.contractSize).toBe(0.1);
+    expect(store.positions[0].contracts).toBe(1);
+    expect(store.positions[0].extra?.contractsNative).toBe(10);
+    expect(main.store.positions[0]).toMatchObject({ contracts: 1, extra: { contractsNative: 10 } });
+    expect(main.store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
+    const { CrossTradeManager } = await import('../crossTrade/runtime/CrossTradeManager');
+    const masterStore = new DefaultStore();
+    masterStore.update({ markets: main.store.markets, tickers: main.store.tickers });
+    const closes: number[] = [];
+    const copier = new CrossTradeManager({ getExchange: () => undefined, placeOrder: async (_copier, _market, _price, _account, _side, amount) => { closes.push(amount); } });
+    await (copier as any)._auditCopierPositions({ masterWeight: 1 }, { account: 'copier', weight: 1, symbolMappings: {} }, { name: 'binance', store: masterStore }, main);
+    expect(closes).toEqual([10]);
+    expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
+    const ids = await exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 95, amount: 2, clientOrderId: 'caller-id' });
+    expect(ids).toEqual(['native-order']);
+    const write = requests.find((request) => request.method === 'POST' && request.url.endsWith('/orders'))!;
+    expect(JSON.parse(write.body!)).toMatchObject({ clientOid: 'caller-id', size: '2', marginMode: 'CROSS', leverage: 10 });
+    expect(write.headers['KC-API-KEY-VERSION']).toBe('2');
+    expect(write.headers['KC-API-PASSPHRASE']).toBe(createHmac('sha256', 'fixture-secret').update('fixture-passphrase').digest('base64'));
+    expect(write.headers['KC-API-PARTNER-SIGN']).toBe(createHmac('sha256', 'broker-fixture').update(write.headers['KC-API-TIMESTAMP'] + 'partner' + 'fixture-key').digest('base64'));
+    await until(() => topics.includes('/contractMarket/tradeOrders'));
+    exchange.listenOrderBook('BTCUSDT', () => {});
+    await until(() => books.length > 0);
+    expect(books[0].bids[0].amount).toBe(3);
+    main.dispose();
   });
 
   it('runs Backpack perpetuals and preserves canonical caller IDs through placement and frames', async () => {
