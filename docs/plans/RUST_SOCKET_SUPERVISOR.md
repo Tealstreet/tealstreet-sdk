@@ -60,4 +60,13 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
 
 ## Progress
 
-- Plan and three independent current-code audits completed; implementation pending.
+- Plan and three independent current-code audits completed.
+- Phase 1: `ca0639d13b` adds the shared policy. Ten new regressions and strict
+  engine Clippy pass (the first nine plus a review-discovered fractional-clock
+  regression). The initial full engine suite passed 88 tests in both default
+  and product-semantics/options feature configurations.
+- Phase-1 review caught subtraction/addition rounding disagreement at a
+  fractional timeout, causing zero-delay timers. Expiry now compares the same
+  absolute deadline used when scheduling. The reproducer includes
+  `10731.000000000002 + 10000`, whose subtraction rounds below 10000.
+- Venue migrations and native regression verification are in progress.

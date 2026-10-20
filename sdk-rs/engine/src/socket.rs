@@ -209,19 +209,19 @@ impl Supervisor {
         }
         self.watch = None;
         let timeout = match self.phase {
-            Phase::Connecting if cx.now - self.since >= self.config.connect_timeout_ms => {
+            Phase::Connecting if cx.now >= self.since + self.config.connect_timeout_ms => {
                 Some(Timeout::Connect)
             }
             Phase::Authenticating
                 if self
                     .config
                     .auth_timeout_ms
-                    .is_some_and(|ms| cx.now - self.since >= ms) =>
+                    .is_some_and(|ms| cx.now >= self.since + ms) =>
             {
                 Some(Timeout::Auth)
             }
             Phase::Authenticating | Phase::Ready
-                if cx.now - self.received >= self.config.idle_timeout_ms =>
+                if cx.now >= self.received + self.config.idle_timeout_ms =>
             {
                 Some(Timeout::Idle)
             }
@@ -615,5 +615,30 @@ mod tests {
         assert!(h.engine.venue().socket.is_none());
         h.advance(60_000.0);
         assert!(h.engine.venue().socket.is_some());
+    }
+
+    #[test]
+    fn fractional_retry_timestamps_expire_without_zero_delay_timer_loops() {
+        for start in [813.297_568_491_074_2, 10_731.000_000_000_002, 0.1] {
+            let mut connecting = Harness::new(Config::default(), start);
+            connecting.advance(start + 10_000.0);
+            assert_eq!(connecting.closed.len(), 1);
+
+            let mut auth = Harness::new(
+                Config {
+                    auth_timeout_ms: Some(10_000.0),
+                    ..Config::default()
+                },
+                start,
+            );
+            auth.open();
+            auth.advance(start + 10_000.0);
+            assert_eq!(auth.closed.len(), 1);
+
+            let mut idle = Harness::new(Config::default(), start);
+            idle.open();
+            idle.advance(start + 60_000.0);
+            assert_eq!(idle.closed.len(), 1);
+        }
     }
 }
