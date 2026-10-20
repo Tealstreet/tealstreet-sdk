@@ -13,15 +13,66 @@ const fill = { id: 8, order_id: 2, symbol: BTC, side: 'BUY', executed_price: 500
   executed_quantity: 0.1, executed_timestamp: 2000, fee: 0.5, fee_asset: 'USDC', is_maker: 1 };
 
 test('query stub correction is input-derived and leaves protocol failures visible', () => {
-  const ts = { commands: [{ ok: [] }], invalidSignatures: 7, missingWrites: 3 };
+  const ts = { commands: [{ ok: [] }], requests: ['GET https://example.test/unrelated?'], invalidSignatures: 7, missingWrites: 3 };
   fixOrderly(ts, [meta, command('fetchFills', { symbol: 'BTCUSDC', from: 1000, to: 3000, limit: 2 }),
     http('GET', `/v1/trades?symbol=${BTC}&start_t=1000&end_t=3000&page=1&size=500`, { rows: [fill], meta: { total: 1 } })]);
   assert.deepEqual(ts.commands[0], { ok: [{ id: '8', timestamp: 2, symbol: 'BTCUSDC', orderId: '2', price: 50000,
     qty: 0.1, side: 'buy', commission: 0.5, commissionAsset: 'USDC', maker: true }] });
   assert.equal(ts.invalidSignatures, 7);
   assert.equal(ts.missingWrites, 3);
+  assert.deepEqual(ts.requests, ['GET https://example.test/unrelated?',
+    `GET https://example.test/v1/trades?end_t=3000&page=1&size=500&start_t=1000&symbol=${BTC}`]);
   assert.notEqual(ts.commands[0].ok[0].price, 1, 'an incorrect native price remains distinguishable');
   assert.equal(fixOrderly.length, 2, 'there is no native-output argument');
+});
+
+test('request corrections preserve unexpected reads, ordered writes and protocol counters', () => {
+  const write = 'DELETE https://example.test/v1/orders?symbol=PERP_BTC_USDC';
+  const ts = { commands: [], requests: [write, 'GET https://example.test/unexpected?',
+    'GET https://example.test/v1/orders?status=INCOMPLETE'], writes: [write], writeCount: 1,
+    protocolErrors: ['invalid signature'], unserved: 2, unusedWrites: 3 };
+  fixOrderly(ts, [meta, http('GET', '/v1/orders?status=INCOMPLETE', { rows: [] }),
+    http('GET', '/v1/orders?status=INCOMPLETE&page=1&size=500', { rows: [] })]);
+  assert.deepEqual(ts.requests, [write, 'GET https://example.test/unexpected?',
+    'GET https://example.test/v1/orders?page=1&size=500&status=INCOMPLETE']);
+  assert.deepEqual(ts.writes, [write]);
+  assert.equal(ts.writeCount, 1);
+  assert.deepEqual(ts.protocolErrors, ['invalid signature']);
+  assert.equal(ts.unserved, 2);
+  assert.equal(ts.unusedWrites, 3);
+});
+
+test('query request corrections are exact and do not modify already implemented results', () => {
+  const records = [meta, command('fetchFills'), http('GET', '/v1/trades?page=1&size=500', { rows: [fill], meta: { total: 1 } })];
+  const ts = { commands: [{ ok: [] }], requests: [] };
+  fixOrderly(ts, records);
+  assert.deepEqual(ts.requests, ['GET https://example.test/v1/trades?page=1&size=500']);
+  ts.requests = [];
+  fixOrderly(ts, records);
+  assert.deepEqual(ts.requests, [], 'missing request from an implemented TS method remains a difference');
+});
+
+test('public zero-open percentage correction requires exact recorded zero denominator and close', () => {
+  const ticker = (symbol, percentage = null) => ({ symbol, percentage, last: 0, volume: 7 });
+  const ts = { tickers: [ticker('BTCUSDC'), ticker('ETHUSDC'), ticker('SOLUSDC'), ticker('XRPUSDC', 17)] };
+  fixOrderly(ts, [{ type: 'meta', private: false }, http('GET', '/v1/public/futures', { rows: [
+    { symbol: BTC, '24h_open': 0, '24h_close': 0 },
+    { symbol: 'PERP_ETH_USDC', '24h_open': 2, '24h_close': 2 },
+    { symbol: 'PERP_SOL_USDC', '24h_open': 0, '24h_close': 3 },
+    { symbol: 'PERP_XRP_USDC', '24h_open': 0, '24h_close': 0 },
+  ] })]);
+  assert.deepEqual(ts.tickers, [ticker('BTCUSDC', 0), ticker('ETHUSDC'), ticker('SOLUSDC'), ticker('XRPUSDC', 17)]);
+});
+
+test('native TIF correction accepts optional omissions but rejects unexpected finite values', () => {
+  const records = [meta, ws('executionreport', { orderId: 2, symbol: BTC, type: 'POST_ONLY', status: 'NEW' })];
+  for (const old of [null, undefined]) {
+    const ts = { commands: [], account: { ...account(), orders: [{ id: '2', timeInForce: old }] } };
+    fixOrderly(ts, records);
+    assert.equal(ts.account.orders[0].type, 'limit');
+    assert.equal(ts.account.orders[0].timeInForce, 'PostOnly');
+  }
+  assert.throws(() => fixOrderly({ commands: [], account: { ...account(), orders: [{ id: '2', timeInForce: 'FillOrKill' }] } }, records), /unexpected TS missing native TIF/);
 });
 
 test('query oracle refuses unexpected TS errors or nonempty data', () => {
@@ -42,32 +93,43 @@ test('paged fill oracle deduplicates overlap and applies exact time bounds', () 
 
 test('funding direction and provisional settlement are independently checked', () => {
   const payment = { symbol: BTC, funding_fee: 1.5, funding_rate: 0.0001, mark_price: 50000, status: 'Settled', created_time: 2000, payment_type: 'Pay' };
-  const ts = { commands: [{ ok: [] }] };
+  const ts = { commands: [{ ok: [] }], requests: [] };
   fixOrderly(ts, [meta, command('fetchIncome', { from: 1000, to: 3000, limit: 10 }),
     http('GET', '/v1/funding_fee/history?start_t=1000&end_t=3000&page=1&size=500', { rows: [payment,
       { ...payment, payment_type: 'Receive', created_time: 2100 }, { ...payment, status: 'Accrued' }], meta: { total: 3 } })]);
   assert.deepEqual(ts.commands[0].ok.map((r) => r.income), [1.5, -1.5]);
   assert.ok(ts.commands[0].ok.every((r) => r.category === 'funding' && r.timestamp < 3));
+  assert.deepEqual(ts.requests, ['GET https://example.test/v1/funding_fee/history?end_t=3000&page=1&size=500&start_t=1000']);
 });
 
 test('public trades retain identical executions using distinct stable occurrence IDs', () => {
   const row = { symbol: BTC, side: 'SELL', executed_price: 50000, executed_quantity: 0.1, executed_timestamp: 2000 };
-  const ts = { commands: [{ error: 'Not implemented' }] };
+  const ts = { commands: [{ error: 'Not implemented' }], requests: [] };
   fixOrderly(ts, [meta, command('fetchPublicTrades', { symbol: 'BTCUSDC', limit: 2 }),
     http('GET', `/v1/public/market_trades?symbol=${BTC}&limit=2`, { rows: [row, row] })]);
   assert.equal(ts.commands[0].ok.length, 2);
   assert.notEqual(ts.commands[0].ok[0].id, ts.commands[0].ok[1].id);
   assert.equal(ts.commands[0].ok[0].quoteQty, 5000);
+  assert.deepEqual(ts.requests, [`GET https://example.test/v1/public/market_trades?limit=2&symbol=${BTC}`]);
 });
 
 test('order history merges terminal ordinary and nested protective rows', () => {
-  const ts = { commands: [{ ok: [] }] };
+  const ts = { commands: [{ ok: [] }], requests: [] };
   fixOrderly(ts, [meta, command('fetchOrderHistory', { limit: 10 }),
     http('GET', '/v1/orders?page=1&size=500', { rows: [{ order_id: 1, symbol: BTC, type: 'LIMIT', side: 'BUY', status: 'FILLED',
       quantity: 1, total_executed_quantity: 1, price: 50000, created_time: 2000 }], meta: { total: 1 } }),
     http('GET', '/v1/algo/orders?page=1&size=500', { rows: [{ algo_order_id: 2, symbol: BTC, algo_type: 'POSITIONAL_TP_SL', algo_status: 'FILLED',
       created_time: 2100, child_orders: [{ algo_order_id: 3, algo_type: 'STOP_LOSS', algo_status: 'CANCELLED', side: 'SELL', quantity: 0, trigger_price: 49000 }] }], meta: { total: 1 } })]);
   assert.deepEqual(ts.commands[0].ok.map((r) => [r.id, r.status, r.createdTime]), [['3', 'canceled', 2100], ['1', 'closed', 2000]]);
+  assert.deepEqual(ts.requests, ['GET https://example.test/v1/algo/orders?page=1&size=500', 'GET https://example.test/v1/orders?page=1&size=500']);
+});
+
+test('symbol leverage stub request is derived from the exact successful documented endpoint', () => {
+  const ts = { commands: [{ ok: null }], requests: [] };
+  fixOrderly(ts, [meta, command('fetchLeverage', { symbol: 'BTCUSDC' }),
+    http('GET', `/v1/client/leverage?symbol=${BTC}&margin_mode=CROSS`, { max_leverage: 12 })]);
+  assert.deepEqual(ts.commands, [{ ok: { buyLeverage: 12, sellLeverage: 12 } }]);
+  assert.deepEqual(ts.requests, [`GET https://example.test/v1/client/leverage?margin_mode=CROSS&symbol=${BTC}`]);
 });
 
 test('fill correction requires the demonstrated duplicate stream and uses cumulative increments', () => {

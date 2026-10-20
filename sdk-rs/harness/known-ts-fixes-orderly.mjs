@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { parseRequestJson } from './request-json.mjs';
+import { requestKey } from './requests.mjs';
 
 export const ORDERLY_TS_FIXES = [
   'keyless full-depth snapshots use documented WS requests rather than signed REST',
@@ -17,10 +18,12 @@ export const ORDERLY_TS_FIXES = [
   'symbol settings use the selected margin mode instead of the last position row',
   'positional placement returns the documented root ID rather than legacy child IDs',
   'symbol leverage reads and four history/public-trade queries replace inherited stubs',
+  'open-order reads request the documented explicit page and maximum page size',
+  'zero-open-price ticker percentages remain finite instead of serializing NaN as null',
 ];
 const parse = parseRequestJson;
-const native = (symbol) => `PERP_${symbol.slice(0, -4)}_USDC`;
-const symbol = (value) => /^PERP_.+_USDC$/.test(value ?? '') ? value.slice(5).replaceAll('_', '') : undefined;
+const native = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
+const symbol = (value) => /^PERP_.+_USDC(?:_[A-Za-z0-9_-]+)?$/.test(value ?? '') ? value.replace(/^PERP_(.+)_USDC(.*)$/, '$1USDC$2') : undefined;
 const side = (value) => ({ BUY: 'buy', SELL: 'sell' })[value];
 const terminal = (status) => ['FILLED', 'CANCELLED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(status);
 const orderStatus = (value) => value === 'FILLED' ? 'closed' : terminal(value) ? 'canceled' : 'open';
@@ -45,12 +48,17 @@ const change = (object, key, legacy, expected, label) => {
   assert.deepEqual(object[key], legacy, `unexpected TS ${label}`);
   object[key] = expected;
 };
+const missing = (object, key, expected, label) => {
+  if (isDeepStrictEqual(object[key], expected)) return;
+  assert.ok(object[key] === null || object[key] === undefined, `unexpected TS ${label}`);
+  object[key] = expected;
+};
 const byTime = (rows, timeKey) => rows.sort((a, b) => number(b[timeKey]) - number(a[timeKey]) ||
   (String(a.id ?? a.tranId) < String(b.id ?? b.tranId) ? 1 : String(a.id ?? a.tranId) > String(b.id ?? b.tranId) ? -1 : 0));
 const accepted = (row, command, time) => (!command.symbol || symbol(row.symbol) === command.symbol) &&
   (command.from === undefined || time >= command.from) && (command.to === undefined || time <= command.to);
 
-function readPages(records, command, commandIndex, route) {
+function readPages(records, command, commandIndex, route, requests) {
   const out = [];
   const seen = new Set();
   for (let page = 1; page <= 50; page++) {
@@ -68,6 +76,7 @@ function readPages(records, command, commandIndex, route) {
     choices = choices.filter((r) => (r.afterCommand ?? 0) === stage);
     const preferred = choices.find((r) => new URL(r.url).searchParams.get('size') === '500') ?? choices[0];
     assert.ok(success(preferred), `failed documented oracle page ${route}`);
+    requests.add(requestKey('GET', preferred.url));
     const response = data(preferred);
     assert.ok(Array.isArray(response.rows), `missing documented oracle rows ${route}`);
     assert.ok(response.rows.length <= 500, 'oversized oracle history page');
@@ -83,11 +92,11 @@ function readPages(records, command, commandIndex, route) {
   throw new Error('documented oracle history exceeds page budget');
 }
 
-function queryExpected(records, command, index) {
+function queryExpected(records, command, index, requests) {
   const limit = Math.min(command.limit ?? (command.op === 'fetchIncome' ? 1000 : 100), 1000);
   if (command.op === 'fetchFills') {
     const route = command.orderId ? `/v1/order/${id(command.orderId)}/trades` : '/v1/trades';
-    const rows = readPages(records, command, index, route).filter((r) => accepted(r, command, number(r.executed_timestamp)) &&
+    const rows = readPages(records, command, index, route, requests).filter((r) => accepted(r, command, number(r.executed_timestamp)) &&
       (!command.orderId || id(r.order_id) === command.orderId)).map((r) => ({
       id: id(r.id), timestamp: number(r.executed_timestamp) / 1000, symbol: symbol(r.symbol), orderId: id(r.order_id),
       price: number(r.executed_price), qty: number(r.executed_quantity), side: side(r.side), commission: number(r.fee),
@@ -120,13 +129,13 @@ function queryExpected(records, command, index) {
       for (const child of row.child_orders ?? []) walk(child, raw, algo, depth + 1);
     };
     for (const [route, algo] of [['/v1/orders', false], ['/v1/algo/orders', true]])
-      for (const row of readPages(records, command, index, route)) walk(row, {}, algo);
+      for (const row of readPages(records, command, index, route, requests)) walk(row, {}, algo);
     return byTime(rows, 'createdTime').slice(0, limit);
   }
   if (command.op === 'fetchIncome') {
     assert.ok(command.incomeType == null || ['FUNDING', 'FUNDING_FEE'].includes(command.incomeType.toUpperCase()), 'unsupported oracle income category');
     const unique = new Set();
-    const rows = readPages(records, command, index, '/v1/funding_fee/history').filter((r) => r.status === 'Settled' && accepted(r, command, number(r.created_time))).flatMap((r) => {
+    const rows = readPages(records, command, index, '/v1/funding_fee/history', requests).filter((r) => r.status === 'Settled' && accepted(r, command, number(r.created_time))).flatMap((r) => {
       assert.ok(['Pay', 'Receive'].includes(r.payment_type), 'unknown funding payment direction');
       const key = `${r.symbol}:${r.margin_mode ?? 'CROSS'}:${number(r.created_time)}:${r.payment_type}:${number(r.funding_fee)}:${number(r.funding_rate)}:${number(r.mark_price)}`;
       if (unique.has(key)) return [];
@@ -139,6 +148,7 @@ function queryExpected(records, command, index) {
   const record = records.find((r) => r.type === 'http' && r.method === 'GET' && path(r) === '/v1/public/market_trades' &&
     new URL(r.url).searchParams.get('symbol') === native(command.symbol) && Number(new URL(r.url).searchParams.get('limit')) === Math.min(limit, 500));
   assert.ok(record && success(record), 'missing documented public-trade oracle');
+  requests.add(requestKey('GET', record.url));
   const occurrences = new Map();
   const rows = data(record).rows.map((r) => {
     const price = number(r.executed_price), qty = number(r.executed_quantity), timestamp = number(r.executed_timestamp);
@@ -191,20 +201,25 @@ function correctCommands(ts, records) {
   const commands = records.filter((r) => r.type === 'command');
   assert.equal(ts.commands.length, commands.length, 'missing TS command result');
   let lastPairCommand = 0;
+  const requiredReads = new Set();
   for (const [index, command] of commands.entries()) {
     const result = ts.commands[index];
     if (['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(command.op)) {
       const legacy = command.op === 'fetchPublicTrades' ? { error: 'Not implemented' } : { ok: [] };
-      const expected = { ok: queryExpected(records, command, index + 1) };
+      const queryReads = new Set();
+      const expected = { ok: queryExpected(records, command, index + 1, queryReads) };
       if (!isDeepStrictEqual(result, expected)) {
         assert.deepEqual(result, legacy, `unexpected TS ${command.op} fallback`);
         ts.commands[index] = expected;
       }
+      if (isDeepStrictEqual(result, legacy)) for (const key of queryReads) requiredReads.add(key);
     } else if (command.op === 'fetchLeverage') {
       const response = records.find((r) => r.type === 'http' && r.method === 'GET' && path(r) === '/v1/client/leverage' && new URL(r.url).searchParams.get('symbol') === native(command.symbol));
       assert.ok(response && success(response), 'missing symbol leverage oracle');
       const leverage = number(data(response).max_leverage ?? data(response).leverage);
+      const legacy = isDeepStrictEqual(result, { ok: null });
       change(ts.commands, index, { ok: null }, { ok: { buyLeverage: leverage, sellLeverage: leverage } }, 'symbol leverage fallback');
+      if (legacy) requiredReads.add(requestKey('GET', response.url));
     } else if (command.op === 'placeOrders' && command.orders.some((o) => o.stopLoss !== undefined || o.takeProfit !== undefined || ['stop_market', 'take_profit_market'].includes(o.type))) {
       const old = [], fixed = [];
       for (const order of command.orders) {
@@ -227,6 +242,7 @@ function correctCommands(ts, records) {
       lastPairCommand = index + 1;
     }
   }
+  if (Array.isArray(ts.requests)) ts.requests = [...new Set([...ts.requests, ...requiredReads])].sort();
   return lastPairCommand;
 }
 
@@ -283,7 +299,7 @@ function correctOrders(account, records, lastPairCommand) {
     if (['POST_ONLY', 'IOC', 'FOK'].includes(rawType)) change(order, 'type', undefined, 'limit', 'native limit variant');
     const caller = raw.clientOrderId ?? raw.client_order_id;
     if (caller != null && caller !== '') change(order, 'clientOrderId', null, String(caller), 'missing client ID');
-    if (order.type === 'limit' && tif(rawType)) change(order, 'timeInForce', null, tif(rawType), 'missing native TIF');
+    if (order.type === 'limit' && tif(rawType)) missing(order, 'timeInForce', tif(rawType), 'missing native TIF');
     if (['stop_market', 'take_profit_market', 'trailing_stop_market'].includes(order.type)) change(order, 'trigger', null, 'mark_price', 'missing MarkPrice trigger');
     if (rawType === 'MARKET' && number(raw.price ?? raw.order_price ?? 0) === 0) change(order, 'price', undefined, 0, 'missing zero market price');
     if (finals.has(order.id)) change(order, 'status', 'open', orderStatus(finals.get(order.id)), 'ignored parent terminal status');
@@ -334,10 +350,43 @@ function correctSettings(account, records) {
   }
 }
 
+function correctOpenOrderRequests(ts, records) {
+  if (!Array.isArray(ts.requests)) return;
+  const replacements = new Map();
+  for (const record of records) {
+    if (record.type !== 'http' || record.method !== 'GET' || !success(record) ||
+        !['/v1/orders', '/v1/algo/orders'].includes(path(record))) continue;
+    const url = new URL(record.url);
+    if (url.searchParams.get('status') !== 'INCOMPLETE' || url.searchParams.get('page') !== '1' || url.searchParams.get('size') !== '500') continue;
+    const paged = requestKey('GET', url);
+    url.searchParams.delete('page');
+    url.searchParams.delete('size');
+    replacements.set(requestKey('GET', url), paged);
+  }
+  // Replace only the precise legacy unpaged reads; writes and unexpected reads
+  // remain visible to Tape and the gate's exact request comparison.
+  ts.requests = [...new Set(ts.requests.map((key) => replacements.get(key) ?? key))].sort();
+}
+
+function correctZeroOpenPercentages(ts, records) {
+  const zeroOpen = new Set();
+  for (const record of records) {
+    if (record.type !== 'http' || record.method !== 'GET' || path(record) !== '/v1/public/futures' || !success(record)) continue;
+    for (const row of data(record).rows) {
+      if (row['24h_open'] === 0 && row['24h_close'] === 0) zeroOpen.add(symbol(row.symbol));
+      else zeroOpen.delete(symbol(row.symbol));
+    }
+  }
+  for (const ticker of ts.tickers ?? [])
+    if (zeroOpen.has(ticker.symbol) && ticker.last === 0 && ticker.percentage === null) ticker.percentage = 0;
+}
+
 export function fixOrderly(ts, records) {
   assert.ok(Array.isArray(records), 'Orderly corrections require input records');
+  correctZeroOpenPercentages(ts, records);
   const privateTape = records.find((r) => r.type === 'meta')?.private ?? records.some((r) => r.url?.includes('/private/stream/'));
   if (!privateTape) return;
+  correctOpenOrderRequests(ts, records);
   const lastPair = correctCommands(ts, records);
   if (!ts.account) return;
   correctFills(ts.account, records);

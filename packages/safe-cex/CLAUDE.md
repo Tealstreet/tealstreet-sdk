@@ -919,3 +919,15 @@ runner depends on that bit for `retry`, blocking steps, and capture
 writeback. For fire-and-forget worker commands with no `reqId`,
 handled failures should still emit `exec-log` so the terminal displays
 the error.
+
+## Orderly Rust engine
+
+Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue
+with broker options. Production registries must not import the frozen replay
+reference in `src/__tests__/reference/orderly`. ED25519 signatures cover exact
+request bytes; the built-in HTTP-over-WebSocket adapter parses/reserializes
+those bytes and is unsupported (`supportsTunnel: false`). Direct requests,
+proxies and custom raw adapters retain byte identity; unsupported socket
+routes fail during startup. History `orderId`/`status` filters fail explicitly
+rather than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
+for native IDs, margin modes, caller IDs and socket capacity.

@@ -1,8 +1,8 @@
-import type { Transport as EngineHostTransport } from '@tealstreet/safe-cex-wasm/host';
+import type { Transport as EngineHostTransport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { TransportProvider } from '../../transport/types';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { orderlyTransport } from '../../exchanges/rust/transport';
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
+import { OrderStatus } from '../../types';
 
 const origin = 'https://api-evm.orderly.org';
 const query = '/v1/order?symbol=PERP_BTC_USDC&client_order_id=a%20b%2Fc';
@@ -68,6 +69,148 @@ afterEach(() => {
 });
 
 describe('Orderly Rust transport boundary', () => {
+  it('rejects startup disposed while the WASM loader is pending before constructing the engine', async () => {
+    const { base } = createBase();
+    const construct = vi.fn();
+    let loaded!: (module: WasmEngineModule) => void;
+    setWasmEngineLoader(
+      () =>
+        new Promise((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    setRustEngineTransport(() => base);
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    const startup = exchange.start();
+    expect(exchange.start()).toBe(startup);
+    const starting = expect(startup).rejects.toThrow('disposed during startup');
+    const account = expect(exchange.getAccount()).rejects.toThrow('disposed during startup');
+    exchange.dispose();
+    loaded({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] });
+    await Promise.all([starting, account]);
+    expect(construct).not.toHaveBeenCalled();
+    expect(base.connect).not.toHaveBeenCalled();
+    expect(base.request).not.toHaveBeenCalled();
+  });
+
+  it('shares deferred startup and its sole host with concurrent start and getAccount calls', async () => {
+    const { base } = createBase();
+    let loaded!: (module: WasmEngineModule) => void;
+    const load = vi.fn(
+      () =>
+        new Promise<WasmEngineModule>((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    setWasmEngineLoader(load);
+    setRustEngineTransport(() => base);
+    const noActions = () => '';
+    const engine: WasmEngineLike = {
+      start: vi.fn(() =>
+        JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://ws-evm.orderly.org/ws/stream/account-id' }]),
+      ),
+      command: noActions,
+      takeFrame: () => undefined,
+      snapshotFrame: () => new Uint8Array(),
+      wsOpen: noActions,
+      wsMessage: noActions,
+      wsClose: noActions,
+      httpStart: noActions,
+      httpChunk: noActions,
+      httpEnd: noActions,
+      httpFailed: noActions,
+      timer: noActions,
+    };
+    const construct = vi.fn(function () {
+      return engine;
+    });
+    const store = new DefaultStore();
+    store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+    const exchange = new RustEngineExchange(
+      'mode',
+      options(undefined, {
+        key: '11111111111111111111111111111111',
+        secret: '11111111111111111111111111111111',
+        applicationId: 'account-id',
+      }),
+      store,
+    );
+    try {
+      const startup = exchange.start();
+      expect(exchange.start()).toBe(startup);
+      const account = exchange.getAccount();
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(construct).not.toHaveBeenCalled();
+      loaded({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] });
+      await startup;
+      await expect(account).resolves.toEqual({ userId: 'account-id', affiliateId: 'account-id' });
+      expect(exchange.start()).toBe(startup);
+      expect(construct).toHaveBeenCalledTimes(1);
+      expect(engine.start).toHaveBeenCalledTimes(1);
+      expect(base.connect).toHaveBeenCalledTimes(1);
+    } finally {
+      exchange.dispose();
+    }
+    expect(base.connect.mock.results[0].value.close).toHaveBeenCalledTimes(1);
+    await expect(exchange.start()).rejects.toThrow('disposed during startup');
+    expect(construct).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the original failed startup promise without retrying the loader or constructing a host', async () => {
+    const { base } = createBase();
+    const failure = new Error('WASM load failed');
+    const load = vi.fn(async (): Promise<WasmEngineModule> => {
+      throw failure;
+    });
+    setWasmEngineLoader(load);
+    setRustEngineTransport(() => base);
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    try {
+      const startup = exchange.start();
+      expect(exchange.start()).toBe(startup);
+      await expect(startup).rejects.toBe(failure);
+      expect(exchange.start()).toBe(startup);
+      await expect(exchange.getAccount()).rejects.toBe(failure);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(base.connect).not.toHaveBeenCalled();
+      expect(base.request).not.toHaveBeenCalled();
+    } finally {
+      exchange.dispose();
+    }
+  });
+
+  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+    '%s refuses unsupported order history filters before dispatching a command',
+    async (name) => {
+      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
+      // No host is started: dispatch would reject with "engine is not started".
+      for (const filter of [{ orderId: '42' }, { status: [OrderStatus.Closed] }, { status: [] }]) {
+        await expect(exchange.fetchHistoricalOrders(filter)).rejects.toThrow(
+          'does not support orderId or status filters',
+        );
+      }
+      exchange.dispose();
+    },
+  );
+
+  it('preserves history dispatch for supported Orderly options and other venues', async () => {
+    for (const name of ['mode', 'binance'] as const) {
+      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
+      try {
+        await expect(
+          exchange.fetchHistoricalOrders({ symbol: 'BTCUSDC', from: 1000, to: 2000, limit: 5 }),
+        ).rejects.toThrow('engine is not started');
+        if (name === 'binance') {
+          await expect(exchange.fetchHistoricalOrders({ orderId: '42', status: [OrderStatus.Closed] })).rejects.toThrow(
+            'engine is not started',
+          );
+        }
+      } finally {
+        exchange.dispose();
+      }
+    }
+  });
+
   it('keeps the direct transport and its streaming response unchanged', async () => {
     setDefaultTransport(directTransport);
     const { base, response } = createBase();

@@ -50,7 +50,7 @@ const orderlyClasses = {
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
-const orderlyNative = (symbol) => `PERP_${symbol.slice(0, -4)}_USDC`;
+const orderlyNative = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
 const orderlyPrivateUrl = (url) => new URL(url).pathname.startsWith('/v2/ws/private/stream/');
 const orderlySocketRequest = (message) => {
   if (message.event !== 'request') return undefined;

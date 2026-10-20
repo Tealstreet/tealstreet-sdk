@@ -241,3 +241,25 @@ Fresh20s public tape captured637socket frames and two full books without topic
 errors; first gate has only legacy zero-opening-price NaN percentage diffs.
 Strict guarded private oracles are being updated for landing optional fields
 and newly enforced request-set accounting; no replay gate counted green yet.
+
+### Public and private replay checkpoint
+
+Fresh20s fixture now passes all three public replay runs:639inputs,144markets,
+144tickers,two full books. Median main CPU TS179.1ms/Rust117.6ms, steady
+TS140.3ms/Rust82.0ms, retained TS2.0MB/Rust1.4MB (Rust linear0.7MB).
+Private base replay passes with33inputs,two markets,14commands; all broker
+mainnet/testnet variants are running before final completion.175harness tests
+pass. Added declared TS fixes for zero-opening-price NaN percentages and
+explicit open-order pagination, plus independent exact read accounting for
+legacy query stubs. Account comparison now canonicalizes object keys while
+preserving every row/value and array order.
+
+Full SDK suite:6644tests/459files passed. SDK real Orderly WASM:15passed.
+Review fixes: shared startup promise prevents duplicate/orphaned hosts;
+disposal while loading rejects; unsupported Orderly history ID/status filters
+reject before reads.48focused SDK tests, typecheck/lint and87metadata/account
+construction tests pass. Built-in HOW capability is no longer advertised.
+Test drivers for Binance/Bybit/Bitget explicitly fail on unexpected Deactivate
+notices, retaining exhaustive checks after the shared lifecycle addition.
+Remaining: combined host/SDK WASM tests, workspace checks, all broker variants,
+mandatory Binance replay regressions, final landing refresh, PR reviews and CI.

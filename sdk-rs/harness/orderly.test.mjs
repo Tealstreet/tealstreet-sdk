@@ -62,12 +62,12 @@ test('every Orderly broker selects one frozen comparator and keeps its own Rust 
 test('event/topic subscriptions retain operation, native symbol and socket path', () => {
   const key = (message) => subscriptionKeys(publicUrl, JSON.stringify(message));
   assert.deepEqual(key({ event: 'subscribe', topic: 'PERP_BTC_USDC@orderbookupdate', id: 'volatile' }), [
-    `${publicUrl} subscribe PERP_BTC_USDC@orderbookupdate`,
+    `WS ${publicUrl}? {"event":"subscribe","topic":"PERP_BTC_USDC@orderbookupdate"}`,
   ]);
   assert.notDeepEqual(key({ event: 'subscribe', topic: 'tickers' }), key({ event: 'unsubscribe', topic: 'tickers' }));
   assert.notDeepEqual(key({ event: 'subscribe', topic: 'tickers' }), key({ event: 'subscribe', topic: 'bbos' }));
-  assert.deepEqual(key(auth()), []);
-  assert.deepEqual(key(request('id')), []);
+  assert.equal(key(auth()).length, 1);
+  assert.equal(key(request('id')).length, 1);
 });
 
 test('Orderly REST verification binds exact bytes, query order, credentials and method', () => {

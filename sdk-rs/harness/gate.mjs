@@ -489,8 +489,8 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }

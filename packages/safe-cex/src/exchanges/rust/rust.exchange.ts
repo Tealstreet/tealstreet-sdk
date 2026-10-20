@@ -2,8 +2,8 @@ import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@t
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
-  ExchangeName,
   ExchangeAccount,
+  ExchangeName,
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
@@ -23,6 +23,7 @@ import type {
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 
 import bs58 from 'bs58';
+
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
@@ -142,6 +143,7 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private startup?: Promise<void>;
   private startupFailure?: Error;
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
@@ -177,7 +179,13 @@ export class RustEngineExchange extends BaseExchange {
     if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
 
-  start = async () => {
+  // Startup is single-use, including failures; a retry needs a new account instance.
+  start = (): Promise<void> => {
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
+    return (this.startup ??= this.startEngine());
+  };
+
+  private startEngine = async () => {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
@@ -192,16 +200,20 @@ export class RustEngineExchange extends BaseExchange {
         const encoded = key?.replace(/^ed25519:/, '') ?? '';
         try {
           if (bs58.decode(encoded).length !== 32) throw new Error();
-        } catch { throw new Error('Orderly requires base58-encoded 32-byte key and secret'); }
+        } catch {
+          throw new Error('Orderly requires base58-encoded 32-byte key and secret');
+        }
       }
     }
     const { WasmEngine } = await loadWasmEngine();
-    if (this.isDisposed) return;
+    if (this.isDisposed) throw new Error('Exchange disposed during startup');
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const baseTransport = engineTransport();
-    const transport = orderlyNames.has(this.name) ? orderlyTransport(this.name, this.options, baseTransport) : baseTransport;
+    const transport = orderlyNames.has(this.name)
+      ? orderlyTransport(this.name, this.options, baseTransport)
+      : baseTransport;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -221,7 +233,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      (this.name === 'backpack' || orderlyNames.has(this.name))
+      this.name === 'backpack' || orderlyNames.has(this.name)
         ? {
             webSocketHeaders: transport.webSocketHeaders,
             now: virtualClock.getCurrentTimeMs,
@@ -251,8 +263,12 @@ export class RustEngineExchange extends BaseExchange {
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
-    try { await this.untilLoaded(); }
-    catch (error) { this.dispose(); throw error; }
+    try {
+      await this.untilLoaded();
+    } catch (error) {
+      this.dispose();
+      throw error;
+    }
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
@@ -297,7 +313,8 @@ export class RustEngineExchange extends BaseExchange {
         if (!this.startupFailure && !this.isDisposed && !ready()) return;
         unsubscribe();
         this.startupWaiters.delete(wake);
-        if (this.startupFailure || this.isDisposed) reject(this.startupFailure ?? new Error('Exchange disposed during startup'));
+        if (this.startupFailure || this.isDisposed)
+          reject(this.startupFailure ?? new Error('Exchange disposed during startup'));
         else resolve();
       };
       this.startupWaiters.add(wake);
@@ -431,7 +448,8 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (this.name === 'blofin' || orderlyNames.has(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (this.name === 'blofin' || orderlyNames.has(this.name))
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };
@@ -445,14 +463,18 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
-    this.command<HistoricalOrder[]>({
+  fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (orderlyNames.has(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('Orderly order history does not support orderId or status filters'));
+    }
+    return this.command<HistoricalOrder[]>({
       op: 'fetchOrderHistory',
       symbol: opts?.symbol,
       from: opts?.from,
       to: opts?.to,
       limit: opts?.limit,
     });
+  };
 
   fetchIncomeHistory = (opts?: IncomeHistoryOptions) =>
     this.command<IncomeRecord[]>({

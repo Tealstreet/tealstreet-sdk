@@ -1304,7 +1304,8 @@ const WooFiMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
@@ -1342,7 +1343,8 @@ const KodiakFIMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
@@ -1380,7 +1382,8 @@ const MODEMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
@@ -1422,7 +1425,8 @@ const SalsaDEXMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
@@ -1460,7 +1464,8 @@ const WhatMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
@@ -1503,7 +1508,8 @@ const TealstreetDEXMetadata: ExchangeMetadata = {
   marginTypes: [MarginType.Cross, MarginType.Isolated],
   orderPendingUpdateDelay: 3_000,
   supportsTrailingStopLoss: false,
-  supportsTunnel: true,
+  // The built-in HOW adapter changes Orderly signed request bytes.
+  supportsTunnel: false,
   tickInterval: 2_000,
   supportsChaser: true,
   supportsPositionMargin: false,
