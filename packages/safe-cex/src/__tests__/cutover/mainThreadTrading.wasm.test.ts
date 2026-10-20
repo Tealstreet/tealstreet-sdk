@@ -3,6 +3,8 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
+import { webcrypto } from 'node:crypto';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
@@ -112,7 +114,9 @@ const venue = () => {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
-  return { transport, requests, writes: () => requests.filter((request) => !request.startsWith('GET')) };
+  // Trading writes only: the private socket's listen-key session is not an order.
+  const writes = () => requests.filter((request) => !request.startsWith('GET') && !request.includes('/listenKey'));
+  return { transport, requests, writes };
 };
 
 /** Connects a main-thread mirror to a real worker the way the web account controller does. */
@@ -131,6 +135,8 @@ const bridge = (worker: () => ExchangeWorker | undefined, main: RustEngineExchan
   },
 });
 
+const previousWindowCrypto = Object.getOwnPropertyDescriptor(window, 'crypto');
+
 describe('main-thread Rust exchange trades through the worker engine', () => {
   let worker: ExchangeWorker | undefined;
   let main: RustEngineExchange | undefined;
@@ -140,11 +146,16 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     worker = main = undefined;
     virtualClock.stop();
     setMainAcceptsFrames(false);
+    if (previousWindowCrypto) Object.defineProperty(window, 'crypto', previousWindowCrypto);
+    else delete (window as { crypto?: Crypto }).crypto;
     vi.restoreAllMocks();
   });
 
   // The web posts full `store` payloads today; `acceptsFrames` is the opt-in frame mode.
   const start = async (frames: boolean) => {
+    // SDK setup supplies a minimal window in Node; the engine generates Binance
+    // client order IDs from the first crypto source it finds there.
+    Object.defineProperty(window, 'crypto', { configurable: true, value: webcrypto });
     const tape = venue();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);

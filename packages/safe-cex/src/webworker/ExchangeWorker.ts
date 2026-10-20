@@ -836,7 +836,7 @@ export class ExchangeWorker {
       if (this._messageBuffer.length < MAX_BUFFER_SIZE) {
         this._messageBuffer.push(payload);
       } else {
-        this._rejectNeverSent(payload);
+        this._rejectNeverSent(payload, 'Worker startup queue is full; nothing was sent.');
         // Send warning through proper logging infrastructure
         this.logError(
           `Message buffer full for ${this._exchangeName}, dropping message`,
@@ -985,10 +985,12 @@ export class ExchangeWorker {
   }
 
   /** A request still buffered when the account stops was never dispatched; answer it rather than leave it pending. */
-  private _rejectNeverSent(payload: StoreWorkerPayload) {
+  private _rejectNeverSent(
+    payload: StoreWorkerPayload,
+    message = 'Exchange stopped before this operation was sent; nothing was sent.',
+  ) {
     if (!this._requestKey(payload)) return;
     const method = payload.op === 'callMethod' ? payload.data?.method : undefined;
-    const message = 'Exchange stopped before this operation was sent; nothing was sent.';
     this._rejectUnavailablePayload(payload, message, {
       message,
       name: 'EngineUnavailableError',
