@@ -23,6 +23,11 @@ pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         Err(serde::de::Error::custom("nonfinite number"))
     }
 }
+fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct Number(#[serde(deserialize_with = "number")] f64);
+    Ok(Option::<Number>::deserialize(d)?.map(|n| n.0))
+}
 #[derive(Deserialize)]
 pub struct Header {
     pub success: bool,
@@ -131,10 +136,10 @@ pub struct Context {
     pub last_price: f64,
     #[serde(default, deserialize_with = "number")]
     pub prev_day_px: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub day_ntl_vlm: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub day_base_vlm: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub day_ntl_vlm: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub day_base_vlm: Option<f64>,
     #[serde(default)]
     pub next_funding_time: Option<f64>,
 }

@@ -17,6 +17,9 @@ pub fn reply(e: &mut Engine<TxFlow>, r: &HttpRequest, status: u16, body: &str) {
     );
 }
 pub fn ready() -> (Engine<TxFlow>, SocketId, SocketId) {
+    ready_with_ticker(TICKER)
+}
+pub fn ready_with_ticker(ticker: &str) -> (Engine<TxFlow>, SocketId, SocketId) {
     let mut e = Engine::new(TxFlow::new(Options {
         testnet: true,
         public_data_only: true,
@@ -35,7 +38,7 @@ pub fn ready() -> (Engine<TxFlow>, SocketId, SocketId) {
                     let body = if r.body.as_deref().unwrap_or("").contains("perpMeta") {
                         META
                     } else {
-                        TICKER
+                        ticker
                     };
                     reply(&mut e, &r, 200, body);
                 }

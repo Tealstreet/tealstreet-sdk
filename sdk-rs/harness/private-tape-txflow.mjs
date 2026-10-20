@@ -33,7 +33,7 @@ const instrument = (index, base, priceTick, basePrecision) => ({
   priceTick, basePrecision, maxLeverage: 50, maxLimitOrderSize: 100, maxMarketOrderSize: 50,
   delisted: false, haltTrading: false, onlyIsolated: false, useNotionalMargin: false,
 });
-info('perpMeta', { includeDelisted: false }, { universe: [instrument(1, 'BTC', '0.1', '0.001'), instrument(2, 'ETH', '0.01', '0.001')] });
+info('perpMeta', { includeDelisted: true }, { universe: [instrument(1, 'BTC', '0.1', '0.001'), instrument(2, 'ETH', '0.01', '0.001'), { ...instrument(9, 'OLD', '0.1', '0.001'), delisted: true, haltTrading: true }] });
 const context = (price) => ({
   markPx: String(price), oraclePx: String(price), lastPrice: String(price), midPx: String(price),
   prevDayPx: String(price), funding: '0.01', openInterest: '2', dayNtlVlm: '1000', dayBaseVlm: '10', nextFundingTime: EPOCH + 3_600_000,

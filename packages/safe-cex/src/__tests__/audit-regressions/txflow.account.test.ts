@@ -22,6 +22,22 @@ function create() {
   const account = new TxflowAccount({ store, emitFill, reportError, requestInfo: <T>(body: Record<string, unknown>) => requestInfo(body) as Promise<T>, wallet: () => WALLET, marketById: (id) => id === '1' ? MARKET : undefined, disposed: () => false });
   return { account, store, emitFill, reportError, requestInfo, setFills: (rows: unknown[]) => { fills = rows; } };
 }
+function hedgeState(legs: ReadonlyArray<readonly [number, number]>, time = NOW + 200) {
+  return { ...STATE, time, assetPositions: legs.map(([size, leverage]) => ({
+    type: 'hedge', position: { ...STATE.assetPositions[0].position, szi: String(size), leverage: { type: 'Isolated', value: leverage } },
+  })) };
+}
+function hedgeSettings(long = 5, short = 8) {
+  return { coin: '1', user: WALLET, leverage: { mode: 'hedge', type: 'Isolated', long_value: long, short_value: short } };
+}
+function pushHedgeSettings(account: TxflowAccount, long = 5, short = 8) {
+  account.nodeFrame(JSON.stringify({ channel: 'activeAssetData', data: hedgeSettings(long, short) }));
+}
+function assertHedgeRails(store: DefaultStore, account: TxflowAccount, long = 5, short = 8) {
+  expect(account.confirmedSetting('BTC-USDC')).toMatchObject({ buyLeverage: long, sellLeverage: short });
+  expect(store.fetchedLeverage['BTC-USDC']).toMatchObject({ buyLeverage: long, sellLeverage: short });
+  expect(store.options.isHedged).toBe(true);
+}
 describe('TxFlow account state from documented native payloads', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
@@ -107,6 +123,113 @@ describe('TxFlow account state from documented native payloads', () => {
     expect(store.options.isHedged).toBe(true);
     expect(store.positions).toHaveLength(0);
     expect(account.confirmedSetting('BTC-USDC')).toMatchObject({ buyLeverage: 5, sellLeverage: 8 });
+    account.dispose();
+  });
+
+  it('keeps configured hedge rails while position legs carry their effective leverage in either row order', async () => {
+    for (const legs of [[ [2, 5], [-3, 8] ], [ [-3, 8], [2, 5] ]] as const) {
+      const { account, store } = create();
+      await account.start();
+      pushHedgeSettings(account);
+      account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState(legs) }));
+      assertHedgeRails(store, account);
+      const positions = store.positions.filter((p) => p.contracts > 0);
+      expect(positions.find((p) => p.side === 'long')).toMatchObject({ leverage: 5, marginType: 'isolated' });
+      expect(positions.find((p) => p.side === 'short')).toMatchObject({ leverage: 8, marginType: 'isolated' });
+      account.dispose();
+    }
+  });
+  it('keeps the absent leg rail when only one hedge position remains', async () => {
+    for (const leg of [[2, 5], [-3, 8]] as const) {
+      const { account, store } = create();
+      await account.start();
+      pushHedgeSettings(account);
+      account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([leg]) }));
+      assertHedgeRails(store, account);
+      expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(1);
+      expect(store.positions.find((p) => p.contracts > 0)?.leverage).toBe(leg[1]);
+      account.dispose();
+    }
+  });
+  it('REST clearinghouse rows never replace authoritative configured rails', async () => {
+    for (const legs of [[[2, 5], [-3, 8]], [[-3, 8], [2, 5]], [[2, 5]], [[-3, 8]]] as const) {
+      const { account, store, requestInfo } = create();
+      await account.start();
+      pushHedgeSettings(account);
+      requestInfo.mockImplementation(async <T>(body: Record<string, unknown>): Promise<T> => {
+        return (body.type === 'clearinghouseState' ? hedgeState(legs) : body.type === 'frontendOpenOrders' ? [] : body.type === 'userFills' ? { data: [], hasMore: false } : hedgeSettings()) as T;
+      });
+      await account.refresh();
+      assertHedgeRails(store, account);
+      expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(legs.length);
+      for (const [size, leverage] of legs) expect(store.positions.find((p) => p.contracts === Math.abs(size))?.leverage).toBe(leverage);
+      account.dispose();
+    }
+  });
+  it('keeps newer settings and account mode across stale state reads and atomic malformed pushes', async () => {
+    const { account, store, requestInfo } = create();
+    await account.start();
+    pushHedgeSettings(account);
+    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[2, 5], [-3, 8]]) }));
+    let release: (value: unknown) => void = () => undefined;
+    requestInfo.mockImplementationOnce(<T>() => new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; }));
+    const refresh = account.refresh();
+    account.nodeFrame(JSON.stringify({ channel: 'userAssetData', data: { user: WALLET, coins: [hedgeSettings(9, 12)] } }));
+    release({ ...STATE, time: NOW + 250 });
+    await refresh;
+    assertHedgeRails(store, account, 9, 12);
+    const positions = structuredClone(store.positions);
+    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[4, 5], [-5, 0]], NOW + 300) }));
+    expect(store.positions).toEqual(positions);
+    assertHedgeRails(store, account, 9, 12);
+    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[-3, 8]], NOW + 400) }));
+    assertHedgeRails(store, account, 9, 12);
+    expect(store.positions.find((p) => p.contracts > 0)?.leverage).toBe(8);
+    account.dispose();
+  });
+  it('does not manufacture configured leverage from positions when settings reads fail', async () => {
+    const { account, store, requestInfo } = create();
+    requestInfo.mockImplementation(async <T>(body: Record<string, unknown>): Promise<T> => {
+      if (body.type === 'activeAssetData') throw new Error('settings unavailable');
+      return (body.type === 'clearinghouseState' ? hedgeState([[2, 5], [-3, 8]]) : body.type === 'frontendOpenOrders' ? [] : { data: [], hasMore: false }) as T;
+    });
+    await account.start();
+    expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(2);
+    expect(account.confirmedSetting('BTC-USDC')).toBeUndefined();
+    expect(store.fetchedLeverage['BTC-USDC']).toBeUndefined();
+    account.dispose();
+  });
+
+  it('fences a held state read behind accepted writes while preserving hedge rails', async () => {
+    const { account, store, requestInfo } = create();
+    await account.start();
+    pushHedgeSettings(account);
+    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[2, 5], [-3, 8]]) }));
+    let release: (value: unknown) => void = () => undefined;
+    requestInfo.mockImplementationOnce(<T>() => new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; }));
+    const refresh = account.refresh();
+    account.writeAccepted();
+    release(hedgeState([[9, 99]], NOW + 300));
+    await refresh;
+    expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(2);
+    assertHedgeRails(store, account);
+    account.dispose();
+  });
+
+  it('fences older clearinghouse mode after a successful REST asset-setting commit', async () => {
+    const { account, store, requestInfo } = create();
+    let release: (value: unknown) => void = () => undefined;
+    requestInfo.mockImplementation(<T>(body: Record<string, unknown>): Promise<T> => {
+      if (body.type === 'clearinghouseState') return new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; });
+      return Promise.resolve((body.type === 'activeAssetData' ? hedgeSettings() : body.type === 'frontendOpenOrders' ? [] : { data: [], hasMore: false }) as T);
+    });
+    const startup = account.start();
+    await vi.advanceTimersByTimeAsync(0);
+    assertHedgeRails(store, account);
+    release(STATE);
+    await startup;
+    expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(1);
+    assertHedgeRails(store, account);
     account.dispose();
   });
 

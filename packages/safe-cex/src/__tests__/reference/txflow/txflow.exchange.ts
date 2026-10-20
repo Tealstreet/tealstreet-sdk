@@ -8,8 +8,8 @@ import { createAPI, createPublicAPI } from './txflow.api';
 import { TxflowAccount } from './txflow.account';
 import { TxFlowTrading, txflowClientOrderIdRule } from './txflow.trading';
 import { fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory, fetchIncomeHistoryRange, fetchTrades } from './txflow.history';
-import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowMarket, mapTxFlowTicker } from './txflow.public';
-import { TXFLOW_INTERVALS, TXFLOW_PUBLIC_READS, TxFlowCandle, TxFlowInstrument, TxFlowTicker } from './txflow.types';
+import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowHistoricalIdentities, mapTxFlowMarket, mapTxFlowTicker } from './txflow.public';
+import { TXFLOW_INTERVALS, TXFLOW_PUBLIC_READS, TxFlowCandle, TxFlowHistoricalIdentity, TxFlowInstrument, TxFlowTicker } from './txflow.types';
 import { TxFlowWebSocket } from './txflow.ws-public';
 
 export class TxFlowExchange extends BaseExchange {
@@ -17,6 +17,7 @@ export class TxFlowExchange extends BaseExchange {
   publicXhr: AxiosInstance;
   account: TxflowAccount;
   trading: TxFlowTrading;
+  historicalIdentities = new Map<string, TxFlowHistoricalIdentity>();
   nodeSocket: TxFlowWebSocket;
   apiSocket: TxFlowWebSocket;
   private accountTimer?: ReturnType<typeof setTimeout>;
@@ -91,10 +92,12 @@ export class TxFlowExchange extends BaseExchange {
   };
 
   fetchMarkets = async () => {
-    const response = await this.info<{ universe: TxFlowInstrument[] }>({ type: 'perpMeta', includeDelisted: false });
+    const response = await this.info<{ universe: TxFlowInstrument[] }>({ type: 'perpMeta', includeDelisted: true });
     if (!Array.isArray(response.universe)) throw new Error('Invalid TxFlow metadata');
+    const identities = mapTxFlowHistoricalIdentities(response.universe);
     const markets = response.universe.flatMap((row) => { const market = mapTxFlowMarket(row); return market ? [market] : []; });
     if (!markets.length || new Set(markets.map((m) => m.id)).size !== markets.length || new Set(markets.map((m) => m.symbol)).size !== markets.length) throw new Error('Invalid or duplicate TxFlow market identities');
+    this.historicalIdentities = identities;
     return markets;
   };
   fetchTickers = async () => {

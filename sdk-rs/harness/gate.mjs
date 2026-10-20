@@ -162,6 +162,8 @@ const KNOWN_TS_FIXES = {
   // TxFlow previously rejected start as a scaffold. Its new TS reference and
   // Rust implementation both fence stale reads, deduplicate executions, reject
   // uncertain write acknowledgements and revalidate queued amendments. Compare
+  // Preserve sparse-context volumes, authoritative hedge settings/mode fences,
+  // and delisted history identities in both implementations as well.
   // both outputs directly; no TxFlow-specific normalization is permitted.
   // The production wrapper also rejects order-history ID/status filters that
   // the native query cannot represent, instead of silently discarding them.

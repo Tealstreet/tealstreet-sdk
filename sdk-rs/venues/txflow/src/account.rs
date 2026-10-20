@@ -44,9 +44,9 @@ pub struct Fence {
 pub enum Request {
     State {
         fence: Fence,
-        settings_revision: u64,
+        // A newer asset setting owns account mode even if exposure can reconcile.
+        mode_revision: u64,
         positions: Vec<Position>,
-        settings: Vec<(String, MarketSetting)>,
         valid: bool,
     },
     Orders {
@@ -150,13 +150,27 @@ struct AssetPosition {
 struct NativePosition {
     asset: String,
     szi: N,
-    leverage: Leverage,
+    leverage: PositionLeverage,
     position_value: N,
     unrealized_pnl: N,
     margin_used: N,
     entry_px: Option<N>,
     liquidation_px: Option<N>,
     update_time: Option<N>,
+}
+/// Clearinghouse rows report the effective leverage of this leg, never both
+/// configured hedge rails. Only asset-data responses establish market settings.
+#[derive(Deserialize)]
+struct PositionLeverage {
+    r#type: String,
+    value: N,
+}
+fn margin_type(value: &str) -> Result<MarginType, &'static str> {
+    match value.to_ascii_lowercase().as_str() {
+        "cross" => Ok(MarginType::Cross),
+        "isolated" => Ok(MarginType::Isolated),
+        _ => Err("Unknown TxFlow margin mode"),
+    }
 }
 #[derive(Deserialize)]
 struct Leverage {
@@ -179,11 +193,7 @@ impl Leverage {
         {
             return Err("Unknown TxFlow position mode");
         }
-        let margin = match self.r#type.to_ascii_lowercase().as_str() {
-            "cross" => MarginType::Cross,
-            "isolated" => MarginType::Isolated,
-            _ => return Err("Unknown TxFlow margin mode"),
-        };
+        let margin = margin_type(&self.r#type)?;
         if self.mode.as_deref() == Some("hedge") {
             let a = self.long_value.ok_or("Missing TxFlow long leverage")?.0;
             let b = self.short_value.ok_or("Missing TxFlow short leverage")?.0;
@@ -370,9 +380,8 @@ impl TxFlow {
                     generation: self.account.generation,
                     revision: self.account.state_revision,
                 },
-                settings_revision: self.account.settings_revision,
+                mode_revision: self.account.settings_revision,
                 positions: Vec::new(),
-                settings: Vec::new(),
                 valid: true,
             };
             self.info(
@@ -497,10 +506,7 @@ impl TxFlow {
             self.next_setting(cx);
         }
     }
-    fn position_row(
-        &self,
-        row: AssetPosition,
-    ) -> Result<(Option<Position>, String, MarketSetting), &'static str> {
+    fn position_row(&self, row: AssetPosition) -> Result<Option<Position>, &'static str> {
         let p = row.position;
         let asset = p
             .asset
@@ -510,7 +516,11 @@ impl TxFlow {
             .symbol(asset)
             .ok_or("Unknown TxFlow position asset")?
             .to_owned();
-        let setting = p.leverage.setting()?;
+        let margin = margin_type(&p.leverage.r#type)?;
+        let leverage = p.leverage.value.0;
+        if leverage <= 0.0 {
+            return Err("Invalid TxFlow position leverage");
+        }
         let side = if p.szi.0 >= 0.0 {
             PositionSide::Long
         } else {
@@ -534,8 +544,8 @@ impl TxFlow {
             side,
             entry_price: p.entry_px.map_or(0.0, |n| n.0),
             notional: p.position_value.0.abs(),
-            leverage: setting.leverage,
-            margin_type: setting.margin_type,
+            leverage,
+            margin_type: Some(margin),
             position_mode: Some(mode),
             unrealized_pnl: p.unrealized_pnl.0,
             realized_pnl: None,
@@ -544,7 +554,7 @@ impl TxFlow {
             margin_size: Some(p.margin_used.0),
             last_update: p.update_time.map(|n| n.0),
         });
-        Ok((position, symbol, setting))
+        Ok(position)
     }
     fn order_row(&self, row: NativeOrder, status: &str, at: f64) -> Result<Order, &'static str> {
         let symbol = self
@@ -631,19 +641,15 @@ impl TxFlow {
     ) {
         match request {
             Request::State {
-                positions,
-                settings,
-                valid,
-                ..
+                positions, valid, ..
             } => match serde_json::from_str::<AssetPosition>(item)
                 .map_err(|_| "Malformed TxFlow position")
                 .and_then(|p| self.position_row(p))
             {
-                Ok((p, s, v)) => {
+                Ok(p) => {
                     if let Some(p) = p {
                         positions.push(p);
                     }
-                    settings.push((s, v));
                 }
                 Err(_) => *valid = false,
             },
@@ -702,9 +708,8 @@ impl TxFlow {
         match request {
             Request::State {
                 fence,
-                settings_revision,
+                mode_revision,
                 positions,
-                settings,
                 valid,
             } => {
                 if fence.generation != self.account.generation {
@@ -735,8 +740,7 @@ impl TxFlow {
                     cx,
                     state,
                     positions,
-                    settings,
-                    settings_revision == self.account.settings_revision,
+                    mode_revision == self.account.settings_revision,
                 );
             }
             Request::Orders {
@@ -897,6 +901,8 @@ impl TxFlow {
                     .and_then(|data| self.asset_setting(data, Some(&coin)))
                 {
                     Ok((symbol, setting, hedged)) => {
+                        self.account.settings_revision =
+                            self.account.settings_revision.saturating_add(1);
                         if let Some(hedged) = hedged {
                             cx.store.set_hedged(hedged);
                         }
@@ -913,8 +919,7 @@ impl TxFlow {
         cx: &mut Cx<'_, Pending>,
         state: State,
         positions: Vec<Position>,
-        settings: Vec<(String, MarketSetting)>,
-        apply_settings: bool,
+        apply_mode: bool,
     ) {
         if let Some(time) = state.time {
             self.account.state_time = time.0;
@@ -928,17 +933,11 @@ impl TxFlow {
             total: equity,
             upnl,
         });
-        if apply_settings && let Some(p) = positions.first() {
+        if apply_mode && let Some(p) = positions.first() {
             cx.store
                 .set_hedged(p.position_mode == Some(PositionMode::Hedged));
         }
         cx.store.set_positions(positions);
-        if apply_settings {
-            for (symbol, setting) in settings {
-                self.account.settings.insert(symbol.clone(), setting);
-                cx.store.update_setting(&symbol, |s| *s = setting);
-            }
-        }
     }
     fn asset_setting(
         &self,
@@ -1011,16 +1010,14 @@ impl TxFlow {
                     return;
                 }
                 let mut positions = Vec::new();
-                let mut settings = Vec::new();
                 let mut valid = true;
                 let decoded =
                     json::each_in_field::<AssetPosition>(frame.data.get(), "assetPositions", |p| {
                         match self.position_row(p) {
-                            Ok((p, s, v)) => {
+                            Ok(p) => {
                                 if let Some(p) = p {
                                     positions.push(p);
                                 }
-                                settings.push((s, v));
                             }
                             Err(_) => valid = false,
                         }
@@ -1030,7 +1027,7 @@ impl TxFlow {
                 }
                 self.account.state_revision = self.account.state_revision.saturating_add(1);
                 self.account.settings_revision = self.account.settings_revision.saturating_add(1);
-                self.apply_state(cx, state, positions, settings, true);
+                self.apply_state(cx, state, positions, true);
             }
             "orderUpdates" => {
                 let mut orders = Vec::new();

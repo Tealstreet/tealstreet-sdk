@@ -539,3 +539,91 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
     assert_eq!(frames.iter().filter(|f| f.contains("l2Book")).count(), 1);
     assert_eq!(frames.iter().filter(|f| f.contains("candle")).count(), 1);
 }
+
+#[test]
+fn absent_node_volume_preserves_rest_seed_and_stream_volume_until_explicit_zero() {
+    let mut seed: serde_json::Value = serde_json::from_str(TICKER).unwrap();
+    seed["data"]["coinVlm"] = "205.4498".into();
+    seed["data"]["dayNtlVlm"] = "16892444.43121".into();
+    seed["data"]["nodeCtx"]
+        .as_object_mut()
+        .unwrap()
+        .remove("dayBaseVlm");
+    seed["data"]["nodeCtx"]
+        .as_object_mut()
+        .unwrap()
+        .remove("dayNtlVlm");
+    let (mut e, node, api) = ready_with_ticker(&seed.to_string());
+    let ticker = e.store().ticker("BTC-USDC").unwrap();
+    assert_eq!(
+        (ticker.volume, ticker.quote_volume),
+        (205.4498, 16892444.43121)
+    );
+    message(
+        &mut e,
+        node,
+        3000.0,
+        r#"{"channel":"allAssetCtxs","data":{"ctxs":[{"coin":"1","ctx":{"markPx":"65000","dayBaseVlm":null,"dayNtlVlm":null}}]}}"#,
+    );
+    let ticker = e.store().ticker("BTC-USDC").unwrap();
+    assert_eq!(
+        (ticker.volume, ticker.quote_volume),
+        (205.4498, 16892444.43121)
+    );
+    message(
+        &mut e,
+        api,
+        4000.0,
+        r#"{"channel":"ticker","data":{"instrumentId":1,"lastPrice":"65000","coinVlm":"300","dayNtlVlm":"19500000"}}"#,
+    );
+    message(
+        &mut e,
+        node,
+        5000.0,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"1","ctx":{"markPx":"65000"}}}"#,
+    );
+    let ticker = e.store().ticker("BTC-USDC").unwrap();
+    assert_eq!((ticker.volume, ticker.quote_volume), (300.0, 19500000.0));
+    message(
+        &mut e,
+        node,
+        6000.0,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"1","ctx":{"dayBaseVlm":"0","dayNtlVlm":"0"}}}"#,
+    );
+    let ticker = e.store().ticker("BTC-USDC").unwrap();
+    assert_eq!((ticker.volume, ticker.quote_volume), (0.0, 0.0));
+}
+#[test]
+fn historical_metadata_alias_conflicts_reject_before_active_markets_commit() {
+    let mut e = Engine::new(TxFlow::new(Options {
+        testnet: true,
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(1000.0);
+    let r = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(
+        r.body
+            .as_ref()
+            .unwrap()
+            .contains("\"includeDelisted\":true")
+    );
+    let mut meta: serde_json::Value = serde_json::from_str(META).unwrap();
+    let mut old = meta["data"]["universe"][0].clone();
+    old["index"] = 9.into();
+    old["name"] = "OTHER-USDC".into();
+    old["delisted"] = true.into();
+    meta["data"]["universe"].as_array_mut().unwrap().push(old);
+    reply(&mut e, &r, 200, &meta.to_string());
+    assert!(e.store().markets().is_empty());
+    assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+}

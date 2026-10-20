@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowContext, mapTxFlowMarket, mapTxFlowTicker } from '../reference/txflow/txflow.public';
+import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowContext, mapTxFlowHistoricalIdentities, mapTxFlowMarket, mapTxFlowTicker } from '../reference/txflow/txflow.public';
 import type { TxFlowInstrument } from '../reference/txflow/txflow.types';
 
 const instrument: TxFlowInstrument = { index: 1, name: 'BTC-USDC', baseCurrency: 'BTC', quoteCurrency: 'USDC', currencyType: 'usdc', basePrecision: '0.0001', priceTick: '0.1', maxLeverage: 50, haltTrading: false, delisted: false, onlyIsolated: false, useNotionalMargin: false };
@@ -32,4 +32,26 @@ describe('TxFlow public native payload semantics', () => {
     expect(mapTxFlowCandle({ t: 60000, s: '1', i: '1m', o: '2', h: '3', l: '1', c: '2.5', v: '4' })).toEqual({ timestamp: 60, open: 2, high: 3, low: 1, close: 2.5, volume: 4 });
     expect(() => mapTxFlowMarket({ ...instrument, priceTick: 'NaN' })).toThrow('Invalid TxFlow numeric');
   });
+});
+
+it('preserves API volumes across omitted or null node context fields and accepts explicit zero', () => {
+  const seed = mapTxFlowTicker(emptyTxFlowTicker(mapTxFlowMarket(instrument)!), { instrumentId: 1, coinVlm: '205.4498', dayNtlVlm: '16892444.43121', nodeCtx: { markPx: '65000' } }, true);
+  expect(seed).toMatchObject({ volume: 205.4498, quoteVolume: 16892444.43121 });
+  const nulls = mapTxFlowContext(seed, { dayBaseVlm: null, dayNtlVlm: null });
+  expect(nulls).toMatchObject({ volume: 205.4498, quoteVolume: 16892444.43121 });
+  const api = mapTxFlowTicker(nulls, { instrumentId: 1, coinVlm: '300', dayNtlVlm: '19500000' });
+  expect(mapTxFlowContext(api, {})).toMatchObject({ volume: 300, quoteVolume: 19500000 });
+  expect(mapTxFlowContext(api, { dayBaseVlm: '0', dayNtlVlm: '0' })).toMatchObject({ volume: 0, quoteVolume: 0 });
+});
+it('retains nontradable historical identities without inventing ambiguous aliases', () => {
+  const retired = { ...instrument, index: 9, name: 'OLD-USDC', baseCurrency: 'OLD', delisted: true, basePrecision: '0', priceTick: '0', maxLeverage: 0 };
+  const identities = mapTxFlowHistoricalIdentities([instrument, retired]);
+  expect(identities.get('9')).toMatchObject({ id: '9', symbol: 'OLD-USDC' });
+  expect(mapTxFlowMarket(retired)).toBeUndefined();
+  expect(() => mapTxFlowHistoricalIdentities([instrument, { ...retired, baseCurrency: 'BTC' }])).toThrow('ambiguous');
+  expect(() => mapTxFlowHistoricalIdentities([instrument, { ...retired, index: 1 }])).toThrow('ambiguous');
+  const relisted = mapTxFlowHistoricalIdentities([instrument, { ...instrument, index: 9, delisted: true }]);
+  expect(relisted.get('9')?.symbol).toBe('BTC-USDC');
+  expect(relisted.get('1')?.symbol).toBe('BTC-USDC');
+  expect(relisted.get('btc-usdc')?.ambiguous).toBe(true);
 });

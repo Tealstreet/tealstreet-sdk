@@ -418,3 +418,15 @@ regressions pass (9/9 wrapper tests). Historical filtering after a native limit
 would be incorrect, so this unsupported option is explicit and documented.
 The PR's initial TxFlow replay CI passes. An unrelated Phemex private balance
 mismatch is under separate investigation; no merge until exact-head CI is green.
+
+All original findings and one adjacent REST-mode fence finding are fixed and
+accepted by their original independent reviewers. Paired TS/native corrections
+preserve sparse volumes (including the actual recorded BTC row), keep position
+effective leverage separate from authoritative market rails, advance the mode
+fence after validated REST settings, and retain delisted history identities
+outside tradable markets. Native account 19/19, public/history 26/26; TS account
+14/14 and public/history 24/24 pass. Public/history Clippy, formatting and full
+safe-cex typecheck pass. Wrapper guard proofs pass 9/9. Refresh the public tape
+from a real recording because metadata now requests delisted identities; do not
+rewrite the old recorded request. The generic TS replay snapshot boundary is
+also being corrected before rerunning the Phemex CI regression.

@@ -289,3 +289,279 @@ fn account_subject_compares_wallet_hex_without_case_sensitivity() {
     );
     assert_eq!(e.store().positions()[0].contracts, 2.0);
 }
+
+fn hedge_state(legs: &[(f64, f64)], time: f64) -> String {
+    let mut envelope: serde_json::Value = serde_json::from_str(STATE).unwrap();
+    let template = envelope["data"]["assetPositions"][0].clone();
+    envelope["data"]["assetPositions"] = legs
+        .iter()
+        .map(|(size, leverage)| {
+            let mut row = template.clone();
+            row["type"] = "hedge".into();
+            row["position"]["szi"] = size.to_string().into();
+            row["position"]["leverage"] = serde_json::json!({"type":"Isolated","value":leverage});
+            row
+        })
+        .collect();
+    envelope["data"]["time"] = time.into();
+    envelope.to_string()
+}
+fn hedge_settings(long: f64, short: f64) -> String {
+    serde_json::json!({"coin":"1","user":WALLET,"leverage":{"mode":"hedge","type":"Isolated","long_value":long,"short_value":short}}).to_string()
+}
+fn push_hedge_settings(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>,
+    socket: safe_cex_engine::SocketId,
+    now: f64,
+    long: f64,
+    short: f64,
+) {
+    message(
+        e,
+        socket,
+        now,
+        &format!(
+            r#"{{"channel":"activeAssetData","data":{}}}"#,
+            hedge_settings(long, short)
+        ),
+    );
+}
+fn push_hedge_state(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>,
+    socket: safe_cex_engine::SocketId,
+    now: f64,
+    legs: &[(f64, f64)],
+) {
+    let state: serde_json::Value = serde_json::from_str(&hedge_state(legs, now)).unwrap();
+    message(
+        e,
+        socket,
+        now,
+        &serde_json::json!({"channel":"clearinghouseState","data":state["data"]}).to_string(),
+    );
+}
+fn assert_hedge_rails(
+    e: &safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>,
+    long: f64,
+    short: f64,
+) {
+    let setting = e.store().setting("BTC-USDC").unwrap();
+    assert_eq!(setting.buy_leverage, Some(long));
+    assert_eq!(setting.sell_leverage, Some(short));
+    assert!(e.store().hedged());
+}
+#[test]
+fn hedge_position_row_order_never_overwrites_configured_directional_leverage() {
+    for legs in [[(2.0, 5.0), (-3.0, 8.0)], [(-3.0, 8.0), (2.0, 5.0)]] {
+        let (mut e, s, reads, _) = bootstrap();
+        answer(&mut e, reads);
+        push_hedge_settings(&mut e, s, NOW + 100.0, 5.0, 8.0);
+        push_hedge_state(&mut e, s, NOW + 200.0, &legs);
+        assert_hedge_rails(&e, 5.0, 8.0);
+        for (size, leverage) in legs {
+            let side = if size > 0.0 {
+                safe_cex_engine::model::PositionSide::Long
+            } else {
+                safe_cex_engine::model::PositionSide::Short
+            };
+            let position = e
+                .store()
+                .positions()
+                .iter()
+                .find(|p| p.side == side)
+                .unwrap();
+            assert_eq!(position.leverage, leverage);
+            assert_eq!(
+                position.margin_type,
+                Some(safe_cex_engine::model::MarginType::Isolated)
+            );
+        }
+    }
+}
+#[test]
+fn a_single_hedge_leg_preserves_the_absent_legs_configured_leverage() {
+    for leg in [(2.0, 5.0), (-3.0, 8.0)] {
+        let (mut e, s, reads, _) = bootstrap();
+        answer(&mut e, reads);
+        push_hedge_settings(&mut e, s, NOW + 100.0, 5.0, 8.0);
+        push_hedge_state(&mut e, s, NOW + 200.0, &[leg]);
+        assert_hedge_rails(&e, 5.0, 8.0);
+        assert_eq!(e.store().positions().len(), 1);
+        assert_eq!(e.store().positions()[0].leverage, leg.1);
+    }
+}
+#[test]
+fn rest_hedge_reconciliation_uses_per_leg_effective_leverage_without_inventing_settings() {
+    for legs in [
+        vec![(2.0, 5.0), (-3.0, 8.0)],
+        vec![(-3.0, 8.0), (2.0, 5.0)],
+        vec![(2.0, 5.0)],
+        vec![(-3.0, 8.0)],
+    ] {
+        let (mut e, _, reads, _) = bootstrap();
+        let mut state = None;
+        for r in reads {
+            match kind(&r).as_str() {
+                "clearinghouseState" => state = Some(r),
+                "activeAssetData" => reply(
+                    &mut e,
+                    &r,
+                    &format!(
+                        r#"{{"success":true,"code":0,"data":{}}}"#,
+                        hedge_settings(5.0, 8.0)
+                    ),
+                ),
+                _ => answer(&mut e, vec![r]),
+            }
+        }
+        reply(&mut e, &state.unwrap(), &hedge_state(&legs, NOW + 100.0));
+        assert_hedge_rails(&e, 5.0, 8.0);
+        assert_eq!(e.store().positions().len(), legs.len());
+        for (size, leverage) in legs {
+            assert!(
+                e.store()
+                    .positions()
+                    .iter()
+                    .any(|p| p.contracts == size.abs() && p.leverage == leverage)
+            );
+        }
+    }
+}
+#[test]
+fn settings_remain_authoritative_after_pushes_and_stale_or_malformed_state_reads() {
+    let (mut e, s, reads, timer) = bootstrap();
+    answer(&mut e, reads);
+    push_hedge_settings(&mut e, s, NOW + 100.0, 5.0, 8.0);
+    push_hedge_state(&mut e, s, NOW + 200.0, &[(2.0, 5.0), (-3.0, 8.0)]);
+    e.drain_actions().for_each(drop);
+    e.handle(NOW + 5025.0, Event::TimerFired { timer });
+    let held = requests(&mut e)
+        .into_iter()
+        .find(|r| kind(r) == "clearinghouseState")
+        .unwrap();
+    message(&mut e,s,NOW+5100.0,&serde_json::json!({"channel":"userAssetData","data":{"user":WALLET,"coins":[serde_json::from_str::<serde_json::Value>(&hedge_settings(9.0,12.0)).unwrap()]}}).to_string());
+    // An older state may refresh exposure but cannot roll back the account mode
+    // established by the newer setting response, or either configured rail.
+    let mut older_state: serde_json::Value = serde_json::from_str(STATE).unwrap();
+    older_state["data"]["time"] = serde_json::json!(NOW + 5050.0);
+    reply_at(&mut e, &held, NOW + 5200.0, 200, &older_state.to_string());
+    assert_hedge_rails(&e, 9.0, 12.0);
+    let before = e.store().positions().to_vec();
+    let malformed = hedge_state(&[(4.0, 5.0), (-5.0, 0.0)], NOW + 5300.0);
+    let malformed: serde_json::Value = serde_json::from_str(&malformed).unwrap();
+    message(
+        &mut e,
+        s,
+        NOW + 5300.0,
+        &serde_json::json!({"channel":"clearinghouseState","data":malformed["data"]}).to_string(),
+    );
+    assert_eq!(e.store().positions(), before.as_slice());
+    assert_hedge_rails(&e, 9.0, 12.0);
+    push_hedge_state(&mut e, s, NOW + 5400.0, &[(-3.0, 8.0)]);
+    assert_hedge_rails(&e, 9.0, 12.0);
+    assert_eq!(e.store().positions()[0].leverage, 8.0);
+}
+#[test]
+fn positions_cannot_manufacture_configured_settings_when_asset_data_is_unavailable() {
+    let (mut e, _, reads, _) = bootstrap();
+    for r in reads {
+        match kind(&r).as_str() {
+            "clearinghouseState" => reply(
+                &mut e,
+                &r,
+                &hedge_state(&[(2.0, 5.0), (-3.0, 8.0)], NOW + 100.0),
+            ),
+            "activeAssetData" => reply_at(&mut e, &r, NOW + 100.0, 503, "settings unavailable"),
+            _ => answer(&mut e, vec![r]),
+        }
+    }
+    assert_eq!(e.store().positions().len(), 2);
+    assert!(e.store().setting("BTC-USDC").is_none());
+}
+#[test]
+fn an_accepted_setting_write_fences_held_state_without_losing_configured_hedge_rails() {
+    let (mut e, s, reads, timer) = bootstrap();
+    answer(&mut e, reads);
+    push_hedge_settings(&mut e, s, NOW + 100.0, 5.0, 8.0);
+    push_hedge_state(&mut e, s, NOW + 200.0, &[(2.0, 5.0), (-3.0, 8.0)]);
+    e.drain_actions().for_each(drop);
+    e.handle(NOW + 5025.0, Event::TimerFired { timer });
+    let held = requests(&mut e)
+        .into_iter()
+        .find(|r| kind(r) == "clearinghouseState")
+        .unwrap();
+    e.handle(
+        NOW + 5100.0,
+        Event::Command(safe_cex_engine::Command::SetMarginType {
+            command: 991,
+            symbol: "BTC-USDC".into(),
+            isolated: false,
+        }),
+    );
+    let write = e
+        .drain_actions()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    reply_at(
+        &mut e,
+        &write,
+        NOW + 5200.0,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"UpdateMarginMode","data":{"statuses":["success"]}}}"#,
+    );
+    reply_at(
+        &mut e,
+        &held,
+        NOW + 5300.0,
+        200,
+        &hedge_state(&[(9.0, 99.0)], NOW + 5050.0),
+    );
+    assert_eq!(e.store().positions().len(), 2);
+    assert_hedge_rails(&e, 5.0, 8.0);
+    assert_eq!(
+        e.store().setting("BTC-USDC").unwrap().margin_type,
+        Some(safe_cex_engine::model::MarginType::Cross)
+    );
+}
+#[test]
+fn a_successful_rest_setting_fences_older_state_mode_before_publishing_hedge_rails() {
+    let (mut e, _, reads, _) = bootstrap();
+    let mut held = None;
+    for r in reads {
+        match kind(&r).as_str() {
+            "clearinghouseState" => held = Some(r),
+            "activeAssetData" => reply(
+                &mut e,
+                &r,
+                &format!(
+                    r#"{{"success":true,"code":0,"data":{}}}"#,
+                    hedge_settings(5.0, 8.0)
+                ),
+            ),
+            _ => answer(&mut e, vec![r]),
+        }
+    }
+    assert_hedge_rails(&e, 5.0, 8.0);
+    reply_at(&mut e, &held.unwrap(), NOW + 100.0, 200, STATE);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_hedge_rails(&e, 5.0, 8.0);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW + 200.0,
+        Event::Command(safe_cex_engine::Command::SetLeverage {
+            command: 992,
+            symbol: "BTC-USDC".into(),
+            leverage: 10.0,
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,safe_cex_engine::Action::Http(r)if r.url.ends_with("/exchange")))
+    );
+    assert!(actions.iter().any(|a|matches!(a,safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {command:992,result:Err(message)})if message.contains("hedge leverage"))));
+}

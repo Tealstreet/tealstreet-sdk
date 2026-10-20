@@ -149,3 +149,159 @@ fn order_history_keeps_native_total_and_remaining_distinct() {
     assert_eq!(rows[0]["filled"], 0.5);
     assert_eq!(rows[0]["status"], "canceled");
 }
+
+fn ready_with_retired(relisted: bool) -> Engine<TxFlow> {
+    let mut e = Engine::new(TxFlow::new(safe_cex_venue_txflow::Options {
+        testnet: true,
+        application_id: Some(WALLET.into()),
+        secret: Some(format!("0x{:064x}", 1)),
+        ..Default::default()
+    }));
+    e.start(NOW);
+    let r = requests(&mut e).pop().unwrap();
+    let mut meta: Value = serde_json::from_str(META).unwrap();
+    let mut old = meta["data"]["universe"][0].clone();
+    old["index"] = 9.into();
+    old["delisted"] = true.into();
+    old["haltTrading"] = true.into();
+    old["basePrecision"] = "0".into();
+    old["priceTick"] = "0".into();
+    old["maxLeverage"] = 0.into();
+    if !relisted {
+        old["name"] = "OLD-USDC".into();
+        old["baseCurrency"] = "OLD".into();
+    }
+    meta["data"]["universe"].as_array_mut().unwrap().push(old);
+    reply(&mut e, &r, &meta.to_string());
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.body.as_ref().unwrap().contains("\"coin\":\"1\""));
+    reply(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(NOW + 25.0, Event::TimerFired { timer });
+    let reads = requests(&mut e);
+    answer(&mut e, reads);
+    e.drain_actions().for_each(drop);
+    assert_eq!(e.store().markets().len(), 1);
+    e
+}
+#[test]
+fn accountwide_and_filtered_history_resolve_delisted_metadata_without_tradable_market() {
+    let mut e = ready_with_retired(false);
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let mut old = execution(99, NOW);
+    old["instrumentId"] = 9.into();
+    reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[execution(1,NOW),old.clone()],"hasMore":false}}).to_string());
+    let rows = done(&mut e).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["symbol"] == "OLD-USDC")
+    );
+    let r = query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: Some("OLD-USDC".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    assert!(r.body.as_ref().unwrap().contains("\"coin\":\"9\""));
+    reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[{"order":{"instrumentId":9,"oid":99,"timestamp":NOW as u64,"side":"B","orderType":"Limit","limitPx":"100","origSz":"1","filledAmount":"1","reduceOnly":false},"status":"Filled","statusTimestamp":NOW as u64}],"hasMore":false}}).to_string());
+    assert_eq!(done(&mut e).unwrap()[0]["symbol"], "OLD-USDC");
+    let r = query(
+        &mut e,
+        Query::Income {
+            symbol: Some("OLD-USDC".into()),
+            kind: Some("REALIZED_PNL".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[old],"hasMore":false}}).to_string(),
+    );
+    assert_eq!(done(&mut e).unwrap()[0]["symbol"], "OLD-USDC");
+    let r = query(
+        &mut e,
+        Query::Income {
+            symbol: Some("OLD-USDC".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[{"coin":"OLD","time":NOW as u64,"amount":"-0.12","szi":"2","fundingRate":"0.01","usdc":"-0.12"}],"hasMore":false}}).to_string());
+    assert_eq!(done(&mut e).unwrap()[0]["symbol"], "OLD-USDC");
+}
+#[test]
+fn relisted_name_keeps_accountwide_identities_and_rejects_ambiguous_symbol_filter() {
+    let mut e = ready_with_retired(true);
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let mut old = execution(99, NOW);
+    old["instrumentId"] = 9.into();
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[old],"hasMore":false}}).to_string(),
+    );
+    assert_eq!(done(&mut e).unwrap()[0]["symbol"], "BTC-USDC");
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 91,
+            query: fills(None, None),
+        }),
+    );
+    assert!(done(&mut e).unwrap_err().contains("ambiguous"));
+}
+#[test]
+fn genuinely_unknown_historical_instrument_still_fails_instead_of_fabricating_symbol() {
+    let mut e = ready_with_retired(false);
+    let r = query(&mut e, fills(None, None));
+    let mut unknown = execution(99, NOW);
+    unknown["instrumentId"] = 999.into();
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[unknown],"hasMore":false}}).to_string(),
+    );
+    assert!(done(&mut e).is_err());
+}

@@ -35,7 +35,7 @@ type NativePosition = {
   position: {
     asset: string;
     szi: Numeric;
-    leverage: Leverage;
+    leverage: { type: string; value: Numeric };
     positionValue: Numeric;
     unrealizedPnl: Numeric;
     marginUsed: Numeric;
@@ -207,20 +207,20 @@ export class TxflowAccount {
   private read = <T>(type: string, fields: Record<string, unknown> = {}): Promise<T> =>
     this.cx.requestInfo<T>({ type, user: this.cx.wallet(), ...fields });
 
-  private mapState = (native: NativeState): { balance: Balance; positions: Position[]; settings: Array<[string, FetchedLeverage]> } => {
+  private mapState = (native: NativeState): { balance: Balance; positions: Position[] } => {
     this.subject(native.user);
     if (!Array.isArray(native.assetPositions)) throw new Error('Missing TxFlow positions');
     const equity = num(native.marginSummary.accountValue);
     const used = num(native.marginSummary.totalMarginUsed);
     const positions: Position[] = [];
-    const settings: Array<[string, FetchedLeverage]> = [];
     for (const { position: p, type } of native.assetPositions) {
       const market = this.cx.marketById(p.asset);
       if (!market) throw new Error('Unknown TxFlow position asset');
-      const s = setting(p.leverage);
+      const leverage = num(p.leverage.value);
+      if (leverage <= 0) throw new Error('Invalid TxFlow position leverage');
+      const marginType = mode(p.leverage.type);
       const size = num(p.szi);
       if (!['oneway', 'hedge'].includes(type.toLowerCase())) throw new Error('Unknown TxFlow position mode');
-      settings.push([market.symbol, s]);
       if (size === 0) continue;
       const side = size > 0 ? PositionSide.Long : PositionSide.Short;
       positions.push({
@@ -229,8 +229,8 @@ export class TxflowAccount {
         side,
         entryPrice: p.entryPx == null ? 0 : num(p.entryPx),
         notional: Math.abs(num(p.positionValue)),
-        leverage: Math.max(s.buyLeverage, s.sellLeverage),
-        marginType: s.marginType,
+        leverage,
+        marginType,
         positionMode: type.toLowerCase() === 'hedge' ? PositionMode.Hedged : PositionMode.OneWay,
         unrealizedPnl: num(p.unrealizedPnl),
         contracts: Math.abs(size),
@@ -239,7 +239,7 @@ export class TxflowAccount {
         ...(p.updateTime == null ? {} : { lastUpdate: num(p.updateTime) }),
       });
     }
-    return { balance: { total: equity, used, free: equity - used, upnl: equity - num(native.marginSummary.totalRawUsd) }, positions, settings };
+    return { balance: { total: equity, used, free: equity - used, upnl: equity - num(native.marginSummary.totalRawUsd) }, positions };
   };
 
   fetchBalance = async (): Promise<Balance> => this.mapState(await this.read<NativeState>('clearinghouseState', { accountType: 'perp' })).balance;
@@ -250,13 +250,13 @@ export class TxflowAccount {
     this.inflight.add('state');
     const generation = this.generation;
     const revision = this.stateRevision;
-    const settingsRevision = this.settingsRevision;
+    const modeRevision = this.settingsRevision;
     try {
       const native = await this.read<NativeState>('clearinghouseState', { accountType: 'perp' });
       const mapped = this.mapState(native);
       const time = native.time === undefined ? undefined : num(native.time);
       if (!this.alive(generation) || revision !== this.stateRevision || (time !== undefined && time < this.stateTime)) return;
-      this.commitState(mapped, time, settingsRevision === this.settingsRevision);
+      this.commitState(mapped, time, modeRevision === this.settingsRevision);
     } catch (e) {
       if (this.alive(generation)) this.cx.reportError(e instanceof Error ? e : new Error('TxFlow account read failed'));
     } finally {
@@ -264,12 +264,11 @@ export class TxflowAccount {
     }
   };
 
-  private commitState(mapped: ReturnType<TxflowAccount['mapState']>, time: number | undefined, applySettings: boolean): void {
+  private commitState(mapped: ReturnType<TxflowAccount['mapState']>, time: number | undefined, applyMode: boolean): void {
     if (time !== undefined) this.stateTime = time;
     this.cx.store.update({ balance: mapped.balance, loaded: { ...this.cx.store.loaded, balance: true, positions: true } });
-    if (applySettings && mapped.positions[0]) this.cx.store.setSetting('isHedged', mapped.positions[0].positionMode === PositionMode.Hedged);
+    if (applyMode && mapped.positions[0]) this.cx.store.setSetting('isHedged', mapped.positions[0].positionMode === PositionMode.Hedged);
     this.cx.store.addOrUpdatePositionsFull(mapped.positions);
-    if (applySettings) this.applySettings(mapped.settings);
   }
 
   private mapOrder = (native: NativeOrder, state: string, at: number): Order => {
@@ -410,7 +409,11 @@ export class TxflowAccount {
     this.inflight.add('setting');
     try {
       const data = await this.read<AssetData>('activeAssetData', { coin });
-      if (this.alive(generation) && revision === this.settingsRevision) this.applySettings([this.mapAsset(data, coin)]);
+      if (this.alive(generation) && revision === this.settingsRevision) {
+        const mapped = this.mapAsset(data, coin);
+        this.settingsRevision += 1;
+        this.applySettings([mapped]);
+      }
     } catch (e) {
       if (this.alive(generation)) this.cx.reportError(e instanceof Error ? e : new Error('TxFlow setting read failed'));
     } finally {

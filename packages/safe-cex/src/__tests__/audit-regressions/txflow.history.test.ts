@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory, fetchTrades } from '../reference/txflow/txflow.history';
+import { mapTxFlowHistoricalIdentities } from '../reference/txflow/txflow.public';
+import type { TxFlowInstrument } from '../reference/txflow/txflow.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus, type Market } from '../../types';
 
@@ -161,4 +163,27 @@ describe('TxFlow indexed history correctness', () => {
     expect(request).not.toHaveBeenCalled();
     expect(() => fetchTrades()).toThrow('does not document a REST public trades history query');
   });
+});
+
+it('resolves retired instruments for account-wide fills, orders, PnL and funding without active markets', async () => {
+  const { exchange, request } = setup((body) => body.type === 'historicalOrders' ? page([order({}, { instrumentId: 9 })]) : body.type === 'userFundings' ? page([funding({ coin: 'OLD' })]) : page([fill({ instrumentId: 9 })]));
+  const retired: TxFlowInstrument = { index: 9, name: 'OLD-USDC', baseCurrency: 'OLD', quoteCurrency: 'USDC', currencyType: 'usdc', delisted: true, haltTrading: true, basePrecision: '0', priceTick: '0', maxLeverage: 0, onlyIsolated: false, useNotionalMargin: false };
+  exchange.historicalIdentities = mapTxFlowHistoricalIdentities([retired]);
+  expect(exchange.store.markets.some((m) => m.id === '9')).toBe(false);
+  expect((await fetchHistoricalFills(exchange, {}))[0].symbol).toBe('OLD-USDC');
+  expect((await fetchHistoricalOrders(exchange, { symbol: 'OLD-USDC' }))[0].symbol).toBe('OLD-USDC');
+  expect((await fetchIncomeHistory(exchange, { symbol: 'OLD-USDC', incomeType: 'REALIZED_PNL' }))[0].symbol).toBe('OLD-USDC');
+  expect((await fetchIncomeHistory(exchange, { symbol: 'OLD-USDC', incomeType: 'FUNDING_FEE' }))[0].symbol).toBe('OLD-USDC');
+  expect(request.mock.calls.filter(([b]) => b.type !== 'userFills' || b.coin).every(([b]) => b.coin === '9')).toBe(true);
+});
+it('retains relisted native IDs but rejects an ambiguous historical symbol filter', async () => {
+  const { exchange } = setup(() => page([fill({ instrumentId: 9 })]));
+  const active: TxFlowInstrument = { index: 1, name: 'BTC-USDC', baseCurrency: 'BTC', quoteCurrency: 'USDC', currencyType: 'usdc', delisted: false, haltTrading: false, basePrecision: '0.0001', priceTick: '0.1', maxLeverage: 50, onlyIsolated: false, useNotionalMargin: false };
+  exchange.historicalIdentities = mapTxFlowHistoricalIdentities([active, { ...active, index: 9, delisted: true }]);
+  expect((await fetchHistoricalFills(exchange, {}))[0].symbol).toBe('BTC-USDC');
+  await expect(fetchHistoricalFills(exchange, { symbol: 'BTC-USDC' })).rejects.toThrow('ambiguous');
+});
+it('continues to reject an unknown historical ID instead of fabricating an SDK symbol', async () => {
+  const { exchange } = setup(() => page([fill({ instrumentId: 999 })]));
+  await expect(fetchHistoricalFills(exchange, {})).rejects.toThrow('Unknown TxFlow history instrument');
 });

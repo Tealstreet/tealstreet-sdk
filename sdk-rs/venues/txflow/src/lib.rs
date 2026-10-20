@@ -93,6 +93,8 @@ pub struct TxFlow {
     pub(crate) assets: HashMap<String, u32>,
     pub(crate) coins: HashMap<String, String>,
     pub(crate) instruments: HashMap<u32, Instrument>,
+    historical_assets: HashMap<String, Option<u32>>,
+    historical_coins: HashMap<String, String>,
     node: Connection,
     api: Connection,
     books: HashMap<String, Ladder>,
@@ -111,6 +113,8 @@ impl TxFlow {
             assets: Default::default(),
             coins: Default::default(),
             instruments: Default::default(),
+            historical_assets: Default::default(),
+            historical_coins: Default::default(),
             node: Default::default(),
             api: Default::default(),
             books: Default::default(),
@@ -175,7 +179,7 @@ impl TxFlow {
     fn metadata(&self, cx: &mut Cx<'_, Pending>) {
         self.info(
             cx,
-            "{\"type\":\"perpMeta\",\"includeDelisted\":false}".into(),
+            "{\"type\":\"perpMeta\",\"includeDelisted\":true}".into(),
             ArrayAt::Path(&["data", "universe"]),
             Pending::Meta {
                 rows: Vec::new(),
@@ -278,8 +282,12 @@ impl TxFlow {
         if c.prev_day_px > 0.0 {
             t.percentage = (t.last - c.prev_day_px) / c.prev_day_px * 100.0;
         }
-        t.volume = c.day_base_vlm;
-        t.quote_volume = c.day_ntl_vlm;
+        if let Some(volume) = c.day_base_vlm {
+            t.volume = volume;
+        }
+        if let Some(volume) = c.day_ntl_vlm {
+            t.quote_volume = volume;
+        }
     }
     fn ticker_update(t: &mut Ticker, row: TickerRow, seed: bool) {
         t.last = row.last_price;
@@ -670,36 +678,66 @@ impl Venue for TxFlow {
                     );
                     return;
                 }
+                let mut historical_assets = HashMap::new();
+                let mut historical_coins = HashMap::new();
                 let mut identities = std::collections::HashSet::new();
-                let mut names = std::collections::HashSet::new();
-                if rows
-                    .iter()
-                    .filter_map(|r| r.market())
-                    .any(|m| !identities.insert(m.id) || !names.insert(m.symbol))
-                {
+                let mut valid = true;
+                for row in rows.iter().filter(|r| r.currency_type == "usdc") {
+                    if row.name.trim().is_empty()
+                        || row.base_currency.trim().is_empty()
+                        || !identities.insert(row.index)
+                    {
+                        valid = false;
+                    }
+                    historical_assets
+                        .entry(row.name.clone())
+                        .and_modify(|id| {
+                            if *id != Some(row.index) {
+                                *id = None;
+                            }
+                        })
+                        .or_insert(Some(row.index));
+                    for alias in [
+                        row.index.to_string(),
+                        row.name.to_ascii_lowercase(),
+                        row.base_currency.to_ascii_lowercase(),
+                    ] {
+                        if historical_coins
+                            .insert(alias, row.name.clone())
+                            .is_some_and(|prior| prior != row.name)
+                        {
+                            valid = false;
+                        }
+                    }
+                }
+                if !valid {
                     self.on_request_failed(
                         cx,
                         Pending::Meta {
                             rows: Vec::new(),
                             valid: false,
                         },
-                        "Duplicate TxFlow market identities",
+                        "Duplicate or ambiguous TxFlow historical identities",
                     );
                     return;
                 }
                 let mut markets = Vec::new();
+                let mut assets = HashMap::new();
+                let mut coins = HashMap::new();
+                let mut instruments = HashMap::new();
+                let mut ticker_queue = VecDeque::new();
                 for row in rows {
                     if let Some(market) = row.market() {
-                        self.assets.insert(market.symbol.clone(), row.index);
+                        assets.insert(market.symbol.clone(), row.index);
                         for key in [
                             row.index.to_string(),
                             row.name.to_ascii_lowercase(),
                             row.base_currency.to_ascii_lowercase(),
                         ] {
-                            self.coins.insert(key, market.symbol.clone());
+                            coins.insert(key, market.symbol.clone());
                         }
-                        self.ticker_queue.push_back(row.index);
-                        self.instruments.insert(row.index, row);
+                        ticker_queue.push_back(row.index);
+                        instruments.insert(row.index, row);
                         markets.push(market);
                     }
                 }
@@ -714,6 +752,24 @@ impl Venue for TxFlow {
                     );
                     return;
                 }
+                let mut active_names = std::collections::HashSet::new();
+                if markets.iter().any(|m| !active_names.insert(&m.symbol)) {
+                    self.on_request_failed(
+                        cx,
+                        Pending::Meta {
+                            rows: Vec::new(),
+                            valid: false,
+                        },
+                        "Duplicate TxFlow tradable market identities",
+                    );
+                    return;
+                }
+                self.assets = assets;
+                self.coins = coins;
+                self.instruments = instruments;
+                self.ticker_queue = ticker_queue;
+                self.historical_assets = historical_assets;
+                self.historical_coins = historical_coins;
                 let tickers = markets
                     .iter()
                     .map(|m| Ticker {

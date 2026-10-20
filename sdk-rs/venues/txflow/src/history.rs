@@ -274,8 +274,14 @@ impl TxFlow {
             cx.done(command, Err("Invalid TxFlow history range or limit".into()));
             return;
         }
-        if symbol.as_ref().is_some_and(|s| self.asset(cx, s).is_none()) {
-            cx.done(command, Err("Unknown TxFlow history symbol".into()));
+        if symbol
+            .as_ref()
+            .is_some_and(|s| self.historical_assets.get(s).and_then(|id| *id).is_none())
+        {
+            cx.done(
+                command,
+                Err("Unknown or ambiguous TxFlow history symbol".into()),
+            );
             return;
         }
         let mut request = Request {
@@ -334,7 +340,7 @@ impl TxFlow {
                 request
                     .symbol
                     .as_ref()
-                    .and_then(|s| self.asset(cx, s))
+                    .and_then(|s| self.historical_assets.get(s).and_then(|id| *id))
                     .map(|a| a.to_string())
             } else {
                 None
@@ -365,23 +371,16 @@ impl TxFlow {
         }
     }
     fn history_symbol(&self, asset: &str) -> Option<&str> {
-        asset
-            .parse::<u32>()
-            .ok()
-            .and_then(|id| self.symbol(id))
-            .or_else(|| {
-                self.coins
-                    .values()
-                    .find(|s| s.as_str() == asset || s.strip_suffix("-USDC") == Some(asset))
-                    .map(String::as_str)
-            })
+        self.historical_coins
+            .get(&asset.to_ascii_lowercase())
+            .map(String::as_str)
     }
     fn map_history_item(&self, r: &mut Request, item: &str) -> Result<(), String> {
         match r.kind {
             Kind::Fills | Kind::IncomeFills => {
                 let f: Fill = serde_json::from_str(item).map_err(|e| e.to_string())?;
                 let sym = self
-                    .symbol(f.instrument_id)
+                    .history_symbol(&f.instrument_id.to_string())
                     .ok_or("Unknown TxFlow history instrument")?;
                 let key = format!("fill:{}", f.tid);
                 if !r.seen.insert(key) {
@@ -447,7 +446,7 @@ impl TxFlow {
                 let row: NativeOrder = serde_json::from_str(item).map_err(|e| e.to_string())?;
                 let o = row.order;
                 let sym = self
-                    .symbol(o.instrument_id)
+                    .history_symbol(&o.instrument_id.to_string())
                     .ok_or("Unknown TxFlow history instrument")?;
                 let key = format!("order:{}", o.oid);
                 if !r.seen.insert(key) {

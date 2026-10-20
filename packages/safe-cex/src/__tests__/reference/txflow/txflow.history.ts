@@ -31,14 +31,14 @@ const side = (value: string): OrderSide => {
   throw new Error('Malformed TxFlow history side');
 };
 const symbolFor = (exchange: TxFlowExchange, asset: number | string): string => {
-  const market = exchange.store.markets.find((m) => m.id === String(asset) || m.symbol === asset || m.base === asset);
+  const market = exchange.historicalIdentities?.get(String(asset).toLowerCase()) ?? exchange.store.markets.find((m) => m.id === String(asset) || m.symbol === asset || m.base === asset);
   if (!market) throw new Error('Unknown TxFlow history instrument');
   return market.symbol;
 };
 const coinFor = (exchange: TxFlowExchange, symbol?: string) => {
   if (!symbol) return {};
-  const market = exchange.store.markets.find((m) => m.symbol === symbol);
-  if (!market) throw new Error('Unknown TxFlow history symbol');
+  const market = exchange.historicalIdentities?.get(symbol.toLowerCase()) ?? exchange.store.markets.find((m) => m.symbol === symbol);
+  if (!market || ('ambiguous' in market && market.ambiguous)) throw new Error('Unknown or ambiguous TxFlow history symbol');
   return { coin: market.id };
 };
 const range = (from?: number, to?: number) => {

@@ -1,5 +1,5 @@
 import type { Candle, Market, Ticker } from '../../../types';
-import type { TxFlowCandle, TxFlowContext, TxFlowInstrument, TxFlowTicker } from './txflow.types';
+import type { TxFlowCandle, TxFlowContext, TxFlowHistoricalIdentity, TxFlowInstrument, TxFlowTicker } from './txflow.types';
 
 export const txflowNumber = (value: unknown): number => {
   const n = value === '' || value == null ? 0 : Number(value);
@@ -37,7 +37,8 @@ export const mapTxFlowContext = (ticker: Ticker, ctx: TxFlowContext): Ticker => 
     fundingRate: txflowNumber(ctx.funding) / 100,
     fundingTime: ctx.nextFundingTime ?? 0,
     percentage: previous > 0 ? ((last - previous) / previous) * 100 : ticker.percentage,
-    volume: txflowNumber(ctx.dayBaseVlm), quoteVolume: txflowNumber(ctx.dayNtlVlm),
+    ...(ctx.dayBaseVlm == null ? {} : { volume: txflowNumber(ctx.dayBaseVlm) }),
+    ...(ctx.dayNtlVlm == null ? {} : { quoteVolume: txflowNumber(ctx.dayNtlVlm) }),
   };
 };
 
@@ -57,3 +58,19 @@ export const mapTxFlowCandle = (row: TxFlowCandle): Candle => ({
   timestamp: row.t / 1000, open: txflowNumber(row.o), high: txflowNumber(row.h),
   low: txflowNumber(row.l), close: txflowNumber(row.c), volume: txflowNumber(row.v),
 });
+
+export const mapTxFlowHistoricalIdentities = (rows: TxFlowInstrument[]) => {
+  const identities = new Map<string, TxFlowHistoricalIdentity>();
+  const assets = new Set<string>();
+  for (const row of rows.filter((r) => r.currencyType === 'usdc')) {
+    if (!Number.isInteger(row.index) || row.index < 0 || row.index > 0xffffffff || !row.name.trim() || !row.baseCurrency.trim() || assets.has(String(row.index))) throw new Error('Duplicate or ambiguous TxFlow historical identities');
+    assets.add(String(row.index));
+    const identity = { id: String(row.index), symbol: row.name, base: row.baseCurrency };
+    for (const alias of [identity.id, identity.symbol.toLowerCase(), identity.base.toLowerCase()]) {
+      const prior = identities.get(alias);
+      if (prior && prior.symbol !== identity.symbol) throw new Error('Duplicate or ambiguous TxFlow historical identities');
+      identities.set(alias, prior && (prior.ambiguous || prior.id !== identity.id) ? { ...identity, ambiguous: true } : identity);
+    }
+  }
+  return identities;
+};
