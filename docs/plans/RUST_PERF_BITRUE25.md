@@ -61,3 +61,19 @@ The two Workers fixtures now register their connected client; assertions and
 timeouts are unchanged. Retain the initial failing fixture/typecheck attempts
 in `RUST_PERF_MERGE25.json.gz`. No new release/performance runs preceded this
 checkpoint. Existing E2 binaries still need archiving before the compiler trial.
+
+Trial complete at source `6b906d7d1c`: z selected and its nine bindings/Cargo
+field restored byte-for-byte. Both output comparisons matched; optimized private
+correctness passed. Public z medians: TS/Rust main 117.054/110.278 ms, steady
+63.562/51.070 ms, retained 15,867,050/2,517,019 bytes (PASS). Public 3 medians:
+main 185.930/188.722 ms (FAIL), steady 126.730/100.477 ms, retained
+15,947,362/2,504,747 bytes. The optimized build improved neither Rust CPU median
+and grew from 766,672 to 828,275 bytes; retain z and its 805,888-byte cap.
+These fixed-order samples include substantial shared-machine variation and do
+not isolate a compiler effect. No numerical failure was retried. Two preflights
+failed before any build/replay: incorrect supplied commit hash, then a workspace
+symlink misclassified as an external dependency. Both remain in the compressed
+trial evidence with the corrected reviewed runner and all raw gate results.
+
+Next: fetch landing at this stable checkpoint, then declare and review a bounded
+singleton encoding comparison if still needed before the full roster freeze.
