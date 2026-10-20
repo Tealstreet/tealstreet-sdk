@@ -930,6 +930,10 @@ impl Bitrue {
                 return Err(());
             }
             let Some(market) = cx.store.market(&group.contract_name) else {
+                // Only owned exposure on an uncatalogued contract blocks the snapshot.
+                if group.positions.iter().all(|row| row.volume.0 == 0.0) {
+                    continue;
+                }
                 return Err(());
             };
             for row in group.positions {

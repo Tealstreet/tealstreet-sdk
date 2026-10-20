@@ -148,3 +148,21 @@ fn a_new_opposite_side_does_not_inherit_the_previous_positions_valuation() {
     assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 0.0);
     assert_eq!(h.engine.store().balance().upnl, 0.0);
 }
+#[test]
+fn empty_groups_for_uncatalogued_contracts_do_not_block_the_snapshot() {
+    for empty in [
+        r#"{"contractName":"E-GONE-USDT","positions":[]}"#,
+        r#"{"contractName":"E-GONE-USDT","positions":[{"side":"BUY","volume":0,"openPrice":0,"leverageLevel":5,"positionType":1}]}"#,
+    ] {
+        let mut h = Harness::new();
+        h.engine
+            .store_mut()
+            .update_ticker("E-BTC-USDT", |t| t.last = 110.0);
+        let body = account("BUY", 2.0)
+            .replace(r#""positionVos":["#, &format!(r#""positionVos":[{empty},"#));
+        h.reply("/account", &body);
+        assert_eq!(h.engine.store().positions().len(), 1);
+        assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 20.0);
+        assert_eq!(h.engine.store().balance().total, 1000.0);
+    }
+}
