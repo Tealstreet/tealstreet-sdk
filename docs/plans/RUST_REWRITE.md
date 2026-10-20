@@ -196,7 +196,9 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS.
+- CPU time: Rust < TS. A CPU objective under 10 ms TS allows Rust 1 ms
+  above TS: at that size tied runs differ by up to 0.9 ms
+  (`RUST_GATE_TIMING.md`).
 - Peak and steady memory (Wasm linear memory plus JS heap retained by the
   worker): Rust < TS.
 

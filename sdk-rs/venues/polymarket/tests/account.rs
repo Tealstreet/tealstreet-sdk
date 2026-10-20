@@ -15,6 +15,7 @@ struct H {
     opened: bool,
     sends: Vec<String>,
     timers: Vec<(TimerId, f64)>,
+    logs: Vec<String>,
 }
 impl H {
     fn with(options: Options) -> Self {
@@ -26,6 +27,7 @@ impl H {
             opened: false,
             sends: vec![],
             timers: vec![],
+            logs: vec![],
         };
         h.e.start(h.now);
         h.collect();
@@ -57,6 +59,9 @@ impl H {
                 Action::WsSend { text, .. } => self.sends.push(text),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                    self.logs.push(message)
+                }
                 _ => {}
             }
         }
@@ -306,6 +311,91 @@ fn malformed_money_and_missing_holding_identity_fail_closed() {
     assert_eq!(h.e.store().balance().total, 12.345678);
     assert_eq!(h.e.store().orders()[0].id, "o1");
     assert_eq!(h.e.store().positions()[0].contracts, 10.0);
+}
+#[test]
+fn malformed_position_row_keeps_its_known_holding_while_other_rows_commit() {
+    for bad in [
+        r#"{"asset":"1","size":"NaN","avgPrice":0.5}"#,
+        r#"{"asset":"1","size":4,"avgPrice":2}"#,
+    ] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{bad},{{"asset":"2","size":3,"avgPrice":0.4,"curPrice":0.5}}]"#),
+        );
+        let positions = h.e.store().positions();
+        assert_eq!(positions.len(), 2, "{bad}");
+        let known = positions
+            .iter()
+            .find(|p| p.symbol == "election-Yes")
+            .unwrap();
+        assert_eq!(known.contracts, 10.0);
+        let fresh = positions
+            .iter()
+            .find(|p| p.symbol == "election-No")
+            .unwrap();
+        assert_eq!(fresh.contracts, 3.0);
+        let holdings = h.e.store().prediction_holdings().unwrap();
+        assert_eq!(holdings.len(), 2);
+        assert!(holdings.iter().any(|h| h.market == 0 && h.redeemable));
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.poll();
+        h.response("/positions", 200, "[]");
+        assert!(h.e.store().positions().is_empty());
+    }
+}
+#[test]
+fn unusable_current_price_still_commits_the_fresh_holding_size() {
+    for cur in ["7", r#""bogus""#, "null", r#"{"x":1}"#] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{{"asset":"1","size":4,"avgPrice":0.25,"curPrice":{cur}}}]"#),
+        );
+        let p = &h.e.store().positions()[0];
+        assert_eq!(p.contracts, 4.0, "{cur}");
+        // Ticker midpoint 0.5 stands in for the unusable quote.
+        assert_eq!(p.notional, 2.0, "{cur}");
+        assert_eq!(p.unrealized_pnl, 1.0, "{cur}");
+    }
+}
+#[test]
+fn holdings_on_unloaded_markets_are_logged_once_per_asset() {
+    let mut h = H::new();
+    h.initial();
+    let unlisted =
+        r#"[{"asset":"77","size":3,"avgPrice":0.5},{"asset":"78","size":0,"avgPrice":0.5}]"#;
+    for _ in 0..2 {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.response("/positions", 200, unlisted);
+    }
+    let reports: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|l| l.contains("has no loaded market"))
+        .collect();
+    assert_eq!(
+        reports,
+        ["Polymarket holding 77 has no loaded market; not shown"]
+    );
+    assert!(h.e.store().positions().is_empty());
 }
 #[test]
 fn cursor_orders_commit_atomically_and_cycles_fail_closed() {

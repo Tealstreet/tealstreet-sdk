@@ -489,3 +489,18 @@ captures were also trimmed and gated separately without replacing that coverage.
   1,178,207-byte hash, final 162-test suite and fresh combined checks. Source
   comparison confirms no Binance/AsterDEX/engine/harness changes since their
   prior gates; the latest landing merge is docs-only. No correction remains.
+
+### First PR landed
+
+- PR #1348 merged into `feat/rust-rewrite` as `5f84b3e21d` after all 40 CI
+  checks passed on reviewed head `74543cc5a7`. One failed Bybit CI job was
+  rerun once at that identical head, transparently documented on the PR. Hyro's
+  successful CI result is Rust 17.0 / TS 19.7 ms main-thread, Rust 2.5 / TS
+  2.6 ms steady CPU and Rust 0.8 / TS 13.4 MB retained. Failed attempts remain
+  visible. No thresholds, fixtures or framework changes were published.
+- A temporary shared-host size heuristic did not improve the ordinary local
+  gate reliably and was discarded before publication. Named-WASM profiling and
+  forced-string diagnostics were diagnostic only, never acceptance evidence.
+- Fresh follow-up branch starts at the merged landing (including PR #1349
+  leverage-side changes). The remaining authorized scope and phase plan are
+  in `RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md`.

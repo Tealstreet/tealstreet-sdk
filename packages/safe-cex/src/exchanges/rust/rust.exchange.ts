@@ -1,3 +1,4 @@
+import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { EngineHealth, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -291,6 +292,10 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
+  /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
+  changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
+  /** Lighter: the engine's cached account tier, when known. */
+  fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
@@ -375,7 +380,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+    if (this.name === 'binance') {
+      // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
+    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
@@ -385,6 +394,13 @@ export class RustEngineExchange extends BaseExchange {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
+    }
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      this.changeAccountTier = async (tier: LighterAccountTier) => {
+        await this.command<null>({ op: 'setAccountTier', tier });
+      };
+      this.fetchAccountTier = async () =>
+        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
     }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
@@ -590,7 +606,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,

@@ -820,3 +820,65 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     h.pace();
     assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
 }
+
+#[test]
+fn account_reconciliation_starts_without_the_private_socket() {
+    let mut h = Harness {
+        engine: Engine::new(Kucoin::new(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Default::default()
+        })),
+        actions: vec![],
+        now: 1610000000000.0,
+        socket: SocketId(0),
+    };
+    h.engine.start(h.now);
+    h.collect();
+    h.reply("/contracts/active", MARKET);
+    h.reply("/allTickers", TICKERS);
+    let bullet = h.http("/bullet-private");
+    h.respond(&bullet, 503, "unavailable");
+    h.ready();
+    assert!(h.engine.store().loaded().positions);
+    assert!(h.engine.store().loaded().orders);
+}
+
+#[test]
+fn unmappable_order_row_does_not_freeze_the_order_snapshot() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    let site = ORDER
+        .replace("5cdfc138b21023a909e5ad55", "site-twap")
+        .replace("\"size\":10", "\"size\":\"lots\"");
+    h.reply(
+        "/orders?",
+        &format!(
+            r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":2,"items":[{ORDER},{site}]}}}}"#
+        ),
+    );
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().orders);
+    assert!(h.engine.store().order("5cdfc138b21023a909e5ad55").is_some());
+    assert!(h.engine.store().order("site-twap").is_none());
+}
+
+#[test]
+fn unmappable_position_row_does_not_block_the_position_snapshot() {
+    let mut h = Harness::new();
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
+    );
+    assert!(h.engine.store().loaded().positions);
+}

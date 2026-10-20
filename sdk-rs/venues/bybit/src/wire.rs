@@ -927,6 +927,12 @@ pub struct MarginModeReason<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionRow<'a> {
     #[serde(borrow, default)]
+    pub id: Opt<'a>,
+    #[serde(borrow, default)]
+    pub side: Opt<'a>,
+    #[serde(borrow, default)]
+    pub size: Opt<'a>,
+    #[serde(borrow, default)]
     pub symbol: Opt<'a>,
     #[serde(rename = "type", borrow, default)]
     pub kind: Opt<'a>,

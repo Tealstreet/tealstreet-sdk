@@ -361,6 +361,8 @@ impl Kucoin {
         }
         if self.credentials.is_some() {
             self.connections.push(Connection::new(Role::Private));
+            // REST reconciliation must not depend on the private socket connecting.
+            self.account_start(cx);
         } else {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);

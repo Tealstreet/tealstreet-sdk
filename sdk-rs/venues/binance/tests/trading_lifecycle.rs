@@ -636,7 +636,10 @@ fn spot_cancel_all_keeps_cross_symbol_client_reuse_and_fences_the_old_native() {
                     u32::from_le_bytes(payload[..4].try_into().unwrap())
                 })
         });
-        assert_eq!(count, u32::from(empty_ack));
+        assert_eq!(
+            count, 1,
+            "quantified and unquantified ACKs preserve delivery"
+        );
         h.advance(10_000.0);
         h.respond("/api/v3/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"9000","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}]"#);
         assert_eq!(h.engine.store().order("maker"), Some(&before));

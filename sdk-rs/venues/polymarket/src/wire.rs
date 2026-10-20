@@ -31,19 +31,17 @@ pub struct Gamma<'a> {
     #[serde(borrow)]
     pub slug: Cow<'a, str>,
     #[serde(default, borrow)]
-    pub question: Cow<'a, str>,
+    pub question: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
-    pub description: Cow<'a, str>,
+    pub description: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
-    pub end_date: Cow<'a, str>,
+    pub end_date: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub clob_token_ids: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub outcomes: Option<Cow<'a, str>>,
-    #[serde(default)]
-    pub active: bool,
-    #[serde(default)]
-    pub closed: bool,
+    pub active: Option<bool>,
+    pub closed: Option<bool>,
     pub enable_order_book: Option<bool>,
     pub accepting_orders: Option<bool>,
     pub order_price_min_tick_size: Option<Number>,
