@@ -369,12 +369,17 @@ per-venue canary holding the circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### OKX
-- High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
+- ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
-  blanks as 0 and continues. Parse blanks as 0, retry with backoff.
-- Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
+  blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
+  blank or malformed seed quotes start at 0 (row kept for live updates); a failed
+  or unusable catalog/ticker read retries the whole product chain with backoff.
+- ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
-  read once, so a mode change in the OKX app makes every order reject.
+  read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
+  bad rows are skipped and counted in a warning; `fetchLeverage` reads
+  `leverage-info` (it previously never answered); config is re-read every 30 s
+  and a changed mode/level reconciles positions.
 - Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
   rejected; income limit truncates.
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
@@ -399,22 +404,18 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
   and Rust re-places (`binance/src/trading.rs:530`): a regression.~~
   Fixed with the USD-M/PM cancellation-proof and racing-fill regression matrix.
-- Medium: ~~PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`)~~;
-  ~~REST candles with `from`+`limit` return the oldest N instead of newest, no
-  1500 cap (`lib.rs:1439`)~~; ~~COIN-M strict batch discards placed ids on a partial
-  reject (`trading.rs:397,700`)~~; ~~PM `close: true` with an amount closes the whole
-  position (`trading.rs:1087`)~~; COIN-M unpriced coin excluded from totals
+- Medium: PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`);
+  REST candles with `from`+`limit` return the oldest N instead of newest, no
+  1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
+  reject (`trading.rs:397,700`); PM `close: true` with an amount closes the whole
+  position (`trading.rs:1087`); COIN-M unpriced coin excluded from totals
   (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
   without sending (`trading.rs:224`)~~ (explicit errors; see
-  [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
-  (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
-  unsupported~~; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
-- Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
+  [cancel audit](RUST_UNKNOWN_CANCEL.md)); history maps `EXPIRED_IN_MATCH` to filled
+  (`history.rs:687`); spot/COIN-M history returns plain `[]` instead of
+  unsupported; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
+- Low: fixed `recvWindow`; closePosition conflict cancel in batches; Binance UI
   STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
-- Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
-  Native unsupported histories reject; SDK methods expose matching branded Base
-  fallbacks. Existing unknown-ID mixed-batch cancellation preflight was reverified.
-  PM canonical ownership and Spot quantified-ACK delivery are also covered there.
 - Confirm (TS bugs Rust fixed): fill price `L` not `ap`; spot fill price on
   market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
   `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
@@ -430,9 +431,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   `baseCoin=All` unverified; live candles lack trade aggregation and seconds
   intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
   wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
-  poll (`account.rs:1838`); order/income history caps; ~~Partial TP/SL amend
-  semantics — decided: match TS (flip SL/TP on drag), do not amend in place~~
-  ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)); spot create params (`marketUnit`); one unmappable
+  poll (`account.rs:1838`); order/income history caps; Partial TP/SL amend
+  semantics — decided: match TS (flip SL/TP on drag), do not amend in place; spot create params (`marketUnit`); one unmappable
   order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
@@ -618,15 +618,19 @@ Normal inputs send the same requests as TS; the risk is resilience.
   field dropped.
 
 ### WEEX
-- High: one `null` numeric field in a public row stops the venue, private start
+- High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
-  order/position row freezes the list, no `planType` fallback (`account.rs:335`).
-- Medium: failed config read backs off all polling to ~60 s (`account.rs:518`);
+  order/position row freezes the list, no `planType` fallback (`account.rs:335`).~~
+  Bad public and account rows are skipped (stored copies kept, exact hedge ids);
+  ticker failure no longer blocks private start; `planType` fallback added.
+- Medium: ~~failed config read backs off all polling to ~60 s (`account.rs:518`);~~
   balance stops updating during active trading (revision discard,
-  `account.rs:408`); accepted conditional reported failed if the venue echoes
-  `clientAlgoId` (`trading.rs:1303`; verify live); imported limit with TP/SL
-  can't be amended (`trading.rs:343`); missing passphrase looks like a valid
-  empty account (`lib.rs:148`).
+  `account.rs:408`) — resilience lane; ~~accepted conditional reported failed if
+  the venue echoes `clientAlgoId` (`trading.rs:1303`; verify live); imported limit
+  with TP/SL can't be amended (`trading.rs:343`); missing passphrase looks like a
+  valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
+  accepted, imported TP/SL amend keeps row working types, partial credentials
+  deactivate visibly.
 - Low: isolated leverage sets both sides; index triggers rejected; fill without
   `id` dropped; income row without asset fails the page; fetchLeverage returns max.
 
@@ -673,13 +677,15 @@ No confirmed highs; valid data matches TS.
 
 ### AsterDEX
 No confirmed highs.
-- Medium: failed position-mode read silently leaves one-way, never retried, and
+- Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
   (`account.rs:817`); one malformed row halts startup (`lib.rs:849,781`); one bad
   row discards open-orders/positions snapshots (`account.rs:402,415`); hedge
   amend of a closing order may open the opposite side (shared with TS; reuse the
-  row's `positionSide`).
+  row's `positionSide`).~~ Mode read retries and holds placement until known;
+  unmapped order types keep their fills; bad rows are skipped keeping stored
+  copies; hedge amend reuses the recorded `positionSide` (TS bug fixed).
 - Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
   history fails on one row and refuses >7 day windows; listen-key keepalive
   omits `listenKey` and tears down on failure; partial balance rows skipped.
