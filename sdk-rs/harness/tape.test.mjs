@@ -172,6 +172,115 @@ test('Bybit per-connection requestId is volatile for HTTP and sockets', async ()
   assert.equal(await tape.socketFor('wss://example.test/v5/public/linear?requestId=recorded'), socket);
 });
 
+// Query through live physical socket state; normalization caches no socket selection.
+const socketsFor = (tape, url) => {
+  const key = tape.canonicalize(url);
+  return tape.sockets.filter((socket) => socket.url === key && socket.opened && !socket.closed);
+};
+
+test('default websocket URL parsing is reused while socket selection stays live', async () => {
+  const OriginalURL = globalThis.URL;
+  let parses = 0;
+  globalThis.URL = class extends OriginalURL {
+    constructor(...args) { super(...args); parses++; }
+  };
+  try {
+    for (const impl of ['ts', 'rust']) {
+      parses = 0;
+      const endpoint = 'wss://example.test/public?token=one';
+      const received = [];
+      const tape = new Tape([], {}, false, 200, impl);
+      const first = tape.connect(endpoint, () => {}, (text) => received.push(`first:${text}`));
+      assert.equal(await tape.socketFor(endpoint), first);
+      assert.deepEqual(socketsFor(tape, endpoint), [first]);
+      await tape.deliver({ type: 'ws', url: endpoint, text: 'one' });
+      tape.close(first);
+      const replacement = tape.connect(endpoint, () => {}, (text) => received.push(`next:${text}`));
+      assert.equal(await tape.socketFor(endpoint), replacement);
+      assert.equal(replacement.generation, 2);
+      await tape.deliver({ type: 'ws', url: endpoint, text: 'two' });
+      assert.deepEqual(received, ['first:one', 'next:two']);
+      assert.equal(parses, 1);
+      assert.deepEqual(socketsFor(tape, `${endpoint}&requestId=generated`), [replacement]);
+      assert.deepEqual(socketsFor(tape, 'wss://example.test/public?token=two'), []);
+      assert.deepEqual(socketsFor(tape, 'wss://example.test/private?token=one'), []);
+      const independent = new Tape([], {}, false, 200, impl);
+      assert.deepEqual(socketsFor(independent, endpoint), []);
+      assert.equal(parses, 5);
+    }
+  } finally {
+    globalThis.URL = OriginalURL;
+  }
+});
+
+test('websocket URL reuse respects changing callers and custom normalization rules', async () => {
+  const venue = {};
+  const tape = new Tape([], venue, false, 200);
+  const a = 'wss://example.test/a';
+  const b = 'wss://example.test/b';
+  const withField = `${a}?field=one`;
+  const sockets = [a, b, withField].map((endpoint) => tape.connect(endpoint, () => {}, () => {}));
+  await new Promise(setImmediate);
+  assert.deepEqual(socketsFor(tape, a), [sockets[0]]);
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+
+  const callerUrl = `${a}?newClientOrderId=caller`;
+  assert.deepEqual(socketsFor(tape, callerUrl), [sockets[0]]);
+  tape.callerIds.add('caller');
+  assert.deepEqual(socketsFor(tape, callerUrl), []);
+  const callerSocket = tape.connect(callerUrl, () => {}, () => {});
+  await new Promise(setImmediate);
+  assert.deepEqual(socketsFor(tape, callerUrl), [callerSocket]);
+  tape.callerIds.clear();
+  assert.deepEqual(socketsFor(tape, callerUrl), [sockets[0]]);
+
+  let path = '/a';
+  venue.requestUrl = () => `wss://example.test${path}`;
+  assert.deepEqual(socketsFor(tape, a), [sockets[0]]);
+  path = '/b';
+  assert.deepEqual(socketsFor(tape, a), [sockets[1]]);
+  delete venue.requestUrl;
+  assert.deepEqual(socketsFor(tape, a), [sockets[0]]);
+
+  // A custom callback can own additional mutable query rules. Keep its output
+  // on the same legacy URL contract used when these sockets were connected.
+  venue.canonicalize = (url) => {
+    const parsed = new globalThis.URL(url);
+    for (const [key, value] of [...parsed.searchParams])
+      if (!tape.callerIds.has(value) && venue.generatedQueryId?.(key, value)) parsed.searchParams.delete(key);
+    return canonicalUrl(parsed, tape.callerIds, venue);
+  };
+  tape.canonicalize = (url) => venue.canonicalize(url);
+  let generated = false;
+  venue.generatedQueryId = (key) => generated && key === 'field';
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+  generated = true;
+  assert.deepEqual(socketsFor(tape, withField), [sockets[0]]);
+  delete venue.generatedQueryId;
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+
+  venue.volatileQueryFields = [];
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+  venue.volatileQueryFields.push('field');
+  assert.deepEqual(socketsFor(tape, withField), [sockets[0]]);
+  venue.volatileQueryFields.splice(0);
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+  delete venue.volatileQueryFields;
+  assert.deepEqual(socketsFor(tape, withField), [sockets[2]]);
+});
+
+test('websocket normalization handles mutable URL objects and repeated invalid URLs', async () => {
+  const tape = new Tape([], {}, false, 200);
+  const first = tape.connect('wss://example.test/a', () => {}, () => {});
+  const second = tape.connect('wss://example.test/b', () => {}, () => {});
+  await new Promise(setImmediate);
+  const endpoint = new globalThis.URL('wss://example.test/a');
+  assert.deepEqual(socketsFor(tape, endpoint), [first]);
+  endpoint.pathname = '/b';
+  assert.deepEqual(socketsFor(tape, endpoint), [second]);
+  for (let i = 0; i < 2; i++) assert.throws(() => socketsFor(tape, 'invalid URL'), /Invalid URL/);
+});
+
 test('staged reads advance only after their command and preserve response headers', () => {
   const early = { ...record('GET'), body: 'early' };
   const later = { ...record('GET'), body: 'later', afterCommand: 1, headers: 'x-stage: later' };

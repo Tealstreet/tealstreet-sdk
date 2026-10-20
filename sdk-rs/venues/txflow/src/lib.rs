@@ -9,7 +9,8 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -341,6 +342,15 @@ impl TxFlow {
         let Ok(frame) = PublicFrame::decode(text) else {
             return false;
         };
+        // Errors are transport controls even when this mixed socket owns no public feed.
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct
+            && !matches!(
+                &frame,
+                PublicFrame::Error(_) | PublicFrame::Acknowledgement(_) | PublicFrame::Other
+            )
+        {
+            return false;
+        }
         match frame {
             PublicFrame::Contexts(rows) => {
                 for row in rows.ctxs {
@@ -579,6 +589,9 @@ impl Venue for TxFlow {
         }
         conn.subscriptions.clear();
         if api {
+            if cx.public_feed_policy() != PublicFeedPolicy::Direct {
+                return;
+            }
             let mut tickers = self
                 .assets
                 .iter()
@@ -631,42 +644,45 @@ impl Venue for TxFlow {
                 );
             }
         } else {
-            self.subscribe(
-                cx,
-                false,
-                "subscribe",
-                Sub {
-                    r#type: "allAssetCtxs",
-                    coin: None,
-                    interval: None,
-                    user: None,
-                    instrument_id: None,
-                },
-            );
-            for (symbol, ladder) in &mut self.books {
-                ladder.book.clear();
-                ladder.time = None;
-                cx.book_changed(symbol);
-            }
-            let mut books = self
-                .books
-                .keys()
-                .filter_map(|symbol| self.assets.get(symbol).copied())
-                .collect::<Vec<_>>();
-            books.sort_unstable();
-            for asset in books {
+            // Node account sockets also carry public contexts and books.
+            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                 self.subscribe(
                     cx,
                     false,
                     "subscribe",
                     Sub {
-                        r#type: "l2Book",
-                        coin: Some(&asset.to_string()),
+                        r#type: "allAssetCtxs",
+                        coin: None,
                         interval: None,
                         user: None,
                         instrument_id: None,
                     },
                 );
+                for (symbol, ladder) in &mut self.books {
+                    ladder.book.clear();
+                    ladder.time = None;
+                    cx.book_changed(symbol);
+                }
+                let mut books = self
+                    .books
+                    .keys()
+                    .filter_map(|symbol| self.assets.get(symbol).copied())
+                    .collect::<Vec<_>>();
+                books.sort_unstable();
+                for asset in books {
+                    self.subscribe(
+                        cx,
+                        false,
+                        "subscribe",
+                        Sub {
+                            r#type: "l2Book",
+                            coin: Some(&asset.to_string()),
+                            interval: None,
+                            user: None,
+                            instrument_id: None,
+                        },
+                    );
+                }
             }
             if !self.options.public_data_only {
                 if let Some(user) = self.user().map(str::to_owned) {

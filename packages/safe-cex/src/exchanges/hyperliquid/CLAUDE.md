@@ -19,6 +19,18 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 - **CCXT WS reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/hyperliquid.ts
 - **HIP-3 data flow report**: `docs/HIP3_API_CAPABILITIES_MATRIX.md` (local, detailed WS/REST coverage)
 
+## Rust public-feed ownership
+
+The Rust perpetual engine uses one account socket for private and public topics.
+`PublicFeedPolicy::Disabled` and `Shared` retain private subscriptions, account
+reconciliation and pings, while skipping public mids/contexts, books and candles
+on initial connection and reconnect. Public subscription commands are intercepted
+by the engine for both policies; unsolicited public payloads on the private socket
+are ignored. Shared ticker input updates native state without replacing local
+market metadata or account settings. Shared quote changes invoke native account
+revaluation so UPNL and available margin follow provider prices. This does not
+add spot support to Rust.
+
 ## File Structure
 
 ### Core Perpetual Futures

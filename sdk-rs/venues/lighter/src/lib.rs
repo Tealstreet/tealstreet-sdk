@@ -7,7 +7,9 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{
+    Candle, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -25,6 +27,17 @@ fn add_snapshot_amount(left: f64, right: f64) -> f64 {
         scaled.round() / factor
     } else {
         sum
+    }
+}
+
+fn revalue_position(position: &mut Position, price: f64) {
+    if position.contracts != 0.0 {
+        let sign = if position.side == PositionSide::Long {
+            1.0
+        } else {
+            -1.0
+        };
+        position.unrealized_pnl = sign * position.contracts * (price - position.entry_price);
     }
 }
 
@@ -451,14 +464,8 @@ impl Lighter {
                 .or(stats.last_trade_price.filter(|p| *p > 0.0));
             if let Some(price) = reference {
                 cx.store.update_positions(|position| {
-                    if position.symbol == symbol && position.contracts != 0.0 {
-                        let sign = if position.side == safe_cex_engine::model::PositionSide::Long {
-                            1.0
-                        } else {
-                            -1.0
-                        };
-                        position.unrealized_pnl =
-                            sign * position.contracts * (price - position.entry_price);
+                    if position.symbol == symbol {
+                        revalue_position(position, price);
                     }
                 });
             }
@@ -631,6 +638,31 @@ impl Lighter {
 }
 impl Venue for Lighter {
     type Pending = Pending;
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.store.loaded().positions {
+            return;
+        }
+        let references: HashMap<_, _> = cx
+            .store
+            .tickers()
+            .iter()
+            .filter_map(|ticker| {
+                // Direct tickers fold index into mark only when mark is absent.
+                // An explicit zero mark falls through to last, not index.
+                [ticker.mark, ticker.last]
+                    .into_iter()
+                    .find(|price| *price > 0.0)
+                    .map(|price| (ticker.symbol.clone(), price))
+            })
+            .collect();
+        if !references.is_empty() {
+            cx.store.update_positions(|position| {
+                if let Some(price) = references.get(&position.symbol) {
+                    revalue_position(position, *price);
+                }
+            });
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, false);
     }

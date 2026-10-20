@@ -2698,3 +2698,50 @@ select favorable samples. Then run one fresh full three-run Spot public gate
 under the same Node 22, artifact and tape. A completed correctness/performance
 failure must never be retried unchanged; stop on another incomplete attempt
 and diagnose it. Static review/docs may proceed while performance is paused.
+
+
+Resume checkpoint: worktree clean at e66b0432d9, PR1309 open on remote
+6b2d580332; its old WOO CI failure is already corrected locally. User explicitly
+requires another landing merge. Fetch now advances landing to fc809a9d85
+(consumer blockers/public-feed integration). Merge is in progress with ten
+conflicted files. Resolve disjoint venue/SDK and harness/host areas with native
+reviewers, preserving incoming public-feed ownership and our reviewed pacing,
+clock, identity, allocation and lifetime corrections. Store retains its existing
+market-index ticker lookup plus the incoming revision counter; no redundant
+sorted index is kept. Keep the nested workspace and all incoming consumer
+startup/loader checks. Inspect every resolution and run fresh native, helper,
+source and compiled consumer checks before release replay.
+
+This new required source merge supersedes the prior frozen artifact for final
+validation. Preserve the earlier KuCoin/Spot private receipts and incomplete
+Spot public baseline attempt as checkpoint evidence. Do not execute the old
+Spot continuation against its stale artifact. Rebuild required modules after
+merge verification, then run fresh gates only on objectively qualified host
+load. The previous two-reading qualification policy, thresholds, tapes, clock,
+GC and deadline rules remain unchanged. Latest aggregate CPU696.2 percent at
+11:47:46 UTC on ten cores does not qualify for the below500 percent policy.
+
+
+Landing merge resolutions are independently audited and frozen. Hyperliquid
+keeps the weighted quota/atomic bootstrap/fresh signing and adds incoming
+shared-feed policy/revaluation; new policy tests use the causal TestEngine
+and actual paced socket/ping/reconnect times instead of immediate bootstrap.
+Lighter retains snapshot safe math and incoming position revaluation; TxFlow
+retains deterministic intent sorting under direct-feed guards, with private
+node subscriptions unaffected. SDK keeps strict CID/options/Bitunix registration
+and all incoming consumer lifecycle wiring. Store revision/index union passes
+independent review including duplicates, orphan promotion and catalog changes.
+WASM retains Bitunix plus incoming feed policy/commands. Tape retains its entire
+reviewed clock/identity/lifecycle implementation and only adds default URL-key
+memoization; arbitrary custom/mutable canonicalizers remain uncached. Incoming
+cache tests are adapted to live physical-socket APIs and preserve caller/rule/
+closure coverage without applying HTTP volatility to socket identities.
+
+Initial merged helpers843/844 exposes a test-only generatedQueryId assumption:
+that hook belongs to HTTP and the strict socket canonicalizer correctly retains
+the query. The custom-policy test now explicitly supplies its fixture-owned
+rule without changing production normalization. Initial strict native Clippy
+finds two borrow errors in newly adapted Hyperliquid helper calls; copy the
+logical now before mutably dispatching, with all assertions retained. Preserve
+/tmp/bitunix-fc809-helpers.log and native-clippy.log; fresh suffixed checks run
+on the corrected frozen source. Root typecheck44/44 and lint28/28 already PASS.

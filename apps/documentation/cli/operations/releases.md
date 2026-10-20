@@ -8,6 +8,9 @@ sidebar_position: 8
 Where the CLI binaries come from, how to install them, and how to keep
 yours up to date.
 
+Rust exchange accounts run an engine embedded in the standalone executable.
+There is no separate Rust runtime or WASM asset to install beside the binary.
+
 ---
 
 ## Where releases live

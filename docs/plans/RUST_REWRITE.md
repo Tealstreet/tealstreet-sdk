@@ -533,9 +533,16 @@ ported. The linked inventory records exact callers and product constraints.
 The source audit found additional gates that must stay visible before default
 cutover or deletion:
 
-- `privateOnly` does not currently suppress Rust public sockets, and Rust does
-  not initialize/use the TS `externalPublicData` provider. Replace these with
-  explicit shared-public-feed policy and test private-worker/provider fan-out.
+- **Consumer-blockers implementation:** `privateOnly` and the pre-start
+  suppression hook now select native Public-role suppression, with explicit
+  topic guards for multiplexed account sockets. Explicit
+  direct/disabled/shared feed policy and transferred-port `RustPublicFeedProvider`
+  fan-out retain private metadata/settings, ingest public data natively, and
+  keep shared fields authoritative across local polling. Tests cover real
+  `ExchangeWorker` instances with transferred ports, native snapshots,
+  identity/catalog checks and disposal.
+  Rust rejects legacy TS `externalPublicData`; application/gateway owners must
+  migrate to the explicit policy before changing their account defaults.
 - Rust frames carry typed Polymarket prediction/holding metadata and typed
   instrument/product metadata; they do not carry arbitrary native `info`.
   Bybit's native `symbolType`, `marketRegion` and `underlyingTicker` now survive
@@ -545,10 +552,17 @@ cutover or deletion:
   unknown. This closes that metadata gap within the documented fixture scope;
   it does not change defaults or certify live private connectivity. See
   [product semantics evidence](RUST_PRODUCT_SEMANTICS.md).
-- `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
-  exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
-  starts are empty and forced refresh does not refresh native metadata. Define
-  and test explicit startup/refresh semantics before adopting this factory.
+- **Public factory lifecycle repaired:** a cache miss starts Rust before
+  reading metadata; a Redis hit remains a lazy metadata-only handle. Forced
+  refresh starts a replacement engine to re-fetch native metadata and swaps
+  `handle.exchange` after successful persistence. Failed refresh retains the
+  previous good engine/catalog. Callers re-read `handle.exchange` after refresh;
+  bounded cold startup, lazy recovery from failed starts, delayed cache reads,
+  concurrent/hour-rollover/disposal paths have native/unit coverage. Native
+  product/environment selectors also isolate current/latest cache and lock keys,
+  including registry-default Rust venues. Shared catalog validation preserves
+  typed classification, future and option identity while private metadata stays
+  native.
 - GRVT's apparent Future/Call/Put catalog gap has an [explicit retirement
   decision](GRVT_PRODUCTS_DECISION.md): TS discovery sends `{}`, which defaults
   to `PERPETUAL`; injected non-perpetual mapper rows are not currently exposed
@@ -556,6 +570,24 @@ cutover or deletion:
   perpetual fixtures. Future enablement requires typed semantic metadata and
   complete product lifecycle evidence. This decision does not authorize TS
   deletion or default cutover; the other consumer/dependency gates still apply.
+
+The consumer-blockers phase also proves saved CFM account CLI reads through the
+real factory, MCP catalog/balance/positions/orders over its actual protocol,
+plus store-only ticker freshness through native Binance public frames and
+BreakoutProp REST polling,
+isolated compiled Bun CLI loading, and isolated packaged Node MCP loading with
+Rust artifacts and dependency notices. `EXCHANGE_ENGINE=rust` explicitly selects
+the MCP engine. Mobile has an explicit cached host-loader registration tested
+with the real browser WASM bytes and two saved accounts; **a Hermes/native-bridge
+binary and device integration remain unproved**. These are deterministic offline
+consumer/packaging proofs, not live account authentication or deployment claims.
+See [RUST_CONSUMER_BLOCKERS.md](RUST_CONSUMER_BLOCKERS.md) for checkpoints/gates.
+
+Additional [rewrite audit findings](RUST_AUDITS.md) remain cutover gates.
+The consumer repairs and offline proofs do not settle downstream engine delivery,
+hosted keyless signing, a Hermes/native bridge, full live private parity or the
+production shadow/canary evidence. Keep these separate from the repaired startup,
+shared-feed and package-loading boundaries documented here.
 
 Deletion proceeds in separate, reviewable PRs:
 

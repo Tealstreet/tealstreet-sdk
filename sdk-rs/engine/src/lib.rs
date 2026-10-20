@@ -7,6 +7,7 @@ pub mod json;
 pub mod model;
 pub mod num;
 pub mod paging;
+pub mod public_feed;
 pub mod store;
 pub mod wire;
 
@@ -17,3 +18,5 @@ pub use engine::{
     SocketContext, SocketId, TimerId, Venue,
 };
 pub use store::Store;
+
+pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

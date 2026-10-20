@@ -154,6 +154,30 @@ pub fn ready_identity(
     approval: &str,
     vault: Option<String>,
 ) -> (Engine<Hyperliquid>, SocketId) {
+    let (engine, socket, _) = ready_identity_policy(
+        mode,
+        hip,
+        builder,
+        approval,
+        vault,
+        safe_cex_engine::PublicFeedPolicy::Direct,
+    );
+    (engine, socket)
+}
+pub fn ready_with_policy(
+    mode: &str,
+    policy: safe_cex_engine::PublicFeedPolicy,
+) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
+    ready_identity_policy(mode, true, None, "30", None, policy)
+}
+fn ready_identity_policy(
+    mode: &str,
+    hip: bool,
+    builder: Option<safe_cex_venue_hyperliquid::Builder>,
+    approval: &str,
+    vault: Option<String>,
+    policy: safe_cex_engine::PublicFeedPolicy,
+) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
     let mut e = Engine::new(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
@@ -162,9 +186,11 @@ pub fn ready_identity(
         vault,
         ..Options::default()
     }));
+    e.set_public_feed_policy(policy).unwrap();
     e.start(1000.0);
     let mut socket = None;
     let mut answered = std::collections::HashSet::new();
+    let mut subscriptions = Vec::new();
     for _ in 0..200 {
         let actions = e.drain_actions().collect::<Vec<_>>();
         if actions.is_empty() {
@@ -203,11 +229,12 @@ pub fn ready_identity(
                     socket = Some(s);
                     e.handle(1000.0, Event::WsOpened { socket: s });
                 }
+                Action::WsSend { text, .. } => subscriptions.push(text),
                 _ => {}
             }
         }
     }
-    (e, socket.unwrap())
+    (e, socket.unwrap(), subscriptions)
 }
 pub fn message(e: &mut Engine<Hyperliquid>, s: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket: s, text });

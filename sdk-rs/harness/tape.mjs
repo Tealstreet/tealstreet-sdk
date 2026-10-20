@@ -459,7 +459,8 @@ export class Tape {
     records = implementationRecords(records, impl);
     this.records = records;
     this.impl = impl;
-    this.canonicalize = venue.canonicalize ?? ((url) => canonicalUrl(url, this.callerIds, venue));
+    this.socketUrlKeys = new Map();
+    this.canonicalize = venue.canonicalize ?? ((url) => this.socketUrlKey(url));
     this.explicitOpens = venue.explicitOpens ?? false;
     this.legacyLatest = venue.legacyLatest ?? true;
     this.venue = venue;
@@ -638,6 +639,19 @@ export class Tape {
       await this.replayClock.advance(this.time);
       await new Promise(setImmediate);
     }
+  }
+
+  socketUrlKey(url) {
+    // Custom rules can close over mutable state. Only memoize default identities.
+    if (typeof url !== 'string' || !this.callerIds || this.callerIds.size || this.venue.canonicalize
+      || this.venue.requestUrl || this.venue.volatileQueryFields || this.venue.generatedQueryId)
+      return (this.venue.canonicalize ?? ((value) => canonicalUrl(value, this.callerIds, this.venue)))(url);
+    let key = this.socketUrlKeys.get(url);
+    if (key === undefined) {
+      key = canonicalUrl(url, this.callerIds, this.venue);
+      this.socketUrlKeys.set(url, key);
+    }
+    return key;
   }
 
   get unserved() { return this.responseStore?.unserved ?? this._unserved; }
