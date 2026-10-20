@@ -1186,8 +1186,10 @@ fn apply_signature(
             if body[end..].contains(field) {
                 return Err("Ambiguous delegated signature field");
             }
-            let mut replacement = String::from("\"signature\":");
-            replacement.push_str(&serde_json::to_string(signature).expect("string serializable"));
+            let replacement = format!(
+                "\"signature\":{}",
+                serde_json::to_string(signature).expect("string serializable")
+            );
             body.replace_range(index..end, &replacement);
         }
     }
