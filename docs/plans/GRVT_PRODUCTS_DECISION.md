@@ -29,6 +29,13 @@ synthetic option fixtures would neither reproduce a currently exposed product
 nor establish a usable option lifecycle. No authenticated writes are needed to
 establish this boundary, and none are authorized or performed for this audit.
 
+| Surface | Actual TS exposure today | Latent behavior if rows are injected | Rust decision |
+| --- | --- | --- | --- |
+| Markets | `{}` discovery requests perpetuals | Maps every kind; preserves only hash/decimal signing info | Keep perpetual catalog; retire unrequested mappings |
+| Tickers | Subscribes discovered markets | Generic native-ID ticker handlers | Keep perpetual streams |
+| Books | Resolves a discovered market to its native ID | Generic native-ID snapshot subscriptions | Keep perpetual books |
+| Orders | Resolves a discovered market before signing | Generic single-asset signing/create can dispatch; symbol cancel is perpetual-only | Keep proven perpetual lifecycle; no futures/options capability claim |
+
 ## Dated public evidence
 
 Read-only HTTPS POSTs on 2026-10-20; both environments returned successful
@@ -108,4 +115,35 @@ current upstream enum is likewise outside the existing TS discovery scope.
   credit perpetual fills/funding; order history, client lookup and public trades
   fail closed on an undiscovered product identity. **21 history tests PASS**.
   No production defect or TS behavior change was needed in these phases.
-- Harness gates and landing evidence follow.
+- Harness fixture phase: fresh 20-second live public recording, two books,
+  **4,572 raw records** (one metadata, one HTTP, one open, **4,569 WS**).
+  Catalog: **194 perpetuals**; **194 ticker ACKs / 4,299 ticker updates**,
+  two book ACKs / **74 book updates**, no errors or unknown instruments.
+  Committed gzip preserves every raw byte after decompression (2,382,215 bytes,
+  SHA-256 `0bd866410596a0310f8a72aaa39fab364007cbe595620c7aa8a33a0807b8c0eb`).
+  Independent review accepted the capture. The unchanged harness's existing
+  perpetual filter means replay proves retained-product parity; retirement
+  evidence comes separately from discovery/source/probes and boundary tests.
+- All local gates PASS on the retained product, with unchanged thresholds,
+  request/protocol validators, normalization and measurement boundaries:
+
+  | Public gate (three-run median) | Main CPU TS / Rust | Steady CPU TS / Rust | Retained memory TS / Rust |
+  | --- | --- | --- | --- |
+  | GRVT isolated, 4,570 replay frames / 194 markets / two books | 170.1 / 157.3 ms | 110.5 / 100.2 ms | 26.4 / 1.7 MB |
+  | GRVT combined, same capture | 215.9 / 181.0 ms | 141.2 / 112.9 ms | 26.4 / 2.6 MB |
+  | Binance combined, 873 frames / three books | 219.8 / 101.3 ms | 119.9 / 42.3 ms | 18.0 / 4.8 MB |
+
+  GRVT private **18 replay frames PASS**, isolated and combined; Binance private
+  **14 replay frames PASS**. Private captures use documented fixtures, not live
+  account lifecycle proof. CPU/memory there are informational. Isolated GRVT
+  Wasm **955,627 bytes**, below **1,258,291**; canonical local bindings restored
+  to the combined build after isolated checks.
+
+  Native GRVT **92 tests PASS**; engine **71 PASS** with default features.
+  Bans, venue fmt and all-target Clippy, combined Wasm Clippy/build PASS.
+  Harness **552**, JS host **68**, cross-language frame wire **1**, full
+  SDK/Wasm **384** (including **274** cutover consumers) PASS. Root quality:
+  **44 typecheck / 28 lint / 27 test tasks PASS**, safe-cex **7,414 tests twice**.
+  No runtime/crypto implementation change or TS bug fix was needed.
+- Independent fixture/gate phase review accepted. PR code-correctness reviews
+  and exact-head green-CI landing follow.
