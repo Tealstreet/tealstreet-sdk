@@ -87,9 +87,15 @@ current upstream enum is likewise outside the existing TS discovery scope.
   confirmed the default-kind contract and dormant generic paths; no port of
   Future/Call/Put is justified by current TS exposure.
 - Public phase: TS discovery/injected-mapper regression **9 PASS**; Rust
-  public **12 PASS** and catalog refresh **3 PASS**. Independent review found
+  public **12 PASS** and catalog refresh **4 PASS**. Independent review found
   one missing subscription assertion; the test now captures initial sends and
   proves only the retained perpetual gets a ticker selector. A mixed-kind
   refresh also cannot enable retired products. Scope docs and the phase-9
   inventory now link this decision; TS implementations/defaults are retained.
-- Private/trading/query phase verification and landing evidence follow.
+- Private phase: independent source audit found exact native-ID/canonical-symbol
+  lookup throughout positions, orders, leverage and fills. Two new account
+  regressions prove same-base/quote retired IDs cannot remove perpetual orders
+  or positions, change settings, emit fills or poison supported fill dedup.
+  REST unknown-order/position snapshots fail atomically; leverage ignores
+  undiscovered IDs. **22 account tests PASS**; independent phase review accepted.
+- Trading/query phase verification and landing evidence follow.
