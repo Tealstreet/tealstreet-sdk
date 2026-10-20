@@ -645,3 +645,20 @@ plus four independent documented UTA/Classic trailing integration cases. The
 172 harness helpers and native Bitget trading26 cases pass; request/body/signature
 and mutation consumption checks remain strict and its incoming fixture is
 unchanged. Final-source combined build/checks and gates must run after merge.
+
+The reviewed parity merge is `8a79b6d5b0`, pushed after both implementation and
+actual-WASM P1 reviews passed. The first local full replay attempt failed before
+imports at the strict TS baseline settling deadline (four samples, one buffer
+transition, ~1.1MB backing buffers, ~1.1s elapsed). Preserve those logs; retry
+only after heavy local checks, without changing deadline/window/thresholds.
+Typecheck44/lint28/licenses31 pass on this source; full workspace native tests
+also completed successfully (see the command log), with Clippy finishing.
+
+WOO #1316 then landed as `6945ee83b4`, so GitHub cannot create a merge commit
+for the PR until that integration is resolved. Preserve its thirteenth venue,
+protocol controls and generic percentage slippage field, deduplicating the
+already-present Bybit option. Current-source P1/host/frame/harness gates remain
+mandatory. Final PR CI will run the complete 13-job venue matrix on isolated
+runners, alongside local required profile gates when the shared host is quiet;
+use those complete CI results as the authoritative full regression evidence.
+Do not claim interrupted or baseline-timeout local matrices as passing.
