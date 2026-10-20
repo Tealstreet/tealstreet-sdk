@@ -549,3 +549,9 @@ never retry an unchanged failed performance measurement to obtain a pass.
   fill independently matched to a raw tape execution (overseer-approved); 4
   checkpoint-11 order paths repeat checkpoint 10's declared divergence. TxFlow
   public empty checkpoint-0 books remain a real regression with its owner.
+- Coinbase INTX EdDSA private (unchanged tape `f117e75e`) varies between CI
+  `39460207328` and `39463152700`: the Rust REST order census in flight at record
+  86 (cancelOrders) resolves at checkpoint 6 or 7. TS and final state are
+  identical. The union of both observed path sets is declared so either outcome
+  passes (overseer option a); deterministic census under replay is routed to
+  the incidentals lane.
