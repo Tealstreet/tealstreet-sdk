@@ -977,6 +977,64 @@ fn hedge_skip_keeps_only_the_unreadable_leg_and_drops_a_closed_sibling() {
     assert_eq!(e.store().positions()[0].contracts, 0.01);
 }
 #[test]
+fn steady_hedged_fills_cannot_starve_position_snapshots() {
+    let (mut e, socket, mut reads, mut timer) = start();
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, &INFO.replace("ONE_WAY", "HEDGE_MODE"));
+    reads.extend(requests(&mut e));
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        40.0,
+        r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":10,"marginMode":"CROSS"}]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let mut now = 2020.0;
+    for i in 0..3 {
+        e.handle(now, Event::TimerFired { timer });
+        let mut read = None;
+        for a in e.drain_actions() {
+            match a {
+                Action::Http(r) if r.url.contains("/v3/positions") => read = Some(r),
+                Action::SetTimer { timer: t, at_ms } if at_ms == now + 2000.0 => timer = t,
+                _ => {}
+            }
+        }
+        ws(
+            &mut e,
+            socket,
+            now + 1.0,
+            &format!(
+                r#"{{"topic":"executionreport","data":{{"symbol":"PERP_BTC_USDT","orderId":{o},"status":"FILLED","side":"BUY","type":"MARKET","quantity":0.01,"totalExecutedQuantity":0.01,"executedQuantity":0.01,"executedPrice":60001,"tradeId":{t}}}}}"#,
+                o = 300 + i,
+                t = 400 + i
+            ),
+        );
+        e.drain_actions().for_each(drop);
+        response(
+            &mut e,
+            &read.unwrap(),
+            now + 2.0,
+            r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.05,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":10,"marginMode":"CROSS"}]}}"#,
+        );
+        let rereads = requests(&mut e)
+            .into_iter()
+            .filter(|r| r.url.contains("/v3/positions"))
+            .count();
+        let long = e
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.id == "BTCUSDT:long")
+            .unwrap()
+            .contracts;
+        assert_eq!(long, if i < 2 { 0.01 } else { 0.05 });
+        assert_eq!(rereads, if i < 2 { 0 } else { 1 });
+        now += 2000.0;
+    }
+}
+#[test]
 fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
     let (mut e, _, mut reads, timer) = start();
     load(&mut e, &mut reads);

@@ -1,43 +1,65 @@
 import { setTimeout as realTimeout } from 'node:timers';
 
 // Node accounts WebAssembly linear memory separately from arrayBuffers.
-// Received frame buffers still belong to JS and must count alongside its heap.
-export const retainedMemory = (before, after, wasmBytes = 0) =>
-  after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + wasmBytes;
+// Subtract the idle-loaded module's static reservation, counting runtime growth
+// exactly once alongside JS heap and retained transfer buffers. Negative JS
+// deltas are genuine releases and remain signed rather than being clamped.
+export const retainedMemory = (before, after, wasmBytes = 0, wasmBeforeBytes = 0) =>
+  after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + wasmBytes - wasmBeforeBytes;
 
-// Include verifier setup's full allocation/release lifecycle in both runners.
-// Sampling after setup could subtract temporary loader objects from retention.
-export const baselineBeforeSetup = async ({ baseline, initialize }) => {
-  const before = await baseline();
-  await initialize();
-  return before;
+const cpuSample = () => ({ thread: process.threadCpuUsage(), process: process.cpuUsage(), wall: performance.now() });
+const milliseconds = (before, after) => (after.user - before.user + after.system - before.system) / 1000;
+export const idleLoadedBaseline = async ({ baseline, load, sample = cpuSample }) => {
+  const before = sample();
+  const loaded = await load();
+  const after = sample();
+  const loadMetrics = {
+    idleLoadCpuMs: milliseconds(before.thread, after.thread),
+    idleLoadProcessCpuMs: milliseconds(before.process, after.process),
+    idleLoadWallMs: after.wall - before.wall,
+  };
+  // Baseline collection is a separate interval: its GC is never counted as
+  // implementation loading or runtime CPU, including background GC threads.
+  return { loaded, loadMetrics, memory: await baseline() };
 };
 
-// Validate absolute samples, exact retained-memory arithmetic and each component.
-// A negative component invalidates the before-import baseline; never clamp it.
+// Performance runs have no checkpoint audit. Freeze their CPU/memory measures
+// before building diagnostic rows, detached snapshots or serialized output.
+// Audited correctness runs retain finalizeReplay's opposite capture-first order.
+export const measureBeforeCapture = async (capture, measure) => {
+  const metrics = await measure();
+  return { ...structuredClone(capture()), metrics };
+};
+
+// Validate absolute counters and exact delta arithmetic. Releases may make a
+// heap/buffer/aggregate delta negative; this is not an invalid absolute sample.
 export const memoryMetricErrors = (metrics) => {
   const errors = [];
+  if (metrics?.baselineKind !== 'idle-loaded') errors.push('invalid baselineKind (expected idle-loaded)');
+  if (!['performance', 'correctness'].includes(metrics?.measuredMode)) errors.push('invalid measuredMode');
   for (const field of [
-    'heapBeforeBytes',
-    'heapUsedBytes',
-    'buffersBefore',
-    'buffersAfter',
-    'wasmBytes',
-    'retainedBytes',
+    'cpuMs', 'processCpuMs', 'steadyCpuMs', 'wallMs',
+    'idleLoadCpuMs', 'idleLoadProcessCpuMs', 'idleLoadWallMs',
+    'runtimeCpuMs', 'runtimeProcessCpuMs', 'runtimeWallMs',
+    'heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter',
+    'wasmBeforeBytes', 'wasmBytes', 'wasmRetainedBytes',
   ]) {
     const value = metrics?.[field];
     if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
   }
-  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
+  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
     const value = metrics?.[field];
-    if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
+    if (!Number.isFinite(value)) errors.push(`invalid ${field} (${value})`);
   }
   if (errors.length) return errors;
-
   for (const [field, expected] of [
+    ['cpuMs', metrics.idleLoadCpuMs + metrics.runtimeCpuMs],
+    ['processCpuMs', metrics.idleLoadProcessCpuMs + metrics.runtimeProcessCpuMs],
+    ['wallMs', metrics.idleLoadWallMs + metrics.runtimeWallMs],
     ['heapRetainedBytes', metrics.heapUsedBytes - metrics.heapBeforeBytes],
     ['bufferRetainedBytes', metrics.buffersAfter - metrics.buffersBefore],
-    ['retainedBytes', metrics.heapRetainedBytes + metrics.bufferRetainedBytes + metrics.wasmBytes],
+    ['wasmRetainedBytes', metrics.wasmBytes - metrics.wasmBeforeBytes],
+    ['retainedBytes', metrics.heapRetainedBytes + metrics.bufferRetainedBytes + metrics.wasmRetainedBytes],
   ]) {
     if (metrics[field] !== expected) errors.push(`inconsistent ${field} (${metrics[field]}; expected ${expected})`);
   }

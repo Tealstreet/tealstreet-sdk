@@ -5,7 +5,7 @@ use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
-    CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
+    CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -261,11 +261,11 @@ pub enum Command {
     },
     SubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     UnsubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     PlaceOrders {
         command: CommandId,
@@ -354,7 +354,7 @@ pub enum Command {
     FetchCandles {
         command: CommandId,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -558,7 +558,7 @@ struct Io<P> {
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
     changed_books_active: usize,
-    candles: Vec<(String, String, Candle)>,
+    candles: Vec<(String, Interval, Candle)>,
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
@@ -1122,18 +1122,15 @@ impl<P> Cx<'_, P> {
 
     /// Queue a live candle for the next frame; a newer update of the same
     /// candle replaces the queued one.
-    pub fn candle(&mut self, symbol: &str, interval: &str, candle: Candle) {
+    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
         let same = self
             .io
             .candles
             .iter_mut()
-            .find(|(s, i, c)| s == symbol && i == interval && c.timestamp == candle.timestamp);
+            .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
         match same {
             Some(queued) => queued.2 = candle,
-            None => self
-                .io
-                .candles
-                .push((symbol.to_owned(), interval.to_owned(), candle)),
+            None => self.io.candles.push((symbol.to_owned(), interval, candle)),
         }
     }
 
@@ -1152,6 +1149,11 @@ pub trait Venue {
     /// Prevent overlapping precomputed amendments and cancellations.
     fn guard_order_mutations(&self) -> bool {
         false
+    }
+    /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
+    /// out must itself cancel any late-landing order once its fresh read proves it.
+    fn fence_uncertain_cancel_all(&self) -> bool {
+        true
     }
 
     /// What this venue answers beyond the common commands; the engine gates
@@ -1260,9 +1262,11 @@ struct BookBaseline {
 
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V) -> Self {
+        let mut store = Store::default();
+        store.set_quantity_units(venue.capabilities().quantity_units);
         Self {
             venue,
-            store: Store::default(),
+            store,
             io: Io::default(),
             started: false,
             shared_books: HashMap::new(),
@@ -1341,7 +1345,7 @@ impl<V: Venue> Engine<V> {
         }
         for update in update.candles {
             if cx.store.market(&update.symbol).is_some() {
-                cx.candle(&update.symbol, &update.interval, update.candle());
+                cx.candle(&update.symbol, update.interval, update.candle());
             }
         }
         Ok(())
@@ -1655,11 +1659,16 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(id) = cx.io.order_locks.acquire(&command, cx.store)
+                        && let Err(id) = cx.io.order_locks.acquire(
+                            &command,
+                            cx.store,
+                            self.venue.fence_uncertain_cancel_all(),
+                        )
                     {
                         let error = match &command {
                             Command::CancelSymbolOrders { symbol, .. }
-                                if cx.io.order_locks.uncertain(symbol) =>
+                                if self.venue.fence_uncertain_cancel_all()
+                                    && cx.io.order_locks.uncertain(symbol) =>
                             {
                                 "Placement outcome is uncertain; reconcile before cancel-all"
                             }
@@ -1696,7 +1705,7 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
-            if failed {
+            if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
                 };
@@ -1865,6 +1874,7 @@ impl<V: Venue> Engine<V> {
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
+        self.venue.capabilities().write(&mut w);
         for (symbol, book) in self.books() {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
@@ -2187,6 +2197,7 @@ mod streaming_tests {
         empty_book: Book,
         book_subscribers: u32,
         symbol_amend: bool,
+        fence_uncertain: bool,
         commands: Vec<Command>,
     }
 
@@ -2196,6 +2207,9 @@ mod streaming_tests {
         }
         fn guard_order_mutations(&self) -> bool {
             true
+        }
+        fn fence_uncertain_cancel_all(&self) -> bool {
+            self.fence_uncertain
         }
         type Pending = Vec<String>;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
@@ -2561,6 +2575,49 @@ mod streaming_tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn opted_out_venue_receives_queued_and_later_cancel_all_after_uncertain_place() {
+        let mut engine = frame_engine();
+        engine.venue.fence_uncertain = false;
+        engine.handle(0., Event::Command(held_place(1, "A")));
+        engine.io.order_locks.note_write();
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            1,
+            "cancel-all still waits for the placement"
+        );
+        complete_held(&mut engine, 1, true);
+        assert!(engine.io.order_locks.uncertain("A"));
+        assert_eq!(
+            engine.venue.commands.len(),
+            2,
+            "queued cancel-all is dispatched"
+        );
+        complete_held(&mut engine, 2, false);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 3,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            3,
+            "later cancel-all is dispatched"
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("uncertain"))));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn complete_known_partial_outcome_does_not_poison_or_clear_older_uncertainty() {
         let mut engine = frame_engine();
         engine.handle(0., Event::Command(held_place(1, "A")));
@@ -2792,6 +2849,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         });
         engine.start(0.0);
@@ -2827,6 +2885,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         })
     }
@@ -2966,7 +3025,7 @@ mod streaming_tests {
             cx.book_changed("A");
             cx.candle(
                 "A",
-                "1m",
+                Interval::M1,
                 crate::model::Candle {
                     timestamp: 1.,
                     open: 98.,
@@ -3074,7 +3133,7 @@ mod streaming_tests {
         );
         engine.io.candles.push((
             "A".into(),
-            "1m".into(),
+            Interval::M1,
             Candle {
                 timestamp: 1.,
                 open: 2.,

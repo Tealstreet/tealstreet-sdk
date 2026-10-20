@@ -270,3 +270,51 @@ fn invalid_order_side_fails_and_a_repeated_full_page_is_not_silently_truncated()
     reply(&mut e, &next, 200, spot);
     assert!(result(&mut e).unwrap_err().contains("incomplete"));
 }
+
+/// Pins the exact request sequence of an offset-paged read. Paging
+/// refactors keep it.
+#[test]
+fn offset_paged_request_sequence_is_pinned() {
+    let (mut e, _) = ready();
+    ask(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let fill = r#"{"orderId":"123","symbol":"SOL_USDC","side":"Bid","price":"141","quantity":"2","fee":"0.1","feeSymbol":"USDC","tradeId":999,"timestamp":"2025-12-15T13:28:00.123+00:00","isMaker":false}"#;
+    let mut sent = Vec::new();
+    let r = requests(&mut e).pop().unwrap();
+    sent.push(
+        r.url
+            .split_once("/wapi/")
+            .map_or(r.url.as_str(), |(_, p)| p)
+            .to_owned(),
+    );
+    reply(&mut e, &r, 200, &format!("[{fill}]"));
+    let r = requests(&mut e).pop().unwrap();
+    sent.push(
+        r.url
+            .split_once("/wapi/")
+            .map_or(r.url.as_str(), |(_, p)| p)
+            .to_owned(),
+    );
+    reply(
+        &mut e,
+        &r,
+        200,
+        &format!("[{}]", fill.replace("SOL_USDC", "SOL_USDC_PERP")),
+    );
+    assert!(result(&mut e).is_ok());
+    assert_eq!(
+        sent,
+        [
+            "v1/history/fills?limit=1&sortDirection=Desc",
+            "v1/history/fills?limit=1&offset=1&sortDirection=Desc",
+        ]
+    );
+}

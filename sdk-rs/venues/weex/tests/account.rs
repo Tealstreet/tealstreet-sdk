@@ -152,6 +152,17 @@ fn documented_private_snapshots_and_browser_rest_fallback() {
     );
 }
 #[test]
+fn account_and_position_events_during_a_read_cannot_starve_the_balance() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    for text in [r#"{"e":"account","d":{}}"#, r#"{"e":"positions","d":[]}"#] {
+        e.handle(NOW, Event::WsMessage { socket, text });
+    }
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert_eq!(e.store().balance().free, 5413.06);
+    assert!(e.store().loaded().balance);
+}
+#[test]
 fn failed_or_malformed_half_never_replaces_order_snapshot() {
     let (mut e, actions) = started(false);
     complete(&mut e, &actions, NORMAL, ALGO);
@@ -1211,17 +1222,36 @@ fn ticker_seed_failure_does_not_block_private_start() {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    // Private reads start at markets, before the ticker seed resolves.
+    let seed: Vec<_> = e.drain_actions().collect();
+    let is_private = |r: &HttpRequest| !r.url.contains("24hr") && !r.url.contains("bookTicker");
+    // A successful seed is awaited so account rows map against seeded prices.
+    assert!(
+        !requests(&seed).iter().any(is_private),
+        "{:?}",
+        requests(&seed)
+    );
+    // The first seed failure starts the account; a still-failing seed never gates it.
+    response(&mut e, request(&seed, "24hr"), 503, "unavailable");
     let actions: Vec<_> = e.drain_actions().collect();
-    response(&mut e, request(&actions, "24hr"), 503, "unavailable");
-    let private: Vec<_> = requests(&actions)
-        .into_iter()
-        .filter(|r| !r.url.contains("24hr") && !r.url.contains("bookTicker"))
-        .collect();
+    let private: Vec<_> = requests(&actions).into_iter().filter(is_private).collect();
     assert_eq!(private.len(), 6, "{private:?}");
-    e.drain_actions().for_each(drop);
+    response(&mut e, request(&seed, "bookTicker"), 503, "unavailable");
+    let retry: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !requests(&retry).iter().any(is_private),
+        "account started once"
+    );
     complete(&mut e, &actions, NORMAL, ALGO);
     assert!(e.store().loaded().orders && e.store().loaded().balance);
+}
+#[test]
+fn account_starts_after_a_successful_ticker_seed() {
+    let (_, actions) = started(false);
+    assert!(
+        requests(&actions)
+            .iter()
+            .any(|r| r.url.contains("allPosition"))
+    );
 }
 #[test]
 fn malformed_hedged_position_row_keeps_only_its_own_side() {

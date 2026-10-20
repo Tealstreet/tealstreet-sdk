@@ -195,6 +195,55 @@ fn accepted_execution_invalidates_an_already_pending_positions_and_balance_read(
 }
 
 #[test]
+fn steady_fills_cannot_starve_the_rest_only_balance() {
+    let (mut e, s, mut tick) = ready_ticking(ORDER, "[]", POSITIONS);
+    let mut read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v1/positions"))
+        .unwrap();
+    let prior = e.store().balance().clone();
+    let stale =
+        r#"{"success":true,"data":{"rows":[],"total_collateral_value":99,"free_collateral":1}}"#;
+    for i in 0..3u32 {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"executionreport","ts":2000,"data":{{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":50000,"quantity":1,"totalExecutedQuantity":0.{n},"executedQuantity":0.1,"executedPrice":50000,"tradeId":{t},"seq":{t}}}}}"#,
+                n = i + 1,
+                t = 60 + i
+            ),
+        );
+        actions(&mut e);
+        reply(&mut e, &read, 200, stale);
+        let rereads: Vec<_> = requests(&mut e)
+            .into_iter()
+            .filter(|r| r.url.ends_with("/v1/positions"))
+            .collect();
+        // Positions keep their stream-maintained rows; only the balance commits.
+        assert_eq!(e.store().positions().len(), 2);
+        if i < 2 {
+            assert_eq!(e.store().balance(), &prior);
+            assert!(rereads.is_empty());
+            e.handle(3000.0, Event::TimerFired { timer: tick });
+            let mut next = None;
+            for a in actions(&mut e) {
+                match a {
+                    Action::Http(r) if r.url.ends_with("/v1/positions") => next = Some(r),
+                    Action::SetTimer { timer, .. } => tick = timer,
+                    _ => {}
+                }
+            }
+            read = next.unwrap();
+        } else {
+            assert_eq!(e.store().balance().total, 99.0);
+            assert_eq!(e.store().balance().free, 1.0);
+            assert_eq!(rereads.len(), 1);
+        }
+    }
+}
+
+#[test]
 fn documented_algo_status_fields_coexist_and_root_rejection_cascades() {
     let algos = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","root_algo_order_status":"NEW","margin_mode":"CROSS","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","status":"NEW","algo_status":"NEW","trigger_price":49000,"quantity":1,"total_executed_quantity":0}]}]"#;
     let (mut e, s) = ready_with(ORDER, algos, POSITIONS);
