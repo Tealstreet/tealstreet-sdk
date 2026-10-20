@@ -195,3 +195,16 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
   steady147.2/49.3ms, retained4.2/2.2MB PASS; private14 frames PASS.
 - Push this reviewed integrated head for all matrix/repository CI checks;
   merge only green, into feat/rust-rewrite, then create fresh follow-up.
+
+### Resume checkpoint: all gates green, latest roster merged
+
+- Head583104665d passed every CI check:12 venue jobs (27 public/private
+  replay gates), all native/WASM/static jobs, both repository CI test jobs,
+  secret scans. CI Bitrue artifact709,935/1,258,291bytes; CPU189.5/168.4ms,
+  steady107.1/83.5ms, retained3.7/2.3MB; public3,287/private20 frames PASS.
+- On explicit resume instruction, fetched and merged landingc5bc2c4adf first.
+  Independent exact-head review PASS: only four roster lines in RUST_REWRITE
+  changed, with runtime/transport/build/CI identical to the tested head.
+- Progress and prior adversarial findings are committed and posted on PR1314.
+  Push this docs-only merge checkpoint and wait for its CI before merging;
+  destination remains feat/rust-rewrite. Create fresh follow-up afterwards.
