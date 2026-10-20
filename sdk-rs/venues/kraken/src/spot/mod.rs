@@ -46,6 +46,8 @@ struct DepthState {
 }
 pub struct KrakenSpot {
     options: Options,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
     public: Connection,
     account: account::Account,
@@ -60,6 +62,7 @@ pub struct KrakenSpot {
     poll: Option<TimerId>,
     markets_in_flight: bool,
     tickers_in_flight: bool,
+    catalogue_incomplete: bool,
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
@@ -77,6 +80,8 @@ impl KrakenSpot {
             };
         Self {
             options,
+            discovery: Default::default(),
+            live_tickers: Default::default(),
             signer,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -91,13 +96,20 @@ impl KrakenSpot {
             poll: None,
             markets_in_flight: false,
             tickers_in_flight: false,
+            catalogue_incomplete: false,
             retries: vec![],
         }
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Markets { .. } => self.markets_in_flight = false,
-            Pending::Tickers { .. } => self.tickers_in_flight = false,
+            Pending::Markets { .. } => {
+                self.markets_in_flight = false;
+                self.discovery.failed(cx, false);
+            }
+            Pending::Tickers { .. } => {
+                self.tickers_in_flight = false;
+                self.discovery.failed(cx, true);
+            }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Private(_) => unreachable!(),
         }
@@ -122,6 +134,7 @@ impl KrakenSpot {
     fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.tickers_in_flight {
             self.tickers_in_flight = true;
+            self.live_tickers.begin();
             self.read(cx, "Ticker", "", Pending::Tickers { retries: 0 });
         }
     }
@@ -193,14 +206,31 @@ impl KrakenSpot {
         let mut markets = vec![];
         let mut pairs = HashMap::new();
         let mut identities = HashMap::new();
-        let mut invalid = false;
-        map_each::<Pair<'_>>(text, |key, p| {
+        let mut rejected = false;
+        map_each::<&serde_json::value::RawValue>(text, |key, raw| {
             if key.ends_with(".d") {
                 return;
             }
-            let Some((base, quote)) = p.wsname.split_once('/') else {
+            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             };
+            let Some((base, quote)) = p.wsname.split_once('/') else {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            };
+            if base.is_empty()
+                || quote.is_empty()
+                || base.trim() != base
+                || quote.trim() != quote
+                || quote.contains('/')
+            {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            }
             let base = asset(base);
             let quote = asset(quote);
             if !matches!(quote, "USD" | "USDT" | "USDC") {
@@ -209,20 +239,23 @@ impl KrakenSpot {
             let pd = p.pair_decimals.unwrap_or(2);
             let ad = p.lot_decimals.unwrap_or(8);
             if pd > 18 || ad > 18 || p.ordermin < 0. {
-                invalid = true;
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             }
             let symbol = p.wsname.to_string();
             let pretty = format!("{base}{quote}");
+            if pairs.contains_key(&symbol) {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            }
             for id in [&*key, &*p.altname, &symbol, &pretty] {
                 if !id.is_empty() {
                     identities.insert(id.to_owned(), symbol.clone());
                 }
             }
-            if pairs.insert(symbol.clone(), key.to_string()).is_some() {
-                invalid = true;
-                return;
-            }
+            pairs.insert(symbol.clone(), key.to_string());
             markets.push(Market {
                 id: format!("{base}/{quote}"),
                 symbol,
@@ -253,9 +286,18 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid markets")?;
-        if invalid || markets.is_empty() {
-            return Err("Kraken Spot invalid markets".into());
+        if markets.is_empty() {
+            return Err("No supported Kraken Spot market rows".into());
         }
+        let recovered: Vec<_> = markets
+            .iter()
+            .filter(|market| {
+                !self.pairs.contains_key(&market.symbol)
+                    && (self.ticker_symbols.is_empty()
+                        || self.ticker_symbols.contains(&market.symbol))
+            })
+            .map(|market| market.symbol.clone())
+            .collect();
         self.ws_symbols = markets
             .iter()
             .map(|m| (m.symbol.clone(), format!("{}/{}", m.base, m.quote)))
@@ -267,14 +309,33 @@ impl KrakenSpot {
             .collect();
         self.pairs = pairs;
         self.identities = identities;
+        self.catalogue_incomplete = rejected;
+        if rejected {
+            self.discovery.failed(cx, false);
+        } else {
+            self.discovery.succeeded(cx, &false);
+        }
         cx.store.set_markets(markets);
+        if self.public.open {
+            for batch in recovered.chunks(50) {
+                self.subscribe(cx, "subscribe", "ticker", batch, None);
+            }
+        }
+        self.revalue_pending_balances(cx);
+        if self.public.socket.is_none() {
+            self.connect(cx);
+        }
+        self.private_start(cx);
         self.tickers(cx);
         Ok(())
     }
     fn tickers_response(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> Result<(), String> {
         let mut rows = vec![];
-        let mut invalid = false;
-        map_each::<RestTicker>(text, |key, t| {
+        map_each::<&serde_json::value::RawValue>(text, |key, raw| {
+            let Ok(t) = serde_json::from_str::<RestTicker>(raw.get()) else {
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            };
             let Some(symbol) = self.identities.get(&*key) else {
                 return;
             };
@@ -282,7 +343,7 @@ impl KrakenSpot {
                 return;
             };
             let n = |s: Option<&String>| -> Option<f64> {
-                s?.parse::<f64>().ok().filter(|n| n.is_finite())
+                safe_cex_engine::startup::number_or_zero(s?)
             };
             let Some((ask, bid, last, volume, open)) = n(t.a.first())
                 .zip(n(t.b.first()))
@@ -291,7 +352,7 @@ impl KrakenSpot {
                 .zip(n(Some(&t.o)))
                 .map(|((((a, b), c), v), o)| (a, b, c, v, o))
             else {
-                invalid = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             };
             rows.push(Ticker {
@@ -313,14 +374,16 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid tickers")?;
-        if invalid || rows.is_empty() {
-            return Err("Kraken Spot invalid tickers".into());
+        if rows.is_empty() {
+            return Err("No valid Kraken Spot ticker rows".into());
         }
+        self.discovery.succeeded(cx, &true);
+        self.live_tickers.finish(cx.store, &mut rows);
         cx.store.set_tickers(rows);
+        self.revalue_pending_balances(cx);
         if self.public.socket.is_none() {
             self.connect(cx);
         }
-        self.private_start(cx);
         Ok(())
     }
 }
@@ -333,6 +396,9 @@ impl Venue for KrakenSpot {
         }
         self.markets(cx);
         self.poll = Some(cx.set_timer(5_000.));
+    }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.revalue_pending_balances(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.private_open(cx, socket) {
@@ -384,11 +450,20 @@ impl Venue for KrakenSpot {
         let Some(data) = msg.data else { return };
         match &*msg.channel {
             "ticker" => {
+                let mut has_wallet_quote = false;
                 let _ = safe_cex_engine::json::each::<WsTicker<'_>>(data.get(), |t| {
+                    has_wallet_quote |= t.last.is_some_and(|last| last.is_finite() && last > 0.0);
                     let symbol = self
                         .ws_canonical
                         .get(&*t.symbol)
                         .map_or(&*t.symbol, String::as_str);
+                    let supplied = u16::from(t.bid.is_some())
+                        | (u16::from(t.ask.is_some()) << 1)
+                        | (u16::from(t.last.is_some()) << 2)
+                        | (u16::from(t.last.is_some()) << 3)
+                        | (u16::from(t.last.is_some()) << 4)
+                        | (u16::from(t.change_pct.is_some()) << 5)
+                        | (u16::from(t.volume.is_some()) << 9);
                     cx.store.update_ticker(symbol, |old| {
                         if let Some(n) = t.bid {
                             old.bid = n
@@ -408,7 +483,11 @@ impl Venue for KrakenSpot {
                             old.percentage = n
                         }
                     });
+                    self.live_tickers.record(cx.store, symbol, supplied);
                 });
+                if has_wallet_quote {
+                    self.revalue_pending_balances(cx);
+                }
             }
             "book" => {
                 let _ = safe_cex_engine::json::each::<Depth<'_>>(data.get(), |d| {
@@ -599,11 +678,7 @@ impl Venue for KrakenSpot {
                 self.private_network_failed(cx, r, error);
                 return;
             }
-            Pending::Markets { retries }
-            | Pending::Tickers { retries }
-            | Pending::Candles { retries, .. }
-                if *retries < 3 =>
-            {
+            Pending::Candles { retries, .. } if *retries < 3 => {
                 *retries += 1;
                 let timer = cx.set_timer(0.);
                 self.retries.push((timer, pending));
@@ -614,6 +689,14 @@ impl Venue for KrakenSpot {
         self.public_failed(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            if tickers {
+                self.tickers(cx);
+            } else {
+                self.markets(cx);
+            }
+            return;
+        }
         if let Some(i) = self.retries.iter().position(|(t, _)| *t == timer) {
             let (_, p) = self.retries.remove(i);
             match &p {
@@ -649,11 +732,6 @@ impl Venue for KrakenSpot {
             }
         } else if self.poll == Some(timer) {
             self.poll = None;
-            if !cx.store.loaded().markets {
-                self.markets(cx)
-            } else if !cx.store.loaded().tickers {
-                self.tickers(cx)
-            }
             self.poll = Some(cx.set_timer(5_000.));
         }
     }

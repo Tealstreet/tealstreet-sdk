@@ -822,6 +822,59 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
 }
 
 #[test]
+fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(
+            r#"{{"code":"200000","data":[{}]}}"#,
+            POSITION.replace("XBTUSDTM", "MISSINGUSDTM")
+        ),
+    );
+    assert!(!h.engine.store().loaded().positions);
+    h.ws(
+        "/contract/position:MISSINGUSDTM",
+        &POSITION.replace("XBTUSDTM", "MISSINGUSDTM"),
+    );
+    assert!(h.engine.store().positions().is_empty());
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn unknown_working_order_rejects_unknown_lot_sizing_but_terminal_rows_do_not() {
+    for (status, loaded) in [("open", false), ("canceled", true)] {
+        let mut h = Harness::new();
+        let order = ORDER
+            .replace("XBTUSDTM", "MISSINGUSDTM")
+            .replace("open", status);
+        h.reply("/orders?", &Harness::page(&order, 1));
+        h.reply("/stopOrders?", EMPTY);
+        assert_eq!(h.engine.store().loaded().orders, loaded);
+        if !loaded {
+            h.ws("/contractMarket/tradeOrders", &order);
+            assert!(h.engine.store().orders().is_empty());
+            h.reply("/orders?", &Harness::page(ORDER, 1));
+            assert!(h.engine.store().loaded().orders);
+            assert_eq!(h.engine.store().orders()[0].amount, 0.01);
+        }
+    }
+}
+
+#[test]
+fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_order() {
+    let mut h = Harness::new();
+    h.ready();
+    let before = h.engine.store().orders().to_vec();
+    h.fill_rows();
+    h.ws("/contractMarket/tradeOrders", r#"{"id":"5cdfc138b21023a909e5ad55","symbol":"MISSINGUSDTM","type":"filled","status":"done","side":"buy","size":10,"filledSize":10,"matchSize":10,"matchPrice":100,"tradeId":"unmapped-execution"}"#);
+    assert_eq!(h.engine.store().orders(), before);
+    assert!(h.fill_rows().is_empty());
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("market unavailable"))));
+}
+
+#[test]
 fn account_reconciliation_starts_without_the_private_socket() {
     let mut h = Harness {
         engine: Engine::new(Kucoin::new(Options {

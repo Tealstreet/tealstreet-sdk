@@ -42,6 +42,16 @@ Apply failures request a bounded local engine snapshot or worker snapshot RPC;
 snapshots contain no executions, so deliver valid original FILLS once. Listener
 failures are distinct from protocol failures and do not trigger snapshot loops.
 
+Initial Rust SDK readiness requires successfully decoded catalogue and account
+sections as well as native STATUS flags. A failed section revokes its decoded
+evidence until a valid replacement arrives; independent valid sections remain
+usable, and validated empty tables count. Invalid catalogue identity revokes
+all indexed evidence. A shared catalogue must pass compatibility validation
+before its store notification can complete startup. Private startup does not require
+tickers. Public-only startup still requires an accepted ticker table, and shared
+startup requires a matching finite quote; a null-only midpoint clear is not a
+first quote.
+
 Aggregate venue ticker streams may still contain delisted symbols absent from
 the current market table. `TICKERS` then carries optional symbol/ID references;
 `FrameApplier` uses those identities for orphan rows and preserves packed delta
