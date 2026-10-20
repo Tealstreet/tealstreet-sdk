@@ -84,6 +84,26 @@ no freshness fence, so every venue reinvents dedupe and terminal fencing.
 
 ## Wire contract
 
+Repair lane: `feat/rust-wire-fixes`, based on `bd94abb524`. Reverified against
+the current code: all requested findings below still hold; ticker orphan
+identities already work and must remain intact. Full-auto phases:
+
+1. Preserve wire information: explicit per-section revisions, display symbols,
+   orphan identities, order extras, midpoint snapshots/deltas, and owned ticker
+   state. Keep Rust, JS declarations, decoder and FrameApplier synchronized.
+2. Preserve market identity: symbol-keyed settings and no market-only flush
+   while MARKETS is pending; regression tests cover reorder/removal and queued
+   books/candles/fills. Route leverage writes through SETTINGS alone.
+3. Recover apply failures: retain independent account sections, stage identity
+   changes, request local/worker snapshots, and test actual frame-to-chaser fills.
+4. Run scoped native/JS/SDK checks, combined WASM and Binance plus affected-field
+   venue replay gates; create the PR into `feat/rust-rewrite`, post adversarial
+   reviews, fix findings, merge only on green CI, and cut a follow-up branch.
+
+Each phase requires an independent sub-agent review and a stable commit. Every
+fixed finding gets a reproducing regression. No TS venue deletion or replay
+threshold relaxation. Strike findings with the fix PR and its evidence.
+
 - FILLS lose `orderId`, so chaser fill tracking never fires on Rust
   (`frameApplier.ts:469`, `ChaserOrderManager.ts:783`).
 - `Market.pretty_symbol` never encoded (`store.rs:827`).
