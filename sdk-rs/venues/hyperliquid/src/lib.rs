@@ -685,8 +685,7 @@ fn spot_rows(
     tickers: &mut Vec<Ticker>,
     excluded: &mut Vec<String>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
-    else {
+    let Ok(contexts) = safe_cex_engine::startup::rows::<SpotCtx>(raw) else {
         return false;
     };
     let positional = contexts.len() == meta.universe.len()
@@ -1114,7 +1113,7 @@ impl Venue for Hyperliquid {
                 ..
             } => {
                 match *stage {
-                    0 => match serde_json::from_str::<SpotMeta>(item) {
+                    0 => match SpotMeta::parse(item) {
                         Ok(value) => {
                             for token in &value.tokens {
                                 if token.0.is_none() {
