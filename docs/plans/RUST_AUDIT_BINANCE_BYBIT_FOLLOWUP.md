@@ -114,3 +114,12 @@ No new error architecture or unrelated engine helper migration belongs here.
 - First-PR proof is in RUST_AUDIT_BINANCE_BYBIT.md; its experimental shared-host
   heuristic was discarded before publication. This branch inherits no host
   experiment or changed gate threshold. Its new work must pass its own gates.
+- Public phase: Binance/Bybit snapshots now enumerate subscribed resync books;
+  five new tests prove missed-clear recovery, fresh depth, refcount unsubscribe,
+  cross-category isolation and all four Binance candle profiles. The Binance
+  three cases and initial Bybit case failed before implementation. Candle
+  ranges cap before subtraction, preserve omitted/zero options and subtract
+  UTC calendar months once before clamping, including leap/year crossings.
+  UTC is deliberate: browser-local Dayjs DST behavior is not claimed as a
+  native parity guarantee. Independent public review passed. Engine snapshot
+  contract changes remain owned by the order-races lane; no engine edits here.
