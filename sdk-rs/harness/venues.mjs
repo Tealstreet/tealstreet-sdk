@@ -10,6 +10,8 @@ import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initial
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
+import {createKrakenRequestAudit,validateKrakenSocketMessage,validateKrakenSocketFrame,krakenRequestBody,krakenCommandResult} from './kraken-protocol.mjs';
+let krakenRequestAudit;
 let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
@@ -520,6 +522,30 @@ export const VENUES = {
       symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
     })),
     tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
+  kraken: {
+    rust: 'kraken',
+    compareBalanceCoins:true,
+    productSubscriptions:true,
+    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
+    tsSettings:(exchange,store)=>store.markets.map(m=>{
+      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
+      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
+    }),
+    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
+    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
+    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
+    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
+    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
+    validateRequest: request=>krakenRequestAudit(request),
+    validateSocketMessage:validateKrakenSocketMessage,
+    validateSocketFrame:validateKrakenSocketFrame,
+    requestBody:krakenRequestBody,
+    commandResult:krakenCommandResult,
+    requestBodies:true,
+    compareFillPrices:true,
+    compareWriteOrder:true,
+    isWrite:method=>method!=='GET',
   },
   asterdex: {
     initializeReplay: initializeAsterCrypto,

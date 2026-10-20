@@ -439,3 +439,14 @@ Node artifact measures 1,239,936 bytes: 24,885 bytes smaller than the failing
 control, with 18,355 bytes of budget headroom. No threshold or economic behavior
 changed. Final standard replays and exact-head CI validate this candidate; results
 and command/artifact provenance are posted on PR #1320.
+
+### Kraken landing integration
+
+Kraken #1323 landed while the remaining repository CI jobs were running. This
+merge adds its registry and replay hooks while preserving the Aster-only parser
+feature selection and Paradex binary/signature/routing contracts. Independent
+both-parent review passes. Paradex's 107 tests, Paradex/Kraken Clippy and
+single-Kraken WASM Clippy pass; merged harness/host suites pass 291/54 tests.
+Kraken's standalone secret option is included in its feature guard. Fresh standard
+gates and exact-head CI remain the landing conditions; final proof is posted on
+PR #1320.

@@ -2,6 +2,10 @@
 # https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
 # Exact commit/path/rule/line only; production source and future changes stay scanned.
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
+# Kraken replay fixture only: base64 of the literal "replay-secret", paired
+# with "replay-key" and independently checked by kraken-protocol.mjs. No account.
+# Exact historical fingerprint; future source and credential changes stay scanned.
+6e7a3e90853214fd9c9377e5bbf96be74b972303:sdk-rs/harness/venues.mjs:generic-api-key:161
 
 # Aster published V3 demonstration private key, copied only into signing fixtures
 # and their independent oracle/generator (never a funded account credential):

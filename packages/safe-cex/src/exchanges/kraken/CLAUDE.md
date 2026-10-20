@@ -882,3 +882,24 @@ backlog. Run the relevant subset before enabling or releasing Kraken Spot.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust futures engine
+
+`exchangeName: 'kraken'` with `engine: 'rust'` selects `sdk-rs/venues/kraken`.
+Kraken Spot remains a separate TypeScript adapter. Futures sockets share their
+upstream URL but carry explicit Public/Private engine roles. Each private
+connection requests and signs a fresh challenge; balances reconcile over REST.
+
+Rust signs exactly the sorted encoded form/query bytes it sends, including
+batch JSON, with a single monotonic nonce source for both derivatives and
+history path families. It uses the current documented `index` trigger signal
+while accepting legacy inbound `spot`. Caller client order IDs are rejected on
+all shapes; internal IDs remain unique per order and bracket leg.
+
+The port keeps full book depth and rejects sequence gaps/stale snapshots.
+Candles use engine-owned charts polling. Execution IDs deduplicate fills across
+reconnects; fill snapshots are historical. Accepted settings and newer private
+state fence delayed REST/ACKs. Protective amendments preserve trigger provenance,
+replace remaining quantity only, and stop if execution races cancellation.
+History failures and unwalkable page boundaries fail explicitly. Tests and gate
+proofs are tracked in `docs/plans/KRAKEN_RUST_PORT.md`.
