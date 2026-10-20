@@ -84,3 +84,14 @@ separate follow-up phase after this fixed cohort, with additional before/after
 checks. Their arrival must not silently change or discard this cohort. Merge
 landing again before the final PR, validate every integrated venue and retain
 all source pins and limitations in the final results.
+
+Release checkpoint: all21 isolated release builds and feature Clippy checks,
+42 web/Node size checks,138 host tests and82 real SDK WASM tests pass with
+default timeouts. Four focused real mixed/text batch checks and all7 Bitget/
+Aster supplementary parity checks pass. The341 production inputs and189
+artifacts match their frozen hashes; all171 archived prior artifacts remain
+unchanged. Only new Paradex/Phemex budgets were added using the declared3%
+rounded-up KiB formula; all19 existing modules shrank and retain their caps.
+The43 private gates are running. No diagnostic, public gate or paired sample
+has run. Full proofs, commands and raw supplementary logs are preserved in
+`RUST_PERF_CHECKPOINT21.json.gz`.
