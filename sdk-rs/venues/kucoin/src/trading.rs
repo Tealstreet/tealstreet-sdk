@@ -47,6 +47,7 @@ struct Job {
     ids: Vec<String>,
     deadline: f64,
     error: Option<String>,
+    keep_going: bool,
     metadata_started: HashSet<String>,
 }
 #[derive(Default)]
@@ -190,7 +191,11 @@ fn post(path: &str, body: String, call: Call) -> Step {
 fn cancel(id: &str, symbol: &str) -> Step {
     Step {
         method: Method::Delete,
-        path: format!("/api/v1/orders/{}?symbol={}", encode(id), encode(symbol)),
+        path: if symbol.is_empty() {
+            format!("/api/v1/orders/{}", encode(id))
+        } else {
+            format!("/api/v1/orders/{}?symbol={}", encode(id), encode(symbol))
+        },
         body: None,
         call: Call::Cancel {
             id: id.into(),
@@ -502,12 +507,18 @@ impl Kucoin {
                     if !seen.insert(parent.to_owned()) {
                         continue;
                     }
-                    let order = cx
+                    if parent.is_empty() {
+                        return Err(
+                            "KuCoin cancellation requires a nonempty native order ID".into()
+                        );
+                    }
+                    let symbol = cx
                         .store
                         .order(&id)
                         .or_else(|| cx.store.order(parent))
-                        .ok_or_else(|| format!("Order not found: {id}"))?;
-                    steps.push_back(cancel(parent, &api_symbol(cx.store, &order.symbol)));
+                        .map(|order| api_symbol(cx.store, &order.symbol))
+                        .unwrap_or_default();
+                    steps.push_back(cancel(parent, &symbol));
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
@@ -524,19 +535,14 @@ impl Kucoin {
                     body: None,
                     call: Call::Write,
                 });
-                steps.push_back(Step {
-                    method: Method::Delete,
-                    path: if symbol.is_empty() {
-                        "/api/v1/stopOrders".into()
-                    } else {
-                        format!(
-                            "/api/v1/stopOrders?symbol={}",
-                            encode(&api_symbol(cx.store, &symbol))
-                        )
-                    },
-                    body: None,
-                    call: Call::Write,
-                });
+                if symbol.is_empty() {
+                    steps.push_back(Step {
+                        method: Method::Delete,
+                        path: "/api/v1/stopOrders".into(),
+                        body: None,
+                        call: Call::Write,
+                    });
+                }
             }
             Command::SetLeverage {
                 symbol, leverage, ..
@@ -628,6 +634,7 @@ impl Kucoin {
         self.trading.jobs.insert(
             id,
             Job {
+                keep_going: matches!(&input, Command::CancelOrders { .. }),
                 input: Some(input),
                 steps: VecDeque::new(),
                 ids: vec![],
@@ -1028,8 +1035,10 @@ impl Kucoin {
             }
             cx.log(LogLevel::Error, &error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
-            job.error = Some(error);
-            job.steps.clear();
+            job.error.get_or_insert(error);
+            if !job.keep_going {
+                job.steps.clear();
+            }
         }
         self.trading.active = false;
         self.trading.queue.push_front(request.command);

@@ -1072,3 +1072,160 @@ fn ambiguous_placement_ack_cannot_authorize_empty_cancel_all_success() {
         "successful empty ACK does not prove placement absence"
     );
 }
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = Harness::new();
+        h.seed();
+        h.e.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.e.drain_actions().for_each(drop);
+        h.e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(h.e.store().order("123").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn broker_payload_gate_covers_normal_trigger_and_protective_orders_without_rewriting_ids() {
+    for attributed in [false, true] {
+        for (raw, endpoint) in [
+            (
+                r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":50000,"clientOrderId":"Caller123"}]"#,
+                "batch-orders",
+            ),
+            (
+                r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"price":50000,"triggerPrice":51000}]"#,
+                "order-algo",
+            ),
+            (
+                r#"[{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"price":40000}]"#,
+                "order-tpsl",
+            ),
+        ] {
+            let mut h = Harness::with_broker_attribution(attributed);
+            h.seed();
+            place(&mut h, raw);
+            let request = h.take(endpoint);
+            let body: serde_json::Value =
+                serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+            let row = body.as_array().map_or(&body, |rows| &rows[0]);
+            if attributed {
+                assert_eq!(row["brokerId"], "b3cdedc0a20880ba");
+            } else {
+                assert!(row.get("brokerId").is_none());
+            }
+            let client = row["clientOrderId"].as_str().unwrap();
+            if raw.contains("Caller123") {
+                assert_eq!(client, "Caller123");
+            } else {
+                assert!(client.starts_with("b3cdedc0a20880ba"));
+                assert_eq!(client.len(), 32);
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
+    for cached_first in [false, true] {
+        let mut h = Harness::new();
+        h.seed();
+        place(
+            &mut h,
+            r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":"Pending1"}]"#,
+        );
+        h.reply(
+            "batch-orders",
+            r#"{"code":"0","data":[{"orderId":"ack-only","code":"0","msg":"success"}]}"#,
+        );
+        assert!(h.e.store().orders().is_empty());
+        h.e.handle(
+            2.,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if cached_first {
+                    vec!["ack-only".into(), "missing".into()]
+                } else {
+                    vec!["missing".into(), "ack-only".into()]
+                },
+            }),
+        );
+        h.collect();
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == safe_cex_engine::Method::Get)
+        );
+        assert!(h.actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                if error.contains("missing") && error.contains("not found")
+        )));
+        h.e.handle(
+            3.,
+            Event::Command(Command::CancelOrders {
+                command: 992,
+                ids: vec!["ack-only".into()],
+            }),
+        );
+        h.collect();
+        let cancel = h.take("cancel-batch-orders");
+        let payload: serde_json::Value =
+            serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload[0]["orderId"], "ack-only");
+        assert_eq!(payload[0]["instId"], "BTC-USDT");
+        h.respond(
+            cancel,
+            r#"{"code":"0","data":[{"orderId":"ack-only","code":"0"}]}"#,
+        );
+        assert!(h.actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: 992,
+                result: Ok(_)
+            })
+        )));
+    }
+}

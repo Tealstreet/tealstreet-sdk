@@ -254,7 +254,7 @@ impl Kucoin {
         let headers = read_credentials
             .as_ref()
             .or(self.credentials.as_ref())
-            .map_or_else(Vec::new, |c| {
+            .map_or_else(sign::public_headers, |c| {
                 sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
             });
         cx.request(
@@ -292,7 +292,7 @@ impl Kucoin {
         let headers = read_credentials
             .as_ref()
             .or(self.credentials.as_ref())
-            .map_or_else(Vec::new, |c| {
+            .map_or_else(sign::public_headers, |c| {
                 sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
             });
         let request = cx.request(
@@ -308,7 +308,7 @@ impl Kucoin {
         let request = cx.request(
             Method::Get,
             format!("{REST}{}", encoded_path(path)),
-            vec![],
+            sign::public_request_headers(self.credentials.as_ref(), Method::Get, path, cx.now),
             None,
             pending,
         );
@@ -324,7 +324,12 @@ impl Kucoin {
             cx.request(
                 Method::Post,
                 format!("{REST}/api/v1/bullet-public"),
-                vec![],
+                sign::public_request_headers(
+                    self.credentials.as_ref(),
+                    Method::Post,
+                    "/api/v1/bullet-public",
+                    cx.now,
+                ),
                 None,
                 pending,
             );

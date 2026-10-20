@@ -644,9 +644,12 @@ impl Bitrue {
                 let mut seen = HashSet::new();
                 for id in &ids {
                     let Some(order) = cx.store.order(id) else {
-                        if let Some(target) = self.trading.acknowledged.get(id)
-                            && seen.insert(id.clone())
-                        {
+                        let target = self.trading.acknowledged.get(id).ok_or_else(|| {
+                            format!(
+                                "Order {id} not found; cancellation requires a reconciled order"
+                            )
+                        })?;
+                        if seen.insert(id.clone()) {
                             plan.steps.push_back(target.cancel());
                         }
                         continue;

@@ -1,7 +1,7 @@
 import type { BitrueExchange } from './bitrue.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { LogSeverity, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
@@ -239,6 +239,14 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
       amount: total,
       filled: Math.max(previous, filled),
       remaining: Math.max(total - Math.max(previous, filled), 0),
+      timeInForce:
+        update.o === 'IOC'
+          ? OrderTimeInForce.ImmediateOrCancel
+          : update.o === 'FOK'
+            ? OrderTimeInForce.FillOrKill
+            : update.o === 'POST_ONLY'
+              ? OrderTimeInForce.PostOnly
+              : (existing?.timeInForce ?? OrderTimeInForce.GoodTillCancel),
       reduceOnly:
         Boolean(existing?.parentId) ||
         Boolean(update.R ?? (update.open === undefined ? existing?.reduceOnly : update.open === 'CLOSE')),

@@ -465,3 +465,104 @@ fn cancel_symbol_includes_ack_before_rest_or_private_new() {
         }
     )));
 }
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = Harness::new();
+        h.e.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "E-BTC-USDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.e.drain_actions().for_each(drop);
+        h.e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(h.e.store().order("123").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
+    for cached_first in [false, true] {
+        let mut h = Harness::new();
+        h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":"pending"}]"#);
+        let create = h.take(Method::Post, "/fapi/v2/order");
+        h.reply(
+            create,
+            r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+        );
+        assert!(h.e.store().orders().is_empty());
+        let cached = "2334151155877155281".to_string();
+        h.command(Command::CancelOrders {
+            command: 991,
+            ids: if cached_first {
+                vec![cached.clone(), "missing".into()]
+            } else {
+                vec!["missing".into(), cached.clone()]
+            },
+        });
+        assert_eq!(h.writes(), 0);
+        assert!(h.notices.iter().any(|notice| matches!(
+            notice,
+            Notice::CommandDone { command: 991, result: Err(error) }
+                if error.contains("missing") && error.contains("not found")
+        )));
+        h.command(Command::CancelOrders {
+            command: 992,
+            ids: vec![cached],
+        });
+        let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+        let payload = body(&cancel);
+        assert_eq!(payload["orderId"], "2334151155877155281");
+        assert_eq!(payload["contractName"], "E-BTC-USDT");
+        h.reply(
+            cancel,
+            r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+        );
+        assert!(h.notices.iter().any(|notice| matches!(
+            notice,
+            Notice::CommandDone {
+                command: 992,
+                result: Ok(_)
+            }
+        )));
+    }
+}

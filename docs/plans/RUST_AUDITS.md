@@ -26,9 +26,24 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
    deleting a family.
 
+Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error;
+Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
+obvious improvements (clearer errors, better messages) need no decision.
+
 Already defaulted to Rust with TS removed on this branch: `coinbase`,
 `coinbasespot`, the six Orderly brokers, `txflow`. The branch cannot reach master
 until 1–3 are settled for them.
+
+## Error handling (scoping)
+
+Owner flags error handling as one of safe-cex's weakest points. Scope a
+standard while the port is open: one error taxonomy across engine, bridge and
+TS callers (rejected by venue / invalid input / auth / rate limit / network /
+unsupported), venue code and message preserved, every failure visible to the
+user with its cause. Design pass first (Opus), then lanes apply it per layer.
+The client contract outside safe-cex (error shape, logger, exchange interface)
+may change when there is a good argument; update tealstreet-next callers with it.
+Audit results and the standards: `docs/plans/RUST_QUALITY.md`.
 
 ## Cutover
 
@@ -198,8 +213,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
   reject (`trading.rs:397,700`); PM `close: true` with an amount closes the whole
   position (`trading.rs:1087`); COIN-M unpriced coin excluded from totals
-  (TS counts 1:1 — confirm); CancelOrders with unknown ids reports success
-  without sending (`trading.rs:224`); history maps `EXPIRED_IN_MATCH` to filled
+  (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
+  without sending (`trading.rs:224`)~~ (explicit errors; see
+  [cancel audit](RUST_UNKNOWN_CANCEL.md)); history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`); spot/COIN-M history returns plain `[]` instead of
   unsupported; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
 - Low: fixed `recvWindow`; closePosition conflict cancel in batches; Binance UI
@@ -220,7 +236,7 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
   wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
   poll (`account.rs:1838`); order/income history caps; Partial TP/SL amend
-  semantics (owner decision); spot create params (`marketUnit`); one unmappable
+  semantics — decided: match TS (flip SL/TP on drag), do not amend in place; spot create params (`marketUnit`); one unmappable
   order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
@@ -233,15 +249,16 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 
 ### BloFin
 - High: a failed or malformed ticker read at startup means the private side
-  never starts, no retry (`blofin/src/lib.rs:617,651`); `brokerId` never sent,
-  losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`);
+  never starts, no retry (`blofin/src/lib.rs:617,651`); ~~`brokerId` never sent,
+  losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`)~~
+  ([attribution audit](RUST_BROKER_ATTRIBUTION.md));
   per-symbol margin mode stays stale after a position closes, so orders go out
   in the wrong margin mode (`trading.rs:271`, `account.rs:614`).
 - Medium: `null` in order/position/ticker fields rejects whole snapshots/frames
   (`wire.rs`; verify against one live frame); WS login timestamp serialized as
   float (`account.rs:284`); one odd instrument row aborts startup
-  (`lib.rs:505`); cancel of an id the store lacks resolves OK with no request
-  (`trading.rs:671`).
+  (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
+  (`trading.rs:671`)~~ (explicit error).
 - Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
   iso/cross warnings; 102143 not translated; history shape.
 - Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
@@ -252,9 +269,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### Cross-venue patterns from the port reviews
 - Startup is fail-closed with no retry on OKX and BloFin where TS continues on
   partial data; check every venue and set one engine policy.
-- Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
-  tag against TS.
-- Cancel of ids not in the store silently succeeds (Binance, BloFin).
+- ~~Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
+  tag against TS.~~ All registered names audited; payload/partner/header fixes
+  and preserved gates are tabled in [the attribution audit](RUST_BROKER_ATTRIBUTION.md).
+- ~~Cancel of ids not in the store silently succeeds (Binance, BloFin).~~ Eight
+  families now error; KuCoin sends uncached IDs. [Every-family audit](RUST_UNKNOWN_CANCEL.md).
 
 ### Bitget family
 - High: hedge-mode isolated leverage always goes to the long leg — the adapter
@@ -303,8 +322,8 @@ Futures matches TS on nearly every input; no high regression.
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
   spot `EGeneral:Permission denied` on an order deactivates the account
   (`spot/account.rs:513`).
-- Owner decision: market entry with attached TP/SL — TS silently drops the
-  legs, Rust rejects the order.
+- Decided: market entry with attached TP/SL is rejected (Rust behaviour);
+  the error must say the TP/SL legs are unsupported on market entry.
 - Low: income over 500 rows errors (TS partial); one bad row rejects
   catalogue/tickers/open orders and blocks private start (startup lane);
   missing funding field set to 0; raw error text; spot 3m candles.
@@ -321,11 +340,13 @@ TxFlow loses nothing (master TS was a placeholder).
   candle `from`/`to` filtering a latest-N fetch.
 
 ### KuCoin
-- High: cancel-symbol also deletes the symbol's TP/SL stops
-  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`); one failed or
+- High: ~~cancel-symbol also deletes the symbol's TP/SL stops
+  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`)~~ (stop-book deletion
+  now only on account-wide cancel); one failed or
   malformed markets/tickers read stops the venue, and futures private REST
   waits for the private socket `welcome` (`lib.rs:767,954,1026`).
-- Medium: one unknown id rejects the whole cancel batch (`trading.rs:505,1034`);
+- Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
+  (uncached IDs sent directly; later cancellations continue and failures surface);
   one malformed REST row freezes reconciliation (`account.rs:652`); caller client
   id on attached TP/SL rejected (`trading.rs:120`).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
@@ -530,7 +551,8 @@ CLOB V2 signing and amounts match the official client.
 
 ### Registration and options (all RUST_VENUES aliases)
 Alias→product mapping, credentials, testnet, routing and broker/builder
-attribution are correct for all 48 names (BloFin `brokerId` aside).
+attribution are correct for all 48 names (~~BloFin `brokerId` aside~~; repaired
+with its production/proxy gate).
 - Medium: Coinbase accounts with a saved read-only key fail to start — no
   `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
   `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.
@@ -543,8 +565,8 @@ attribution are correct for all 48 names (BloFin `brokerId` aside).
 ### Backpack
 Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
 - Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
-  can't be seen or cancelled (`backpack/src/lib.rs:543`); owner decision: port
-  spot or retire it before cutover. A mark-price failure or one bad ticker row
+  can't be seen or cancelled (`backpack/src/lib.rs:543`); decided: retire
+  Backpack spot (remove any spot surface, no port). A mark-price failure or one bad ticker row
   blocks startup (`lib.rs:211,787`).
 - Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
   open-order rows with `"quantity": null`.

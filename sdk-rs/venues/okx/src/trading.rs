@@ -509,7 +509,9 @@ impl Okx {
             } else if let Some(order) = self.trading.acknowledged.get(id) {
                 (order.inst_id.as_str(), id.as_str(), order.algo)
             } else {
-                continue;
+                return Err(format!(
+                    "Order {id} not found; cancellation requires a reconciled order"
+                ));
             };
             if !seen.insert((inst_id, native)) {
                 continue;

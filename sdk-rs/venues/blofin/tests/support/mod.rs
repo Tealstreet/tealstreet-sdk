@@ -14,7 +14,15 @@ impl Harness {
         Self::new_at(0.0)
     }
     pub fn new_at(now: f64) -> Self {
+        Self::with_broker_attribution_at(false, now)
+    }
+    #[allow(dead_code)] // Used by the trading suite; other suites share this module.
+    pub fn with_broker_attribution(broker_attribution: bool) -> Self {
+        Self::with_broker_attribution_at(broker_attribution, 0.0)
+    }
+    fn with_broker_attribution_at(broker_attribution: bool, now: f64) -> Self {
         let mut e = Engine::new(Blofin::new(Options {
+            broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),

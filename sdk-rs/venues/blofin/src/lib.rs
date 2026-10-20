@@ -18,6 +18,8 @@ use wire::*;
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
+    /// TS enables payload attribution in production builds or with tealstreetProxy.
+    pub broker_attribution: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,

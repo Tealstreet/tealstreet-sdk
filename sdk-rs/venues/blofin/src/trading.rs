@@ -136,6 +136,8 @@ struct Placement {
     size: String,
     client_order_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    broker_id: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     order_type: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     price: Option<String>,
@@ -384,6 +386,7 @@ impl Blofin {
             },
         };
         let mut payload = Placement {
+            broker_id: self.options.broker_attribution.then_some(BROKER),
             inst_id: m.id.clone(),
             margin_mode: margin(margin_mode).into(),
             position_side: side.into(),
@@ -679,9 +682,10 @@ impl Blofin {
         let mut seen = HashSet::new();
         for id in ids {
             let Some(order) = cx.store.order(id) else {
-                if let Some(target) = self.trading.acknowledged.get(id)
-                    && seen.insert((target.family, target.id.clone()))
-                {
+                let target = self.trading.acknowledged.get(id).ok_or_else(|| {
+                    format!("Order {id} not found; cancellation requires a reconciled order")
+                })?;
+                if seen.insert((target.family, target.id.clone())) {
                     out.push(target.clone());
                 }
                 continue;

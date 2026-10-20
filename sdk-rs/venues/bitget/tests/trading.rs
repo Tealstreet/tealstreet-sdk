@@ -877,3 +877,103 @@ fn ambiguous_placement_ack_cannot_be_followed_by_false_empty_cancel_all_success(
         "a missing native ID must not mean the order was never placed"
     );
 }
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = Harness::classic();
+        h.engine.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(
+            h.engine.store().order("123").unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}
+
+#[test]
+fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown_mixed_id() {
+    use safe_cex_engine::{Action, Notice};
+
+    for mixed in [false, true] {
+        let mut h = Harness::classic();
+        place(&mut h, vec![limit()]);
+        let placed = h.take("/batch-place-order");
+        batch_success(&mut h, placed.id, &["ack-only"]);
+        assert!(h.engine.store().order("ack-only").is_none());
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 992,
+                ids: if mixed {
+                    vec!["ack-only".into(), "missing".into()]
+                } else {
+                    vec!["ack-only".into()]
+                },
+            }),
+        );
+        let out = h.engine.drain_actions().collect::<Vec<_>>();
+        if mixed {
+            assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(out.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 992, result: Err(error) })
+                    if error.contains("missing") && error.contains("not found")
+            )));
+        } else {
+            let cancel = out
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.contains("/batch-cancel-orders") => Some(r),
+                    _ => None,
+                })
+                .expect("acknowledged native identity is sufficient before a stream echo");
+            let payload: Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["orderIdList"][0]["orderId"], "ack-only");
+        }
+    }
+}
