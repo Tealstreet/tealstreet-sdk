@@ -201,8 +201,6 @@ impl CandleRow {
 #[derive(Deserialize)]
 pub struct CandleEnvelope<'a> {
     pub candles: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
-    pub more_candles: bool,
     #[serde(default, borrow)]
     pub error: Cow<'a, str>,
     #[serde(default, borrow)]

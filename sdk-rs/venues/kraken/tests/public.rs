@@ -211,7 +211,6 @@ fn old_or_malformed_snapshot_cannot_replace_synced_depth() {
 fn failed_or_incomplete_candles_are_explicit_errors() {
     for body in [
         r#"{"candles":[],"error":"unavailable"}"#,
-        r#"{"candles":[],"more_candles":true}"#,
         r#"{"status":"error"}"#,
         r#"{"candles":null}"#,
         r#"{"candles":{}}"#,
@@ -310,4 +309,27 @@ fn full_ticker_refreshes_native_statistics_after_rest_seed() {
         (t.percentage, t.volume, t.quote_volume, t.open_interest),
         (20.0, 0.0, 0.0, 0.0)
     );
+}
+#[test]
+fn capped_candle_page_returns_served_rows_instead_of_an_empty_chart() {
+    let (mut e, _) = public();
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 8,
+            symbol: "PF_XBTUSD".into(),
+            interval: "1m".into(),
+            limit: Some(2),
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"candles":[{"time":1700000000000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}],"more_candles":true}"#,
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Ok(s) }) if s.contains("1700000000.0"))));
 }

@@ -727,9 +727,8 @@ impl Venue for Kraken {
                 let envelope = serde_json::from_str::<CandleEnvelope<'_>>(response.body);
                 if !envelope.as_ref().is_ok_and(|e| {
                     let _ = &e.candles;
-                    !e.more_candles
-                        && e.error.is_empty()
-                        && !matches!(e.status.as_ref(), "error" | "unauthorized")
+                    // more_candles marks a capped page, not a failure; keep what was served.
+                    e.error.is_empty() && !matches!(e.status.as_ref(), "error" | "unauthorized")
                 }) {
                     self.public_failed(
                         cx,
