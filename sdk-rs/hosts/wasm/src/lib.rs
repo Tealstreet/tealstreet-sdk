@@ -27,12 +27,13 @@
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -166,6 +167,7 @@ struct KucoinExtra {
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
@@ -208,6 +210,7 @@ struct EngineOptions {
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "phemex",
         feature = "orderly",
         feature = "lighter",
@@ -239,6 +242,7 @@ struct EngineOptions {
         feature = "phemex",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "txflow",
         feature = "kraken",
         feature = "lighter",
         feature = "woo",
@@ -271,6 +275,7 @@ struct EngineOptions {
     omni_key_seed: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
+        feature = "txflow",
         feature = "asterdex",
         feature = "orderly",
         feature = "lighter",
@@ -278,7 +283,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     application_id: Option<String>,
-    #[cfg(feature = "hyperliquid")]
+    #[cfg(any(feature = "hyperliquid", feature = "txflow"))]
     #[serde(default)]
     vault: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -549,6 +554,7 @@ impl WasmEngine {
         feature = "weex",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "orderly",
         feature = "lighter",
         feature = "okx"
@@ -634,6 +640,19 @@ impl WasmEngine {
                 omni_key_seed: options.omni_key_seed,
                 tick_interval_ms: None,
             }))),
+            #[cfg(feature = "txflow")]
+            "txflow" => {
+                let options = safe_cex_venue_txflow::Options {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                };
+                options.validate().map_err(|e| JsError::new(&e))?;
+                Box::new(Engine::new(safe_cex_venue_txflow::TxFlow::new(options)))
+            }
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
                 testnet: options.testnet,

@@ -154,3 +154,10 @@ Landing advanced to `bf1cf3c99a` (TxFlow PR #1329) during these gates.
 Commit this passing evidence, integrate the landing without discarding either
 venue, then rebuild combined WASM and repeat gates affected by shared replay
 finalization/routing changes before PR creation.
+
+TxFlow integration resolves four overlapping files by retaining both venue
+registrations/imports, both startup exceptions, both build selectors and each
+readiness row. Combined inventory: 49 exchange names, 45 Rust adapters, nine
+Rust defaults, 36 opt-in TS defaults and four names without Rust. The landing's
+TxFlow reference/default cutover and replay finalization/routing improvements
+are retained. Lighter production TS files remain intact.

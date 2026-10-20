@@ -36,7 +36,7 @@ function addressToBytes(address: string): Uint8Array {
   return ethers.getBytes(address);
 }
 
-function actionHash(action: unknown, vaultAddress: string | null, nonce: number): string {
+export function actionHash(action: unknown, vaultAddress: string | null, nonce: number): string {
   const msgPackBytes = encode(action);
   // console.log("action hash", Buffer.from(msgPackBytes).toString("base64"));
   const additionalBytesLength = vaultAddress === null ? 9 : 29;

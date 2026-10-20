@@ -32,6 +32,7 @@ import {
 import { paradexProtocol } from './paradex-protocol.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
+import { initializeTxFlowCrypto, createTxFlowRequestValidator, validateTxFlowSocketMessage } from './txflow-protocol.mjs';
 
 import {
   createKrakenRequestAudit,
@@ -616,6 +617,33 @@ const coinbase = (name) => ({
 });
 
 export const VENUES = {
+  txflow: {
+    rust: 'txflow',
+    independentLeverage: true,
+    options: { testnet: true },
+    virtualPrivateClock: true,
+    recordPublicCorsDirect: true,
+    recordAfterReady: true,
+    ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
+    requestKey: typedRequest,
+    requestBodies: true,
+    matchRequestBody: true,
+    volatileBodyFields: true,
+    compareWriteOrder: true,
+    compareFillPrices: true,
+    compareSubscriptions: true,
+    compareClientIds: true,
+    replayCredentials: { applicationId: '0x0000000000000000000000000000000000000001', secret: '0x' + 'ab'.repeat(32), key: '' },
+    initializeReplay(_impl, options) {
+      if (!options.publicDataOnly) return initializeTxFlowCrypto();
+    },
+    createRequestValidator: createTxFlowRequestValidator,
+    validateSocketMessage: validateTxFlowSocketMessage,
+    isWrite: (_method, url) => new URL(url).pathname === '/exchange',
+    isPrivateRecord: (r) => r.type === 'ws' && /"channel":"(?:orderUpdates|clearinghouseState|userAssetData|activeAssetData)"/.test(r.text ?? ''),
+    tsBooksSubscribed: (exchange, count) => exchange.nodeSocket?.bookListeners.size >= count,
+    tsSettings: (_exchange, store) => Object.entries(store.fetchedLeverage).map(([symbol, setting]) => ({ symbol, ...setting })),
+  },
   breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
