@@ -2,7 +2,10 @@ use crate::account::{clean, first, is_algo, is_hedged, margin, plan_type};
 use crate::wire::{Envelope, Identifier, Number, SymbolConfig, UtaSettings};
 use crate::{BitgetFutures, Pending, paths};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, TimerId, VenueError,
+    num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -28,8 +31,10 @@ struct Job {
     calls: VecDeque<Planned>,
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
-    error: Option<String>,
+    error: Option<VenueError>,
     ids: Vec<String>,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 
 pub struct Request {
@@ -262,7 +267,7 @@ impl BitgetFutures {
             self.preflight(cx, &command)
         };
         if let Err(error) = validation {
-            cx.done(id, Err(error));
+            cx.fail(id, not_sent(error));
             return;
         }
         self.trading.queue.push_back(command);
@@ -377,6 +382,7 @@ impl BitgetFutures {
                 rollback: None,
                 error: None,
                 ids: vec![],
+                effective: false,
             }
         } else {
             return;
@@ -401,7 +407,7 @@ impl BitgetFutures {
         }
         if let Some(symbol) = job.metadata.pop_front() {
             if cx.store.market(&symbol).is_none() {
-                cx.done(job.id, Err(format!("Market {symbol} not found")));
+                self.trade_fail(cx, &job, not_sent(format!("Market {symbol} not found")));
                 self.resume_trading(cx);
                 return;
             }
@@ -427,7 +433,7 @@ impl BitgetFutures {
                 job.positions_checked = true;
             }
             if let Err(error) = self.plan_job(cx, &mut job) {
-                cx.done(job.id, Err(error));
+                self.trade_fail(cx, &job, not_sent(error));
                 self.resume_trading(cx);
                 return;
             }
@@ -437,11 +443,13 @@ impl BitgetFutures {
         if let Some(call) = job.calls.pop_front() {
             self.issue_trade(cx, job, call, false, 0);
         } else {
-            let result = match job.error {
-                Some(error) => Err(error),
-                None => Ok(serde_json::to_string(&job.ids).expect("order ids")),
-            };
-            cx.done(job.id, result);
+            match job.error.take() {
+                Some(error) => self.trade_fail(cx, &job, error),
+                None => cx.done(
+                    job.id,
+                    Ok(serde_json::to_string(&job.ids).expect("order ids")),
+                ),
+            }
             self.resume_trading(cx);
         }
     }
@@ -467,7 +475,7 @@ impl BitgetFutures {
                     let coin = match self.margin_coin(cx, symbol) {
                         Ok(coin) => coin,
                         Err(error) => {
-                            cx.done(job.id, Err(error));
+                            self.trade_fail(cx, &job, not_sent(error));
                             self.resume_trading(cx);
                             return;
                         }
@@ -494,7 +502,7 @@ impl BitgetFutures {
             match self.signed_headers(cx.now, method, &path, body.as_deref().unwrap_or("")) {
                 Ok(headers) => headers,
                 Err(error) => {
-                    cx.done(job.id, Err(error));
+                    self.trade_fail(cx, &job, not_sent(error));
                     self.resume_trading(cx);
                     return;
                 }
@@ -1509,13 +1517,11 @@ impl BitgetFutures {
                 self.trading.active = Some(job);
                 self.resume_trading(cx);
             } else {
-                cx.done(
-                    job.id,
-                    Err(format!(
-                        "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
-                        job.ids
-                    )),
-                );
+                let error = VenueError::new(format!(
+                    "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
+                    job.ids
+                ));
+                self.trade_fail(cx, &job, error);
             }
             return;
         }
@@ -1552,10 +1558,8 @@ impl BitgetFutures {
                         self.resume_trading(cx);
                     }
                     _ => {
-                        cx.done(
-                            job.id,
-                            Err("Bitget UTA metadata could not be resolved".into()),
-                        );
+                        let error = not_sent("Bitget UTA metadata could not be resolved");
+                        self.trade_fail(cx, &job, error);
                         self.resume_trading(cx);
                     }
                 }
@@ -1600,15 +1604,15 @@ impl BitgetFutures {
                     self.resume_trading(cx);
                 }
                 _ => {
-                    cx.done(
-                        job.id,
-                        Err("Bitget position mode or margin type could not be resolved".into()),
-                    );
+                    let error =
+                        not_sent("Bitget position mode or margin type could not be resolved");
+                    self.trade_fail(cx, &job, error);
                     self.resume_trading(cx);
                 }
             }
             return;
         }
+        let status = response.as_ref().ok().map(|r| r.status);
         let parsed = response.map_err(str::to_owned).and_then(|r| {
             serde_json::from_str::<Reply>(r.body)
                 .map(|reply| (r.status, reply))
@@ -1666,6 +1670,8 @@ impl BitgetFutures {
             return;
         }
         let mut write_noted = false;
+        // A 2xx success answer that does not account for every order.
+        let mut unproven = false;
         if error.is_none()
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
@@ -1714,6 +1720,7 @@ impl BitgetFutures {
             } else if (request.call.path == paths::BATCH_CANCEL || retained)
                 && orders.iter().any(|o| !accepted.contains(&native_id(o)))
             {
+                unproven = true;
                 error = Some("Bitget batch cancel did not acknowledge every order".into());
             }
         }
@@ -1749,6 +1756,7 @@ impl BitgetFutures {
                             .join("; ")
                     ));
                 } else if ids.len() != expected {
+                    unproven = true;
                     error = Some(format!(
                         "Bitget acknowledged {} of {expected} orders; ids {ids:?}",
                         ids.len()
@@ -1905,6 +1913,29 @@ impl BitgetFutures {
             }
         }
         if let Some(error) = error {
+            let error = match (&parsed, status) {
+                (_, None) => VenueError::new(error)
+                    .kind(ErrorKind::Network)
+                    .outcome(Outcome::Unknown),
+                _ if unproven => VenueError::new(error).outcome(Outcome::Unknown),
+                (Ok((status, reply)), _) if explicit_rejection => {
+                    let error = VenueError::new(error).kind(match status {
+                        401 => ErrorKind::AuthInvalid,
+                        403 => ErrorKind::AuthPermission,
+                        429 => ErrorKind::RateLimited,
+                        _ => ErrorKind::Rejected,
+                    });
+                    let error = match reply.code.0 {
+                        Some(code) => error.venue_code(code.to_string()),
+                        None => error,
+                    };
+                    error.outcome(Outcome::Rejected)
+                }
+                // Explicit per-order refusals in a 2xx answer, without a documented code table.
+                (Ok((200, reply)), _) if reply.code.0 == Some(0.0) => VenueError::new(error),
+                // 408, 5xx, malformed answers and Bitget's ambiguous codes.
+                _ => VenueError::new(error).outcome(Outcome::Unknown),
+            };
             if matches!(request.call.effect, Effect::Place { .. }) {
                 self.account.orders_version = self.account.orders_version.wrapping_add(1);
             }
@@ -1929,10 +1960,24 @@ impl BitgetFutures {
                 self.resume_trading(cx);
                 return;
             }
-            let error = job.error.map_or(error.clone(), |original| {
-                format!("{original}; protection rollback failed: {error}")
-            });
-            cx.done(job.id, Err(error));
+            let error = match job.error.take() {
+                None => error,
+                Some(original) => VenueError {
+                    message: format!(
+                        "{}; protection rollback failed: {}",
+                        original.message, error.message
+                    ),
+                    // A lost or unproven rollback makes the result Unknown, with its kind.
+                    kind: if error.outcome == Some(Outcome::Unknown) {
+                        error.kind
+                    } else {
+                        original.kind
+                    },
+                    outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
+                    ..original
+                },
+            };
+            self.trade_fail(cx, &job, error);
             self.refresh_orders(cx, false);
             self.resume_trading(cx);
             return;
@@ -2026,7 +2071,10 @@ impl BitgetFutures {
                     }
                     job.ids.push(next);
                 } else {
-                    cx.done(job.id, Err("Bitget amendment identity is not available; refresh before further edits".into()));
+                    let error = VenueError::new(
+                        "Bitget amendment identity is not available; refresh before further edits",
+                    );
+                    self.trade_fail(cx, &job, error);
                     self.refresh_orders(cx, false);
                     self.resume_trading(cx);
                     return;
@@ -2082,8 +2130,21 @@ impl BitgetFutures {
         if !write_noted && request.call.path != paths::ORDER_DETAIL {
             self.note_write(cx);
         }
+        if request.call.path != paths::ORDER_DETAIL {
+            job.effective = true;
+        }
         self.trading.active = Some(job);
         self.resume_trading(cx);
+    }
+
+    /// Fails the job; after a write took effect it is never Rejected or NotSent.
+    fn trade_fail(&mut self, cx: &mut Cx<'_, Pending>, job: &Job, mut error: VenueError) {
+        if (job.effective || !job.ids.is_empty())
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
+            error.outcome = None;
+        }
+        cx.fail(job.id, error);
     }
 
     fn commit_amend(
@@ -2140,14 +2201,12 @@ impl BitgetFutures {
         if self.trading.detect_wait == Some(timer) {
             self.trading.detect_wait = None;
             if let Some(job) = self.trading.active.take() {
-                cx.done(
-                    job.id,
-                    Err("Bitget account detection did not complete".into()),
-                );
+                let error = not_sent("Bitget account detection did not complete");
+                self.trade_fail(cx, &job, error);
             }
             while let Some(command) = self.trading.queue.pop_front() {
                 if let Some(id) = command_id(&command) {
-                    cx.done(id, Err("Bitget account detection did not complete".into()));
+                    cx.fail(id, not_sent("Bitget account detection did not complete"));
                 }
             }
             return;
@@ -2402,4 +2461,9 @@ impl Payload {
 
 fn leverage_limit(value: f64, fallback: f64) -> f64 {
     if value == 0.0 { fallback } else { value }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }

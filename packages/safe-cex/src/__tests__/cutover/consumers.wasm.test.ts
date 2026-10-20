@@ -37,7 +37,7 @@ import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 
 const hyroEnvironment = vi.hoisted(() => {
@@ -162,9 +162,10 @@ class FrameSource implements WasmEngineLike {
   takeFrame = (_now: number, marketOnly: boolean) => {
     if (!this.pending || marketOnly) return undefined;
     this.pending = false;
-    return new Uint8Array(consumerFrame(this.current));
+    return new Uint8Array(this.frame());
   };
-  snapshotFrame = () => new Uint8Array(consumerFrame(this.current));
+  snapshotFrame = () => new Uint8Array(this.frame());
+  private frame = () => consumerFrame(this.current, undefined, false, undefined, quantityUnitsCode(this.venue));
 }
 const sources: FrameSource[] = [];
 const workers: ExchangeWorker[] = [];
@@ -234,7 +235,7 @@ async function consumer(name: ExchangeName) {
     // Exercise the same callback EngineHost invokes, with an independently
     // encoded lifecycle frame; no store mutation is substituted for decoding.
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(
-      consumerFrame(data, delta, events),
+      consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)),
     );
   };
   return { main, worker, exchange, messages, ctx, deliver };

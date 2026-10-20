@@ -4,19 +4,21 @@ mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Query, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
+    SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use wire::*;
 const REST: &str = "https://api.kucoin.com";
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Pending {
     Markets {
@@ -95,11 +97,12 @@ pub struct KucoinSpot {
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
     books: BTreeMap<String, SpotBook>,
-    candles: BTreeMap<(String, String), u32>,
+    candles: BTreeMap<(String, Interval), u32>,
     revision: u64,
     balance_revision: u64,
     orders_loading: bool,
     balance_loading: bool,
+    balance_guard: StaleGuard,
     wallet_valuation_pending: bool,
     tickers_applied: bool,
     wallet_unquoted_warned: bool,
@@ -141,6 +144,7 @@ impl KucoinSpot {
             balance_revision: 0,
             orders_loading: false,
             balance_loading: false,
+            balance_guard: StaleGuard::default(),
             wallet_valuation_pending: false,
             tickers_applied: false,
             wallet_unquoted_warned: false,
@@ -236,6 +240,10 @@ impl KucoinSpot {
         if c.token_pending || c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
+        // Suppressed public feeds never open; bullets and supervision would only churn retries.
+        if channel == 0 && cx.public_feed_policy() != PublicFeedPolicy::Direct {
+            return;
+        }
         c.token_pending = true;
         c.generation = c.generation.wrapping_add(1);
         c.supervisor.set_ping_interval(cx, None);
@@ -305,7 +313,7 @@ impl KucoinSpot {
                 .chain(
                     self.candles
                         .keys()
-                        .map(|(s, i)| format!("/market/candles:{s}_{}", interval(i).unwrap().1)),
+                        .map(|(s, i)| format!("/market/candles:{s}_{}", interval(*i).unwrap().1)),
                 )
                 .collect::<Vec<_>>();
             for t in topics {
@@ -655,8 +663,8 @@ impl KucoinSpot {
             let Some(i) = self
                 .candles
                 .keys()
-                .find(|(s, i)| s == symbol && interval(i).is_ok_and(|(_, v)| v == native))
-                .map(|(_, i)| i.clone())
+                .find(|(s, i)| s == symbol && interval(*i).is_ok_and(|(_, v)| v == native))
+                .map(|(_, i)| *i)
             else {
                 return;
             };
@@ -668,7 +676,7 @@ impl KucoinSpot {
             if let Ok(u) = serde_json::from_str::<Update>(data.get())
                 && let Ok(c) = candle(u.candles.get())
             {
-                cx.candle(symbol, &i, c);
+                cx.candle(symbol, i, c);
             }
         }
     }
@@ -882,7 +890,13 @@ impl Venue for KucoinSpot {
         let data = match result {
             Ok(d) => d,
             Err(e) => {
-                self.on_request_failed(cx, pending, &e);
+                if let Pending::Write(job) = pending {
+                    cx.command_error(job.command, &e);
+                    let error = crate::wire::write_failure(response.status, response.body, e);
+                    self.write_failed(cx, job, error);
+                } else {
+                    self.on_request_failed(cx, pending, &e);
+                }
                 return;
             }
         };
@@ -973,11 +987,13 @@ impl Venue for KucoinSpot {
             }
             Pending::Balance(revision) => {
                 self.balance_loading = false;
-                if revision == self.balance_revision {
-                    if let Err(e) = self.account_balance(cx, data) {
-                        cx.log(LogLevel::Error, e);
-                    }
-                } else {
+                let current = revision == self.balance_revision;
+                if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT)
+                    && let Err(e) = self.account_balance(cx, data)
+                {
+                    cx.log(LogLevel::Error, e);
+                }
+                if !current {
                     self.heal(cx, true);
                 }
             }
@@ -1214,7 +1230,7 @@ impl Venue for KucoinSpot {
             }
             Pending::Write(j) => {
                 cx.command_error(j.command, error);
-                cx.done(j.command, Err(error.into()));
+                self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
             Pending::Candles { command, .. }
@@ -1298,17 +1314,17 @@ impl Venue for KucoinSpot {
                 symbol,
                 interval: i,
             } => {
-                if interval(&i).is_err() {
-                    cx.log(LogLevel::Error, "unsupported KuCoin Spot candle interval");
+                if interval(i).is_err() {
+                    cx.log(LogLevel::Error, i.unsupported("KuCoin Spot"));
                     return;
                 }
-                let n = self.candles.entry((symbol.clone(), i.clone())).or_default();
+                let n = self.candles.entry((symbol.clone(), i)).or_default();
                 *n += 1;
                 if *n == 1 {
                     self.topic(
                         cx,
                         0,
-                        &format!("/market/candles:{symbol}_{}", interval(&i).unwrap().1),
+                        &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
                         true,
                     );
                 }
@@ -1317,14 +1333,14 @@ impl Venue for KucoinSpot {
                 symbol,
                 interval: i,
             } => {
-                if let Some(n) = self.candles.get_mut(&(symbol.clone(), i.clone())) {
+                if let Some(n) = self.candles.get_mut(&(symbol.clone(), i)) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
-                        self.candles.remove(&(symbol.clone(), i.clone()));
+                        self.candles.remove(&(symbol.clone(), i));
                         self.topic(
                             cx,
                             0,
-                            &format!("/market/candles:{symbol}_{}", interval(&i).unwrap().1),
+                            &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
                             false,
                         );
                     }
@@ -1339,11 +1355,8 @@ impl Venue for KucoinSpot {
                 from_ms,
                 to_ms,
             } => {
-                let Ok((minutes, native)) = interval(&i) else {
-                    cx.done(
-                        command,
-                        Err("unsupported KuCoin Spot candle interval".into()),
-                    );
+                let Ok((minutes, native)) = interval(i) else {
+                    cx.done(command, Err(i.unsupported("KuCoin Spot")));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);

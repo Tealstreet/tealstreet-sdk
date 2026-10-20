@@ -174,7 +174,7 @@ pub struct PublicBook {
 #[serde(deny_unknown_fields)]
 pub struct PublicCandle {
     pub symbol: String,
-    pub interval: String,
+    pub interval: crate::model::Interval,
     pub timestamp: f64,
     pub open: f64,
     pub high: f64,
