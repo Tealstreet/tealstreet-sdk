@@ -120,3 +120,6 @@ never retry an unchanged failed performance measurement to obtain a pass.
   replaced it with a self-created temporary fixture, 8/8 controls PASS.
   The blocked first matrix attempt reached no quantitative replay cases and
   was cancelled. Execution-ID projection correction is still in progress.
+- Repository test verification on stable post-merge source: all 27 tasks PASS;
+  safe-cex unit and CI suites each pass 7,748 tests in 523 files. Source logs:
+  `/tmp/gate-honesty-final-{typecheck,lint,repo-tests}.log`.
