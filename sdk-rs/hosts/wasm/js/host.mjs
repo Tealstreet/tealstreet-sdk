@@ -185,6 +185,13 @@ export class EngineHost {
     const messages = this.messages;
     this.messages = [];
     this.messageBytes = 0;
+    // A singleton still waits for this scheduled drain or event barrier. Avoid
+    // packing it when the single-message entry point has identical input types;
+    // unusual clocks/payloads retain the batch encoder's validation/coercion.
+    if (messages.length === 3 && typeof messages[2] === 'string' && Number.isFinite(messages[1])) {
+      this.run(this.engine.wsMessage(messages[0], messages[2], messages[1]));
+      return;
+    }
     const pendingActions = [];
     for (let start = 0; start < messages.length && !this.disposed;) {
       let end = start;

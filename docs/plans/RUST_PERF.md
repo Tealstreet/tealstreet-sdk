@@ -980,3 +980,13 @@ and raw nodes remain distinct. Both lost-identity cases were demonstrated RED
 before fixing; signed request authentication and all audit checks remain fatal.
 This checkpoint has18 families/22 public fixtures/40 private variants. No18
 release/control build or new performance measurement has run.
+
+Singleton delivery phase verified: the production host now routes a detached
+single string/finite-clock arrival through wsMessage at the scheduled drain or
+barrier. Multi-message batching is unchanged. Seven regressions and95 broader
+JS checks pass, with independent plan/source review. All required mocks now
+implement both existing WASM entry points; assertions were preserved. Real
+WASM Unicode/surrogate parity remains pending rebuilt artifacts. No speedup is
+claimed from static fixture group counts. Test this source phase in the next
+frozen gate/cohort; keep the Bitrue O3 experiment deferred unless CPU still
+fails. All earlier valid negative observations remain retained.

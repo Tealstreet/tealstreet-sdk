@@ -24,6 +24,7 @@ const fixture = (options) => {
   let next = 1;
   const engine = Object.fromEntries(['start', 'command', 'wsOpen', 'wsClose', 'httpStart', 'httpChunk', 'httpEnd', 'httpFailed', 'timer'].map((name) =>
     [name, (...args) => { calls.push([name, ...args]); return ''; }]));
+  engine.wsMessage = (socket, text, now) => { calls.push(['single', [[socket, now, text]]]); return ''; };
   engine.wsMessages = (data) => { calls.push(['batch', decode(data)]); return ''; };
   engine.takeFrame = () => { calls.push(['frame']); };
   engine.snapshotFrame = () => { calls.push(['snapshot']); return new Uint8Array(); };
@@ -52,6 +53,118 @@ test('one task batches mixed sockets, empty text, newlines and Unicode with arri
   f.host.dispose();
 });
 
+test('singleton arrivals stay deferred and preserve their text and raw finite clocks', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('a singleton must not be encoded');
+  const scratch = f.host.batchBuffer;
+  for (const [text, now] of [['', 17.25], ['雪😀\n\u001e', -7], ['\ud800', -0]]) {
+    f.arrivals.get('2').onMessage(text, now);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.tasks.size, 1);
+    f.tick();
+    assert.deepEqual(f.calls.pop(), ['single', [[2, now, text]]]);
+    assert.equal(f.host.messages.length, 0);
+    assert.equal(f.host.messageBytes, 0);
+    assert.equal(f.host.batchTimer, undefined);
+    assert.equal(f.host.batchBuffer, scratch);
+  }
+  f.host.dispose();
+});
+
+test('singleton actions enqueue reentrant arrivals in a fresh scheduled task', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('each captured queue has one arrival');
+  f.engine.wsMessage = (socket, text, now) => {
+    f.calls.push(['single', [[socket, now, text]]]);
+    return text === 'first' ? JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]) : '';
+  };
+  f.host.handlers.onLog = () => {
+    assert.equal(f.host.messages.length, 0);
+    assert.equal(f.host.batchTimer, undefined);
+    f.arrivals.get('2').onMessage('second', 18);
+  };
+  f.arrivals.get('1').onMessage('first', 17);
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]]]);
+  assert.equal(f.tasks.size, 1);
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]], ['single', [[2, 18, 'second']]]]);
+  f.host.dispose();
+});
+
+test('singleton action disposal stops later resources and the enclosing flush', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => {
+    f.calls.push(['single']);
+    return JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+      { op: 'wsConnect', socket: 3, url: 'leak' }, { op: 'setTimer', timer: 9, at: 0 }]);
+  };
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'pending');
+  f.host.flush();
+  f.tick();
+  assert.deepEqual(f.calls, [['single']]);
+  assert.equal(f.arrivals.has('leak'), false);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('an oversized singleton crosses directly without allocating batch scratch', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('oversized singleton must not be encoded');
+  const scratch = f.host.batchBuffer;
+  const text = '雪😀'.repeat(100_000);
+  f.arrivals.get('2').onMessage(text, 123.5);
+  assert.deepEqual(f.calls, [['single', [[2, 123.5, text]]]]);
+  assert.equal(f.host.batchBuffer, scratch);
+  assert.equal(f.tasks.size, 0);
+  f.host.dispose();
+});
+
+test('singleton undefined or empty actions are accepted and engine throws retain identity', () => {
+  const f = fixture();
+  for (const result of [undefined, '']) {
+    f.engine.wsMessage = () => result;
+    f.send(1, 'no actions');
+    assert.doesNotThrow(f.tick);
+  }
+  const error = new Error('engine failed');
+  f.engine.wsMessage = () => { throw error; };
+  f.send(1, 'throws');
+  assert.throws(f.tick, (actual) => actual === error);
+  assert.equal(f.host.messages.length, 0);
+  assert.equal(f.host.batchTimer, undefined);
+  f.engine.wsMessage = (socket, text, now) => { f.calls.push(['single', [[socket, now, text]]]); return ''; };
+  f.send(2, 'after failure');
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[2, 4, 'after failure']]]]);
+  f.host.dispose();
+});
+
+test('nonfinite and coercible clocks retain the batch encoding path', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => assert.fail('invalid or coercible clocks must retain batch semantics');
+  for (const now of [NaN, Infinity, -Infinity, '7', new Number(8)]) {
+    f.arrivals.get('1').onMessage('payload', now);
+    f.tick();
+    const row = f.calls.pop();
+    assert.equal(row[0], 'batch');
+    assert.deepEqual(row[1], [[1, Number(now), 'payload']]);
+  }
+  const error = new Error('batch validation failed');
+  f.engine.wsMessages = () => { throw error; };
+  f.arrivals.get('1').onMessage('payload', NaN);
+  assert.throws(f.tick, (actual) => actual === error);
+  f.host.dispose();
+});
+
+test('nonstring singleton payloads retain the encoder rejection path', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => assert.fail('nonstring payload must not reach the single-message API');
+  f.arrivals.get('1').onMessage(new String('payload'), 7);
+  assert.throws(f.tick, TypeError);
+  f.host.dispose();
+});
+
 test('commands, snapshots, flushes and socket lifecycle preserve queued-message order', async () => {
   const f = fixture();
   f.send(1, 'a');
@@ -64,7 +177,7 @@ test('commands, snapshots, flushes and socket lifecycle preserve queued-message 
   f.arrivals.get('1').onClose(1001);
   f.send(2, 'e');
   f.arrivals.get('2').onOpen();
-  assert.deepEqual(f.calls.map(([name]) => name), ['batch', 'command', 'batch', 'snapshot', 'batch', 'frame', 'batch', 'wsClose', 'batch', 'wsOpen']);
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'command', 'single', 'snapshot', 'single', 'frame', 'single', 'wsClose', 'single', 'wsOpen']);
   assert.equal(f.tasks.size, 0);
   f.host.dispose();
 });
@@ -78,11 +191,11 @@ test('HTTP and timer events cannot overtake socket arrivals', async () => {
     f.send(1, 'before end');
   };
   await f.host.receive(1, { status: 200, body: body() });
-  assert.deepEqual(f.calls.map(([name]) => name), ['batch', 'httpStart', 'batch', 'httpChunk', 'batch', 'httpEnd']);
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'httpStart', 'single', 'httpChunk', 'single', 'httpEnd']);
   f.host.execute({ op: 'setTimer', timer: 1, at: 0 });
   f.send(1, 'before timer');
   f.tick();
-  assert.deepEqual(f.calls.slice(-2).map(([name]) => name), ['batch', 'timer']);
+  assert.deepEqual(f.calls.slice(-2).map(([name]) => name), ['single', 'timer']);
   f.host.dispose();
 });
 
@@ -96,9 +209,11 @@ test('bounded batches do not drop messages and oversize scratch is released', ()
   assert.equal(f.calls.at(-1)[1][0][2].length, 1024 * 1024);
   assert.ok(f.host.batchBuffer.length <= 1024 * 1024);
   f.send(1, 'x'.repeat(10_000));
+  f.send(2, 'y'.repeat(10_000));
   f.tick();
   assert.equal(f.host.batchBuffer.length, 0, 'a moderate burst does not become retained scratch');
   f.send(1, 'small message');
+  f.send(2, 'another small message');
   f.tick();
   assert.ok(f.host.batchBuffer.length > 0 && f.host.batchBuffer.length <= 16 * 1024);
   f.host.dispose();
@@ -107,10 +222,12 @@ test('bounded batches do not drop messages and oversize scratch is released', ()
 test('capacity flush cannot reorder an arrival behind a synchronous action callback', () => {
   const f = fixture();
   const batches = [];
-  f.engine.wsMessages = (data) => {
-    batches.push(decode(data));
+  const receive = (rows) => {
+    batches.push(rows);
     return JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]);
   };
+  f.engine.wsMessages = (data) => receive(decode(data));
+  f.engine.wsMessage = (socket, text, now) => receive([[socket, now, text]]);
   let reentered = false;
   f.host.handlers.onLog = () => {
     if (!reentered) {
@@ -258,6 +375,7 @@ test('disposal while draining a batch prevents its enclosing flush or command', 
     f.engine.wsMessages = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);
     f.host.handlers.onLog = () => f.host.dispose();
     f.send(1, 'pending');
+    f.send(2, 'also pending');
     if (enclosing === 'command') await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
     else f.host.flush();
     assert.deepEqual(f.calls, []);
@@ -665,7 +783,7 @@ test('request rejection cannot overtake queued websocket arrivals', async () => 
   f.send(1, 'before failure');
   reject(new Error('transport failed'));
   await new Promise(setImmediate);
-  assert.deepEqual(f.calls.map(([name]) => name), ['batch', 'httpFailed']);
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'httpFailed']);
   assert.equal(f.host.requests.size, 0);
   f.host.dispose();
 });
@@ -691,6 +809,7 @@ test('deactivation while draining an HTTP rejection aborts it and stops later re
   };
   f.host.handlers.onDeactivate = () => f.host.dispose();
   f.send(1, 'credentials rejected');
+  f.send(2, 'also before failure');
   reject(new Error('later failure'));
   await new Promise(setImmediate);
   assert.deepEqual(f.calls.map(([name]) => name), ['batch']);

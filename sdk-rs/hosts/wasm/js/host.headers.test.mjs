@@ -87,6 +87,7 @@ test('unsupported-header fallback drains queued messages before reporting close'
   let callback;
   const calls = [];
   const host = new EngineHost({
+    wsMessage: () => { calls.push('messages'); return ''; },
     wsMessages: () => { calls.push('messages'); return ''; },
     wsClose: () => { calls.push('close'); return ''; },
   }, {
