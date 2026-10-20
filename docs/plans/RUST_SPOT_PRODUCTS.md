@@ -103,3 +103,10 @@ documented positive relative distance; ambiguous edits fail before writes.
   branch cleanly at `16e4fa340e`. No PR exists yet. Selected Kraken WASM build,
   private/public/parent-venue/Binance gates, final repository checks, independent
   harness review, measurements and PR remain pending.
+- TxFlow landing integrated at `30a16c7a2a`; incoming replay/tape/responses,
+  routing and memory snapshot changes are preserved. Readiness now counts
+  49 registered names / 46 Rust aliases / nine defaults / 37 opt-in / three
+  absent products. Independent merge review found two stale test expectations,
+  repaired without enabling credentialed spot smoke profiles. All 562 harness
+  tests and the 332-test SDK/registry/transport/readiness subset pass.
+  Integrated default WASM strict Clippy, all-workspace formatting and bans pass.
