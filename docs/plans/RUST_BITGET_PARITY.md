@@ -182,3 +182,22 @@ green final-head CI. No stash, rebase, force push or master changes.
   PASS27 tasks with concurrency1; an earlier parallel cold-import timeout was
   isolated and resolved without changing test timeouts or product code.
 - Final native-contract replays, rebuilt per-venue gates and PR/CI still required.
+
+## Final local gates
+
+- Latest landing c5bc2c4adf merged; phase-end independent review clear, including
+  delayed snapshot revisions and exact published TPSL close direction.
+- Bitget136 native tests, harness147, native-contract integrations4, WASM adapter25
+  and Worker/wire26 tests PASS. Bans, workspace fmt, strict native/WASM clippy,
+  repository typecheck44, lint28 and tests27 tasks PASS.
+- Rebuilt Bitget-only WASM926,001bytes < unchanged1,258,291byte budget. Rebuilt
+  combined host and its complete adapter/Worker checks PASS as well.
+- Fresh Bitget public PASS:39,457frames,846markets/tickers,2books. TS/Rust CPU
+  646.8/594.0ms; steady432.7/395.1ms; retained5.8/2.5MB; Rustlinear1.2MB.
+- Bitget Classic private and inverse private strict parity PASS; inverse13frames,
+  2markets/tickers, exact collateral/native metadata and request identities.
+- Binance public PASS:873frames,917markets,783tickers,3books. TS/Rust CPU
+  258.3/118.3ms; steady160.1/49.7ms; retained4.2/2.2MB; linear1.5MB.
+  Binance private PASS. Private CPU/memory measurements remain informational.
+- Next: push, PR into feat/rust-rewrite, post adversarial independent reviews,
+  fix findings, require all final-head CI green, merge and create follow-up branch.
