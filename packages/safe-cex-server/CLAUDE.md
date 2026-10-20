@@ -38,7 +38,9 @@ deployed application routes, authorization and shell features remain caller-owne
   The profile shares the public-feed identity (environment, product flags,
   Bybit site, Hyro mode and sorted Polymarket slugs). Default native catalogs
   and existing TS callers retain their original keys. Semantic `Market.info`
-  and option terms survive serialization and warm hydration.
+  and option terms survive serialization and warm hydration. The resolved
+  exchange class selects this policy, including registry-default Rust Orderly
+  brokers without an explicit engine flag; a resolved TS exchange keeps TS keys.
 - A cold Rust cache miss awaits native startup before reading markets. Empty
   successful metadata reads are rejected rather than cached. Native startup is
   bounded by `nativeStartupTimeoutMs` (30 seconds by default), including venue

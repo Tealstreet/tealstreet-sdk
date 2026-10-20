@@ -336,7 +336,8 @@ export class PublicExchangeFactory {
 
   private cacheNamespace(exchangeName: ExchangeName): string {
     // Preserve existing keys for TS callers and the default native catalog.
-    if (this.options.exchangeOptions?.engine !== 'rust') return this.namespace;
+    // Registry defaults may resolve to Rust without an explicit engine flag.
+    if (!(this.handles.get(exchangeName)?.exchange instanceof RustEngineExchange)) return this.namespace;
     const defaults = { key: '', secret: '' };
     const identity = rustPublicFeedIdentity(exchangeName, { ...defaults, ...this.options.exchangeOptions });
     if (identity === rustPublicFeedIdentity(exchangeName, defaults)) return this.namespace;

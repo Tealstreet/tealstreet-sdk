@@ -1,4 +1,5 @@
 import type { Market } from '@tealstreet/safe-cex/src/types';
+import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PublicExchangeFactory } from './PublicExchangeFactory';
@@ -6,6 +7,7 @@ import { getMarketCacheKeys } from './buckets';
 import { type RedisLikeMarketCacheClient, writeMarketCacheSnapshot } from './marketCache';
 
 const mockExchange = vi.hoisted(() => ({
+  start: vi.fn(async () => {}),
   fetchMarkets: vi.fn(),
   dispose: vi.fn(),
   store: {
@@ -20,7 +22,9 @@ const mockExchange = vi.hoisted(() => ({
   },
 }));
 
-const createPublicExchange = vi.hoisted(() => vi.fn(async () => mockExchange));
+const createPublicExchange = vi.hoisted(() =>
+  vi.fn(async (_name?: string, _options?: { engine?: string }) => mockExchange),
+);
 
 vi.mock('@tealstreet/safe-cex/src', () => ({
   createPublicExchange,
@@ -52,7 +56,18 @@ const market = (id: string): Market =>
 
 describe('PublicExchangeFactory', () => {
   beforeEach(() => {
-    createPublicExchange.mockClear();
+    createPublicExchange.mockReset();
+    // Resolve the class as the SDK registry does, including its default-native
+    // Orderly broker. Native startup itself is covered by the real WASM suite.
+    createPublicExchange.mockImplementation(async (name, options) => {
+      Object.setPrototypeOf(
+        mockExchange,
+        options?.engine === 'rust' || name === 'tealstreet-dex' ? RustEngineExchange.prototype : Object.prototype,
+      );
+      return mockExchange;
+    });
+    Object.setPrototypeOf(mockExchange, Object.prototype);
+    mockExchange.start.mockClear();
     mockExchange.fetchMarkets.mockReset();
     mockExchange.dispose.mockClear();
     mockExchange.store.loaded = {
@@ -190,6 +205,36 @@ describe('PublicExchangeFactory', () => {
     const combined = new PublicExchangeFactory({ ...options, exchangeOptions: { engine: 'rust', enableOptionMarkets: true } });
     await expect(combined.get('bybit')).rejects.toThrow('combined discovery unavailable');
     expect(mockExchange.store.update).not.toHaveBeenCalled();
+  });
+
+  it('partitions registry-default native Orderly environments without an explicit engine flag', async () => {
+    const redis = new MemoryRedis();
+    const now = () => Date.UTC(2026, 4, 2, 23, 15);
+    mockExchange.fetchMarkets.mockResolvedValueOnce([market('MAINNET')]).mockResolvedValueOnce([market('TESTNET')]);
+    const main = new PublicExchangeFactory({ redis, now });
+    const test = new PublicExchangeFactory({ redis, now, exchangeOptions: { testnet: true } });
+    expect((await main.get('tealstreet-dex')).markets[0].id).toBe('MAINNET');
+    expect((await test.get('tealstreet-dex')).markets[0].id).toBe('TESTNET');
+    expect(mockExchange.start).toHaveBeenCalledTimes(2);
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+    const warmMain = new PublicExchangeFactory({ redis, now });
+    const warmTest = new PublicExchangeFactory({ redis, now, exchangeOptions: { testnet: true } });
+    expect((await warmMain.get('tealstreet-dex')).markets[0].id).toBe('MAINNET');
+    expect((await warmTest.get('tealstreet-dex')).markets[0].id).toBe('TESTNET');
+    expect(mockExchange.start).toHaveBeenCalledTimes(2);
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves legacy cache keys when an explicit Rust request resolves to a TypeScript exchange', async () => {
+    const redis = new MemoryRedis();
+    const now = () => Date.UTC(2026, 4, 2, 23, 15);
+    await writeMarketCacheSnapshot({ client: redis, exchange: 'bitunix', bucket: '2026050223', markets: [market('TS_FALLBACK')], refreshedAt: now() });
+    // The SDK falls back to the TS registry when a venue has no Rust implementation.
+    createPublicExchange.mockImplementationOnce(async () => mockExchange);
+    const factory = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust', testnet: true } });
+    expect((await factory.get('bitunix')).markets[0].id).toBe('TS_FALLBACK');
+    expect(mockExchange.start).not.toHaveBeenCalled();
+    expect(mockExchange.fetchMarkets).not.toHaveBeenCalled();
   });
 
   it('canonicalizes Rust public selections and isolates testnet without changing TypeScript keys', async () => {
