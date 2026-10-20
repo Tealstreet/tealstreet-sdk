@@ -2,44 +2,7 @@
 use serde::Deserialize;
 use std::borrow::Cow;
 
-pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    struct Number;
-    impl<'de> serde::de::Visitor<'de> for Number {
-        type Value = f64;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a finite number or numeric string")
-        }
-        fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<f64, E> {
-            if n.is_finite() {
-                Ok(n)
-            } else {
-                Err(E::custom("nonfinite number"))
-            }
-        }
-        fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<f64, E> {
-            self.visit_f64(n as f64)
-        }
-        fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<f64, E> {
-            self.visit_f64(n as f64)
-        }
-        fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<f64, E> {
-            self.visit_f64(s.trim().parse().map_err(E::custom)?)
-        }
-        fn visit_borrowed_str<E: serde::de::Error>(self, s: &'de str) -> Result<f64, E> {
-            self.visit_str(s)
-        }
-        fn visit_string<E: serde::de::Error>(self, s: String) -> Result<f64, E> {
-            self.visit_str(&s)
-        }
-    }
-    d.deserialize_any(Number)
-}
-pub fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
+pub use safe_cex_engine::de::{number, optional_number};
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(borrow)]

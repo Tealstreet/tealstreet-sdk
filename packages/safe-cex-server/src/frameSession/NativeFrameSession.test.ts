@@ -97,6 +97,10 @@ describe('NativeFrameSession', () => {
     socket.message(done);
     await microtasks();
     expect(sink.onNotice).toHaveBeenLastCalledWith(done);
+    const startupFailed = '{"type":"startupFailed","detail":{"message":"Bybit rejected the API key (10003): API key is invalid.","kind":"authInvalid"}}';
+    socket.message(startupFailed);
+    await microtasks();
+    expect(sink.onNotice).toHaveBeenLastCalledWith(startupFailed);
     const failed = '{"type":"done","command":5,"error":"leg 2 rejected","detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}}';
     socket.message(failed);
     await microtasks();
@@ -364,6 +368,8 @@ describe('NativeFrameSession', () => {
     '{"type":"done","command":1,"result":[]}',
     '{"type":"done","command":1,"result":"[]","detail":{"message":"x"}}',
     '{"type":"done","command":1,"error":"x","detail":"x"}',
+    '{"type":"startupFailed"}',
+    '{"type":"startupFailed","detail":{}}',
     '{"type":"error","error":4}',
     '{"type":"error","command":null,"error":"bad"}',
     '{"type":"log","level":"warn","message":"bad"}',

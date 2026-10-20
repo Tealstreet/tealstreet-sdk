@@ -17,22 +17,8 @@ pub fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error>
     }
 }
 
-pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if !n.is_finite() {
-        return Err(serde::de::Error::custom("non-finite number"));
-    }
-    Ok(n)
-}
+use safe_cex_engine::de::number_or_zero;
+pub use safe_cex_engine::de::{Number, number};
 
 /// Names a row that failed to decode, for the skip log; never echoes the raw row.
 pub fn row_symbol(item: &str) -> String {
@@ -42,10 +28,6 @@ pub fn row_symbol(item: &str) -> String {
         symbol: Str<'a>,
     }
     serde_json::from_str::<Row<'_>>(item).map_or_else(|_| "unknown".into(), |r| r.symbol.into())
-}
-
-fn nullable_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    Ok(Option::<Number>::deserialize(d)?.map_or(0.0, |n| n.0))
 }
 
 #[derive(Deserialize)]
@@ -202,9 +184,9 @@ pub struct TradeEvent<'a> {
 pub struct BookEvent<'a> {
     #[serde(borrow)]
     pub s: Str<'a>,
-    #[serde(deserialize_with = "nullable_number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub b: f64,
-    #[serde(deserialize_with = "nullable_number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub a: f64,
 }
 
@@ -307,8 +289,6 @@ pub fn timestamp(text: &str) -> Result<f64, String> {
     Ok((days * 86400 + hour * 3600 + minute * 60 + second) as f64 * 1000.0 + fraction * 1000.0)
 }
 
-#[derive(Deserialize)]
-pub struct Number(#[serde(deserialize_with = "number")] pub f64);
 #[derive(Default, Deserialize)]
 pub struct Filters {
     #[serde(default)]
@@ -331,10 +311,7 @@ pub struct QuantityFilter {
 }
 
 pub fn finite(text: &str) -> Result<f64, String> {
-    text.parse::<f64>()
-        .ok()
-        .filter(|n| n.is_finite())
-        .ok_or_else(|| "invalid number".into())
+    num::parse_decimal(text).ok_or_else(|| "invalid number".into())
 }
 
 #[derive(Deserialize)]
