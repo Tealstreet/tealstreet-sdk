@@ -122,7 +122,7 @@ export interface CommandIdentity {
 
 /** A classified venue failure built from the engine's `detail`; `message` is unchanged venue text. */
 export class ExchangeError extends Error {
-  constructor(message: string, detail: VenueErrorDetail);
+  constructor(message: string, detail?: VenueErrorDetail);
   readonly kind?: NonNullable<VenueErrorDetail['kind']>;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;

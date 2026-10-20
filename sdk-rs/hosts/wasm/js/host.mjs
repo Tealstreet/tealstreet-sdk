@@ -81,7 +81,7 @@ const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : un
 /** A classified venue failure (`engine/src/error.rs`). `message` is the text
  * hosts have always shown; `name` stays `Error` so displayed text is unchanged. */
 export class ExchangeError extends Error {
-  constructor(message, detail) {
+  constructor(message, detail = {}) {
     super(message);
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;

@@ -9,6 +9,15 @@ describe('isUnknownOutcome', () => {
     expect(isUnknownOutcome({ message: 'connection reset', outcome: 'notSent' })).toBe(false);
   });
 
+  it('treats host interruption markers as unknown even when their text does not say so', () => {
+    expect(
+      isUnknownOutcome({
+        message: 'Exchange engine stopped; command outcome is unknown. Reconcile before retrying',
+        outcome: 'unknown',
+      }),
+    ).toBe(true);
+  });
+
   it('falls back to text matching for unclassified errors', () => {
     expect(isUnknownOutcome({ message: 'socket hang up' })).toBe(true);
     expect(isUnknownOutcome({ message: 'Margin is insufficient.' })).toBe(false);
