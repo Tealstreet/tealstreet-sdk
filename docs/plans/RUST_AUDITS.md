@@ -41,6 +41,8 @@ standard while the port is open: one error taxonomy across engine, bridge and
 TS callers (rejected by venue / invalid input / auth / rate limit / network /
 unsupported), venue code and message preserved, every failure visible to the
 user with its cause. Design pass first (Opus), then lanes apply it per layer.
+The client contract outside safe-cex (error shape, logger, exchange interface)
+may change when there is a good argument; update tealstreet-next callers with it.
 
 ## Cutover
 
