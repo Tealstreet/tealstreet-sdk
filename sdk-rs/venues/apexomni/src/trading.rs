@@ -632,14 +632,12 @@ impl ApexOmni {
             Command::SetMarginType {
                 command, isolated, ..
             } => {
-                cx.done(
-                    command,
-                    if isolated {
-                        Err("ApeX Omni supports cross margin only".into())
-                    } else {
-                        Ok("null".into())
-                    },
-                );
+                if isolated {
+                    let error = not_sent("ApeX Omni supports cross margin only");
+                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                } else {
+                    cx.done(command, Ok("null".into()));
+                }
                 return Ok(());
             }
             Command::SetPositionMode {
@@ -647,14 +645,12 @@ impl ApexOmni {
                 hedged,
                 symbol: _,
             } => {
-                cx.done(
-                    command,
-                    if hedged {
-                        Ok("null".into())
-                    } else {
-                        Err("ApeX Omni supports hedged position mode only".into())
-                    },
-                );
+                if hedged {
+                    cx.done(command, Ok("null".into()));
+                } else {
+                    let error = not_sent("ApeX Omni supports hedged position mode only");
+                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                }
                 return Ok(());
             }
             Command::FetchLeverage { command, symbol } => {
@@ -808,8 +804,9 @@ impl ApexOmni {
         self.trading.waiting = false;
         self.trading.amendment = None;
         if let Some(job) = self.trading.active.take() {
-            // A later rejection after a step took effect cannot mean nothing happened.
-            if job.effective && error.outcome == Some(Outcome::Rejected) {
+            // A later refusal after a step took effect cannot mean nothing happened.
+            if job.effective && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
                 error.outcome = None;
             }
             cx.command_error(job.command, &error.message);

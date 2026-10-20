@@ -10,9 +10,7 @@ mod trading;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, RequestId, Response, SocketId, TimerId, Venue,
-};
+use safe_cex_engine::{Command, Cx, Method, RequestId, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default)]
@@ -98,6 +96,7 @@ impl ApexOmni {
         at: Option<ArrayAt>,
     ) -> Result<RequestId, String> {
         self.send_signed(cx, request, pending, at, false, 0)
+            .map_err(|(error, _)| error)
     }
 
     fn send_signed(
@@ -108,8 +107,12 @@ impl ApexOmni {
         at: Option<ArrayAt>,
         legacy: bool,
         retries: u8,
-    ) -> Result<RequestId, String> {
-        let signed = sign::request(&self.options, cx.now, &request, legacy)?;
+    ) -> Result<RequestId, (String, Box<Pending>)> {
+        // A signing failure hands the pending request back so its caller can complete it.
+        let signed = match sign::request(&self.options, cx.now, &request, legacy) {
+            Ok(signed) => signed,
+            Err(error) => return Err((error, Box::new(pending))),
+        };
         let url = format!("{}{}", self.rest, signed.path);
         let stream = at;
         let method = request.method;
@@ -156,8 +159,13 @@ impl ApexOmni {
                 });
                 if !legacy && rejected {
                     Self::reset_request(&mut pending);
-                    if let Err(error) = self.send_signed(cx, request, *pending, at, true, retries) {
-                        cx.log(LogLevel::Error, &error);
+                    if let Err((error, pending)) =
+                        self.send_signed(cx, request, *pending, at, true, retries)
+                    {
+                        // The venue refused the first signature; the resend never left.
+                        let error = safe_cex_engine::VenueError::new(error)
+                            .outcome(safe_cex_engine::Outcome::Rejected);
+                        self.failed(cx, *pending, error);
                     }
                     return;
                 }
@@ -213,9 +221,12 @@ impl ApexOmni {
                 at,
             } if request.method == Method::Get && retries < 3 => {
                 Self::reset_request(&mut pending);
-                if let Err(error) = self.send_signed(cx, request, *pending, at, legacy, retries + 1)
+                if let Err((error, pending)) =
+                    self.send_signed(cx, request, *pending, at, legacy, retries + 1)
                 {
-                    cx.log(LogLevel::Error, error);
+                    let error = safe_cex_engine::VenueError::new(error)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.failed(cx, *pending, error);
                 }
             }
             pending => {
