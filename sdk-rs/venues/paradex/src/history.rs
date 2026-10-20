@@ -1,19 +1,28 @@
 //! Rare cursor-paged reads never mutate the account store.
 use crate::{Pending, account::Account};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json::ArrayAt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
+/// Fills pages before the read falls back to order history or stops.
+const FILL_PAGES: u32 = 5;
+
+/// Pages a read may walk before it stops with a cursor pending.
+fn page_cap(query: &Query) -> u32 {
+    match query {
+        Query::Fills { .. } => FILL_PAGES,
+        Query::Income { .. } => 200,
+        _ => 50,
+    }
+}
 
 #[derive(Default)]
 pub struct History;
 pub struct Request {
     command: CommandId,
     query: Query,
-    cursor: Option<String>,
-    cursors: HashSet<String>,
-    seen: HashSet<String>,
-    page: u32,
+    walk: CursorWalk,
     valid: bool,
     raw_rows: usize,
     fallback: bool,
@@ -292,11 +301,8 @@ impl History {
         };
         let request = Request {
             command,
+            walk: CursorWalk::new(page_cap(&query)),
             query,
-            cursor: None,
-            cursors: HashSet::new(),
-            seen: HashSet::new(),
-            page: 0,
             valid: true,
             raw_rows: 0,
             fallback: false,
@@ -421,7 +427,7 @@ impl History {
         if let Some(to) = to {
             params.push(format!("end_at={}", safe_cex_engine::num::format(to)));
         }
-        if let Some(cursor) = &request.cursor {
+        if let Some(cursor) = request.walk.cursor() {
             params.push(format!("cursor={}", encode(cursor)));
         }
         let path = format!("{path}?{}", params.join("&"));
@@ -460,7 +466,7 @@ impl History {
             };
             if row.market == *symbol
                 && row.client_id == *client_order_id
-                && request.seen.insert(row.id.clone())
+                && request.walk.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
                     rows.push(order);
@@ -492,7 +498,7 @@ impl History {
         if request.fallback && row.order_id.is_empty() {
             row.order_id = row.id.clone();
         }
-        if !row.id.is_empty() && !request.seen.insert(row.id.clone()) {
+        if !row.id.is_empty() && !request.walk.fresh(row.id.clone()) {
             return;
         }
         match &mut request.rows {
@@ -658,40 +664,42 @@ impl History {
             self.on_failed(cx, request, "invalid Paradex history envelope");
             return;
         };
-        request.page += 1;
         let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
             if matches!(&request.rows, Rows::Lookup(rows) if !rows.is_empty()) {
                 self.finish(cx, request);
                 return;
             }
-            if let Some(next) = &next
-                && request.page < 50
-            {
-                if !request.cursors.insert(next.clone()) {
+            let page = CursorPage {
+                next: next.clone(),
+                rows: request.raw_rows,
+                fresh: request.raw_rows,
+                want_more: true,
+            };
+            match request.walk.advance(page) {
+                CursorStep::More(_) => {
+                    self.issue(cx, account, request);
+                    return;
+                }
+                CursorStep::Stalled(Stall::RepeatedCursor) => {
                     self.on_failed(cx, request, "Paradex repeated open-order cursor");
                     return;
                 }
-                request.cursor = Some(next.clone());
-                self.issue(cx, account, request);
-                return;
+                CursorStep::Stalled(_) | CursorStep::Done => {}
             }
             request.open_complete = next.is_none();
             request.lookup_history = true;
-            request.page = 0;
-            request.cursor = None;
-            request.cursors.clear();
+            request.walk.restart();
             self.issue(cx, account, request);
             return;
         }
         if matches!(request.query, Query::Fills { .. })
             && request.raw_rows == 0
             && !request.fallback
-            && (next.is_none() || request.page >= 5)
+            && (next.is_none() || request.walk.pages() + 1 >= FILL_PAGES)
         {
             request.fallback = true;
-            request.cursor = None;
-            request.page = 0;
+            request.walk.restart();
             self.issue(cx, account, request);
             return;
         }
@@ -701,32 +709,29 @@ impl History {
             }
             _ => false,
         };
-        let cap = match request.query {
-            Query::Fills { .. } => 5,
-            Query::Income { .. } => 200,
-            Query::PublicTrades { .. } => 1,
-            _ => 50,
-        };
         request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
-        if !filled_limit
-            && !request.fallback
-            && let Some(next) = next
-        {
-            if !request.cursors.insert(next.clone()) {
-                self.on_failed(cx, request, "Paradex repeated history cursor");
-                return;
-            }
-            if request.page < cap {
-                request.cursor = Some(next);
+        // The orders fallback and public trades are single pages.
+        let single = request.fallback || matches!(request.query, Query::PublicTrades { .. });
+        let page = CursorPage {
+            next: if single { None } else { next },
+            rows: request.raw_rows,
+            fresh: request.raw_rows,
+            want_more: !filled_limit,
+        };
+        match request.walk.advance(page) {
+            CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
             }
-            if cap > 1 {
-                cx.log(
-                    safe_cex_engine::LogLevel::Warning,
-                    "Paradex history reached page cap",
-                );
+            CursorStep::Stalled(Stall::PageBudget) => cx.log(
+                safe_cex_engine::LogLevel::Warning,
+                "Paradex history reached page cap",
+            ),
+            CursorStep::Stalled(_) => {
+                self.on_failed(cx, request, "Paradex repeated history cursor");
+                return;
             }
+            CursorStep::Done => {}
         }
         self.finish(cx, request);
     }
