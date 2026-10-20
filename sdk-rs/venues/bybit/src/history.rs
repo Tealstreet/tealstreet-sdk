@@ -568,10 +568,7 @@ impl BybitLinear {
         let cursor = match parsed {
             Ok(cursor) => cursor,
             Err(message) => {
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bybit history ({}): {message}", walk.path),
-                );
+                cx.command_error(command, format!("Bybit history ({}): {message}", walk.path));
                 self.history.reads.remove(&command);
                 cx.done(command, Err(message));
                 return;

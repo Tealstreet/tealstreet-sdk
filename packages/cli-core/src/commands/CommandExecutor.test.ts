@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { markErrorReported } from '@tealstreet/safe-cex/src/commandOutcome';
 import { executeCommand } from './CommandExecutor';
 import { preprocessCommand } from '../preprocess/preprocess';
 import { MemoryPreprocessStore } from '../preprocess/memoryStore';
@@ -44,6 +45,40 @@ function makeExchange(): ExchangeLike {
     emitter: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
   } as unknown as ExchangeLike;
 }
+
+describe('executeCommand — exchange-reported order failures', () => {
+  it.each(['reported', 'frozen', 'unreported'] as const)('prints the Buy failure result even when the exchange reported it (%s)', async (mode) => {
+    const adapter = makeAdapter();
+    const exchange = makeExchange();
+    (exchange.store as unknown as { tickers: unknown[] }).tickers = [{ symbol: 'BTCUSDT', last: 50_000 }];
+    const error = Object.assign(new Error('Reconcile before retrying'), {
+      code: 'COMMAND_TIMEOUT', command: 'placeOrders', outcome: 'unknown', clientOrderId: 'requested',
+      actualClientOrderIds: ['actual'], partialOrderIds: ['accepted'],
+    });
+    if (mode === 'frozen') Object.freeze(error);
+    const placeOrder = vi.fn().mockImplementation(async () => {
+      if (mode !== 'unreported') {
+        // The standalone exchange error listener or worker error event prints
+        // before the awaited Buy rejection reaches the executor boundary.
+        markErrorReported(error);
+        adapter.printError(error.message);
+      }
+      throw error;
+    });
+    (exchange as unknown as { placeOrder: ReturnType<typeof vi.fn> }).placeOrder = placeOrder;
+    const result = await executeCommand('buy $100', 'BTCUSDT', undefined, exchange, adapter);
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    // The exchange error listener filters and deduplicates (suppressed categories,
+    // once-per-account auth, 10s console dedupe), so the result line always prints.
+    expect(adapter.printError).toHaveBeenCalledWith(`Command failed: ${error.message}`);
+    expect(adapter.printError).toHaveBeenCalledTimes(mode === 'unreported' ? 1 : 2);
+    expect(result).toMatchObject({ handled: true, success: false, error: error.message, errorReported: true, errorDetails: {
+      code: 'COMMAND_TIMEOUT', command: 'placeOrders', outcome: 'unknown', clientOrderId: 'requested',
+      actualClientOrderIds: ['actual'], partialOrderIds: ['accepted'],
+    } });
+    if (mode !== 'unreported') expect(result.errorDetails?.errorReported).toBe(true);
+  });
+});
 
 describe('executeCommand — bare-instrument shorthand', () => {
   it('treats `BTCUSDT` as `switch BTCUSDT` when the market exists', async () => {
