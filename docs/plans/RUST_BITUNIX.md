@@ -1761,3 +1761,23 @@ timestamp waivers, retries, record changes or retiming. Harness owner tracing
 actual TS request-selection/completion/callback/onTick; independent owner
 inspecting TS initial listener semantics vs native. Bitunix and Binance gates
 not reached; no final gate/PR push/merge claim.
+
+Breakout trace disproves a clock/settlement defect: duplicate concurrent
+getAccountCode GET/users makes startup6requests against5RPS, so actual TS
+initial quote completes1000ms and periodic reads3000/5000. Native coalesces
+account lookup, initial0/periodic2000. Independently, TS stores initialquotes
+without notifying already-registered book listeners, whereas native explicitly
+publishes the initial REST quote (covered by native public regression). Docs
+describe synthetic REST quote books but do not promise late cached callbacks.
+
+Choose bounded TS corrections: coalesce in-flight account lookup with safe
+rejection/disposal/session-selection fences; publish fetched startup quotes to
+EXISTING book listeners so first valid REST publication is delivered. Keep
+late subscriptions waiting for the next poll (no new cached-listener feature),
+native initial-quote contract and both original2000ms poll intervals. No
+harness/timestamp/hash/fixture/clock changes. Document this explicit initial
+publication improvement nearby and in known-fix comments. Add failing-before
+duplicate-discovery and early-subscriber snapshots/rejection retry/disposal
+controls, run package typecheck/lint/targeted+complete deterministic tests,
+independent source audit, then repeat only failed Breakout gate+parity and
+remaining Bitunix/Binance batch on rebuilt artifacts.
