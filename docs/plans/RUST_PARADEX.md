@@ -216,3 +216,32 @@ merge and create a fresh follow-up branch.
 - Binance regressions, combined-host tests, final workspace checks and CI/PR
   reviews remain in progress. All 6,917 safe-cex tests passed with one test worker;
   repository checks are being repeated after merging the landing branch.
+
+### Final local gates (landing merged through Lighter #1319)
+
+All mandatory brief gates PASS on the final venue source:
+
+| Gate | Result |
+| --- | --- |
+| Bans; workspace format/Clippy; WASM Clippy | PASS |
+| Paradex native tests | 85 PASS |
+| Merged replay harness | 195 PASS |
+| Combined WASM build; host tests | PASS; 38 PASS |
+| Single Paradex WASM | 1,216,038 bytes; budget 1,258,291 |
+| Private replay | PASS: 15 commands, 32 frames, exact signatures/writes/account/queries |
+| Public replay, three runs | PASS: 12,261 frames, 66 markets/tickers, two full-depth books |
+| Public main-thread CPU, TS / Rust | 915.837ms / 711.566ms (1.29x) |
+| Public steady CPU, TS / Rust | 511.9ms / 374.4ms (1.37x) |
+| Public retained memory, TS / Rust | 1,565,800 / 1,304,200 bytes (1.20x) |
+| Binance public replay | PASS: 873 frames, three books; CPU 238.6ms / 121.0ms; retained 4.2MB / 2.6MB |
+| Binance private replay | PASS |
+
+The final private run's performance is informational: CPU TS 568.4ms / Rust
+360.4ms, retained memory 6.7MB / 7.1MB. Private replay gates correctness, while
+the public replay gates both CPU and memory using unchanged thresholds.
+Configured account leverage is compared independently from effective position
+leverage; neither runtime's output is rewritten for Paradex.
+
+Landing integration preserves both Lighter and Paradex registrations, normalization
+hooks and host roles. Five focused wrapper/routing files pass55 tests after that
+merge. PR adversarial reviews and green CI are the remaining landing steps.
