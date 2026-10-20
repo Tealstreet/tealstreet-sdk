@@ -417,6 +417,96 @@ fn global_cancel_covers_regular_and_algo_families() {
     req(&a, Method::Delete, "/v3/algo/orders/pending");
 }
 #[test]
+fn global_cancel_attempts_both_families_after_failures_without_retrying() {
+    for failure in ["http", "transport", "nested"] {
+        let mut e = engine();
+        e.handle(
+            1000.0,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 1,
+                symbol: String::new(),
+            }),
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        let regular = req(&a, Method::Delete, "/v3/orders/pending");
+        match failure {
+            "transport" => e.handle(
+                1010.0,
+                Event::HttpFailed {
+                    request: regular.id,
+                    error: "connection lost",
+                },
+            ),
+            _ => e.handle(
+                1010.0,
+                Event::HttpResponse {
+                    request: regular.id,
+                    response: Response {
+                        status: if failure == "http" { 503 } else { 200 },
+                        headers: "",
+                        body: if failure == "http" {
+                            r#"{"success":false,"message":"regular failed"}"#
+                        } else {
+                            r#"{"success":true,"data":{"success":false}}"#
+                        },
+                    },
+                },
+            ),
+        }
+        let a: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+        let a = tick(&mut e, &a);
+        let algo = req(&a, Method::Delete, "/v3/algo/orders/pending");
+        let a = reply(
+            &mut e,
+            &algo,
+            1120.0,
+            r#"{"success":false,"message":"algo failed"}"#,
+        );
+        let error = result(&a).unwrap_err();
+        assert!(error.contains("/v3/orders/pending"), "{error}");
+        assert!(error.contains("/v3/algo/orders/pending"), "{error}");
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Delete))
+        );
+        // Finishing the failed command releases the FIFO for the next command.
+        let a = placed(&mut e, vec![opts()]);
+        let a = if a.iter().any(|a| matches!(a, Action::SetTimer { .. })) {
+            tick(&mut e, &a)
+        } else {
+            a
+        };
+        req(&a, Method::Post, "/v1/order");
+    }
+}
+#[test]
+fn global_cancel_reports_algo_failure_after_regular_success() {
+    let mut e = engine();
+    e.handle(
+        1000.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: String::new(),
+        }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let regular = req(&a, Method::Delete, "/v3/orders/pending");
+    let a = reply(&mut e, &regular, 1010.0, r#"{"success":true}"#);
+    let a = tick(&mut e, &a);
+    let algo = req(&a, Method::Delete, "/v3/algo/orders/pending");
+    let a = reply(
+        &mut e,
+        &algo,
+        1120.0,
+        r#"{"success":false,"message":"algo failed"}"#,
+    );
+    assert!(result(&a).unwrap_err().contains("algo failed"));
+}
+#[test]
 fn ambiguous_write_failure_never_retries_and_fifo_advances_to_next_command() {
     let mut e = engine();
     let a = placed(&mut e, vec![opts()]);
@@ -539,13 +629,13 @@ fn positional_engine() -> TestEngine {
         &mut e,
         &regular,
         30.0,
-        r#"{"success":true,"rows":[],"meta":{"total":0,"records_per_page":100}}"#,
+        r#"{"success":true,"rows":[],"meta":{"total":0,"records_per_page":100,"current_page":1}}"#,
     );
     reply(
         &mut e,
         &algos,
         40.0,
-        r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDT","rootAlgoOrderId":100,"algoType":"POSITIONAL_TP_SL","childOrders":[{"algoOrderId":101,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0,"triggerPrice":58000,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0,"reduceOnly":true},{"algoOrderId":102,"algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":0,"triggerPrice":65000,"triggerPriceType":"MARKET_PRICE","totalExecutedQuantity":0,"reduceOnly":true}]}],"meta":{"total":1,"records_per_page":100}}}"#,
+        r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDT","rootAlgoOrderId":100,"algoType":"POSITIONAL_TP_SL","childOrders":[{"algoOrderId":101,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0,"triggerPrice":58000,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0,"reduceOnly":true},{"algoOrderId":102,"algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":0,"triggerPrice":65000,"triggerPriceType":"MARKET_PRICE","totalExecutedQuantity":0,"reduceOnly":true}]}],"meta":{"total":1,"records_per_page":100,"current_page":1}}}"#,
     );
     e
 }

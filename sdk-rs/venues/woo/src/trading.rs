@@ -13,6 +13,7 @@ enum Accepted {
     Regular,
     Algo,
     Ids(Vec<String>),
+    CancelAll,
     Leverage {
         symbol: String,
         leverage: f64,
@@ -58,6 +59,7 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     touches: HashMap<(String, OrderSide), f64>,
+    errors: Vec<String>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -816,14 +818,14 @@ impl Woo {
                             "/v3/orders/pending",
                             vec![],
                             None,
-                            Accepted::Ids(vec![]),
+                            Accepted::CancelAll,
                         ),
                         write(
                             Method::Delete,
                             "/v3/algo/orders/pending",
                             vec![],
                             None,
-                            Accepted::Ids(vec![]),
+                            Accepted::CancelAll,
                         ),
                     ]))
                 } else {
@@ -938,6 +940,7 @@ impl Woo {
                     steps,
                     ids: Vec::new(),
                     touches: HashMap::new(),
+                    errors: Vec::new(),
                 });
                 self.trade_pump(cx);
             }
@@ -957,7 +960,12 @@ impl Woo {
             };
             let Some(step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
-                cx.done(job.command, Ok(json(&job.ids).unwrap()));
+                let result = if job.errors.is_empty() {
+                    Ok(json(&job.ids).unwrap())
+                } else {
+                    Err(job.errors.join("; "))
+                };
+                cx.done(job.command, result);
                 continue;
             };
             let command = job.command;
@@ -1028,8 +1036,7 @@ impl Woo {
                         }),
                     );
                     if let Err(error) = result {
-                        self.trade_config_finished(&outbound);
-                        self.trade_abort(cx, &error);
+                        self.trade_write_failed(cx, &outbound, &error);
                         continue;
                     }
                     self.trading.next_write =
@@ -1095,6 +1102,25 @@ impl Woo {
             cx.done(job.command, Err(format!("{error}{suffix}")));
         }
         self.trading.waiting = false;
+    }
+    fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, error: &str) {
+        if let Step::Write {
+            accepted: Accepted::CancelAll,
+            path,
+            ..
+        } = step
+        {
+            // The two cancel families are independent; neither ambiguous write is retried.
+            self.trading
+                .active
+                .as_mut()
+                .unwrap()
+                .errors
+                .push(format!("{path}: {error}"));
+        } else {
+            self.trade_config_finished(step);
+            self.trade_abort(cx, error);
+        }
     }
     fn trade_retry_read(&mut self, cx: &mut Cx<'_, Pending>, step: Step, error: &str) {
         let original = step.clone();
@@ -1231,8 +1257,7 @@ impl Woo {
                 if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
                     self.trade_retry_read(cx, request.step, &error);
                 } else {
-                    self.trade_config_finished(&request.step);
-                    self.trade_abort(cx, &error);
+                    self.trade_write_failed(cx, &request.step, &error);
                     self.trade_pump(cx);
                 }
                 return;
@@ -1297,6 +1322,7 @@ impl Woo {
                                 .ids
                                 .extend(rows.rows.into_iter().map(|r| r.order_id));
                         }
+                        Accepted::CancelAll => (),
                         Accepted::Ids(ids) => self
                             .trading
                             .active
@@ -1404,8 +1430,7 @@ impl Woo {
                 self.trade_retry_read(cx, request.step, &error);
                 return;
             }
-            self.trade_config_finished(&request.step);
-            self.trade_abort(cx, &error);
+            self.trade_write_failed(cx, &request.step, &error);
         }
         self.trade_pump(cx);
     }
@@ -1425,8 +1450,7 @@ impl Woo {
                 self.trade_retry_read(cx, request.step, error)
             }
             _ => {
-                self.trade_config_finished(&request.step);
-                self.trade_abort(cx, error);
+                self.trade_write_failed(cx, &request.step, error);
                 self.trade_pump(cx);
             }
         }
