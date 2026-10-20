@@ -123,3 +123,13 @@ No new error architecture or unrelated engine helper migration belongs here.
   UTC is deliberate: browser-local Dayjs DST behavior is not claimed as a
   native parity guarantee. Independent public review passed. Engine snapshot
   contract changes remain owned by the order-races lane; no engine edits here.
+- Private PM phase: explicit CM account events are ignored; canonical owners
+  record observed regular/strategy source, symbol and native identity across
+  stream, accepted snapshots and captured cancellations. Triggered regular
+  stops use regular cancellation regardless of order type. Sixteen dedicated
+  tests pass. Independent review reproduced malformed stream/snapshot economics
+  stealing ownership; validation now precedes binding and malformed REST joins
+  fail atomically with a visible log. All four review regressions pass, closure
+  review passed, and strict Binance Clippy passed. A trade-first execution emits
+  immediately but ownership waits for regular NEW/accepted snapshot; PM
+  TRIGGERED semantics remain untouched.

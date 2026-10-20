@@ -76,6 +76,18 @@ struct OrdersJoin {
     failed: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PmOrderSource {
+    Regular(u64),
+    Strategy(u64),
+}
+
+#[derive(Clone)]
+struct PmOrderOwner {
+    symbol: String,
+    source: PmOrderSource,
+}
+
 #[derive(Default)]
 pub struct AccountState {
     started: bool,
@@ -97,6 +109,7 @@ pub struct AccountState {
     terminal_algo_ids: HashSet<String>,
     strategy_client_native: HashMap<(String, String), u64>,
     terminal_strategies: HashSet<(String, u64)>,
+    pm_order_owners: HashMap<String, PmOrderOwner>,
     unquantified_cancels: HashSet<(String, u64)>,
     spot_client_native: HashMap<(String, String), u64>,
     spot_subscribe_id: Option<String>,
@@ -186,6 +199,12 @@ fn position_side(ps: &str, signed_contracts: f64) -> PositionSide {
 
 fn opt(value: &Option<std::borrow::Cow<'_, str>>) -> f64 {
     value.as_deref().map_or(0.0, num::parse)
+}
+
+fn nonnegative_number(value: &str) -> bool {
+    value
+        .parse::<f64>()
+        .is_ok_and(|n| n.is_finite() && n >= 0.0)
 }
 
 /// The body's Binance error, if the request failed.
@@ -784,10 +803,25 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
+                let mut malformed = false;
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
+                        malformed |= self.options.portfolio_margin;
                         return;
                     };
+                    if self.options.portfolio_margin
+                        && (!matches!(o.side.as_ref(), "BUY" | "SELL")
+                            || [&o.price, &o.orig_qty, &o.executed_qty]
+                                .iter()
+                                .any(|n| !nonnegative_number(n))
+                            || o.stop_price
+                                .as_deref()
+                                .is_some_and(|n| !nonnegative_number(n))
+                            || num::parse(&o.executed_qty) > num::parse(&o.orig_qty))
+                    {
+                        malformed = true;
+                        return;
+                    }
                     let price = num::parse(&o.price);
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
@@ -837,15 +871,21 @@ impl BinanceFutures {
                         });
                     }
                 }
+                if malformed {
+                    cx.log(
+                        LogLevel::Error,
+                        "Binance open order row has invalid economics",
+                    );
+                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => {
+                        Ok(()) if !malformed => {
                             join.regular = Some(orders);
                             join.native_orders = native_orders;
                         }
-                        Err(_) => join.failed = true,
+                        _ => join.failed = true,
                     }
                 }
                 self.finish_orders(cx);
@@ -854,10 +894,20 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_strategies = Vec::new();
+                let mut malformed = false;
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let Some(kind) = order_type(&o.strategy_type) else {
+                        malformed = true;
                         return;
                     };
+                    if !matches!(o.side.as_ref(), "BUY" | "SELL")
+                        || [&o.price, &o.orig_qty, &o.stop_price]
+                            .iter()
+                            .any(|n| n.as_deref().is_some_and(|n| !nonnegative_number(n)))
+                    {
+                        malformed = true;
+                        return;
+                    }
                     let price = opt(&o.price);
                     let amount = opt(&o.orig_qty);
                     if let Some(native) = o.strategy_id {
@@ -893,15 +943,21 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                if malformed {
+                    cx.log(
+                        LogLevel::Error,
+                        "Binance conditional order row has invalid economics",
+                    );
+                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => {
+                        Ok(()) if !malformed => {
                             join.algo = Some(orders);
                             join.native_strategies = native_strategies;
                         }
-                        Err(_) => join.failed = true,
+                        _ => join.failed = true,
                     }
                 }
                 self.finish_orders(cx);
@@ -1087,6 +1143,34 @@ impl BinanceFutures {
             self.schedule_orders_refresh(cx);
             return;
         }
+        if self.options.portfolio_margin {
+            let mut clients = HashSet::new();
+            let ambiguous = join
+                .regular
+                .iter()
+                .flatten()
+                .chain(join.algo.iter().flatten())
+                .any(|order| !clients.insert(order.id.as_str()));
+            let idless_conflict = join.algo.iter().flatten().any(|order| {
+                !join
+                    .native_strategies
+                    .iter()
+                    .any(|(symbol, client, _)| symbol == &order.symbol && client == &order.id)
+                    && self
+                        .account
+                        .pm_order_owners
+                        .get(&order.id)
+                        .is_some_and(|owner| {
+                            owner.symbol != order.symbol
+                                || !matches!(owner.source, PmOrderSource::Strategy(_))
+                        })
+            });
+            if ambiguous || idless_conflict {
+                self.account.orders_stale = true;
+                self.schedule_orders_refresh(cx);
+                return;
+            }
+        }
         self.account.orders_stale = false;
         let mut orders = join.regular.unwrap_or_default();
         orders.extend(join.algo.unwrap_or_default());
@@ -1188,7 +1272,9 @@ impl BinanceFutures {
                 }
             }
             Some("ACCOUNT_UPDATE") => {
-                if let Ok(event) = serde_json::from_str::<AccountUpdateEvent>(text) {
+                if let Ok(event) = serde_json::from_str::<AccountUpdateEvent>(text)
+                    && !(self.options.portfolio_margin && event.fs.as_deref() == Some("CM"))
+                {
                     self.on_account_update(cx, event.a);
                 }
             }
@@ -1225,6 +1311,10 @@ impl BinanceFutures {
             _ => o.i.to_string(),
         };
         let status = o.status.as_ref();
+        let kind = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type);
+        if status == "NEW" && kind.is_none() {
+            return;
+        }
         let Some(amount) =
             o.q.parse::<f64>()
                 .ok()
@@ -1239,6 +1329,14 @@ impl BinanceFutures {
         else {
             return;
         };
+        if status == "NEW"
+            && (filled > amount
+                || !matches!(o.side.as_ref(), "BUY" | "SELL")
+                || !nonnegative_number(&o.p)
+                || o.sp.as_deref().is_some_and(|p| !nonnegative_number(p)))
+        {
+            return;
+        }
         let inverse = self.is_inverse();
         let key = (o.s.to_string(), o.i);
         let (previous, native_terminal) = self
@@ -1248,20 +1346,12 @@ impl BinanceFutures {
             .copied()
             .unwrap_or_default();
         let foreign_row = self.client_order_row_is_foreign(cx, &o.s, &id);
+        let source = PmOrderSource::Regular(o.i);
         let stale_incarnation = self.options.portfolio_margin
-            && ((native_terminal
-                && self
-                    .account
-                    .spot_client_native
-                    .get(&(o.s.to_string(), id.clone()))
-                    .is_some_and(|native| *native != o.i))
+            && ((self.pm_owner_conflicts(&o.s, &id, source)
+                && (native_terminal || status != "NEW"))
                 || (foreign_row
-                    && (status != "NEW"
-                        || self
-                            .account
-                            .spot_client_native
-                            .get(&(o.s.to_string(), id.clone()))
-                            == Some(&o.i))));
+                    && (status != "NEW" || self.spot_native_order_id(&o.s, &id) == Some(o.i))));
         if self.options.portfolio_margin && !stale_incarnation {
             self.bind_regular_native(&o.s, &id, o.i);
         }
@@ -1349,7 +1439,7 @@ impl BinanceFutures {
                 || (inverse
                     && cx.store.order(&id).is_none()
                     && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
-            && let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type)
+            && let Some(kind) = kind
         {
             let price = num::parse(&o.p);
             cx.store.upsert_order(Order {
@@ -1421,6 +1511,15 @@ impl BinanceFutures {
     fn on_conditional_update(&mut self, cx: &mut Cx<'_, Pending>, o: ConditionalUpdate<'_>) {
         let id = o.c.to_string();
         self.account.order_version += 1;
+        if o.os == "NEW"
+            && (order_type(&o.st).is_none()
+                || !matches!(o.side.as_ref(), "BUY" | "SELL")
+                || [&o.q, &o.p, &o.sp]
+                    .iter()
+                    .any(|n| n.as_deref().is_some_and(|n| !nonnegative_number(n))))
+        {
+            return;
+        }
         let is_terminal = matches!(
             o.os.as_ref(),
             "TRIGGERED" | "FINISHED" | "FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED"
@@ -1436,15 +1535,25 @@ impl BinanceFutures {
             if is_terminal {
                 self.account.terminal_strategies.insert(key);
             }
-            if (terminal && (o.os == "NEW" || current.is_some_and(|current| current != native)))
+            if (terminal && o.os == "NEW")
+                || (self.pm_owner_conflicts(&o.s, &id, PmOrderSource::Strategy(native))
+                    && (terminal || o.os != "NEW"))
                 || (self.client_order_row_is_foreign(cx, &o.s, &id)
                     && (o.os != "NEW" || current == Some(native)))
             {
                 return;
             }
             self.bind_strategy_native(&o.s, &id, native);
-        } else if is_terminal {
-            self.observe_strategy_terminal(&o.s, &id);
+        } else {
+            // An idless packet cannot prove ownership of a newer native row.
+            if self.account.pm_order_owners.get(&id).is_some_and(|owner| {
+                owner.symbol != o.s || !matches!(owner.source, PmOrderSource::Strategy(_))
+            }) {
+                return;
+            }
+            if is_terminal {
+                self.observe_strategy_terminal(&o.s, &id);
+            }
         }
         match o.os.as_ref() {
             "TRIGGERED" | "FINISHED" | "FILLED" => {
@@ -2216,7 +2325,62 @@ impl BinanceFutures {
 }
 
 impl BinanceFutures {
+    pub(crate) fn pm_order_source(&self, symbol: &str, client: &str) -> Option<PmOrderSource> {
+        self.account
+            .pm_order_owners
+            .get(client)
+            .filter(|owner| owner.symbol == symbol)
+            .map(|owner| owner.source)
+    }
+
+    pub(crate) fn pm_owner_matches(
+        &self,
+        symbol: &str,
+        client: &str,
+        source: PmOrderSource,
+    ) -> Option<bool> {
+        self.account
+            .pm_order_owners
+            .get(client)
+            .map(|owner| owner.symbol == symbol && owner.source == source)
+    }
+
+    fn pm_owner_conflicts(&self, symbol: &str, client: &str, source: PmOrderSource) -> bool {
+        self.pm_owner_matches(symbol, client, source) == Some(false)
+    }
+
+    fn bind_pm_owner(&mut self, symbol: &str, client: &str, source: PmOrderSource) {
+        if !self.options.portfolio_margin {
+            return;
+        }
+        if let Some(previous) = self.account.pm_order_owners.insert(
+            client.to_owned(),
+            PmOrderOwner {
+                symbol: symbol.to_owned(),
+                source,
+            },
+        ) && (previous.symbol != symbol || previous.source != source)
+        {
+            // Canonical client IDs span both native namespaces and all symbols.
+            match previous.source {
+                PmOrderSource::Regular(native) => {
+                    self.account
+                        .native_executed
+                        .entry((previous.symbol, native))
+                        .or_default()
+                        .1 = true;
+                }
+                PmOrderSource::Strategy(native) => {
+                    self.account
+                        .terminal_strategies
+                        .insert((previous.symbol, native));
+                }
+            }
+        }
+    }
+
     fn bind_regular_native(&mut self, symbol: &str, client: &str, native: u64) {
+        self.bind_pm_owner(symbol, client, PmOrderSource::Regular(native));
         if let Some(previous) = self
             .account
             .spot_client_native
@@ -2232,6 +2396,7 @@ impl BinanceFutures {
     }
 
     fn bind_strategy_native(&mut self, symbol: &str, client: &str, native: u64) {
+        self.bind_pm_owner(symbol, client, PmOrderSource::Strategy(native));
         if let Some(previous) = self
             .account
             .strategy_client_native

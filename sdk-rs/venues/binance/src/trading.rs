@@ -1,7 +1,7 @@
 //! Order entry. Each command becomes a job of sequential steps; a step's
 //! requests go out together and the next step starts when they all answer.
 //! Stops, take-profits and trailing stops use the Algo Order API.
-use crate::account::venue_error;
+use crate::account::{PmOrderSource, venue_error};
 use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
@@ -269,7 +269,7 @@ impl BinanceFutures {
                     .orders()
                     .iter()
                     .filter(|o| o.symbol == symbol)
-                    .partition(|o| is_algo(o.kind));
+                    .partition(|o| self.order_uses_strategy(o));
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
                 let mut step = vec![
                     Planned {
@@ -802,12 +802,21 @@ impl BinanceFutures {
             .collect()
     }
 
+    fn order_uses_strategy(&self, order: &Order) -> bool {
+        if self.options.portfolio_margin
+            && let Some(source) = self.pm_order_source(&order.symbol, &order.id)
+        {
+            return matches!(source, PmOrderSource::Strategy(_));
+        }
+        is_algo(order.kind)
+    }
+
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
         if self.options.portfolio_margin || self.is_spot() {
             // One at a time, by the client ids the orders were placed with.
             for order in orders {
-                let (path, field) = if !self.is_spot() && is_algo(order.kind) {
+                let (path, field) = if !self.is_spot() && self.order_uses_strategy(order) {
                     (self.paths.conditional_order, "newClientStrategyId")
                 } else {
                     (self.paths.order, "origClientOrderId")
@@ -820,7 +829,7 @@ impl BinanceFutures {
                         .str(field, &order.id),
                     call: Call::Cancel {
                         ids: vec![order.id.clone()],
-                        proof: Some(if !self.is_spot() && is_algo(order.kind) {
+                        proof: Some(if !self.is_spot() && self.order_uses_strategy(order) {
                             CancelProof::Strategy(self.cancel_target(order))
                         } else {
                             CancelProof::One(self.cancel_target(order))
@@ -1706,7 +1715,7 @@ impl BinanceFutures {
             if let Some(order) = cx.store.order(id) {
                 let symbol = order.symbol.clone();
                 let filled = order.filled;
-                let native_regular = self.is_inverse() || !is_algo(order.kind);
+                let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
                     self.observe_strategy_terminal(&symbol, id);
@@ -1736,6 +1745,22 @@ impl BinanceFutures {
         target: &CancelTarget,
         strategy: bool,
     ) -> bool {
+        let Some(native) = target.native else {
+            return false;
+        };
+        if self.options.portfolio_margin
+            && let Some(current) = self.pm_owner_matches(
+                &target.symbol,
+                &target.id,
+                if strategy {
+                    PmOrderSource::Strategy(native)
+                } else {
+                    PmOrderSource::Regular(native)
+                },
+            )
+        {
+            return current && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id);
+        }
         let current = if self.options.portfolio_margin && strategy {
             self.pm_strategy_native_order_id(&target.symbol, &target.id)
         } else if self.is_spot() || self.options.portfolio_margin {
@@ -1800,7 +1825,7 @@ impl BinanceFutures {
         CancelTarget {
             id: order.id.clone(),
             symbol: order.symbol.clone(),
-            native: if self.options.portfolio_margin && is_algo(order.kind) {
+            native: if self.options.portfolio_margin && self.order_uses_strategy(order) {
                 self.pm_strategy_native_order_id(&order.symbol, &order.id)
             } else if self.is_spot() || self.options.portfolio_margin {
                 self.spot_native_order_id(&order.symbol, &order.id)

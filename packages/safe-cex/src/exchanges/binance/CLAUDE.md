@@ -38,8 +38,13 @@ trade IDs are deduplicated in a bounded 16,384-execution window retained across
 private reconnects; missing IDs use cumulative progress, so complete identity
 coverage requires the venue's documented `t`. Execution delivery is independent
 of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
-while an old generation cannot close a new PM order within the same native
-family. Cross-family client-ID stream ownership remains a tracked follow-up.
+while an old generation cannot close a new PM order across regular and strategy
+families. PM records native ownership from observed stream/REST sources, so a
+triggered regular STOP_MARKET still cancels through the regular endpoint.
+Malformed handoff economics cannot retire the current owner; malformed REST
+joins retain the prior account state. Explicit PM `fs:"CM"` account events do
+not create USD-M positions. Trade-first fills emit immediately while ownership
+waits for a regular NEW or accepted snapshot.
 Accepted cancellations invalidate in-flight order snapshots. Generated-ID
 entropy failures return an error instead of sharing a broker-only ID.
 
