@@ -369,3 +369,29 @@ Private frames remain USD-M 14, PM 6, Spot 8, COIN-M 6. Every replay has zero un
 Binance-only WASM **898,165 bytes**, budget 1,258,291; SHA-256 `e61067173975ec815c3e45c478ab4efb28670764162405285de3674bd1b26e99`.
 
 Fresh combined build passes 104 actual WASM tests across eight suites, including worker/main Binance balances, and 64 host/wire cases. Native Binance 99/engine 67, root typecheck 44/lint 28, fmt/bans and strict Binance/default WASM Clippy pass. Feature-range credential scan is clean. Fresh CI on the pushed head is required before merge. Bybit/Hyro measurements above remain scoped to their tested source; the previous current-head CI passed the full Bybit/Hyro variants matrix.
+
+
+### Final GRVT integration evidence
+
+Verified source `a05370c95d`: all twelve public/private replay gates PASS for USD-M, PM, Spot, COIN-M, baseline Bybit and Hyro. Public values are three-run medians. Workloads, thresholds and CPU boundaries are unchanged. Independent reviews pass after resolving the wrapper/roster conflicts.
+
+| Profile | Frames | TS/Rust main  ms | TS/Rust steady  ms | TS/Rust retained  MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 307.409/154.756 | 173.053/78.719 | 16.293/2.516 |
+| PM | 873 | 310.680/155.507 | 181.844/86.195 | 16.066/2.516 |
+| Spot | 7045 | 917.586/702.351 | 415.482/288.187 | 24.110/7.658 |
+| COIN-M | 202 | 255.146/133.217 | 172.867/82.574 | 13.233/1.485 |
+
+Private frames: USD-M 14, PM 6, Spot 8, COIN-M 6, baseline Bybit 18 and Hyro 13; baseline Bybit public 8,743 and Hyro public 160. Every run has zero unserved requests, missing writes, invalid signatures or protocol errors. Spot currency numeric fields and native COIN-M quantities remain exact.
+
+Binance-only WASM **898,165 bytes**, budget 1,258,291; SHA-256 `e61067173975ec815c3e45c478ab4efb28670764162405285de3674bd1b26e99`. Bybit-only **947,960 bytes**, SHA-256 `368210be0e3ff135f55616e5ba61663e7773bf28fa21907f00a9440fb514dbcf`.
+
+Checks PASS: 99 native Binance, 123 native Bybit, 67 engine, 404 harness helpers, 240 focused wrapper/frame/transport cases; 108 actual WASM tests across eight suites and 65 host/wire tests on the fresh combined build; root typecheck 44/lint 28 tasks, fmt/bans, strict Binance/default WASM Clippy and feature-range credential scan.
+
+GRVT brings a reviewed Bybit fast path for unsigned integer strings of at most 15 digits; exact-value and fallback tests pass. Its sampling policy now takes both baselines before verifier setup and awaits major GC plus a 100ms quiet window after new heap lows. It returns the actual current sample. Retained memory still equals nonnegative JS heap/buffer deltas plus all reserved WASM bytes, with no clamp, minimum selection or source-buffer subtraction. Earlier measurements retain their source attribution in the port plan.
+
+Fresh Hyro public: TS/Rust main 33.065/25.306ms, steady 10.088/8.218ms, retained 13.217/0.825MB. Both CPU measures favor Rust; no repeats were needed.
+
+Fresh Hyro private: TS/Rust main 41.337/38.464ms, steady 22.201/18.152ms, retained 13.619/0.940MB. Both CPU measures favor Rust; no repeats were needed.
+
+Hyro investigation: earlier #1307 public losses and later small private losses remain recorded. Unchanged-baseline checks and repeated fresh public gates did not establish a reproducible production regression; bounded private repeats favored Rust. Profiling identified shared replay URL/scheduling work without proving a production cause. No speculative Hyro optimization or relaxed gate was added; strict machine isolation and live Hyro connectivity are not claimed. Green CI on the pushed PR head remains mandatory before merge.
