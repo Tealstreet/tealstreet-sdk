@@ -1,6 +1,6 @@
 //! Signed request/acknowledgement behavior, independent of a live account.
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response};
 use safe_cex_venue_txflow::{Options, TxFlow};
 use serde_json::{Value, json};
 #[path = "support/account.rs"]
@@ -252,7 +252,10 @@ fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
         r#"{"status":"pending","txHash":"fixture"}"#,
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(e)}) if e.contains("uncertain"))));
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
+        if error.message.contains("uncertain") && error.outcome == Some(Outcome::Unknown))
+    ));
     assert!(
         !actions
             .iter()
@@ -270,7 +273,39 @@ fn unconfirmed_consensus_success_is_not_executed_success() {
         200,
         r#"{"status":"ok","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error.contains("uncertain"))));
+    assert!(e.drain_actions().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
+        if error.message.contains("uncertain") && error.outcome == Some(Outcome::Unknown))
+    ));
+}
+#[test]
+fn explicit_rejections_stay_plain_and_lost_responses_are_unknown() {
+    let mut e = engine();
+    place(&mut e, 7, vec![limit("rejected")]);
+    let r = write(&mut e);
+    ack(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"err","message":"Insufficient margin"}"#,
+    );
+    assert!(e.drain_actions().any(
+        |a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
+        if error == "Insufficient margin; reconcile before any resubmission")
+    ));
+
+    let mut e = engine();
+    place(&mut e, 8, vec![limit("lost")]);
+    let r = write(&mut e);
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: r.id,
+            error: "connection reset",
+        },
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, error })
+        if error.message == "connection reset; reconcile before any resubmission" && error.outcome == Some(Outcome::Unknown))));
 }
 #[test]
 fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
