@@ -2365,3 +2365,18 @@ re-probes all seven prior unknown query counterexamples: each returns 599 with
 ACK retained; honest original returns 200 once. Root typecheck 44/44 and lint
 28/28 pass again. No fixture, metric, threshold, deadline or economic output
 change. Resume actual related replay controls with owned jobs quiet.
+
+
+The fresh Lighter public gate catches a scope regression in the new strict
+query policy: top-level preserveQueryFields also reaches WebSocket subscription
+URL identity, making TS's generated transport requestId differ from Rust's
+URL without that token. All output economics, CPU and memory pass; only this
+subscription identity fails in all three runs. Preserve the failure under
+/tmp/bitunix-df2-identityfix-lighter-public.log; no unchanged retry.
+
+Narrow the HTTP policy into the existing requestOptions hook, which HTTP
+requestKey applies but socket URL canonicalization does not. Preserve all new
+HTTP unknown-query rejection controls, verify the actual Base WS transport
+requestId generation, and add socket token/unrelated-field controls. This
+restores existing socket behavior without a new projection or fixture change.
+Independent review and all helper controls precede the fresh related batch.
