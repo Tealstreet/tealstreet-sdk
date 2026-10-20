@@ -333,3 +333,21 @@ Merged-source verification: 99 Binance native tests, 38 engine JSON cases, 349 h
 Hyro public TS/Rust main 35.915/30.283ms, steady 11.816/9.664ms, retained 16.404/0.893MB. Private original main 36.995/32.949ms; steady 18.110/18.348ms is a retained 0.238ms Rust loss. Two unchanged-artifact repeats favor Rust: main 48.028/35.282 and 44.937/40.437ms; steady 24.297/18.388 and 23.475/21.507ms. Three-sample medians main 44.937/35.282 and steady 23.475/18.388ms favor Rust. Earlier losses remain recorded above. No reproducible production regression is established, no threshold or measurement window changed, and no speculative Hyro optimization is claimed.
 
 The Phemex UTF-8/actions host entry and opt-in streaming list omission pass independent review. The reusable 4KB JS ingress scratch and full reserved WASM pages remain counted. Source changes are committed; this PR may merge only on green CI for its pushed head.
+
+
+### Coinbase landing integration
+
+Fresh source `58658899eb` passes all eight Binance public/private gates after merging Coinbase. Earlier twelve-gate Bybit/Hyro evidence remains attributed to `098bcddcee` above. Independent wrapper, shared engine/host and harness reviews pass. Coinbase routing and its reference hooks coexist with all Binance native unit/currency flags and client-ID rules.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 184.515/99.234 | 97.640/39.838 | 19.165/2.556 |
+| PM | 873 | 177.325/93.530 | 98.975/36.413 | 18.643/2.556 |
+| Spot | 7045 | 585.386/487.285 | 254.442/154.668 | 26.684/7.708 |
+| COIN-M | 202 | 183.168/79.214 | 124.867/46.928 | 15.808/1.529 |
+
+Private frame counts remain USD-M 14, PM 6, Spot 8 and COIN-M 6. Zero unserved requests, missing writes, invalid signatures and protocol errors. Every numeric Spot currency field and native COIN-M contract quantity remains compared.
+
+Binance WASM **895,511 bytes**, budget 1,258,291; SHA-256 `3397c74b6ffc4c60def631debc53fcabc2cc03406c4b7f576dba228cdc0496a8`.
+
+Coinbase changed the optional shared currency tail: a freshly rebuilt matched producer/decoder passes all 88 real WASM checks across seven suites, including worker/main Spot balances, and 63 host/wire cases. Native Binance 99 and engine 65, harness helpers 377, focused wrapper/frame/transport 285, root typecheck 44/lint 28, fmt/bans and strict Binance/default WASM Clippy pass. Feature-range credential scan is clean. CI on the resulting pushed head must pass before merge.
