@@ -257,16 +257,21 @@ impl Grvt {
         };
         let url = format!("{base}{}", pending.path);
         let body = Some(pending.body.clone());
-        if let Some(at) = at {
-            cx.request_streamed_body(Method::Post, url, headers, body, at, pending);
+        let builders = matches!(pending.job, Job::Account(account::Request::Builders { .. }));
+        let id = if let Some(at) = at {
+            cx.request_streamed_body(Method::Post, url, headers, body, at, pending)
         } else {
-            cx.request(Method::Post, url, headers, body, pending);
+            cx.request(Method::Post, url, headers, body, pending)
+        };
+        if builders {
+            // Matches TS's 10s abort; its own retry budget lives in `builder_failed`.
+            cx.request_timeout(id, 10_000);
         }
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
             Job::Account(request) => self.account_failed(cx, request, error),
-            Job::Trade(request) => self.trade_failed(cx, request, error),
+            Job::Trade(request) => self.trade_failed(cx, request, error, false),
             Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
@@ -819,6 +824,8 @@ impl Venue for Grvt {
                     request.reset();
                 }
                 self.account_refresh(cx, pending);
+            } else if let Job::Trade(request) = pending.job {
+                self.trade_failed(cx, request, &error, !wire::venue_rejected(&response));
             } else {
                 self.fail_pending(cx, pending, &error);
             }
@@ -940,6 +947,7 @@ impl Venue for Grvt {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         let read = match &pending.job {
             Job::Trade(request) => request.is_read(),
+            Job::Account(account::Request::Builders { .. }) => false,
             _ => true,
         };
         if read && pending.attempts < 5 {
@@ -965,10 +973,10 @@ impl Venue for Grvt {
             self.send_request(cx, pending);
             return;
         }
-        if matches!(pending.job, Job::Account(account::Request::Login)) {
-            self.account_login_unavailable(cx);
-        } else {
-            self.fail_pending(cx, pending, error);
+        match pending.job {
+            Job::Account(account::Request::Login) => self.account_login_unavailable(cx),
+            Job::Trade(request) => self.trade_failed(cx, request, error, true),
+            _ => self.fail_pending(cx, pending, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
