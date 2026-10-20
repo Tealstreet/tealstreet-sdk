@@ -127,6 +127,15 @@ enum CommandIn {
         command: u32,
         tier: String,
     },
+    FetchClosedPositions {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -312,6 +321,19 @@ impl From<CommandIn> for Command {
             CommandIn::SetAccountTier { command, tier } => Self::Venue {
                 command,
                 action: crate::VenueAction::SetAccountTier { tier },
+            },
+            CommandIn::FetchClosedPositions {
+                command,
+                symbol,
+                from,
+                to,
+            } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol,
+                    from_ms: from,
+                    to_ms: to,
+                },
             },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchMaxLeverage { command, symbol } => {
@@ -540,6 +562,20 @@ mod tests {
             Command::Venue {
                 command: 6,
                 action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
+    #[test]
+    fn closed_positions_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchClosedPositions","command":7,"from":1,"to":2}"#).unwrap(),
+            Command::Venue {
+                command: 7,
+                action: crate::VenueAction::FetchClosedPositions {
+                    symbol: None,
+                    from_ms: Some(1.0),
+                    to_ms: Some(2.0),
+                },
             }
         );
     }

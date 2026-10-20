@@ -209,6 +209,13 @@ pub enum VenueAction {
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
     SetAccountTier { tier: String },
+    /// Venue-reported closed positions as the venue's own JSON rows, newest
+    /// window first, for hosts that map them with the venue's TS mappers.
+    FetchClosedPositions {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    },
 }
 
 /// The shared rejection for a venue action the venue does not implement.

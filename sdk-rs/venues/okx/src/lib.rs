@@ -1,5 +1,6 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -71,6 +72,7 @@ struct BookState {
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Markets {
         kind: InstrumentType,
@@ -111,6 +113,7 @@ pub struct Okx {
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    closed: closed::ClosedState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
@@ -150,6 +153,7 @@ impl Okx {
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            closed: closed::ClosedState::default(),
             connections: std::array::from_fn(|_| Connection::default()),
             books: HashMap::new(),
             marks: HashSet::new(),
@@ -783,6 +787,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -1051,6 +1056,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
+            Pending::Closed(request) => self.closed_response(cx, request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1201,6 +1207,8 @@ impl Venue for Okx {
             self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
@@ -1223,7 +1231,7 @@ impl Venue for Okx {
             }
             return;
         }
-        if self.history_timer(cx, timer) {
+        if self.history_timer(cx, timer) || self.closed_timer(cx, timer) {
             return;
         }
         if self.account_timer(cx, timer) {
@@ -1253,6 +1261,22 @@ impl Venue for Okx {
                 c.watchdog = Some(cx.set_timer(10_000.0));
                 return;
             }
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 

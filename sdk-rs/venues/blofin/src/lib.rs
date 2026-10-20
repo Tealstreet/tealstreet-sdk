@@ -1,5 +1,6 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -29,6 +30,7 @@ pub struct Options {
 }
 pub enum Pending {
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
@@ -545,6 +547,7 @@ impl Venue for Blofin {
         match pending {
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, failed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
@@ -666,6 +669,10 @@ impl Venue for Blofin {
                 self.history_response(cx, request, response);
                 return;
             }
+            Pending::Closed(request) => {
+                self.closed_response(cx, request, response);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 return;
@@ -715,6 +722,10 @@ impl Venue for Blofin {
         let pending = match pending {
             Pending::History(request) => {
                 self.history_failed(cx, request, error);
+                return;
+            }
+            Pending::Closed(request) => {
+                Self::closed_failed(cx, request, error);
                 return;
             }
             Pending::Trade(request) => {
@@ -770,6 +781,21 @@ impl Venue for Blofin {
                 self.public_close(cx);
             }
             SocketTick::Handled | SocketTick::Unhandled => {}
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
