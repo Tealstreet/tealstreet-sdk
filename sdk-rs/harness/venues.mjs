@@ -1,5 +1,5 @@
 import { initializeTxFlowCrypto, createTxFlowRequestValidator, validateTxFlowSocketMessage, txFlowRequestBody, createTxFlowSocketAudit } from './txflow-protocol.mjs';
-import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols, binanceRequestOptions } from './binance-protocol.mjs';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols, binanceRequestOptions, binanceDepthStream } from './binance-protocol.mjs';
 import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
 import { polymarket } from './polymarket.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
@@ -1847,6 +1847,7 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
+    ...(name === 'binance' ? { streamOf: binanceDepthStream } : {}),
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
     ...(name === 'binancespot' ? {
       compareFillPrices: true,

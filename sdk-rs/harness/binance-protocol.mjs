@@ -277,6 +277,15 @@ export const binanceSubscriptionMessage = (message) => {
   return message;
 };
 
+// A depth packet is causally downstream of this exact socket's subscription.
+// Leave aggregate/private events on their existing URL/connection routing.
+export const binanceDepthStream = (text) => {
+  let event;
+  try { event = JSON.parse(text); } catch { return; }
+  if (event?.e === 'depthUpdate' && typeof event.s === 'string' && event.s)
+    return `${event.s.toLowerCase()}@depth`;
+};
+
 export const binanceTickerSymbols = (text) => {
   const payload = JSON.parse(text);
   return (Array.isArray(payload) ? payload : [payload]).filter((event) => event?.e === '24hrTicker').map((event) => event.s);

@@ -319,3 +319,71 @@ test('Spot fill correction accepts only the recorded legacy resting price or exa
   assert.throws(() => fixBinanceSpotFills(account, records), /Unexpected TS/);
   assert.equal(account.fills[0].price, 98);
 });
+
+
+test('USD-M depth routing waits for the recorded physical socket subscription without changing the frame', async () => {
+  const venue = venueOf('binance');
+  const tape = new Tape([], venue, false, 100);
+  const url = 'wss://fstream.binance.com/public/ws';
+  const received = [];
+  const target = tape.connect(url, () => {}, (text) => received.push(text));
+  const sibling = tape.connect(url, () => {}, () => assert.fail('depth reached sibling socket'));
+  tape.openSocket(target); tape.openSocket(sibling);
+  const text = JSON.stringify({ e: 'depthUpdate', s: 'BTCUSDT', U: 100, u: 101, pu: 99, b: [], a: [] });
+  const frame = { type: 'ws', t: 75, url, connection: target.connection, text };
+  const subscribe = (socket, topic) => tape.send(socket, JSON.stringify({ method: 'SUBSCRIBE', params: [topic], id: 1 }));
+  subscribe(sibling, 'btcusdt@depth');
+  subscribe(target, 'ethusdt@depth');
+  const pending = tape.deliver(frame);
+  assert.deepEqual(received, [], 'wrong socket/symbol cannot release the frame');
+  assert.equal(tape.waiters.size, 1);
+  subscribe(target, 'btcusdt@depth');
+  await pending;
+  assert.deepEqual(received, [text]);
+  assert.deepEqual(frame, { type: 'ws', t: 75, url, connection: target.connection, text });
+  assert.equal(tape.waiters.size, 0);
+});
+
+test('USD-M depth routing times out for absent, unsubscribed and closed-generation subscriptions', async () => {
+  const url = 'wss://fstream.binance.com/public/ws';
+  const text = JSON.stringify({ e: 'depthUpdate', s: 'BTCUSDT' });
+  for (const state of ['absent', 'unsubscribed', 'closed']) {
+    const tape = new Tape([], venueOf('binance'), false, 20);
+    const first = tape.connect(url, () => {}, () => assert.fail('unsubscribed depth delivered'));
+    tape.openSocket(first);
+    if (state !== 'absent') tape.send(first, JSON.stringify({ method: 'SUBSCRIBE', params: ['btcusdt@depth'], id: 1 }));
+    if (state === 'unsubscribed') tape.send(first, JSON.stringify({ method: 'UNSUBSCRIBE', params: ['btcusdt@depth'], id: 2 }));
+    if (state === 'closed') {
+      tape.close(first);
+      const replacement = tape.connect(url, () => {}, () => assert.fail('old frame reached replacement'));
+      tape.openSocket(replacement);
+      tape.send(replacement, JSON.stringify({ method: 'SUBSCRIBE', params: ['btcusdt@depth'], id: 3 }));
+    }
+    await assert.rejects(tape.deliver({ type: 'ws', url, connection: first.connection, text }), /timeout/, state);
+    assert.equal(tape.waiters.size, 0);
+  }
+});
+
+test('depth stream projection is USD-M-only and leaves unrelated event routing unchanged', () => {
+  const venue = venueOf('binance');
+  assert.equal(venue.streamOf?.('{"e":"depthUpdate","s":"BTCUSDT"}'), 'btcusdt@depth');
+  for (const text of ['{"e":"24hrTicker","s":"BTCUSDT"}', '{"e":"ORDER_TRADE_UPDATE"}', '{"e":"depthUpdate"}', '{"e":"depthUpdate","s":4}'])
+    assert.equal(venue.streamOf?.(text), undefined);
+  for (const name of ['binancepm', 'binanceinverse', 'binancespot']) assert.equal(venueOf(name).streamOf, undefined);
+});
+
+
+test('USD-M stream selection leaves literal, malformed and unrelated packet bytes to the real handler', async () => {
+  const tape = new Tape([], venueOf('binance'), false, 100);
+  const url = 'wss://fstream.binance.com/public/ws';
+  const received = [];
+  const socket = tape.connect(url, () => {}, (text) => received.push(text));
+  tape.openSocket(socket);
+  const packets = ['ping', '{"e":"depthUpdate",', '{"e":"24hrTicker","s":"BTCUSDT","c":"1"}', '[{"e":"24hrTicker","s":"BTCUSDT"}]', 'null'];
+  for (const text of packets) {
+    await tape.deliver({ type: 'ws', url, connection: socket.connection, text });
+    assert.equal(received.at(-1), text);
+  }
+  assert.deepEqual(received, packets);
+  assert.equal(tape.waiters.size, 0);
+});

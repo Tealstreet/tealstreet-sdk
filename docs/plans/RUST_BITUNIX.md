@@ -2607,3 +2607,29 @@ add delayed, never-subscribed, wrong-symbol/socket and generation controls.
 Independent reviewer must validate the same capture and no background waiters,
 then all nine scripted lifecycle tests and affected helper controls must pass.
 Other Binance products are unchanged until evidence requires otherwise.
+
+
+Depth routing phase is frozen and independently reviewed PASS. Only USD-M
+depthUpdate maps to its exact lowercase symbol@depth stream through existing
+socketFor; wrong symbol/physical socket, absent/unsubscribed and closed-generation
+subscriptions cannot release a frame. Exact target subscription releases the
+original bytes/t=75 with no waiter leak. Other Binance products stay unchanged.
+The hook returns undefined on unrelated/malformed text, leaving the actual
+protocol handler in control; five raw literal/malformed/non-depth shapes are
+independently verified byte-for-byte. Positive unit setup proves waiter entry
+synchronously, preserving its original deadline and all routing assertions.
+All 25 protocol controls and final 841/841 helpers pass; three controls fail
+before, direct SDK typecheck and source/diff checks pass.
+
+The owner completed all nine scripted lifecycle controls after the routing fix
+(/tmp/bitunix-1a10-smoke-routing-after.log). The root's subsequent full helper/
+lifecycle verification passes 841 helpers and eight lifecycle safety cases but
+the successful lifecycle case stops earlier, during TS baseline memory
+settlement before exchange construction (replay.mjs:757), with the unchanged
+1000 ms budget. Preserve /tmp/bitunix-1a10-depth-final-live-smoke.log. No output
+or performance result from that failed attempt is accepted. The raw-message
+follow-up changes only malformed input, not this successful JSON path; do not
+hide this distinct pre-start failure or rerun unchanged to select green.
+Read-only bounded GC/counter diagnostics must classify it before performance
+work; production memory policy, deadlines, warmup and metrics stay unchanged.
+Exact-head CI must still validate all lifecycle cases before merge.

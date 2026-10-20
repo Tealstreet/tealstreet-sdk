@@ -114,10 +114,11 @@ test('real Wasm lifecycle through fake transport records a TS/Rust-replayable pr
   const directory = mkdtempSync(join(tmpdir(), 'rust-live-smoke-'));
   try {
     const tape = join(directory, 'private.jsonl'); writeFileSync(tape, serialized, { mode: 0o600 });
+    // Preserve the exact scripted capture even when its strict replay fails.
+    if (process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT) writeFileSync(process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT, readFileSync(tape), { mode: 0o600 });
     const gate = spawnSync('corepack', ['yarn', '-s', 'rust:gate', '--venue', 'binance', '--tape', tape, '--books', '', '--runs', '1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(gate.status, 0, `${gate.stdout}\n${gate.stderr}`);
     assert.match(gate.stdout, /PASS/);
-    if (process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT) writeFileSync(process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT, readFileSync(tape), { mode: 0o600 });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
