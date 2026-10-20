@@ -119,6 +119,7 @@ export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
   method = method.toUpperCase();
   if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
+  body = options.wireBody?.(body, { method, url, callerIds }) ?? body;
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
@@ -194,12 +195,14 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
-      message.args = message.args.map((arg) => ({
-        ...arg,
-        timestamp: '<timestamp>',
-        sign: '<signature>',
-        ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
-      }));
+      message.args = message.args.map((arg) => {
+        const nested = options.rust === 'apexomni' && typeof arg === 'string';
+        const payload = nested ? parseJson(arg) : arg;
+        const normalized = { ...payload, timestamp: '<timestamp>', sign: '<signature>',
+          ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
+          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) };
+        return nested ? JSON.stringify(normalized) : normalized;
+      });
     }
     if (options.wooProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };

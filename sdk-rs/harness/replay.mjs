@@ -79,6 +79,7 @@ const until = async (predicate, label) => withTimeout((async () => {
   while (!predicate()) await new Promise((resolve) => realTimeout(resolve, 5));
 })(), label, 15000);
 
+await venue.prepareReplay?.({ isPrivate, options: replayOptions });
 await venue.initializeReplay?.(values.impl, replayOptions);
 
 const settle = async () => {
@@ -549,7 +550,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -694,6 +695,7 @@ async function runTsCommand(exchange, store, record) {
     case 'setStpMode':
       await exchange.changeStpMode(args.mode);
       return [];
+    case 'getAccount':
     case 'fetchAccount':
       return exchange.getAccount();
     case 'fetchOrderBook':

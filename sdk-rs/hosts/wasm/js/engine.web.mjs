@@ -5,6 +5,7 @@ import { venueFamily } from './venues.mjs';
 
 function importEngine(family) {
   switch (family) {
+    case 'apexomni': return import('../pkg/web/apexomni/safe_cex_wasm.js');
     case 'kraken': return import('../pkg/web/kraken/safe_cex_wasm.js');
     case 'asterdex': return import('../pkg/web/asterdex/safe_cex_wasm.js');
     case 'kucoin': return import('../pkg/web/kucoin/safe_cex_wasm.js');

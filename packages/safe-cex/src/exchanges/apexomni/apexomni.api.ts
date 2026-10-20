@@ -4,13 +4,13 @@ import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import qs from 'qs';
 
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { appendHttpFailure } from '../../utils/httpFailure';
+import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './apexomni.types';
 import { hmacSha256Base64 } from './apexomni.utils';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
 const serializeApexPayload = (payload: unknown) => {
   if (payload === undefined || payload === null) return '';
@@ -68,8 +68,14 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   xhr.interceptors.request.use((config) => {
+    // Retries receive transformed form bytes (or platform-specific FormData).
+    // Retain the semantic payload so legacy signing is stable across runtimes.
+    const originalData = Object.prototype.hasOwnProperty.call(config, '__apexOriginalData')
+      ? (config as any).__apexOriginalData
+      : config.data;
     const nextConfig = {
       ...config,
+      __apexOriginalData: originalData,
       params: {
         ...config.params,
       },
@@ -85,7 +91,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     const messageToSign = (() => {
       if (useLegacySigning) {
-        const params = serializeApexPayloadLegacy(isQueryMethod ? nextConfig.params : nextConfig.data);
+        const params = serializeApexPayloadLegacy(isQueryMethod ? nextConfig.params : originalData);
         const timestamp = new Date(new Date(virtualClock.getCurrentTimeMs()).toUTCString()).getTime();
         const path = nextConfig.url || '';
         (nextConfig as any).__apexTimestamp = timestamp;
@@ -97,7 +103,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           path,
           isQueryMethod && params?.length > 0 ? '?' : '',
           params,
-          path.includes(ENDPOINTS.CREATE_ORDER) ? nextConfig.data : '',
+          path.includes(ENDPOINTS.CREATE_ORDER) ? originalData : '',
         ].join('');
       }
 

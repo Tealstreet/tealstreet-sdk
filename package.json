@@ -51,7 +51,8 @@
     "rust:private-tape-bybitdemo": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitdemo",
     "rust:private-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader",
     "rust:public-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader --public",
-    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
+    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

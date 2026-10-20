@@ -235,7 +235,7 @@ export class Tape {
     this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers, records: this.records });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url), true, impl);
     this.frames = this.records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close'
-      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'kucoin', 'asterdex', 'kraken'].includes(venue.rust))));
+      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni'].includes(venue.rust))));
     this.startupDelivered = new Set();
     this.open = new Map();
     this.waiters = [];
@@ -358,7 +358,7 @@ export class Tape {
 
   respond(method, url, body, headers) {
     if (this.validateRequest) this.verifySignature(
-      (request) => this.validateRequest(request) !== false, { method, url, body, headers }, 'invalid replay request validation');
+      (request) => this.validateRequest(request) !== false, { method, url, body, headers, callerIds: this.callerIds }, 'invalid replay request validation');
     if (this.isPrivate && this.venue.verifyRequest) {
       this.verifySignature(
         this.venue.verifyRequest,

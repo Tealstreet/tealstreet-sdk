@@ -990,3 +990,28 @@ WASM Unicode/surrogate parity remains pending rebuilt artifacts. No speedup is
 claimed from static fixture group counts. Test this source phase in the next
 frozen gate/cohort; keep the Bitrue O3 experiment deferred unless CPU still
 fails. All earlier valid negative observations remain retained.
+
+ApeX landing integration phase plan: merge ecb313026f into19 isolated families
+and23 public fixtures/41 private variants. Keep the generic scheduled singleton
+path, optional diagnostic cutoff, exact nested native IDs and existing audit
+rules. Preserve native zkLink signing and typed account/config options; the
+JS signing SDK stays an independent oracle. Merge root scripts without duplicate
+replay/test-harness keys. Independent harness/loader/SDK reviews and focused
+checks precede commit. All17/18 release and aggregate control drafts remain
+unbuilt checkpoints; production artifacts still belong to the previous15-family
+source. After this integration, freeze one release/control/cohort checkpoint
+rather than mixing runtime inputs while other work lands.
+
+ApeX integration checkpoint:1700 Rust tests across143 groups pass, with strict
+native/wasm workspace Clippy, fmt/bans,44 typecheck and28 lint tasks. Focused
+ApeX SDK boundary19 checks pass after adding the required batch method to its
+mock. Full351 harness checks pass. Independent SDK/host and harness reviews
+pass after reproducing/fixing Apex JSON unsafe-ID rounding, raw-number field
+conversion and overbroad nested-login signature normalization. These changes
+are Apex-scoped; existing18 validation and nanosecond cursor behavior stays
+strict. Real WASM single/batch Unicode, raw-surrogate replacement and snapshot
+parity pass on the retained OKX artifact, alongside malformed-tail atomicity;
+repeat on rebuilt final artifacts. Freeze19 families/23 public profiles/41
+private variants for the next source/control release and fixed comparison.
+All17/18 control/build drafts remain unbuilt; previous15 artifacts/evidence
+are retained. Bitrue opt3 is deferred until singleton-phase gates justify it.

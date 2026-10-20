@@ -17,6 +17,27 @@ import {
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
+
+test('wire body decoding preserves semantic form and multipart identity before normalization', () => {
+  const options = { wireBody: (body) => typeof body === 'string' && body.includes('=')
+    ? Object.fromEntries(new URLSearchParams(body)) : body };
+  assert.equal(requestKey('POST', exchange, 'size=1&clientId=caller%2B1', new Set(), options),
+    requestKey('POST', exchange, { size: '1', clientId: 'caller+1' }, new Set(), options));
+  assert.notEqual(requestKey('POST', exchange, 'size=2&clientId=caller%2B1', new Set(), options),
+    requestKey('POST', exchange, { size: '1', clientId: 'caller+1' }, new Set(), options));
+});
+
+test('nested JSON login payloads retain credentials while clocks and validated signatures vary', () => {
+  const login = (timestamp, signature, apiKey = 'key') => JSON.stringify({ op: 'login', args: [JSON.stringify({
+    type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey, passphrase: 'pass', timestamp, signature,
+  })] });
+  const key = (payload) => subscriptionKey(exchange, payload, new Set(), { rust: 'apexomni' });
+  assert.equal(key(login(100, 'a')), key(login(200, 'b')));
+  assert.notEqual(key(login(100, 'a')), key(login(100, 'a', 'other')));
+  assert.notEqual(key(login(100, 'a')), key({ op: 'login', args: [{
+    type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey: 'key', passphrase: 'pass', timestamp: 100, signature: 'a',
+  }] }));
+});
 const cloid = (n) => `0x${String(n).padStart(32, '0')}`;
 const callerIds = new Set([cloid(1), cloid(2), 'caller-a', 'caller-b']);
 
@@ -678,4 +699,13 @@ test('per-route request adapters preserve method normalization and exact bigint 
   assert.equal(key(9007199254740993n), requestKey('POST', 'https://fixture.test/cancel', '{"nested":{"id":9007199254740993}}'));
   assert.notEqual(key(9007199254740993n), key(9007199254740994n));
   assert.notEqual(key(9007199254740993n), key('9007199254740993'));
+});
+
+
+test('nested login signatures remain strict outside the ApeX descriptor opt-in', () => {
+  const login = (signature) => ({ op: 'login', args: [JSON.stringify({ apiKey: 'caller-key', signature, timestamp: 100 })] });
+  for (const options of [{}, { rust: 'okx' }, { rust: 'blofin', blofinProtocol: true }, { rust: 'kraken' }]) {
+    assert.notEqual(subscriptionKey('wss://example.test/private', login('a'), new Set(), options),
+      subscriptionKey('wss://example.test/private', login('b'), new Set(), options));
+  }
 });

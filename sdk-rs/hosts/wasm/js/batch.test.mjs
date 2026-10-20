@@ -14,7 +14,7 @@ const pack = (socket, now, text) => {
   return batch;
 };
 
-test('real wasm rejects malformed batches atomically and preserves single delivery actions', () => {
+const initialized = () => {
   const engine = new WasmEngine('okx', '{"publicDataOnly":true}');
   try {
     let actions = JSON.parse(engine.start(100));
@@ -26,6 +26,48 @@ test('real wasm rejects malformed batches atomically and preserves single delive
     }
     const { socket } = actions.find((a) => a.op === 'wsConnect' && a.url.endsWith('/public'));
     engine.wsOpen(socket, 101);
+    return { engine, socket };
+  } catch (error) {
+    engine.free();
+    throw error;
+  }
+};
+
+test('real wasm single and batched delivery preserve Unicode actions and snapshot bytes', () => {
+  const single = initialized();
+  let batch;
+  try {
+    batch = initialized();
+    const payloads = [
+      '',
+      '{"event":"error",\n"code":"60001","msg":"雪😀line"}',
+      '{"event":"error","code":"60001","msg":"raw-high:\ud800"}',
+      '{"event":"error","code":"60001","msg":"raw-low:\udfff"}',
+      '{"event":"error","code":"60001","msg":"雪\ud800😀\udfff"}',
+    ];
+    const actions = (json) => json ? JSON.parse(json) : [];
+    for (const [index, text] of payloads.entries()) {
+      const now = 102 + index;
+      const direct = actions(single.engine.wsMessage(single.socket, text, now));
+      const encoded = actions(batch.engine.wsMessages(pack(batch.socket, now, text)));
+      assert.deepEqual(direct, encoded, `actions for payload ${index}`);
+      assert.deepEqual(single.engine.snapshotFrame(now), batch.engine.snapshotFrame(now),
+        `snapshot bytes for payload ${index}`);
+      if (index >= 2) {
+        assert(text.includes('\ud800') || text.includes('\udfff'), 'the JS input contains a raw lone surrogate');
+        assert.match(JSON.stringify(direct), /�/, 'both UTF-8 crossings replace the raw surrogate');
+      }
+      if (index === 1) assert.match(JSON.stringify(direct), /雪😀/);
+    }
+  } finally {
+    single.engine.free();
+    batch?.engine.free();
+  }
+});
+
+test('real wasm rejects malformed batches atomically and preserves single delivery actions', () => {
+  const { engine, socket } = initialized();
+  try {
     const text = JSON.stringify({ event: 'error', code: '60001', msg: '雪😀' });
     const good = pack(socket, 102, text);
     const malformed = [

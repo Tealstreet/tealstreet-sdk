@@ -104,6 +104,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - venue: apexomni
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-apexomni
           - venue: asterdex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-asterdex
