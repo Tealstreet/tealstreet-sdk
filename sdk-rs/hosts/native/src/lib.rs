@@ -426,7 +426,7 @@ mod timer_tests {
             .handle(0., Event::PollScaleChanged { scale: 5. });
         host.execute(&mut |_| {});
         let normal = *host.timers.keys().next().unwrap();
-        let event = tokio::time::timeout(Duration::from_secs(1), host.inbox.recv())
+        let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())
             .await
             .unwrap()
             .unwrap();

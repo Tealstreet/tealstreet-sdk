@@ -10,6 +10,7 @@ struct Case {
     address: String,
     subkey: String,
     now: u64,
+    #[serde(rename = "shortAuth")]
     auth: Signed,
     orders: Vec<Order>,
     ethereum: Ethereum,
@@ -88,6 +89,7 @@ fn delegated_hashes_match_independent_starknet_js_without_a_private_key() {
 struct Ethereum {
     key: String,
     address: String,
+    #[serde(rename = "shortAuth")]
     auth: Signed,
 }
 
@@ -120,7 +122,7 @@ fn auth_orders_and_amendments_match_independent_starknet_js_for_both_environment
         let auth = credentials.auth(case.now).unwrap();
         assert_eq!(auth.signature, case.auth.signature);
         assert_eq!(auth.timestamp, 1717171717);
-        assert_eq!(auth.expiration, 1717258117);
+        assert_eq!(auth.expiration, 1717172017);
         assert!(
             auth.headers(credentials.address())
                 .iter()

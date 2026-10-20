@@ -1,6 +1,7 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
 use safe_cex_engine::Fill;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use serde::Deserialize;
@@ -1721,8 +1722,7 @@ impl Blofin {
                 self.refresh_orders(cx, 1);
             }
             let not_before_ms = if self.account.auth_failures > 0 {
-                cx.now
-                    + (10_000.0 * 2f64.powi(self.account.auth_failures.min(3) as i32)).min(60_000.0)
+                cx.now + Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)
             } else {
                 f64::NEG_INFINITY
             };

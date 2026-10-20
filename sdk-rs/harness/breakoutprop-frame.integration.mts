@@ -35,7 +35,7 @@ type Timer = { at: number; fn: () => void };
 const response = (value: unknown, status = 200): HttpResponse => ({ status, body: encoder.encode(JSON.stringify(value)) });
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise(setImmediate); };
 
-function rig(reply?: (request: Request) => Promise<HttpResponse> | HttpResponse) {
+function rig(reply?: (request: Request) => Promise<HttpResponse> | HttpResponse, options: Record<string, unknown> = {}) {
   let now = Date.UTC(2024, 11, 11, 9);
   const timers = new Set<Timer>();
   const requests: Request[] = [];
@@ -44,7 +44,7 @@ function rig(reply?: (request: Request) => Promise<HttpResponse> | HttpResponse)
   let frames = 0;
   const store = new DefaultStore();
   const applier = new FrameApplier(store);
-  const engine = new WasmEngine('breakoutprop', JSON.stringify({ key: 'documented-user', secret: 'documented-password' }));
+  const engine = new WasmEngine('breakoutprop', JSON.stringify({ key: 'documented-user', secret: 'documented-password', ...options }));
   const host = new EngineHost(engine, {
     now: () => now,
     connect() { assert.fail('BreakoutProp must never open an exchange socket'); },
@@ -77,6 +77,7 @@ function rig(reply?: (request: Request) => Promise<HttpResponse> | HttpResponse)
   });
   return {
     host, store, requests, logs, timers,
+    get now() { return now; },
     get deactivated() { return deactivated; },
     get frames() { return frames; },
     async until(predicate: () => boolean) {
@@ -170,5 +171,36 @@ test('compiled polling controls pause and resume through the fire-and-forget hos
     await r.until(() => r.requests.length > before);
     assert.ok(new URL(r.requests[before].url).pathname.endsWith('/portfolio'));
     assert.equal(r.deactivated, 0);
+  } finally { r.dispose(); }
+});
+
+
+for (const [tickInterval, expected] of [[0.00001, 1_000], [1e300, 120_000]] as const) {
+  test(`compiled initial polling interval ${tickInterval} obeys the request-pressure bounds`, async () => {
+    const r = rig(undefined, { tickInterval });
+    try {
+      r.host.start();
+      await r.until(() => r.store.loaded.balance);
+      assert.equal(r.timers.size, 1);
+      const next = [...r.timers][0];
+      assert.equal(next.at - r.now, expected);
+      const before = r.requests.length;
+      await r.until(() => r.requests.length > before);
+      assert.ok(new URL(r.requests[before].url).pathname.endsWith('/portfolio'));
+      assert.deepEqual(r.logs, []);
+    } finally { r.dispose(); }
+  });
+}
+
+test('compiled pollingEnabled false pauses even an initial flood interval after account bootstrap', async () => {
+  const r = rig(undefined, { tickInterval: 0.00001, pollingEnabled: false });
+  try {
+    r.host.start();
+    await r.until(() => r.store.loaded.balance);
+    assert.equal(r.timers.size, 0);
+    const before = r.requests.length;
+    await settle();
+    assert.equal(r.requests.length, before);
+    assert.deepEqual(r.logs, []);
   } finally { r.dispose(); }
 });

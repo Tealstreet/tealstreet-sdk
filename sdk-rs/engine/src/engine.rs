@@ -12,6 +12,19 @@ use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
 
+/// Bounds on a host-scaled poll cadence, beyond a venue's own native cadence.
+pub const POLL_POLICY_FLOOR_MS: f64 = 1_000.0;
+pub const POLL_POLICY_CAP_MS: f64 = 120_000.0;
+
+/// Bound a configured absolute cadence; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(POLL_POLICY_FLOOR_MS, POLL_POLICY_CAP_MS)
+    } else {
+        f64::INFINITY
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SocketId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -77,7 +90,7 @@ impl RequestRoute {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
     pub method: Method,
@@ -90,7 +103,22 @@ pub struct HttpRequest {
     pub body: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("id", &self.id)
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("url", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .field("signer_headers", &"<redacted>")
+            .field("body", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadSignRequest {
     pub exchange_name: &'static str,
@@ -98,6 +126,18 @@ pub struct PayloadSignRequest {
     pub payload: String,
     pub scheme: &'static str,
     pub encoding: &'static str,
+}
+
+impl std::fmt::Debug for PayloadSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignRequest")
+            .field("exchange_name", &self.exchange_name)
+            .field("key", &"<redacted>")
+            .field("payload", &"<redacted>")
+            .field("scheme", &self.scheme)
+            .field("encoding", &self.encoding)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -227,6 +267,16 @@ pub enum VenueAction {
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
     SetAccountTier { tier: String },
+    /// Venue-reported closed positions as the venue's own JSON rows, newest
+    /// window first, for hosts that map them with the venue's TS mappers.
+    FetchClosedPositions {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    },
+    /// The venue's raw account balance payload as JSON, or `null` before one
+    /// is read, for hosts that expose it as `balance.info`.
+    FetchBalanceInfo,
 }
 
 /// The shared rejection for a venue action the venue does not implement.
@@ -444,7 +494,6 @@ impl<'a> Response<'a> {
     }
 }
 
-#[derive(Debug)]
 pub enum Event<'a> {
     /// Host polling policy: a factor on each poll's own cadence (resolved SDK
     /// tick over its metadata tick); infinity pauses optional venue polling.
@@ -505,6 +554,15 @@ pub enum Event<'a> {
         timer: TimerId,
     },
     Command(Command),
+}
+
+impl std::fmt::Debug for Event<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Events include authenticated payloads, headers and delegated signatures.
+        f.debug_struct("Event")
+            .field("kind", &std::mem::discriminant(self))
+            .finish_non_exhaustive()
+    }
 }
 
 /// What a venue may do while handling an event.
@@ -650,11 +708,20 @@ impl<P> Io<P> {
 
     fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
         let interval = default_ms * scale.unwrap_or(1.);
-        match ceiling_ms {
+        let interval = match ceiling_ms {
             Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
                 interval.min(default_ms.max(ceiling))
             }
             _ => interval,
+        };
+        // Host policy cannot flood a venue or overflow a timer; infinity pauses.
+        if interval.is_finite() {
+            interval.clamp(
+                default_ms.min(POLL_POLICY_FLOOR_MS),
+                default_ms.max(POLL_POLICY_CAP_MS),
+            )
+        } else {
+            interval
         }
     }
 
@@ -1235,11 +1302,52 @@ pub trait Venue {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
 }
 
+/// Startup never hangs silently: sections still unloaded after this are named
+/// in a visible notice, repeated on a slow cadence until they load (non-terminal).
+const STARTUP_WATCH_MS: f64 = 60_000.0;
+const STARTUP_REPEAT_MS: f64 = 300_000.0;
+
+fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
+    let loaded = cx.store.loaded();
+    let tickers = cx.io.public_feed_policy != PublicFeedPolicy::Disabled;
+    let missing: Vec<&str> = [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .filter_map(|(name, done, required)| (required && !done).then_some(name))
+    .collect();
+    if missing.is_empty() {
+        return false;
+    }
+    // Only missing tickers can still leave a private account usable (no prices).
+    let level = if missing == ["tickers"] {
+        LogLevel::Warning
+    } else {
+        LogLevel::Error
+    };
+    cx.log(
+        level,
+        format!(
+            "Startup incomplete: still waiting for {}",
+            missing.join(", ")
+        ),
+    );
+    true
+}
+
 pub struct Engine<V: Venue> {
     venue: V,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    /// Checked on handled events, so it adds no timer of its own.
+    startup_watch_at: Option<f64>,
+    /// Hosts opt in when the account can sign; public-only engines have no account sections.
+    account_startup: bool,
     shared_books: HashMap<String, Book>,
     shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
     shared_ticker_revision: u64,
@@ -1269,6 +1377,8 @@ impl<V: Venue> Engine<V> {
             store,
             io: Io::default(),
             started: false,
+            startup_watch_at: None,
+            account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
             shared_ticker_revision: 0,
@@ -1290,6 +1400,12 @@ impl<V: Venue> Engine<V> {
         }
         self.io.public_feed_policy = policy;
         Ok(())
+    }
+
+    /// Account sections (balance, orders, positions) are expected at startup only
+    /// for an account that can sign, matching the SDK's readiness rule.
+    pub fn set_account_startup(&mut self, account: bool) {
+        self.account_startup = account;
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -1476,6 +1592,7 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
     }
 
@@ -1537,6 +1654,12 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        if let Some(at) = self.startup_watch_at
+            && now >= at
+        {
+            self.startup_watch_at =
+                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
+        }
         match event {
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
@@ -4164,6 +4287,49 @@ mod signing_tests {
 }
 
 #[cfg(test)]
+mod security_debug {
+    use super::*;
+
+    #[test]
+    fn transport_and_signing_debug_never_render_authentication_material() {
+        let sentinel = "credential-sentinel-never-log";
+        let http = HttpRequest {
+            id: RequestId(17),
+            method: Method::Post,
+            route: None,
+            timeout_ms: Some(5_000),
+            url: format!("https://venue.test/private?signature={sentinel}"),
+            headers: vec![("Authorization", sentinel.into())],
+            signer_headers: vec![("X-Proof".into(), sentinel.into())],
+            body: Some(sentinel.into()),
+        };
+        let signing = PayloadSignRequest {
+            exchange_name: "test-venue",
+            key: sentinel.into(),
+            payload: sentinel.into(),
+            scheme: "test",
+            encoding: "test",
+        };
+        let event = Event::PayloadSigned {
+            request: RequestId(17),
+            signature: sentinel,
+            headers: vec![("X-Proof".into(), sentinel.into())],
+        };
+        for debug in [
+            format!("{http:?}"),
+            format!("{signing:?}"),
+            format!("{event:?}"),
+        ] {
+            assert!(!debug.contains(sentinel));
+            assert!(!debug.contains("https://venue.test"));
+        }
+        assert!(format!("{http:?}").contains("RequestId(17)"));
+        assert!(format!("{signing:?}").contains("test-venue"));
+        assert!(format!("{event:?}").contains("kind"));
+    }
+}
+
+#[cfg(test)]
 mod startup_tests {
     use super::*;
     use crate::startup::{Backoff, number_or_zero};
@@ -4228,5 +4394,102 @@ mod startup_tests {
         for bad in ["NaN", "inf", "oops", "1x"] {
             assert_eq!(number_or_zero(bad), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod startup_watch_tests {
+    use super::*;
+
+    struct Idle;
+    impl Venue for Idle {
+        type Pending = ();
+        fn start(&mut self, _cx: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, ()>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _response: Response<'_>) {}
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, ()>, _pending: (), _error: &str) {}
+        fn on_timer(&mut self, _cx: &mut Cx<'_, ()>, _timer: TimerId) {
+            panic!("the idle venue sets no timers");
+        }
+        fn on_command(&mut self, _cx: &mut Cx<'_, ()>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn notices(engine: &mut Engine<Idle>, now: f64) -> Vec<(LogLevel, String)> {
+        engine.handle(now, Event::PollScaleChanged { scale: 1.0 });
+        engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Log { level, message }) => Some((level, message)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unloaded_startup_is_reported_until_every_section_loads() {
+        let mut engine = Engine::new(Idle);
+        engine.set_account_startup(true);
+        engine.start(0.0);
+        assert!(
+            engine
+                .drain_actions()
+                .all(|action| !matches!(action, Action::SetTimer { .. })),
+            "the watch adds no timer of its own"
+        );
+        engine.store_mut().set_markets(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS - 1.0).is_empty());
+        assert_eq!(
+            notices(&mut engine, STARTUP_WATCH_MS),
+            [(
+                LogLevel::Error,
+                "Startup incomplete: still waiting for tickers, balance, orders, positions"
+                    .to_owned()
+            )]
+        );
+        assert!(notices(&mut engine, STARTUP_WATCH_MS + 1.0).is_empty());
+        let store = engine.store_mut();
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        let repeat = STARTUP_WATCH_MS + STARTUP_REPEAT_MS;
+        assert_eq!(
+            notices(&mut engine, repeat),
+            [(
+                LogLevel::Warning,
+                "Startup incomplete: still waiting for tickers".to_owned()
+            )]
+        );
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, repeat + STARTUP_REPEAT_MS).is_empty());
+        assert!(notices(&mut engine, repeat + 10.0 * STARTUP_REPEAT_MS).is_empty());
+    }
+
+    #[test]
+    fn public_only_engine_is_not_told_its_account_never_loaded() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
+        let mut disabled = Engine::new(Idle);
+        disabled
+            .set_public_feed_policy(PublicFeedPolicy::Disabled)
+            .unwrap();
+        disabled.set_account_startup(true);
+        disabled.start(0.0);
+        let store = disabled.store_mut();
+        store.set_markets(vec![]);
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
     }
 }

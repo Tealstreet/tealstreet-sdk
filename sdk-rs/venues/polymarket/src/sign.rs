@@ -11,7 +11,7 @@ use safe_cex_crypto::{
     hex, hmac_sha256,
 };
 use safe_cex_engine::Method;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 const ORDER_TYPE: &str = "Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)";
 const DOMAIN_TYPE: &str =
@@ -20,7 +20,14 @@ const EXCHANGE_NAME: &str = "Polymarket CTF Exchange";
 pub const STANDARD_EXCHANGE: &str = "0xE111180000d2663C0091e4f400237545B87B996B";
 pub const NEG_RISK_EXCHANGE: &str = "0xe2222d279d744050d28e00520010520000310F59";
 
-#[derive(Clone, Deserialize, Serialize)]
+/// Credential carriers may be deserialized from venue responses but never serialized wholesale.
+/// ```compile_fail
+/// use safe_cex_venue_polymarket::sign::Credentials;
+/// fn accidental_log(credentials: &Credentials) {
+///     let _ = serde_json::to_string(credentials);
+/// }
+/// ```
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Credentials {
     pub api_key: String,
@@ -516,10 +523,8 @@ mod tests {
             ]
         );
         assert!(l2_headers(&credentials, "invalid", 1, Method::Get, "/data/orders", "").is_err());
-        let missing = Credentials {
-            api_key: String::new(),
-            ..credentials
-        };
+        let mut missing = credentials.clone();
+        missing.api_key.clear();
         assert!(l2_headers(&missing, ADDRESS, 1, Method::Get, "/data/orders", "").is_err());
     }
 
@@ -737,3 +742,5 @@ mod tests {
         }
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, api_key, secret, passphrase);

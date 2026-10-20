@@ -772,7 +772,7 @@ async fn invalid_websocket_polling_controls_have_no_venue_effects() {
 }
 
 #[tokio::test]
-async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
+async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
     LocalSet::new()
         .run_until(async {
             let fixture = Fixture::new(config()).await;
