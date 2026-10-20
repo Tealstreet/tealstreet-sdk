@@ -19,6 +19,8 @@ const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/list
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
+/// Consecutive event-fenced snapshots discarded before one commits anyway.
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
     !matches!(client_order_id, "" | "0" | "undefined")
@@ -94,6 +96,7 @@ pub struct Account {
     fast: Option<TimerId>,
     snapshot_pending: bool,
     snapshot_again: bool,
+    snapshot_discards: u8,
     order_queue: VecDeque<String>,
     order_active: Option<String>,
     order_timer: Option<TimerId>,
@@ -1511,7 +1514,13 @@ impl Bitrue {
                         LogLevel::Error,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
-                } else if revision == self.account.settings_revision {
+                } else if revision == self.account.settings_revision
+                    // Steady private events would otherwise discard every snapshot; a
+                    // committed stale one is re-read at once (snapshot_again).
+                    || (self.account.snapshot_discards >= STALE_SNAPSHOT_LIMIT
+                        && self.account.leverage_queries.is_empty())
+                {
+                    self.account.snapshot_discards = 0;
                     let closed: Vec<String> = cx
                         .store
                         .positions()
@@ -1549,6 +1558,8 @@ impl Bitrue {
                         self.refresh_orders(cx, closed);
                     }
                 } else {
+                    self.account.snapshot_discards =
+                        self.account.snapshot_discards.saturating_add(1);
                     self.account.snapshot_again = true;
                 }
                 if std::mem::take(&mut self.account.snapshot_again) {
