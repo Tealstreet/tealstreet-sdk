@@ -111,3 +111,21 @@ the literal manifest pins in both drivers. All owned jobs are quiet.
 `RUST_PERF_INPUTS25.json.gz` preserves the manifest, verification, reviewed
 drivers and preparation proofs. The separate original 24-family control is
 built and audited for follow-up integration; it is excluded from this cohort.
+
+All three declared optional diagnostics pass, with every output preserved in
+`RUST_PERF_DIAGNOSTICS25.json.gz`. Observed CPU times below include profiling
+overhead and are not public gate votes:
+
+| Fixture | Messages | WASM message calls | WS CPU ms | Frame CPU ms | Inclusive host CPU ms | Host outside engine ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| OKX | 8,904 | 329 | 33.285 | 4.201 | 46.940 | 13.655 |
+| Bybit | 8,742 | 516 | 36.499 | 5.518 | 57.656 | 21.157 |
+| Bitrue | 3,286 | 2,294 | 30.542 | 4.596 | 48.421 | 17.879 |
+
+Websocket CPU includes bridge, parsing and state updates. Host CPU includes
+engine CPU; its residual includes encoding, action dispatch and observer work,
+so it is not exact packing cost. Bitrue has 1,734 singleton drains, confirming
+that its sparse arrivals offer less batching opportunity. Overall profiled
+main CPU is 210.227/234.521/171.376 ms respectively. Preserve the earlier valid
+negative profiles; no speedup is established by these three observations.
+The 25 independent public gates and fixed 250 paired comparisons are next.
