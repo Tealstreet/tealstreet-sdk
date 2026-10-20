@@ -363,6 +363,18 @@ publish an empty snapshot or dispose the previous good engine.
   typecheck 44 / lint 28 and all fresh artifact consumer/native/store proofs
   recorded above PASS. Fresh exact-head CI remains required before merge.
 
+- Exact-head CI checkpoint `0c494cd355`: 38 checks pass, including Linux's
+  canonical solo OKX EU gate (main TS/Rust 2,658.1/2,370.1 ms; steady
+  2,009.0/1,795.9; memory 21.6/6.7 MB). Hyro's 160-frame steady-CPU gate
+  fails two attempts: TS/Rust 7.3/7.4 ms, then 2.9/3.4; main CPU,
+  correctness and memory pass. The one reviewed unchanged-job rerun is spent;
+  stop reruns and profile matched canonical solo artifacts/runtime against
+  landing. Local emitted-code audit refutes a large restoration prologue;
+  investigate measured hot work before choosing a bounded native fix. Preserve
+  all Shared authority/readiness, ticker dirty-state and private-role behavior,
+  and rerun affected native/consumer/replay checks. Fixtures, thresholds and
+  output oracles remain unchanged. Merge stays blocked on this gate.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
