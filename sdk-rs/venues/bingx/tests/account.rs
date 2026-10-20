@@ -2,8 +2,8 @@
 //! swap-ws-account and swap-trade. No credentials or live writes are used.
 use safe_cex_engine::model::{MarginType, OrderStatus, PositionMode, PositionSide};
 use safe_cex_engine::{
-    Action, Engine, Event, HttpRequest, Method, Notice, RequestId, Response, SocketId, TimerId,
-    wire,
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, RequestId, Response, SocketId,
+    TimerId, wire,
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
@@ -32,6 +32,13 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
+        let mut h = Self::unstarted();
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        h
+    }
+    fn unstarted() -> Self {
         let mut h = Self {
             engine: Engine::new(Bingx::new(Options {
                 key: Some("key".into()),
@@ -48,9 +55,6 @@ impl Harness {
         };
         h.engine.start(h.now);
         h.collect();
-        h.respond("/quote/contracts", 200, MARKETS);
-        h.respond("/quote/ticker", 200, DAILY);
-        h.respond("/quote/premiumIndex", 200, PREMIUM);
         h
     }
     fn collect(&mut self) {
@@ -119,8 +123,25 @@ impl Harness {
             .iter()
             .position(|(_, t)| *t == at)
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
-        let (timer, time) = self.timers.remove(i);
-        self.now = time;
+        let (timer, _) = self.timers.remove(i);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+    fn fire_latest_due(&mut self, at: f64) {
+        let i = self
+            .timers
+            .iter()
+            .rposition(|(_, time)| *time <= at)
+            .expect("due private watchdog");
+        let (timer, _) = self.timers.remove(i);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+    fn fire_recovery(&mut self) {
+        let (timer, at) = *self.timers.last().expect("recovery timer");
+        assert!(at > self.now);
+        self.timers.pop();
+        self.now = at;
         self.event(Event::TimerFired { timer });
     }
     fn poll_late(&mut self, now: f64) {
@@ -258,6 +279,7 @@ fn expired_key_closes_stale_socket_and_recovery_is_single_owner() {
     let old = h.private();
     h.message(r#"{"e":"listenKeyExpired"}"#);
     assert_eq!(h.closed, [old]);
+    h.fire_recovery();
     let key = h.take(KEY);
     h.event(Event::WsClosed {
         socket: old,
@@ -295,6 +317,12 @@ fn transient_key_failure_retries_and_keepalive_expiry_rebuilds() {
         r#"{"code":100001,"msg":"listen key does not exist"}"#,
     );
     assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains(KEY))
+    );
+    h.fire_recovery();
+    assert!(
         h.requests
             .iter()
             .any(|r| r.method == Method::Post && r.url.contains(KEY))
@@ -307,6 +335,7 @@ fn stale_keepalive_response_cannot_install_timer_for_replaced_key() {
     h.fire_at(1_801_000.0);
     let put = h.take(KEY);
     h.message(r#"{"e":"listenKeyExpired"}"#);
+    h.fire_recovery();
     let key = h.take(KEY);
     h.reply(put.id, 200, r#"{"code":0}"#);
     assert!(!h.timers.iter().any(|(_, at)| *at == h.now + 1_800_000.0));
@@ -325,11 +354,12 @@ fn private_watchdog_recovers_a_silent_connection_and_replies_to_ping() {
     let mut h = Harness::ready();
     h.message("Ping");
     assert!(h.sent.iter().any(|(_, s)| s == "Pong"));
-    h.fire_at(16000.0);
-    h.fire_at(31000.0);
-    h.fire_at(46000.0); // Last receive was at 1001.
+    h.fire_latest_due(16000.0);
+    h.fire_latest_due(31000.0);
+    h.fire_latest_due(46000.0); // Last receive was at 1001.
     assert!(h.requests.iter().all(|r| !r.url.contains(KEY)));
-    h.fire_at(61000.0);
+    h.fire_latest_due(61000.0);
+    h.fire_recovery();
     assert!(h.requests.iter().any(|r| r.url.contains(KEY)));
     assert_eq!(h.closed.len(), 1);
 }
@@ -486,7 +516,7 @@ fn reconnect_snapshot_does_not_replay_historical_gap_at_new_execution_price() {
         socket: h.private(),
         code: 1006,
     });
-    h.fire_at(2000.0);
+    h.fire_recovery();
     h.respond(KEY, 200, r#"{"listenKey":"reconnected"}"#);
     h.event(Event::WsOpened {
         socket: h.private(),
@@ -692,4 +722,264 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert!(h.fills().is_empty());
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
+}
+
+#[test]
+fn malformed_market_ticker_and_funding_rows_are_skipped_and_private_start_proceeds() {
+    let mut h = Harness::unstarted();
+    h.respond(
+        "/quote/contracts",
+        200,
+        r#"{"code":0,"data":[{"symbol":"ETH-USDT","asset":"ETH"},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+    );
+    assert_eq!(h.engine.store().markets().len(), 1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("skipped 1 malformed market row(s): ETH-USDT"))
+    );
+    h.respond(
+        "/quote/ticker",
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"},{"symbol":"BTC-USDT","lastPrice":null}]}"#,
+    );
+    h.respond(
+        "/quote/premiumIndex",
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"bad"}]}"#,
+    );
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.symbol.as_str(), ticker.last), ("BTCUSDT", 60000.0));
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("malformed funding row(s): BTC-USDT"))
+    );
+    h.take(KEY);
+    h.take(MODE);
+}
+
+#[test]
+fn a_failed_funding_read_starts_the_private_side_and_its_retry_fills_funding() {
+    let mut h = Harness::unstarted();
+    h.respond("/quote/contracts", 200, MARKETS);
+    h.respond("/quote/ticker", 200, DAILY);
+    h.respond(
+        "/quote/premiumIndex",
+        200,
+        r#"{"code":100500,"msg":"busy"}"#,
+    );
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.last, ticker.funding_rate), (60000.0, 0.0));
+    h.take(KEY);
+    h.fire_at(2000.0);
+    h.respond("/quote/premiumIndex", 200, PREMIUM);
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!((ticker.mark, ticker.funding_rate), (60001.0, 0.0001));
+    assert_eq!(h.engine.store().tickers().len(), 1);
+}
+
+#[test]
+fn one_malformed_position_row_is_skipped_and_never_closes_its_known_position() {
+    let mut h = Harness::ready();
+    h.fire_at(3000.0);
+    h.respond(
+        POSITIONS,
+        200,
+        r#"{"code":0,"data":[{"symbol":"ETH-USDT"},{"symbol":"BTC-USDT","positionAmt":"0.2","positionSide":"BOTH","avgPrice":"60000","unrealizedProfit":"10","leverage":20,"isolated":false,"liquidationPrice":50000}]}"#,
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.2);
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("skipped 1 malformed position row(s): ETHUSDT"))
+    );
+    for snapshot in [
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.3","leverage":0}]}"#,
+        r#"{"code":0,"data":[42]}"#,
+    ] {
+        h.fire_at(h.now + 2000.0);
+        h.respond(POSITIONS, 200, snapshot);
+        assert_eq!(h.engine.store().positions().len(), 1);
+        assert_eq!(h.engine.store().positions()[0].contracts, 0.2);
+    }
+}
+
+#[test]
+fn one_malformed_order_row_is_skipped_and_keeps_only_the_order_it_names() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    h.respond(
+        ORDERS,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":8389765519993909000,"symbol":"BTC-USDT","type":"LIMIT"},{"orderId":77,"symbol":"BTC-USDT","type":"LIMIT","side":"SELL","status":"NEW","origQty":"0.1","executedQty":"0","price":"61000","positionSide":"BOTH","timeInForce":"GTC"}]}}"#,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert_eq!(h.engine.store().order("77").unwrap().price, 61000.0);
+    assert!(h.logs.iter().any(|l| l.contains(&format!(
+        "skipped 1 malformed open order row(s): {ORDER_ID}"
+    ))));
+    h.fire_at(28000.0);
+    h.fire_at(30000.0);
+    h.respond(
+        ORDERS,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT"}]}}"#,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_none());
+    assert!(h.engine.store().order("77").is_some());
+}
+
+#[test]
+fn signature_rejection_is_re_signed_and_resent_exactly_once() {
+    let mut h = Harness::new();
+    let rejected = r#"{"code":100001,"msg":"Signature verification failed"}"#;
+    let first = h.take(MODE);
+    h.now += 5.0;
+    h.reply(first.id, 200, rejected);
+    let second = h.take(MODE);
+    assert_ne!(first.url, second.url);
+    assert!(second.url.contains("timestamp=1005"));
+    h.reply(second.id, 200, rejected);
+    assert!(!h.requests.iter().any(|r| r.url.contains(MODE)));
+    assert!(h.logs.iter().any(|l| l.contains("private request failed")));
+
+    // Streamed reads and writes take the same single resend.
+    h.respond(ORDERS, 200, rejected);
+    h.respond(ORDERS, 200, OPEN);
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    h.event(Event::Command(Command::CancelOrders {
+        command: 9,
+        ids: vec![ORDER_ID.into()],
+    }));
+    h.respond("/trade/order", 200, rejected);
+    h.respond("/trade/order", 200, r#"{"code":0,"data":{}}"#);
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+
+    // Other venue errors are never resent.
+    h.respond(BALANCE, 200, r#"{"code":100004,"msg":"denied","data":[]}"#);
+    assert!(!h.requests.iter().any(|r| r.url.contains(BALANCE)));
+}
+
+#[test]
+fn account_rows_on_a_market_skipped_at_startup_are_reported_once_as_errors() {
+    let mut h = Harness::unstarted();
+    h.respond(
+        "/quote/contracts",
+        200,
+        r#"{"code":0,"data":[{"symbol":"ETH-USDT","asset":"ETH"},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+    );
+    h.respond("/quote/ticker", 200, DAILY);
+    h.respond("/quote/premiumIndex", 200, PREMIUM);
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    let eth = r#"{"code":0,"data":[{"symbol":"ETH-USDT","positionAmt":"1","positionSide":"BOTH","avgPrice":"3000","unrealizedProfit":"0","leverage":5,"isolated":false,"liquidationPrice":0}]}"#;
+    h.respond(POSITIONS, 200, eth);
+    h.respond(
+        ORDERS,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":5,"symbol":"ETH-USDT","type":"LIMIT","side":"BUY","status":"NEW","origQty":"1","executedQty":"0","price":"2900","positionSide":"BOTH","timeInForce":"GTC"}]}}"#,
+    );
+    h.fire_at(3000.0);
+    h.respond(POSITIONS, 200, eth);
+    let errors: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|l| l.contains("ETHUSDT is hidden"))
+        .collect();
+    assert_eq!(errors.len(), 1, "{:?}", h.logs);
+}
+
+#[test]
+fn a_malformed_daily_row_still_gets_a_ticker_slot_for_funding_and_stream_updates() {
+    let mut h = Harness::unstarted();
+    h.respond("/quote/contracts", 200, MARKETS);
+    h.respond(
+        "/quote/ticker",
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":null}]}"#,
+    );
+    h.respond("/quote/premiumIndex", 200, PREMIUM);
+    h.take(KEY);
+    let ticker = &h.engine.store().tickers()[0];
+    assert_eq!(
+        (ticker.symbol.as_str(), ticker.mark, ticker.funding_rate),
+        ("BTCUSDT", 60001.0, 0.0001)
+    );
+}
+
+#[test]
+fn flat_rows_close_even_with_zero_leverage_and_hedge_skips_keep_only_their_side() {
+    let mut h = Harness::ready();
+    h.fire_at(3000.0);
+    h.respond(
+        POSITIONS,
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0","positionSide":"BOTH","avgPrice":"0","unrealizedProfit":"0","leverage":0,"isolated":false,"liquidationPrice":0}]}"#,
+    );
+    assert!(h.engine.store().positions().is_empty());
+
+    h.engine.store_mut().set_hedged(true);
+    h.fire_at(5000.0);
+    h.respond(
+        POSITIONS,
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":false,"liquidationPrice":0},{"symbol":"BTC-USDT","positionAmt":"-0.2","positionSide":"SHORT","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":false,"liquidationPrice":0}]}"#,
+    );
+    assert_eq!(h.engine.store().positions().len(), 2);
+    // The malformed long row keeps the long; the short, absent, closes.
+    h.fire_at(7000.0);
+    h.respond(
+        POSITIONS,
+        200,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionSide":"LONG","positionAmt":"bad"}]}"#,
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].side, PositionSide::Long);
+}
+
+#[test]
+fn a_persistent_unidentifiable_order_row_keeps_known_orders_and_escalates_to_error() {
+    let mut h = Harness::ready();
+    let mut at = 26000.0;
+    h.poll_late(at);
+    for read in 1..=3 {
+        h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[42]}}"#);
+        assert!(h.engine.store().order(ORDER_ID).is_some());
+        let escalated = h
+            .logs
+            .iter()
+            .any(|l| l.contains("3 consecutive snapshots is keeping every known open order"));
+        assert_eq!(escalated, read == 3, "read {read}");
+        for _ in 0..4 {
+            at += 2000.0;
+            h.fire_at(at);
+        }
+    }
+    h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[]}}"#);
+    assert!(h.engine.store().order(ORDER_ID).is_none());
+}
+
+#[test]
+fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
+    let mut h = Harness::new();
+    let old = h.take(KEY);
+    let (timer, _) = *h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == h.now + 5000.0)
+        .unwrap();
+    h.now += 10_000.0;
+    h.event(Event::TimerFired { timer });
+    let sockets = h.sockets.len();
+    h.reply(old.id, 200, r#"{"listenKey":"late-retired"}"#);
+    assert_eq!(h.sockets.len(), sockets);
+    assert!(!h.requests.iter().any(|r| r.url.contains(KEY)));
+    h.fire_recovery();
+    assert_eq!(h.take(KEY).method, Method::Post);
 }
