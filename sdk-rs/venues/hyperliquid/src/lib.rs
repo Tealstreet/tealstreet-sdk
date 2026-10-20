@@ -643,13 +643,23 @@ fn market_rows(
         && i == instruments.len()
 }
 
+fn spot_contexts(raw: &str) -> serde_json::Result<Vec<SpotCtx>> {
+    // This list overlaps the metadata and output tables during bootstrap.
+    // Avoid geometric Vec growth: WASM memory cannot shrink after it is freed.
+    let mut count = 0;
+    json::each::<serde::de::IgnoredAny>(raw, |_| count += 1)?;
+    let mut contexts = Vec::with_capacity(count);
+    json::each::<SpotCtx>(raw, |context| contexts.push(context))?;
+    Ok(contexts)
+}
+
 fn spot_rows(
     meta: &SpotMeta,
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
+    let Ok(contexts) = spot_contexts(raw) else {
         return false;
     };
     let additional = meta.universe.len().min(contexts.len());
@@ -1287,4 +1297,74 @@ fn valid_interval(interval: &str) -> bool {
         "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M",
     ]
     .contains(&interval)
+}
+
+#[cfg(test)]
+mod spot_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn context_storage_matches_the_full_row_count_without_spare_capacity() {
+        for count in [0, 1, 3, 302, 513] {
+            let raw = format!(
+                "[{}]",
+                (0..count)
+                    .map(|i| format!(r#"{{"coin":"@{i}","midPx":"1.25"}}"#))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let contexts = spot_contexts(&raw).unwrap();
+            assert_eq!(contexts.len(), count);
+            assert_eq!(contexts.capacity(), count);
+            for (i, context) in contexts.iter().enumerate() {
+                assert_eq!(context.coin, format!("@{i}"));
+                assert_eq!(context.context.mid_px, Some(1.25));
+            }
+        }
+    }
+
+    #[test]
+    fn exact_context_storage_preserves_named_first_match_and_positional_joins() {
+        let meta: SpotMeta = serde_json::from_str(
+            r#"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"A","index":1,"szDecimals":2},{"name":"B","index":2,"szDecimals":2}],"universe":[{"name":"@1","tokens":[1,0],"index":1},{"name":"@2","tokens":[2,0],"index":2}]}"#,
+        )
+        .unwrap();
+        for raw in [
+            r#"[{"coin":"@2","midPx":"2"},{"coin":"@1","midPx":"1"},{"coin":"@1","midPx":"99"}]"#,
+            r#"[{"midPx":"1"},{"midPx":"2"}]"#,
+        ] {
+            let mut markets = Vec::new();
+            let mut tickers = Vec::new();
+            assert!(spot_rows(&meta, raw, &mut markets, &mut tickers));
+            assert_eq!(markets.len(), 2);
+            assert_eq!(markets[0].id, "@1");
+            assert_eq!(markets[1].id, "@2");
+            assert_eq!(tickers[0].last, 1.0);
+            assert_eq!(tickers[1].last, 2.0);
+        }
+        for raw in [
+            r#"[{"midPx":"1"}]"#,
+            r#"[{"midPx":"1"},{"coin":"unmatched","midPx":"2"}]"#,
+        ] {
+            let mut markets = Vec::new();
+            let mut tickers = Vec::new();
+            assert!(spot_rows(&meta, raw, &mut markets, &mut tickers));
+            assert!(markets.is_empty());
+            assert!(tickers.is_empty());
+        }
+    }
+
+    #[test]
+    fn context_precount_never_skips_late_or_unmatched_typed_validation() {
+        for raw in [
+            r#"[{"coin":"@1","midPx":"1"},{"coin":"unmatched","midPx":"NaN"}]"#,
+            r#"[{"coin":"@1","midPx":"1"},{"coin":"unmatched","midPx":false}]"#,
+            r#"[{"coin":"@1","midPx":"1"},null]"#,
+            r#"[{"coin":"@1","midPx":"1"},{}] trailing"#,
+            r#"[{"coin":"@1","midPx":"1"},]"#,
+            "{}",
+        ] {
+            assert!(spot_contexts(raw).is_err(), "{raw}");
+        }
+    }
 }

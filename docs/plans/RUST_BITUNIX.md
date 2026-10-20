@@ -3333,3 +3333,23 @@ same memoryunit failure inOrderly/KuCoin/KrakenSpot. Preserve c34logs; no
 unchanged completedperformancefailure retry. Investigate soundHLIretained/
 monotoniclinearpeak reduction andMEXCcausalstartup before nextpush. No local
 WASMrelease/replay/timing/size job underoverseerloadrule. CurrentCI_NOTgreen.
+
+HLI119focusednativecases/strictalltargetClippy/fmtPASS for exactcount context
+scratch allocation (one numericdecode; fulljson.end validation beforeoutputs).
+Oldallocation fail-before showscapacity4 vs1, not a printed302→512pair; preserve
+that distinction. Independent allocation/join/malformed/atomicity reviewPASS.
+ActualCIretainedmemory/CPU outcome stillpending; doNOTclaim a page saving.
+
+MEXCsecondaudit provesrecording isrecoverable:7,965BTCupdates ononesocket are
+contiguous43065..51029. FirstREST1206anchor43035 cannotbridge, but secondREST
+1823anchor43125 has exactsuccessor43126 at1602 beforeitsresponse. Both TS/native
+currentlydropallvalidbackoffupdates, discarding requiredsame-interesthistory.
+Plan pairedproductionrepair preserving bounded2000delta buffer throughretry
+while invalidating oldrequest/visibleversion. Strict+1 and atomicfullcandidate
+validation stay; actualsocket/interest replacement, malformedinput andoverflow
+hardreset buffer. Focusedtestsfirst; no retiming/fixture/readiness/oracle changes.
+
+MERGE HOLD (overseer): doNOTmergePR1309 oranyPR into feat/rust-rewrite until
+securityPR1351lands andoverseer explicitlylifts hold. Keepfixing/pushing/CI.
+No mergewatcher isactive; all41green andactualheadreviews remainnecessary
+but do not override thishold. Finalwinddown stillrequiredafterauthorizedmerge.
