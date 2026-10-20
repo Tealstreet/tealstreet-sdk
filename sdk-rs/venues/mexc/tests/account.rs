@@ -781,6 +781,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_account_start() {
         public_data_only: false,
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
+        recv_window: None,
     }));
     e.start(0.0);
     let r = requests(&mut e).remove(0);
