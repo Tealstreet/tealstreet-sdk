@@ -696,3 +696,26 @@ fn amend_infers_protection_from_requested_price() {
         );
     }
 }
+
+#[test]
+fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
+    let (mut e, _) = ready_unattributed();
+    place(
+        &mut e,
+        vec![order(
+            json!({"symbol":"ETH","type":"trailing_stop_market","side":"sell","amount":0.2,"price":95,"reduceOnly":true}),
+        )],
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::SignPayload { .. })),
+        "{actions:?}"
+    );
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
+            if error.contains("trailing")
+    )));
+}

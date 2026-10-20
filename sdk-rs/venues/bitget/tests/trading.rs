@@ -1056,3 +1056,38 @@ fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown
         }
     }
 }
+
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let app = |kind: &str, price: f64, trigger: f64| json!({"symbol":"BTCUSDT","side":"sell","type":kind,"notional":100,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":price,"triggerPrice":trigger,"amount":1});
+    for uta_mode in [false, true] {
+        let path = if uta_mode {
+            "/place-strategy-order"
+        } else {
+            "/place-tpsl-order"
+        };
+        for (kind, price) in [("stop_market", 80.0), ("take_profit_market", 120.0)] {
+            let mut sent = vec![];
+            let mut price_only = app(kind, price, price);
+            price_only.as_object_mut().unwrap().remove("triggerPrice");
+            for o in [app(kind, price, price), price_only] {
+                let mut h = if uta_mode { uta() } else { Harness::classic() };
+                place(&mut h, vec![o]);
+                let (_, mut p) = body(&mut h, path);
+                p.as_object_mut().unwrap().remove("clientOid");
+                sent.push(p);
+            }
+            let field = match (uta_mode, kind) {
+                (false, _) => "triggerPrice",
+                (true, "stop_market") => "stopLoss",
+                (true, _) => "takeProfit",
+            };
+            assert_eq!(sent[0][field], price.to_string(), "{kind} {uta_mode}");
+            assert_eq!(sent[0], sent[1], "{kind} {uta_mode}");
+        }
+        let mut h = if uta_mode { uta() } else { Harness::classic() };
+        place(&mut h, vec![app("stop_market", 80.0, 79.0)]);
+        assert!(h.done[0].1.is_err());
+        assert!(h.requests.iter().all(|r| r.method == Method::Get));
+    }
+}

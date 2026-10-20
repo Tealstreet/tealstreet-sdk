@@ -364,7 +364,9 @@ impl Bitrue {
         {
             return Err("Unsupported Bitrue time in force".into());
         }
-        if opts.trigger_price.is_some() || opts.trigger_type.is_some() {
+        if (opts.trigger_price.is_some() && !opts.redundant_protective_trigger())
+            || opts.trigger_type.is_some()
+        {
             return Err("Unsupported Bitrue generic trigger shape".into());
         }
         if protective && (opts.stop_loss.is_some() || opts.take_profit.is_some()) {

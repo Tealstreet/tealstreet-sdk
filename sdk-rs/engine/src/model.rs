@@ -460,6 +460,18 @@ pub struct PlaceOrderOpts {
     pub implied_volatility: Option<f64>,
 }
 
+impl PlaceOrderOpts {
+    /// The app sends protective orders with `triggerPrice` equal to `price`;
+    /// venues that trigger on `price` accept that redundancy and nothing else.
+    pub fn redundant_protective_trigger(&self) -> bool {
+        matches!(
+            self.kind,
+            OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        ) && self.trigger_price.is_some()
+            && self.trigger_price == self.price
+    }
+}
+
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<String>, D::Error> {
@@ -485,5 +497,25 @@ mod tests {
         assert!(serde_json::from_str::<PlaceOrderOpts>(
             r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"clientOrderId":null}"#,
         ).is_err());
+    }
+
+    #[test]
+    fn only_protective_orders_with_matching_prices_carry_a_redundant_trigger() {
+        let parse = |kind: &str, fields: &str| {
+            serde_json::from_str::<PlaceOrderOpts>(&format!(
+                r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":1{fields}}}"#
+            ))
+            .unwrap()
+            .redundant_protective_trigger()
+        };
+        let app = r#","price":95,"triggerPrice":95"#;
+        assert!(parse("stop_market", app));
+        assert!(parse("take_profit_market", app));
+        assert!(parse("trailing_stop_market", app));
+        assert!(!parse("stop_market", r#","price":95,"triggerPrice":94"#));
+        assert!(!parse("stop_market", r#","triggerPrice":95"#));
+        assert!(!parse("stop_market", r#","price":95"#));
+        assert!(!parse("limit", app));
+        assert!(!parse("conditional", app));
     }
 }

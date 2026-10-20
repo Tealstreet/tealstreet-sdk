@@ -280,7 +280,9 @@ impl BitgetFutures {
                     .store
                     .market(&o.symbol)
                     .ok_or_else(|| format!("Market {} not found", o.symbol))?;
-                if o.kind == OrderType::Conditional || o.trigger_price.is_some() {
+                if o.kind == OrderType::Conditional
+                    || (o.trigger_price.is_some() && !o.redundant_protective_trigger())
+                {
                     return Err("Bitget opening conditional orders are unsupported".into());
                 }
                 if !o.amount.is_finite() || o.amount < 0.0 {

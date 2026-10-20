@@ -945,3 +945,40 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
 }
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let app = |kind: &str, price: f64, trigger: Option<f64>| {
+        let mut o = opts(
+            json!({"symbol":"PF_XBTUSD","side":"sell","type":kind,"notional":12,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":price,"amount":0.1234}),
+        );
+        o.trigger_price = trigger;
+        o
+    };
+    for (kind, price) in [("stop_market", 90.5), ("take_profit_market", 110.5)] {
+        let mut sent = vec![];
+        for trigger in [Some(price), None] {
+            let (mut e, _) = ready();
+            place(&mut e, vec![app(kind, price, trigger)]);
+            let r = http(&mut e, "sendorder");
+            let mut params = r
+                .body
+                .unwrap()
+                .split('&')
+                .filter(|p| !p.starts_with("cliOrdId="))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            params.sort();
+            sent.push(params);
+        }
+        assert!(sent[0].contains(&format!("stopPrice={price}")), "{kind}");
+        assert_eq!(sent[0], sent[1], "{kind}");
+    }
+    let (mut e, _) = ready();
+    place(&mut e, vec![app("stop_market", 90.5, Some(90.0))]);
+    let all = e.drain_actions().collect::<Vec<_>>();
+    assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(all.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+    )));
+}

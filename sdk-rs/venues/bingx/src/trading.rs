@@ -582,7 +582,7 @@ impl Trading {
                 if !matches!(o.kind, OrderType::Limit | OrderType::Market)
                     || o.stop_loss.is_some()
                     || o.take_profit.is_some()
-                    || o.trigger_price.is_some()
+                    || (o.trigger_price.is_some() && !o.redundant_protective_trigger())
                     || o.close == Some(true)
                 {
                     return Err("Client order id requires one plain LIMIT or MARKET order".into());
@@ -612,7 +612,9 @@ impl Trading {
         {
             return Err("BingX supports mark-price and last-price triggers".into());
         }
-        if o.trigger_price.is_some() || o.kind == OrderType::Conditional {
+        if (o.trigger_price.is_some() && !o.redundant_protective_trigger())
+            || o.kind == OrderType::Conditional
+        {
             return Err("BingX does not support this conditional order shape".into());
         }
         if !o.amount.is_finite() || o.amount < 0.0 {

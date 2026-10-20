@@ -221,7 +221,7 @@ impl PhemexPerpetuals {
             if o.kind == OrderType::Conditional {
                 return Err("Phemex opening trigger orders are disabled until stopPxRp and triggerType are verified".into());
             }
-            if o.trigger_price.is_some() {
+            if o.trigger_price.is_some() && !o.redundant_protective_trigger() {
                 return Err("Phemex triggerPrice is unsupported for this order type".into());
             }
             if o.client_order_id.is_some() && o.amount > m.limits.amount.max {

@@ -1385,3 +1385,48 @@ fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_r
         }
     }
 }
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let protected = || {
+        let mut h = Harness::new();
+        h.e.store_mut().set_positions(vec![Position {
+            id: "E-BTC-USDT".into(),
+            symbol: "E-BTC-USDT".into(),
+            side: PositionSide::Long,
+            entry_price: 2000.0,
+            notional: 20.0,
+            leverage: 20.0,
+            margin_type: Some(MarginType::Cross),
+            position_mode: Some(PositionMode::Oneway),
+            unrealized_pnl: 0.0,
+            realized_pnl: None,
+            contracts: 0.01,
+            liquidation_price: 0.0,
+            margin_size: None,
+            last_update: None,
+        }]);
+        h
+    };
+    let app = |kind: &str, price: f64, trigger: &str| {
+        format!(
+            r#"[{{"symbol":"E-BTC-USDT","side":"sell","type":"{kind}","notional":2,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":{price}{trigger},"amount":0.001}}]"#
+        )
+    };
+    for (kind, price) in [("stop_market", 1800.0), ("take_profit_market", 2200.0)] {
+        let mut sent = vec![];
+        for trigger in [format!(r#","triggerPrice":{price}"#), String::new()] {
+            let mut h = protected();
+            h.place(&app(kind, price, &trigger));
+            assert!(!h.failed(), "{kind}");
+            let mut row = body(&h.take(Method::Post, "/fapi/v2/order"));
+            row.as_object_mut().unwrap().remove("clientOrderId");
+            sent.push(row);
+        }
+        assert_eq!(sent[0]["triggerPrice"], price, "{kind}");
+        assert_eq!(sent[0], sent[1], "{kind}");
+    }
+    let mut h = protected();
+    h.place(&app("stop_market", 1800.0, r#","triggerPrice":1790"#));
+    assert!(h.failed());
+    assert_eq!(h.writes(), 0);
+}

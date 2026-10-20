@@ -973,9 +973,12 @@ impl Lighter {
         }
         let amount = num::adjust(opts.amount, market.precision.amount);
         let conditional = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
-        let is_market = matches!(opts.kind, OrderType::Market | OrderType::TrailingStopLoss);
+        let is_market = opts.kind == OrderType::Market;
         if opts.kind == OrderType::Conditional {
             return Err("Lighter opening conditional orders are unsupported".into());
+        }
+        if opts.kind == OrderType::TrailingStopLoss {
+            return Err("Lighter trailing stops are unsupported".into());
         }
         let trigger = if conditional {
             opts.trigger_price.or(opts.price).unwrap_or(0.0)
@@ -1085,10 +1088,10 @@ impl Lighter {
         };
         let kind = match opts.kind {
             OrderType::Limit => 0,
-            OrderType::Market | OrderType::TrailingStopLoss => 1,
+            OrderType::Market => 1,
             OrderType::StopLoss => 2,
             OrderType::TakeProfit => 4,
-            OrderType::Conditional => unreachable!(),
+            OrderType::Conditional | OrderType::TrailingStopLoss => unreachable!(),
         };
         let scaled_price = u32::try_from(scale(price, price_decimals)?)
             .map_err(|_| "Lighter price exceeds uint32 range")?;

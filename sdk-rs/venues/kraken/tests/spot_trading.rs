@@ -451,3 +451,41 @@ fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
     );
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 31, result: Err(m) }) if m.contains("Permission denied"))));
 }
+#[test]
+fn market_entry_with_tpsl_legs_fails_before_any_write_unless_legs_are_disabled() {
+    for (stop_loss, take_profit) in [
+        (Some(95.), None),
+        (None, Some(105.)),
+        (Some(95.), Some(105.)),
+    ] {
+        let (mut e, _, _) = ready(false);
+        let mut o = opts("market", 99.);
+        o.stop_loss = stop_loss;
+        o.take_profit = take_profit;
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 44,
+                orders: vec![opts("limit", 99.), o],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("market entry"))));
+    }
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("market", 99.);
+    o.stop_loss = Some(0.);
+    o.take_profit = Some(0.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 45,
+            orders: vec![o],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.body.as_ref().unwrap().contains("ordertype=market"));
+    reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
+    assert_eq!(done(&mut e, 45).unwrap(), r#"["ENTRY"]"#);
+}

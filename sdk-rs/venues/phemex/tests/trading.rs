@@ -2061,3 +2061,41 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
     assert_eq!(p(r, "longLeverageRr"), Some("10".into()));
     assert_eq!(p(r, "shortLeverageRr"), Some("37".into()));
 }
+
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let app = |kind: &str, price: f64, trigger: Option<f64>| {
+        let mut o: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","side":"sell","type":kind,"notional":690,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":price,"amount":0.01})).unwrap();
+        o.trigger_price = trigger;
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        }
+    };
+    for (kind, price) in [("stop_market", 68000.), ("take_profit_market", 71000.)] {
+        let mut sent = vec![];
+        for trigger in [Some(price), None] {
+            let mut e = engine();
+            let a = command(&mut e, app(kind, price, trigger));
+            let w = writes(&a);
+            assert_eq!(w.len(), 1, "{kind}: {:?}", done(&a));
+            let mut params = params(&w[0]);
+            params.retain(|(k, _)| k != "clOrdID");
+            params.sort();
+            sent.push((
+                w[0].method,
+                w[0].url.split_once('?').unwrap().0.to_owned(),
+                params,
+            ));
+        }
+        assert!(
+            sent[0].2.contains(&("stopPxRp".into(), price.to_string())),
+            "{kind}"
+        );
+        assert_eq!(sent[0], sent[1], "{kind}");
+    }
+    let mut e = engine();
+    let a = command(&mut e, app("stop_market", 68000., Some(67900.)));
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+}

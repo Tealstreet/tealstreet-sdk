@@ -273,7 +273,9 @@ impl Kraken {
         if !market.active || market.is_read_only == Some(true) {
             return Err("Kraken market is not tradable".into());
         }
-        if opts.trigger_price.is_some() || opts.kind == OrderType::Conditional {
+        if (opts.trigger_price.is_some() && !opts.redundant_protective_trigger())
+            || opts.kind == OrderType::Conditional
+        {
             return Err("Kraken opening conditional orders are unsupported".into());
         }
         let amount = adjust(opts.amount, market.precision.amount)?;
