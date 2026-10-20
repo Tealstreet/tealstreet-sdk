@@ -334,3 +334,8 @@ captures were also trimmed and gated separately without replacing that coverage.
   All 443 compiled SDK tests, 76 host tests, 16 product-semantic tests and 9
   scripted live-smoke controls pass again on the final artifact. Bybit and
   AsterDEX protocol code remains unchanged; their replay evidence still applies.
+- Independent gate-evidence review at `7a544a6bc4` confirms all 12 public table
+  rows, three artifact sizes/hashes, 478 native tests and every SDK/host/harness
+  count against the logs. It verifies 23 passing replay checks plus the final
+  nine Binance reruns, explicit evidence limits and deferred follow-up scope;
+  no correction or false-green claim found. Proceed to PR correctness reviews.
