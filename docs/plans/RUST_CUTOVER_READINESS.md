@@ -96,3 +96,10 @@ consumer adoption remain explicit blockers.
   pass again: main CPU TS/Rust 276.6/157.9 ms, steady 145.3/75.9 ms, retained
   memory 19.7/3.6 MB including 2.0 MB Rust linear memory. Full native and SDK/WASM
   aggregate reruns are finishing before the PR checkpoint.
+- PR checkpoint: full post-integration SDK/WASM aggregate passes 343 tests in
+  ten files, including all 39 native startup cases and 205 independent consumer/
+  metadata cases. Native workspace passes 2,081 tests. No outstanding local
+  gate or actionable correctness-review finding remains. The three SDK fixes
+  introduce no venue protocol divergence or new `KNOWN_TS_FIXES` entry.
+  Push/open the PR into `feat/rust-rewrite`, publish review findings/fixes,
+  verify its exact-head CI, merge on green and cut the follow-up branch.
