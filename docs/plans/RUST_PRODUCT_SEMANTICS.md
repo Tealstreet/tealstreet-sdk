@@ -110,3 +110,33 @@ implements items 1–3 only and makes no GRVT retirement decision.
   below supersede intermediate counts. Private tapes are documented protocol
   evidence, not live credentialed connectivity or empirical verification of
   ambiguous OKX private margin-unit documentation.
+
+### Accepted local gates
+
+- Current landing workspace native suite: 2,476 tests PASS, followed by the
+  final engine 74 / Bybit 137 / OKX 83 regressions and strict workspace
+  all-targets Clippy. WASM Clippy, workspace format and bans PASS.
+- Root typecheck 44 tasks and lint 28 tasks PASS after the landing merge.
+  Earlier full-root test run passed 27 tasks including 7,329 safe-cex tests;
+  final combined-WASM SDK suite passes 384 tests / 12 files, host 68 tests,
+  frame-wire integration one, harness 557 and product integration 16.
+- Adversarial final review closed Greek identity loss through frames (old
+  artifact demonstrably fails), malformed/overflowing native OKX risk erasing
+  proven margin, and infinite leverage eliminating order reserve. Native and
+  actual-class reference regressions cover the repaired boundaries.
+- Bybit single-venue artifact: 1,108,674 bytes, below 1,258,291 budget; SHA256
+  `ee22fdc06244cf29fb86c018cd34bb8e21c6eb3c23b7ce237aff2a851f288c52`.
+
+Public medians over three runs. CPU columns are the merge gate's main-thread
+and steady-state measurements; process CPU is retained in raw logs and is
+informational. Private tapes require correctness; their performance is not a
+public performance claim. Every accepted gate also compares output and native
+request/write/signature/protocol contracts.
+
+| Profile | Frames / markets / books | Main CPU TS / Rust ms | Steady TS / Rust ms | Retained TS / Rust MB | Public / private |
+| --- | --- | --- | --- | --- | --- |
+| `bybit` | 4295 / 912 / 2 | 174.2 / 138.3 | 80.9 / 47.6 | 22.0 / 5.0 | PASS / PASS |
+| `bybitinverse` | 708 / 26 / 2 | 118.3 / 34.1 | 75.7 / 12.8 | 14.1 / 1.6 | PASS / PASS |
+| `bybitspot` | 4339 / 527 / 2 | 144.4 / 106.3 | 79.1 / 45.0 | 16.2 / 3.1 | PASS / PASS |
+| `bybitdemo` | 5833 / 912 / 2 | 222.3 / 162.5 | 112.9 / 63.6 | 21.8 / 5.0 | PASS / PASS |
+| `hyrotrader` | 160 / 2 / 2 | 19.6 / 18.9 | 3.8 / 3.4 | 13.3 / 0.8 | PASS / PASS |
