@@ -96,7 +96,8 @@ Historical candle timestamps are normalized from RFC 3339 milliseconds to
 safe-cex seconds. The polling listener creates synthetic zero-volume candles
 from ticker `last`, bucketed to the subscribed interval start. The order book
 is likewise synthetic and contains the REST quote's bid/ask with placeholder
-size. These are legacy limitations, not real WebSocket market depth/bars.
+size, with one level on each side. Public-only sessions continue quote polling
+for their listeners while skipping portfolio reads. These are legacy limitations, not real WebSocket market depth/bars.
 
 ## Portfolio reconciliation
 
@@ -144,7 +145,9 @@ order schema does not require `positionCode`, so the adapter does not guess a
 legacy-host extension.
 
 Orders use GTC and a `tealstreet-<uuid>` client code. Amount and price are
-adjusted to market steps. Bulk cancellation runs batches of ten, awaits every
+adjusted to market steps. Cancellation includes the standard `If-Match: *` precondition required by DX
+REST; errors, including 412, propagate without a replacement. Bulk cancellation
+runs batches of ten, awaits every
 cancel in the current batch, and propagates rejection. `updateOrder` awaits the
 cancel before placing its replacement, preventing double exposure.
 

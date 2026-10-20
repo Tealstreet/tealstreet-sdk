@@ -531,6 +531,7 @@ export class BreakoutpropExchange extends BaseExchange {
       await this.getSessionToken();
       const accountCode = await this.getAccountCode();
       await this.xhr.delete(ENDPOINTS.CANCEL_ORDER, {
+        headers: { 'If-Match': '*' },
         params: {
           accountCode,
           orderCode,
@@ -673,6 +674,7 @@ export class BreakoutpropExchange extends BaseExchange {
       this.store.update({
         loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
       });
+      await this.tick();
       return;
     }
 
@@ -797,10 +799,8 @@ export class BreakoutpropExchange extends BaseExchange {
 
   tick = async () => {
     if (!this.isDisposed) {
-      if (this.isPublicDataOnly) return;
-
       try {
-        const portfolioRaw = await this.fetchPortfolioRaw();
+        const portfolioRaw = this.isPublicDataOnly ? null : await this.fetchPortfolioRaw();
         if (this.isDisposed) return;
         if (portfolioRaw) {
           const balance = this.formatBalance(portfolioRaw);

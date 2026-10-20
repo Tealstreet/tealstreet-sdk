@@ -77,3 +77,18 @@ verification.
 - Read current landing brief/spec, root/package/exchange guidance and Breakout
   CLAUDE first. Fresh branch created from fetched landing head.
 - Initial independent auth/account and surface/harness plan audits running.
+
+- Initial plan audits confirmed no protocol inheritance. Phase 1 foundation:
+  20 scripted native tests, strict clippy and fmt pass. Independent review is
+  finding subscription/scheduler boundary bugs; fixes are in progress.
+- TS reference fixes public-only quote polling and duplicate placeholder book
+  levels; targeted TS suite: 15 passing.
+- Credential-name check: `oneshot-secret ls` reports no store. No credential
+  values read or searched. Live recording remains blocked.
+- Generic polling harness: 263 tests pass before venue registration. Public
+  fixture metadata will explicitly say `documented-scripted`, never live.
+- Phase 1 independent review found four defects: empty active-symbol masks,
+  synthetic interval coverage, earlier dispatch deadlines, and reciprocal
+  leverage overflow. All fixed with regressions: 26 public/auth tests passing;
+  strict all-target clippy and fmt passing. Public auth remains socket-free.
+  Future-phase files are present but not part of this phase commit.

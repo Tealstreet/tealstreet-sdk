@@ -1,0 +1,619 @@
+mod support;
+use safe_cex_engine::{Command, Event, Method};
+use safe_cex_venue_breakoutprop::{Options, parse_session_timeout_ms};
+use support::*;
+
+#[test]
+fn documented_market_steps_and_margin_rates_are_not_decimal_counts() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    let market = rig.engine.store().market("ETHUSD").unwrap();
+    assert_eq!(market.precision.price, 0.01);
+    assert_eq!(market.precision.amount, 0.01);
+    assert_eq!(market.limits.amount.min, 0.01);
+    assert_eq!(market.limits.amount.max, 724.0);
+    assert_eq!(market.limits.leverage.max, 5.0);
+    assert_eq!(market.contract_size, Some(1.0));
+    assert_eq!(market.base, "ETH");
+    assert!(rig.engine.store().market("XBTUSD").is_none());
+    assert!(
+        rig.dispatch_times
+            .windows(2)
+            .all(|window| window[1] - window[0] >= 200.0)
+    );
+}
+
+#[test]
+fn login_has_basic_body_and_further_requests_use_dxapi_session() {
+    let mut rig = Rig::defaults();
+    let login = rig.next_request();
+    assert_eq!(login.method, Method::Post);
+    assert_eq!(
+        login.body.as_deref(),
+        Some(r#"{"domain":"default","username":"example-user","password":"example-password"}"#)
+    );
+    assert!(
+        login
+            .headers
+            .iter()
+            .all(|(name, _)| *name != "Authorization")
+    );
+    assert_eq!(login.timeout_ms, Some(20_000));
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    assert!(
+        user.headers
+            .contains(&("Authorization", "DXAPI example-session".into()))
+    );
+    rig.reply(&user, 200, USER);
+    let instruments = rig.next_request();
+    assert!(
+        instruments
+            .headers
+            .contains(&("Authorization", "DXAPI example-session".into()))
+    );
+}
+
+#[test]
+fn timeout_parsing_is_bounded_positive_and_rejects_malformed_parts() {
+    assert_eq!(parse_session_timeout_ms("01:02:03"), Ok(3_723_000.0));
+    for timeout in [
+        "00:60:00",
+        "00:00:60",
+        "-1:00:00",
+        "x:00:00",
+        "00:00",
+        "00:00:00",
+        "1::2",
+        "1.5:00:00",
+    ] {
+        assert!(parse_session_timeout_ms(timeout).is_err(), "{timeout}");
+    }
+}
+
+#[test]
+fn multiple_market_requests_share_one_login_and_one_discovery() {
+    let mut rig = Rig::defaults();
+    let login = rig.next_request();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    assert!(rig.requests.is_empty());
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    assert!(user.url.contains("/users/"));
+    rig.reply(&user, 200, USER);
+    let first = rig.next_request();
+    let second = rig.next_request();
+    let third = rig.next_request();
+    assert!(first.url.contains("instruments/query"));
+    assert!(second.url.contains("instruments/query"));
+    assert!(third.url.ends_with("marketdata"));
+}
+
+#[test]
+fn quote_prices_seed_zero_funding_ticker_and_one_placeholder_book_level() {
+    let mut rig = Rig::defaults();
+    rig.command(Command::SubscribeOrderBook {
+        symbol: "ETHUSD".into(),
+    });
+    rig.boot();
+    let ticker = rig.engine.store().ticker("ETHUSD").unwrap();
+    assert_eq!(
+        (
+            ticker.bid,
+            ticker.ask,
+            ticker.last,
+            ticker.mark,
+            ticker.index
+        ),
+        (3656.01, 3656.02, 3656.01, 3656.01, 3656.01)
+    );
+    assert_eq!(
+        (
+            ticker.funding_rate,
+            ticker.funding_time,
+            ticker.volume,
+            ticker.percentage
+        ),
+        (0.0, 0.0, 0.0, 0.0)
+    );
+    let book = rig.engine.book("ETHUSD").unwrap();
+    assert_eq!(book.bids(), &[(3656.01, 1.0)]);
+    assert_eq!(book.asks(), &[(3656.02, 1.0)]);
+}
+
+#[test]
+fn book_subscriptions_are_reference_counted() {
+    let mut rig = Rig::defaults();
+    for _ in 0..2 {
+        rig.command(Command::SubscribeOrderBook {
+            symbol: "ETHUSD".into(),
+        });
+    }
+    rig.boot();
+    rig.command(Command::UnsubscribeOrderBook {
+        symbol: "ETHUSD".into(),
+    });
+    assert!(rig.engine.book("ETHUSD").is_some());
+    rig.command(Command::UnsubscribeOrderBook {
+        symbol: "ETHUSD".into(),
+    });
+    assert!(rig.engine.book("ETHUSD").is_none());
+}
+
+#[test]
+fn public_only_keeps_polling_authenticated_quotes_without_a_socket() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    let poll = rig.next_request();
+    assert!(poll.url.ends_with("marketdata"));
+    assert_eq!(
+        poll.body.as_deref(),
+        Some(r#"{"eventTypes":[{"type":"Quote"}],"symbols":["ETHUSD"],"account":"default:00002"}"#)
+    );
+    rig.reply(&poll, 200, QUOTES);
+    assert!(rig.next_request().url.ends_with("marketdata"));
+}
+
+#[test]
+fn malformed_quote_snapshot_keeps_last_known_good_tickers_and_book() {
+    let mut rig = Rig::defaults();
+    rig.command(Command::SubscribeOrderBook {
+        symbol: "ETHUSD".into(),
+    });
+    rig.boot();
+    let poll = rig.next_request();
+    rig.reply(&poll, 200, r#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":10,"ask":11,"time":"2024-12-11T07:55:11Z"},{"symbol":"ETHUSD","type":"Quote","bid":12,"ask":13,"time":"not-a-date"}]}"#);
+    assert_eq!(rig.engine.store().ticker("ETHUSD").unwrap().bid, 3656.01);
+    assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(3656.01));
+}
+
+#[test]
+fn first_401_refreshes_and_resends_once_while_second_fails() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let original = rig.next_request();
+    rig.reply(&original, 401, "{}");
+    let login = rig.next_request();
+    assert!(login.url.ends_with("login"));
+    rig.reply(
+        &login,
+        200,
+        r#"{"sessionToken":"new-session","timeout":"00:30:00"}"#,
+    );
+    let retry = rig.next_request();
+    assert_eq!(retry.body, original.body);
+    assert!(
+        retry
+            .headers
+            .contains(&("Authorization", "DXAPI new-session".into()))
+    );
+    rig.reply(&retry, 401, "{}");
+    assert!(rig.result(9).as_ref().unwrap_err().contains("401"));
+}
+
+#[test]
+fn late_old_session_401_reuses_new_session_without_second_login() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    for command in [8, 9] {
+        rig.command(Command::FetchCandles {
+            command,
+            symbol: "ETHUSD".into(),
+            interval: "1h".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+    }
+    let first = rig.next_request();
+    let second = rig.next_request();
+    rig.reply(&first, 401, "{}");
+    let login = rig.next_request();
+    assert!(login.url.ends_with("login"));
+    rig.reply(
+        &login,
+        200,
+        r#"{"sessionToken":"new-session","timeout":"00:30:00"}"#,
+    );
+    rig.reply(&second, 401, "{}");
+    for _ in 0..2 {
+        let retry = rig.next_request();
+        assert!(retry.url.ends_with("marketdata"));
+        assert!(
+            retry
+                .headers
+                .contains(&("Authorization", "DXAPI new-session".into()))
+        );
+        rig.reply(&retry, 200, r#"{"events":[]}"#);
+    }
+    assert!(rig.result(8).is_ok());
+    assert!(rig.result(9).is_ok());
+}
+
+#[test]
+fn simultaneous_401s_share_one_reauthentication() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    for command in [8, 9] {
+        rig.command(Command::FetchCandles {
+            command,
+            symbol: "ETHUSD".into(),
+            interval: "1h".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+    }
+    let first = rig.next_request();
+    let second = rig.next_request();
+    rig.reply(&first, 401, "{}");
+    rig.reply(&second, 401, "{}");
+    let login = rig.next_request();
+    assert!(login.url.ends_with("login"));
+    rig.reply(&login, 200, LOGIN);
+    for _ in 0..2 {
+        let retry = rig.next_request();
+        assert!(retry.url.ends_with("marketdata"));
+        rig.reply(&retry, 200, r#"{"events":[]}"#);
+    }
+    assert!(rig.result(8).is_ok());
+    assert!(rig.result(9).is_ok());
+}
+
+#[test]
+fn expired_cached_session_logs_in_before_next_poll_and_keeps_account() {
+    let mut rig = Rig::defaults();
+    let login = rig.next_request();
+    rig.reply(
+        &login,
+        200,
+        r#"{"sessionToken":"short","timeout":"00:00:01"}"#,
+    );
+    for body in [USER, INSTRUMENTS, DETAILS, QUOTES] {
+        let request = rig.next_request();
+        rig.reply(&request, 200, body);
+    }
+    let refresh = rig.next_request();
+    assert!(refresh.url.ends_with("login"));
+    rig.reply(&refresh, 200, LOGIN);
+    let poll = rig.next_request();
+    assert!(poll.url.ends_with("marketdata"));
+    assert!(poll.body.unwrap().contains("default:00002"));
+}
+
+#[test]
+fn login_401_does_not_loop_and_does_not_leak_password_or_response_body() {
+    let mut rig = Rig::defaults();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let login = rig.next_request();
+    rig.reply(
+        &login,
+        401,
+        r#"{"message":"example-password secret-token"}"#,
+    );
+    assert!(rig.requests.is_empty());
+    let error = rig.result(9).as_ref().unwrap_err();
+    assert_eq!(error, "DXtrade HTTP 401");
+    assert!(!format!("{:?}", rig.notices).contains("example-password"));
+}
+
+#[test]
+fn network_retries_have_three_attempt_limit() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    for _ in 0..4 {
+        loop {
+            let request = rig.next_request();
+            if request.body.as_ref().unwrap().contains("Candle") {
+                rig.failure(&request);
+                break;
+            }
+            rig.reply(&request, 200, QUOTES);
+        }
+    }
+    assert_eq!(
+        rig.result(9).as_ref().unwrap_err(),
+        "DXtrade transport failed"
+    );
+}
+
+#[test]
+fn exact_subaccount_suffix_cannot_accidentally_select_a_longer_number() {
+    let mut rig = Rig::new(Options {
+        key: "example-user".into(),
+        secret: "password".into(),
+        subaccount: Some("2".into()),
+        ..Options::default()
+    });
+    let login = rig.next_request();
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    rig.reply(&user,200,r#"{"userDetails":[{"login":"example-user","domain":"default","accounts":[{"account":"default:12","accountStatus":"FULL_TRADING"},{"account":"default:2","accountStatus":"FULL_TRADING"},{"account":"default:3","accountStatus":"CLOSE_ONLY"}]}]}"#);
+    let instruments = rig.next_request();
+    assert!(instruments.url.ends_with("accountCode=default%3A2"));
+}
+
+#[test]
+fn ambiguous_account_discovery_fails_before_market_requests() {
+    let mut rig = Rig::defaults();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let login = rig.next_request();
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    rig.reply(&user,200,r#"{"userDetails":[{"login":"example-user","domain":"default","accounts":[{"account":"default:12","accountStatus":"FULL_TRADING"},{"account":"default:2","accountStatus":"FULL_TRADING"}]}]}"#);
+    assert!(
+        rig.result(9)
+            .as_ref()
+            .unwrap_err()
+            .contains("Multiple accounts")
+    );
+    assert!(rig.requests.is_empty());
+}
+
+#[test]
+fn username_is_encoded_as_a_single_url_segment() {
+    let mut rig = Rig::new(Options {
+        key: "user/name?x=y".into(),
+        secret: "password".into(),
+        ..Options::default()
+    });
+    let login = rig.next_request();
+    rig.reply(&login, 200, LOGIN);
+    assert!(
+        rig.next_request()
+            .url
+            .ends_with("users/user%2Fname%3Fx%3Dy")
+    );
+}
+
+#[test]
+fn historical_candles_parse_rfc3339_to_seconds_and_send_account() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: Some(1_733_907_600_000.0),
+        to_ms: None,
+        limit: None,
+    });
+    let request = rig.next_request();
+    assert!(
+        request
+            .body
+            .as_ref()
+            .unwrap()
+            .contains("2024-12-11T09:00:00.000Z")
+    );
+    assert!(
+        request
+            .body
+            .as_ref()
+            .unwrap()
+            .contains(r#""account":"default:00002""#)
+    );
+    rig.reply(&request,200,r#"{"events":[{"symbol":"ETHUSD","type":"Candle","candleType":"h","open":3656.01,"close":3657,"high":3658,"low":3655,"volume":922.778,"time":"2024-12-11T09:00:00.125Z"}]}"#);
+    assert!(rig.result(9).as_ref().unwrap().contains("1733907600.125"));
+}
+
+#[test]
+fn unsupported_interval_fails_before_any_new_http_request() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "3m".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    assert!(rig.result(9).is_err());
+    assert!(rig.requests.is_empty());
+}
+
+#[test]
+fn partial_stream_failure_discards_accumulated_rows_before_retry() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let request = rig.next_request();
+    rig.engine.handle(
+        rig.now,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    rig.engine.handle(rig.now,Event::HttpChunk{request:request.id,data:br#"{"events":[{"symbol":"ETHUSD","type":"Candle","candleType":"h","open":1,"close":1,"high":1,"low":1,"volume":0,"time":"2024-12-11T09:00:00Z"},"#});
+    rig.failure(&request);
+    let retry = rig.next_request();
+    rig.reply(&retry, 200, r#"{"events":[]}"#);
+    assert_eq!(rig.result(9).as_ref().unwrap(), "[]");
+}
+
+fn synthetic_candle_interval(interval: &str, seconds: f64) {
+    let mut rig = Rig::defaults();
+    rig.command(Command::SubscribeCandles {
+        symbol: "ETHUSD".into(),
+        interval: interval.into(),
+    });
+    rig.boot();
+    let frame = rig
+        .engine
+        .take_market_frame(rig.now)
+        .expect("live candle frame");
+    let mut at = 16;
+    let mut candle = None;
+    while at < frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let length = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        let body = at + 8;
+        if kind == safe_cex_engine::wire::section::CANDLES {
+            assert_eq!(
+                u32::from_le_bytes(frame[body..body + 4].try_into().unwrap()),
+                1
+            );
+            let values = (body + 12).next_multiple_of(8);
+            candle = Some(std::array::from_fn::<_, 6, _>(|index| {
+                f64::from_le_bytes(
+                    frame[values + index * 8..values + index * 8 + 8]
+                        .try_into()
+                        .unwrap(),
+                )
+            }));
+        }
+        at = body + length;
+    }
+    let candle = candle.expect("synthetic candle section");
+    assert_eq!(candle[0], (rig.now / 1_000.0 / seconds).floor() * seconds);
+    assert_eq!(&candle[1..5], &[3656.01; 4]);
+    assert_eq!(candle[5], 0.0);
+    rig.command(Command::UnsubscribeCandles {
+        symbol: "ETHUSD".into(),
+        interval: interval.into(),
+    });
+    let request = rig.next_request();
+    rig.reply(&request, 200, QUOTES);
+    assert!(rig.engine.take_market_frame(rig.now).is_none());
+}
+
+#[test]
+fn synthetic_three_minute_candles_do_not_require_a_native_history_interval() {
+    synthetic_candle_interval("3m", 180.0);
+}
+
+#[test]
+fn synthetic_six_hour_candles_do_not_require_a_native_history_interval() {
+    synthetic_candle_interval("6h", 21_600.0);
+}
+
+#[test]
+fn synthetic_twelve_hour_candles_do_not_require_a_native_history_interval() {
+    synthetic_candle_interval("12h", 43_200.0);
+}
+
+#[test]
+fn wrapper_ticker_interest_masks_never_limit_dx_account_quotes() {
+    let mut rig = Rig::defaults();
+    rig.command(Command::SetTickerSymbols {
+        symbols: Vec::new(),
+    });
+    rig.boot();
+    rig.command(Command::SetTickerSymbols {
+        symbols: vec!["BTCUSD".into()],
+    });
+    let poll = rig.next_request();
+    assert!(
+        poll.body
+            .as_ref()
+            .unwrap()
+            .contains(r#""symbols":["ETHUSD"]"#)
+    );
+    rig.reply(&poll, 200, QUOTES);
+    rig.command(Command::SetTickerSymbols {
+        symbols: Vec::new(),
+    });
+    let poll = rig.next_request();
+    assert!(
+        poll.body
+            .as_ref()
+            .unwrap()
+            .contains(r#""symbols":["ETHUSD"]"#)
+    );
+}
+
+#[test]
+fn a_delayed_read_retry_cannot_hold_ready_work_past_the_rate_limit() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    rig.command(Command::FetchCandles {
+        command: 8,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let old = rig.next_request();
+    assert_eq!(rig.now, 1000.0);
+    rig.failure(&old);
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1m".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let fresh = rig.next_request();
+    assert_eq!(rig.now, 1200.0);
+    assert!(fresh.body.as_ref().unwrap().contains(r#""candleType":"m""#));
+    rig.reply(&fresh, 200, r#"{"events":[]}"#);
+    assert!(rig.result(9).is_ok());
+    let retry = rig.next_request();
+    assert_eq!(rig.now, 2001.0);
+    assert_eq!(retry.body, old.body);
+}
+
+#[test]
+fn reciprocal_margin_rate_must_be_finite_and_at_least_one() {
+    for rate in ["1e-320", "2"] {
+        let mut rig = Rig::defaults();
+        for body in [LOGIN, USER, INSTRUMENTS] {
+            let request = rig.next_request();
+            rig.reply(&request, 200, body);
+        }
+        let request = rig.next_request();
+        rig.reply(&request, 200, &DETAILS.replace("0.2", rate));
+        assert!(rig.engine.store().markets().is_empty());
+        assert!(!rig.engine.store().loaded().markets);
+        assert!(rig.requests.is_empty());
+    }
+}

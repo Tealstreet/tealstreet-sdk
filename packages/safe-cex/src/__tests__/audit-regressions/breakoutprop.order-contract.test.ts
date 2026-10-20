@@ -227,6 +227,26 @@ describe('Breakout Prop official DX REST order contract', () => {
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ timestamp: expectedLiveTimestamp }));
   });
 
+  it('publishes one synthetic quote level on each side', () => {
+    const listener = vi.fn();
+    exchange.listenOrderBook(symbol, listener);
+    exchange.publicWebsocket.messageHandlers[`poll_book.${symbol}`][0]({ bid: 3500, ask: 3501 });
+    expect(listener).toHaveBeenCalledWith({ bids: [{ price: 3500, amount: 1, total: 1 }], asks: [{ price: 3501, amount: 1, total: 1 }] });
+  });
+
+  it('keeps public-only quote listeners polling without portfolio reads', async () => {
+    vi.spyOn(exchange, 'isPublicDataOnly', 'get').mockReturnValue(true);
+    const portfolio = vi.spyOn(exchange, 'fetchPortfolioRaw');
+    vi.spyOn(exchange, 'fetchTickers').mockResolvedValue([{ id: symbol, symbol, bid: 3500, ask: 3501, last: 3500 } as any]);
+    const listener = vi.fn();
+    exchange.listenOrderBook(symbol, listener);
+    vi.spyOn(exchange, 'getTickInterval' as any).mockReturnValue(Number.POSITIVE_INFINITY);
+    await exchange.tick();
+    exchange.dispose();
+    expect(portfolio).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
   it('uses the portfolio snapshot for orders and maps close/update fields', async () => {
     const portfolio = {
       portfolios: [

@@ -3702,6 +3702,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-breakoutprop"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
@@ -3823,6 +3833,7 @@ dependencies = [
  "safe-cex-venue-bitget",
  "safe-cex-venue-bitrue",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-breakoutprop",
  "safe-cex-venue-bybit",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-hyperliquid",
