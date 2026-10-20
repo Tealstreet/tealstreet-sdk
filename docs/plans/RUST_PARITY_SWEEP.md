@@ -50,3 +50,21 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
 - Initial cross-review found Binance USD-M and OKX TS definitive lookup
   overrides absent from Rust. Detailed gap census and phase scopes pending
   completion of the independent discovery audits.
+
+### Discovery review accepted
+
+- All 27 PRs inspected using `gh pr view`; 24 merged into landing. #1309
+  (Bitunix), #1321 (GRVT), and #1315 (master/CLI) remain unmerged and excluded.
+- Three independent reviews are recorded in `RUST_PARITY_SWEEP_AUDIT.md`.
+- Supported declared gaps: OKX inverse swaps and EEA X-Perps (#1302),
+  generic secondary GET credentials/egress (#1313). Also close the concrete
+  Binance/OKX native client-ID lookup regressions found by roster review.
+- Phemex explicit requested additions use documented reported ledger amounts
+  unchanged and direct closed-inclusive ID lookup. TS does not support
+  unbounded Phemex fills/order history, so keep its bounded scope explicit.
+- Other declared gaps are already fixed by later PRs, TS-unsupported, other
+  lane ownership, safety boundaries, live verification, or phase 9 adoption.
+- Undisclosed broader API differences found during audit are retained as
+  evidence in the census; these are not mislabeled TS-unsupported/live-only.
+- Implementation divided into disjoint query, OKX product/account/trading,
+  and secondary-signer scopes. Primary owns Phemex, wrapper, harness and docs.
