@@ -2176,7 +2176,16 @@ fn read_key_refused_portfolios_falls_back_to_the_trading_key() {
             read_key_session_with("portfolio-one", |s| s.read_portfolios_status = Some(status));
         s.collect();
         assert!(!s.deactivated, "HTTP {status}");
-        assert_eq!(s.e.account_id(), Some("portfolio-one"));
+        s.e.handle(
+            s.now,
+            Event::Command(Command::FetchAccount { command: 992 }),
+        );
+        s.collect();
+        assert!(
+            s.results
+                .contains(&(992, Ok(r#"{"userId":"portfolio-one"}"#.into()))),
+            "HTTP {status}"
+        );
         let listed = s
             .requests
             .iter()
