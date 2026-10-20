@@ -91,6 +91,14 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     ]);
   });
 
+  it('okx and blofin read an empty symbol account-wide, as TS', async () => {
+    for (const name of ['okx', 'blofin'] as const) {
+      const { exchange, command } = make(name, []);
+      await exchange.fetchClosedPnl({ symbol: '', accountName: 'a' });
+      expect(command).toHaveBeenCalledWith({ op: 'fetchClosedPositions', symbol: undefined, from: undefined, to: undefined });
+    }
+  });
+
   it('a failed engine read reports once and yields an empty history, as TS does', async () => {
     const { exchange } = make('okx', new Error('OKX closed positions: OKX 50011: Too Many Requests'));
     await expect(exchange.fetchClosedPnl({ symbol: 'BTCUSDT', accountName: 'a' })).resolves.toEqual([]);
