@@ -22,6 +22,8 @@ export function buildHyperliquidSpotTape() {
   const command = (t, op, args = {}) => records.push({ t, type: 'command', op, ...args });
   info('spotMetaAndAssetCtxs', hyperliquidSpotMeta);
   info('spotClearinghouseState', hyperliquidSpotBalance, { user: HYPERLIQUID_SPOT_REPLAY.applicationId });
+  // Rust reconciles standalone spot open orders; none rest in this scenario.
+  info('frontendOpenOrders', [], { user: HYPERLIQUID_SPOT_REPLAY.applicationId });
   ws(100, 'allMids', { mids: { '@1': '100', '@107': '100' } });
   ws(200, 'spotState', { user: HYPERLIQUID_SPOT_REPLAY.applicationId, spotState: hyperliquidSpotBalance });
   const fill = { coin: '@1', px: '100', sz: '0.5', side: 'B', time: SPOT_EPOCH + 300, startPosition: '0', dir: 'Buy', closedPnl: '0', oid: 900, tid: 12345, crossed: true, fee: '0.01', feeToken: 'USDC', hash: `0x${'11'.repeat(32)}` };
