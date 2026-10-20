@@ -2297,3 +2297,14 @@ After source tests/types/lint and independent final review, resume rebuilt
 four-mode Binance gates and all remaining selected checks. Root source checks
 just passed 44/28/27 tasks and 7,711 SDK tests per target before this final
 paired USD-M correction; refresh affected validation before final landing.
+
+
+Paired USD-M source correction is frozen and independently reviewed PASS.
+Two new USD-M preclosed/racing-fill controls fail before; all 11 cancellation
+controls pass after (all original seven retained plus four shared USD-M/PM
+cases). Package typecheck, explicit production/test lint with no-ignore,
+harness syntax and diff checks pass. The source captures native family IDs,
+then guards current Closed/Canceled status at ACK time, retaining quantities,
+both requests, family-specific failure behavior and later placements. Gate
+delta is documentation only. Native production and tapes are unchanged.
+Resume all four Binance public/private controls on the reviewed candidate.

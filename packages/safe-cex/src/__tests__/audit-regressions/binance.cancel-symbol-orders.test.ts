@@ -166,3 +166,40 @@ describe('Binance PM symbol cancellation', () => {
     expect(store.orders.find((order) => order.id === 'new-order')?.status).toBe(OrderStatus.Open);
   });
 });
+
+it.each([
+  ['USD-M', 'before'],
+  ['USD-M', 'during'],
+  ['PM', 'before'],
+  ['PM', 'during'],
+])('%s preserves a complete fill %s cancellation and a later placement', async (profile, timing) => {
+  const store = createStore();
+  const exchange = profile === 'PM'
+    ? new BinancePMExchange('binancepm', { key: 'key', secret: 'secret' }, store)
+    : new BinanceExchange('binance', { key: 'key', secret: 'secret' }, store);
+  const releases: Array<() => void> = [];
+  const deleteRequest = vi.fn(() => new Promise((resolve) => releases.push(() => resolve({ data: { code: 200 } }))));
+  const client = { delete: deleteRequest } as unknown as Axios;
+  if (exchange instanceof BinancePMExchange) exchange.papiXhr = client;
+  else exchange.xhr = client;
+  const fill = () => store.updateOrder({ id: 'regular-order' }, {
+    status: OrderStatus.Closed,
+    amount: 0.002,
+    filled: 0.002,
+    remaining: 0,
+  });
+  if (timing === 'before') fill();
+  const pending = exchange.cancelSymbolOrders('BTCUSDT');
+  if (timing === 'during') fill();
+  store.addOrUpdateOrders([{ ...store.orders[0], id: 'later-order', status: OrderStatus.Open, filled: 0, remaining: 0.002 }]);
+  for (const release of releases) release();
+  await pending;
+
+  expect(deleteRequest).toHaveBeenCalledTimes(2);
+  expect(store.orders.find((order) => order.id === 'regular-order')).toMatchObject({
+    status: OrderStatus.Closed, amount: 0.002, filled: 0.002, remaining: 0,
+  });
+  expect(store.orders.find((order) => order.id === 'algo-order')?.status).toBe(OrderStatus.Canceled);
+  expect(store.orders.find((order) => order.id === 'later-order')?.status).toBe(OrderStatus.Open);
+  expect(store.orders.find((order) => order.id === 'other-symbol-order')?.status).toBe(OrderStatus.Open);
+});

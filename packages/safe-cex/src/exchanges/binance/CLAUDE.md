@@ -631,6 +631,9 @@ regular endpoint does not claim that coverage. Both requests are attempted even
 when one fails. Local regular and algo rows are marked canceled independently
 only after their corresponding request succeeds, and any partial failure is
 re-thrown so the caller cannot mistake a partial cancel for full success.
+Only IDs captured when cancellation begins may be marked canceled. A fill
+completed before the command or racing its acknowledgement remains closed;
+later placements and unrelated symbols retain their current state.
 
 **Portfolio Margin** (`binancepm.exchange.ts:626-673`):
 
