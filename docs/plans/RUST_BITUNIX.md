@@ -2217,3 +2217,24 @@ retained 3.7/2.5 MB and sampled peak 12.1/5.0 MB. Private documented tape:
 verbatim. Kraken futures/spot public and private plus five compiled spot
 controls also PASS; selected Kraken module 1,057,043 bytes. The remaining
 Binance four-mode and integration controls continue; final CI is still pending.
+
+
+Selected replay batch stopped at portfolio-margin private correctness. USD-M,
+Spot and COIN-M public/private gates passed first. PM account/command outputs
+match, but exact outbound audit catches TS sending three writes versus four
+native writes: missing TS conditional cancel-all. Failure retained in
+/tmp/bitunix-df2-final-binancepm-private.log and out/binancepm-binancepm-private-
+jsonl-81998. No unchanged retry or write-comparison waiver.
+
+Independent production and harness investigations agree this predates the
+landing merge. TS PM calls only regular cancel-all then marks every symbol row
+canceled, including live conditionals. Native already cancels both, with an
+existing regression. The private fixture declares the conditional ACK native-
+only, but the strict Binance outbound comparison correctly still rejects the
+missing write. Correct production TS to attempt both families despite one
+failure and mark only acknowledged families; add success/partial-failure
+controls and the existing endpoint constant. Make that private ACK required
+for both implementations. Record this genuine paired TS bug correction in the
+gate and commit. No output normalization, gate change or removal of native
+cancellation. Independent review and fresh PM private/public controls precede
+resuming the remaining batch; other unaffected Binance modes retain passes.
