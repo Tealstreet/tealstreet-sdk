@@ -416,7 +416,9 @@ impl Transport for NetworkTransport {
                     }
                     route.alias_headers(&mut headers)?;
                     if route.authorize {
-                        let token = (routing.as_ref().unwrap().tokens)().await?;
+                        let token = (routing.as_ref().unwrap().tokens)()
+                            .await
+                            .map_err(|_| "Proxy authorization failed".to_owned())?;
                         if !token.is_empty() {
                             insert_header(
                                 &mut headers,

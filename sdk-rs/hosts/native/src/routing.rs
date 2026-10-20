@@ -535,7 +535,9 @@ async fn send_current_token(
     tokens: &ProxyTokenProvider,
 ) -> Result<(), String> {
     loop {
-        let token = tokens().await?;
+        let token = tokens()
+            .await
+            .map_err(|_| "Proxy authorization failed".to_owned())?;
         if !token.is_empty() {
             return send(
                 socket,

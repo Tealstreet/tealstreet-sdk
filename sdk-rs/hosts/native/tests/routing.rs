@@ -1631,6 +1631,7 @@ const NOTICE_SIGNATURE: &str = "native-notice-signature-sentinel";
 struct NoticeNetwork {
     network: NetworkTransport,
     signed_url: String,
+    account_route: bool,
 }
 impl Transport for NoticeNetwork {
     fn connect(
@@ -1644,6 +1645,9 @@ impl Transport for NoticeNetwork {
     }
     fn request(&self, mut request: HttpRequest, events: safe_cex_native::Events) {
         request.url.clone_from(&self.signed_url);
+        if self.account_route {
+            request.route = None;
+        }
         request
             .headers
             .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
@@ -1652,6 +1656,14 @@ impl Transport for NoticeNetwork {
 }
 
 async fn signed_network_notices(origin: &str) -> Vec<Notice> {
+    routed_signed_network_notices(origin, NetworkTransport::new(), false).await
+}
+
+async fn routed_signed_network_notices(
+    origin: &str,
+    network: NetworkTransport,
+    account_route: bool,
+) -> Vec<Notice> {
     let signed_url =
         format!("{origin}/private?api_key={NOTICE_API_KEY}&signature={NOTICE_SIGNATURE}");
     let engine = Engine::new(safe_cex_venue_binance::BinanceFutures::new(
@@ -1661,8 +1673,9 @@ async fn signed_network_notices(origin: &str) -> Vec<Notice> {
         },
     ));
     let transport = NoticeNetwork {
-        network: NetworkTransport::new(),
+        network,
         signed_url: signed_url.clone(),
+        account_route,
     };
     let (commands, inbox) = mpsc::unbounded_channel();
     let (notices, mut emitted) = mpsc::unbounded_channel();
@@ -1750,4 +1763,87 @@ async fn signed_connection_and_body_failures_cannot_leak_through_any_native_noti
     let body_notices = signed_network_notices(&origin).await;
     assert!(!body_notices.is_empty());
     server.await.unwrap();
+}
+
+fn rejected_proxy_token(calls: Arc<AtomicUsize>) -> ProxyTokenProvider {
+    Arc::new(move || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Err(format!(
+                "Token refresh failed: {NOTICE_API_KEY} https://token.invalid/refresh?signature={NOTICE_SIGNATURE}"
+            ))
+        })
+    })
+}
+
+fn assert_proxy_authorization_notices(notices: &[Notice]) {
+    assert!(notices.iter().any(|notice| matches!(notice,
+        Notice::Log { message, .. } if message.contains("Proxy authorization failed")
+    )));
+    assert!(notices.iter().any(|notice| matches!(notice,
+        Notice::CommandDone { command: 411, result: Err(message) }
+            if message.contains("Proxy authorization failed")
+    )));
+}
+
+#[tokio::test]
+async fn proxy_token_provider_failures_cannot_leak_through_direct_authorization_notices() {
+    let (listener, origin) = listener().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let plan = RoutingPlan {
+        http: HttpRoute {
+            authorize: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
+    // Exercise account routing through the actual venue's startup and command error paths.
+    let notices = routed_signed_network_notices(&origin, transport, true).await;
+    assert_proxy_authorization_notices(&notices);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_notices() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            socket
+                .send(Message::text(r#"{"type":"serverTime"}"#))
+                .await
+                .unwrap();
+            while let Some(message) = socket.next().await {
+                assert!(
+                    !matches!(message, Ok(Message::Text(_) | Message::Binary(_))),
+                    "failed token provider must not send authentication or HTTP payloads"
+                );
+            }
+        }
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let plan = RoutingPlan {
+        http: HttpRoute {
+            mode: HttpRouteMode::How,
+            tunnel_url: Some(origin.replacen("http://", "ws://", 1)),
+            // Leave direct authorization disabled to reach HOW's separate token boundary.
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
+    let notices = routed_signed_network_notices(&origin, transport, true).await;
+    assert_proxy_authorization_notices(&notices);
+    assert!(calls.load(Ordering::SeqCst) >= 2);
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
 }

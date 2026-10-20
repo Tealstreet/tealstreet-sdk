@@ -485,3 +485,19 @@ live trading, weakened parity oracle, or performance threshold changes.
   Scope excludes caller copies, earlier reallocations, crypto scratch and abort.
 - Native token-provider fix/regressions are in progress; public/replay CI is
   green on many initial-head jobs but remains a checkpoint until fixes land.
+
+### PR review fixes accepted
+
+- Native direct-proxy and HOW HTTP token-provider errors now become fixed
+  `Proxy authorization failed` diagnostics at each callback origin. Both actual
+  Host/Binance regressions inspect every startup Log and command notice, and
+  verify no HTTP/auth payload is dispatched. Each origin's raw-propagation
+  negative control independently exposes credential/signed-URL sentinels and
+  fails; restored tests plus existing connection/body regression pass 3/3.
+- Independent code-correctness re-review accepts both fixes. Relay opening
+  failures already emit only WsClosed1006, so no unproven relay change is made.
+  Successful/empty-token auth behavior, HOW greeting/IP auth and structured
+  venue errors remain intact. Scoped strict all-target Clippy for native and
+  Kraken passes, as do all 76 native tests and all 138 Kraken tests.
+- Push the fixes and require fresh green CI at the corrected head; earlier
+  public/variant successes at49f2a35681 do not substitute for that final CI.

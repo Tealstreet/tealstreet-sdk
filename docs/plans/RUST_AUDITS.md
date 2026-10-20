@@ -316,7 +316,8 @@ against current code before fixing. Lifecycle differences alone are not defects.
   than a claimed defect fix. New delegated signer callback errors
   are generic instead of echoing arbitrary credential-bearing exception text.
   Unstructured custom JS HTTP/body/socket exceptions are sanitized at origin;
-  structured venue responses retain actionable errors.
+  structured venue responses retain actionable errors. Native direct-proxy and
+  HOW HTTP authorization-provider failures also use fixed diagnostics.
 - ~~Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).~~
   **M4:** redirects disabled in native HTTP, host fetch and Workers HTTP/upgrade.
 - ~~live-smoke: no notional cap, no post-only, testnet reads mainnet env names.~~
