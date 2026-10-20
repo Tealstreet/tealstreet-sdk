@@ -44,6 +44,39 @@ fn fills_stream_into_execution_shape_with_millisecond_filters_and_seconds_output
     assert!(e.store().orders().is_empty());
 }
 #[test]
+fn malformed_fill_rows_are_skipped_and_logged_while_valid_fills_return() {
+    let (mut e, _) = ready();
+    ask(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(100),
+        },
+    );
+    let r = requests(&mut e).pop().unwrap();
+    let fill = r#"{"orderId":"123","symbol":"SOL_USDC_PERP","side":"Bid","price":"141","quantity":"2","fee":"-0.1","feeSymbol":"USDC","tradeId":999,"timestamp":"2025-12-15T13:28:00.123Z","isMaker":false}"#;
+    let null_fee = fill.replace(r#""-0.1""#, "null").replace("999", "998");
+    let bad_side = fill.replace("Bid", "Sideways").replace("999", "997");
+    reply(&mut e, &r, 200, &format!("[{fill},{null_fee},{bad_side}]"));
+    let actions: Vec<_> = e.drain_actions().collect();
+    let json = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            _ => None,
+        })
+        .unwrap()
+        .unwrap();
+    assert!(json.contains("\"id\":\"999\""));
+    assert!(!json.contains("998"));
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Log { message, .. })
+            if message == "Skipped 2 malformed Backpack fill rows: 998, 997")));
+}
+#[test]
 fn order_history_accepts_iso_created_at_and_computes_average_execution_price() {
     let (mut e, _) = ready();
     ask(
