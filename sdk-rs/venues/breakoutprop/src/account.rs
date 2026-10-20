@@ -99,6 +99,7 @@ impl Snapshot {
         cx.store.retain_position_ids();
         cx.store.set_positions(self.positions);
         cx.store.set_orders(self.orders);
+        cx.orders_reconciled(None);
         let settings = self
             .settings
             .into_iter()

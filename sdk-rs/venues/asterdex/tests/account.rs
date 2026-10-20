@@ -770,6 +770,20 @@ fn hedge_amend_keeps_the_order_rows_position_side() {
 }
 
 #[test]
+fn rest_ahead_of_stream_does_not_consume_no_id_execution() {
+    let mut h = H::new();
+    h.event(Event::WsOpened { socket: h.socket() });
+    h.reply("/openOrders", r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"0.5","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":10}]"#);
+    assert_eq!(h.engine.store().order("123").unwrap().filled, 0.5);
+    let mut event = order(11.0, "PARTIALLY_FILLED", "0.5", 1);
+    event["o"].as_object_mut().unwrap().remove("t");
+    h.ws(event.clone());
+    h.ws(event);
+    assert_eq!(fill_rows(&mut h), [(102.0, 0.5)]);
+    assert_eq!(h.engine.store().order("123").unwrap().filled, 0.5);
+}
+
+#[test]
 fn retired_keepalive_failure_cannot_close_the_replacement_private_socket() {
     let mut h = H::new();
     let old = h.socket();
