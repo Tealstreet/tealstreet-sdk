@@ -401,7 +401,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 12,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(1499040000000.0),
         to_ms: None,
@@ -437,7 +437,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 13,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -704,5 +704,33 @@ fn suppressed_public_feed_is_not_supervised() {
     assert_eq!(
         h.fired, 2,
         "only the unanswered interest and clock refreshes fire"
+    );
+}
+
+// AsterDEX used to serve unsupported intervals as 1h candles under the
+// requested interval; they are now rejected and nothing is requested.
+#[test]
+fn unsupported_candle_intervals_are_rejected_not_served_as_one_hour() {
+    let mut h = Harness::ready();
+    let sent = h.sent.len();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::H8,
+    });
+    assert_eq!(h.sent.len(), sent, "no kline subscription is sent");
+    let requests = h.requests.len();
+    h.command(Command::FetchCandles {
+        command: 14,
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::H8,
+        limit: None,
+        from_ms: None,
+        to_ms: None,
+    });
+    assert_eq!(h.requests.len(), requests);
+    let (_, result) = h.done.iter().find(|(command, _)| *command == 14).unwrap();
+    assert_eq!(
+        result.as_ref().unwrap_err(),
+        "AsterDEX does not support 8h candles"
     );
 }

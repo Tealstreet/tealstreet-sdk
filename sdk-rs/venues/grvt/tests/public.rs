@@ -1,3 +1,4 @@
+use safe_cex_engine::model::Interval;
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketChannel, SocketId,
     TimerId, Venue,
@@ -232,7 +233,7 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
         Event::Command(Command::FetchCandles {
             command: 8,
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1700000000000.),
             to_ms: None,
@@ -334,12 +335,12 @@ fn ticker_empty_string_clears_only_that_field() {
 fn simultaneous_candle_intervals_use_independent_feed_sockets_and_dispose() {
     let (mut e, _) = boot();
     let mut sockets = vec![];
-    for interval in ["1m", "5m"] {
+    for interval in [Interval::M1, Interval::M5] {
         e.handle(
             1700000000010.,
             Event::Command(Command::SubscribeCandles {
                 symbol: "BTC_USDT_PERP".into(),
-                interval: interval.into(),
+                interval,
             }),
         );
         let socket = e
@@ -366,12 +367,12 @@ fn simultaneous_candle_intervals_use_independent_feed_sockets_and_dispose() {
         sockets.push(socket);
     }
     assert_ne!(sockets[0], sockets[1]);
-    for (index, interval) in ["1m", "5m"].iter().enumerate() {
+    for (index, interval) in [Interval::M1, Interval::M5].iter().enumerate() {
         e.handle(
             1700000000012.,
             Event::Command(Command::UnsubscribeCandles {
                 symbol: "BTC_USDT_PERP".into(),
-                interval: (*interval).into(),
+                interval: *interval,
             }),
         );
         assert!(
@@ -418,7 +419,7 @@ fn unsupported_unicode_candle_interval_fails_without_trapping() {
         Event::Command(Command::FetchCandles {
             command: 33,
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1分钟".into(),
+            interval: safe_cex_engine::model::Interval::S1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -580,7 +581,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let socket = e
@@ -598,7 +599,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let socket = e
@@ -620,7 +621,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "ETH_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(
@@ -632,7 +633,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "ETH_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -640,7 +641,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(

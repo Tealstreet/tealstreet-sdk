@@ -103,9 +103,15 @@ pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
 pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketId) {
+    let (e, socket, _) = ready_ticking(order, algos, positions);
+    (e, socket)
+}
+/// Like `ready_with`, also returning the account poll tick timer.
+pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, SocketId, TimerId) {
     let mut e = Engine::new(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
+    let mut tick = None;
     for _ in 0..10 {
         let out = actions(&mut e);
         if out.is_empty() {
@@ -120,6 +126,10 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
+                Action::SetTimer {
+                    timer,
+                    at_ms: 3000.0,
+                } => tick = Some(timer),
                 _ => {}
             }
         }
@@ -128,7 +138,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
     e.handle(1000.0, Event::WsOpened { socket });
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
-    (e, socket)
+    (e, socket, tick.unwrap())
 }
 pub fn account_body(url: &str, order: &str, algos: &str, positions: &str) -> String {
     if url.ends_with("/v1/client/info") {

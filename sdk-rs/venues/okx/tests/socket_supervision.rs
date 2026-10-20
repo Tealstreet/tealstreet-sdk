@@ -268,7 +268,7 @@ fn reconnected_business_socket_resubscribes_candles() {
     h.open("/business");
     h.event(Event::Command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     let delay = h.close("/business");
     h.reconnect("/business", delay);

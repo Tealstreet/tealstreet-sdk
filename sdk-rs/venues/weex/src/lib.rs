@@ -10,7 +10,7 @@ mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Market, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -141,7 +141,7 @@ pub struct WeexFutures {
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
-    candles: BTreeMap<(String, String), u32>,
+    candles: BTreeMap<(String, Interval), u32>,
     seed: Seed,
     paused_until: f64,
     next_generation: u32,
@@ -481,6 +481,8 @@ impl WeexFutures {
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
+                // Markets are loaded; account state does not depend on tickers.
+                self.start_account(cx);
             }
             Task::Depth { symbol, generation } => {
                 if self
@@ -532,11 +534,10 @@ fn row_symbol(item: &str) -> String {
     serde_json::from_str::<Row<'_>>(item)
         .map_or_else(|_| "unknown".into(), |r| r.symbol.into_owned())
 }
-fn interval(i: &str, stream: bool) -> bool {
-    matches!(
-        i,
-        "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "12h" | "1d" | "1w"
-    ) || (stream && matches!(i, "2h" | "6h"))
+// WEEX kline codes are the TS spellings; 2h and 6h are stream-only.
+fn interval(i: Interval, stream: bool) -> bool {
+    use Interval::*;
+    matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
     fn guard_order_mutations(&self) -> bool {
@@ -640,11 +641,10 @@ impl Venue for WeexFutures {
             "kline" => {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, Vec<CandleEvent<'_>>>>(text) {
                     for c in row.d {
-                        if self
-                            .candles
-                            .contains_key(&(row.s.to_string(), c.i.to_string()))
+                        if let Some(i) = Interval::parse(&c.i)
+                            && self.candles.contains_key(&(row.s.to_string(), i))
                         {
-                            cx.candle(&row.s, &c.i, c.candle());
+                            cx.candle(&row.s, i, c.candle());
                         }
                     }
                 }
@@ -809,7 +809,6 @@ impl Venue for WeexFutures {
                 }
                 self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(markets);
-                self.start_account(cx);
                 self.seed = Seed {
                     rows: cx
                         .store
@@ -838,6 +837,7 @@ impl Venue for WeexFutures {
                 if self.seed.finished == 3 && !self.seed.failed {
                     if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
                         self.discovery.failed(cx, true);
+                        self.start_account(cx);
                         return;
                     }
                     let rows = std::mem::take(&mut self.seed.rows)
@@ -849,6 +849,8 @@ impl Venue for WeexFutures {
                     cx.store.set_tickers(rows);
                     self.discovery.succeeded(cx, &true);
                     self.connect_public(cx);
+                    // After the ticker seed so account rows map against seeded prices.
+                    self.start_account(cx);
                 }
             }
             Task::Depth { symbol, generation } => {
@@ -990,11 +992,8 @@ impl Venue for WeexFutures {
                 symbol,
                 interval: i,
             } => {
-                if !interval(&i, true) {
-                    cx.log(
-                        LogLevel::Warning,
-                        format!("WEEX does not support {i} candles"),
-                    );
+                if !interval(i, true) {
+                    cx.log(LogLevel::Error, i.unsupported("WEEX"));
                     return;
                 }
                 let key = (symbol, i);
@@ -1023,8 +1022,8 @@ impl Venue for WeexFutures {
                 from_ms,
                 to_ms,
             } => {
-                if !interval(&i, false) {
-                    cx.done(command, Err(format!("WEEX does not support {i} candles")));
+                if !interval(i, false) {
+                    cx.done(command, Err(i.unsupported("WEEX")));
                     return;
                 }
                 let historical = from_ms.is_some() || to_ms.is_some();

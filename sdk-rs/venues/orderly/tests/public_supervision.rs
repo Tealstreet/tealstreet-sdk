@@ -247,7 +247,7 @@ fn market_reconnect_resubscribes_live_topics_and_ignores_retired_socket() {
     }));
     h.event(Event::Command(Command::SubscribeCandles {
         symbol: "ETHUSDC".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     h.close_and_reconnect(Feed::Market, old);
     let socket = h.open(Feed::Market);

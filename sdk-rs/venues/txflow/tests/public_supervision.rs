@@ -218,7 +218,7 @@ fn api_reconnect_resubscribes_tickers_and_candles_and_ignores_retired_socket() {
     rig.open(true);
     rig.handle(Event::Command(Command::SubscribeCandles {
         symbol: "BTC-USDC".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     rig.advance(rig.now + 1_000.0);
     let old = rig.api;

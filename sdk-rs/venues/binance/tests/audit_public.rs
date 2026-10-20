@@ -66,7 +66,7 @@ fn candle_url(
     h.event(Event::Command(Command::FetchCandles {
         command: 5,
         symbol: "BTCUSDT".into(),
-        interval: interval.into(),
+        interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
         limit,
         from_ms,
         to_ms,

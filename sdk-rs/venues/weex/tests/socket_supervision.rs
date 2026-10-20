@@ -293,7 +293,7 @@ fn public_reconnect_resubscribes_live_topics_and_ignores_retired_socket() {
     h.respond("/depth", DEPTH);
     h.event(Event::Command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     assert_eq!(h.sent_to(old, "BTCUSDT@depth200"), 1);
     let delay = h.close(old);
