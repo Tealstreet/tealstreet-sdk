@@ -588,6 +588,9 @@ an auth failure — they are real rejections but not credential problems.
   generated `clientOrderId` values (truncated to 32 chars)
 - Only the payload `brokerId` field is gated to production or
   `tealstreetProxy`; the client-order-ID prefix is always applied
+- The Rust bridge passes this environment/proxy decision as `brokerAttribution`;
+  native callers set `Options.broker_attribution` for the same policy. It applies
+  to normal, trigger and protective placements, including replacements.
 - Format: `clientOrderId = "${BROKER_ID}${uuid}".slice(0, 32)`
 
 ## Tealstreet Proxy

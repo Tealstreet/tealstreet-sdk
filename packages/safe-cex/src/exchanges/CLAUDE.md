@@ -1580,3 +1580,14 @@ failed writes preserve both. Venue metadata cannot make leverage clamping panic.
 For the five side-aware families, reading already known leverage flushes the
 engine and returns its confirmed leg settings instead of replacing them with
 the market maximum. Fresh uncached leverage discovery is a separate contract.
+
+## Rust cancellation requires evidence
+
+For every registered Rust venue, canceling a nonempty ID absent from the local
+store must send a native cancellation request or reject the command explicitly.
+Store absence cannot prove an exchange order was canceled. Venues whose native
+cancel needs a symbol, asset index, or ordinary/conditional provenance reject the
+whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
+send the supplied identity directly. Empty requested lists remain valid no-ops.
+The family inventory and regression evidence live in
+`docs/plans/RUST_UNKNOWN_CANCEL.md`.

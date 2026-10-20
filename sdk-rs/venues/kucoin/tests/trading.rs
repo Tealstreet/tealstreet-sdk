@@ -485,10 +485,7 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    let stop = h.take("/api/v1/stopOrders?symbol=XBTUSDTM");
-    assert_eq!(stop.method, Method::Delete);
-    h.response(&stop, 200, r#"{"code":"200000","data":[]}"#);
-    h.pace();
+    assert!(!h.has("/api/v1/stopOrders"));
     assert_eq!(h.done(1), &Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -502,18 +499,15 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
 }
 
 #[test]
-fn symbol_cancel_cannot_report_success_when_the_stop_family_rejects() {
+fn account_cancel_cannot_report_success_when_the_stop_family_rejects() {
     let mut h = Harness::new();
     h.command(Command::CancelSymbolOrders {
         command: 1,
-        symbol: "BTCUSDT".into(),
+        symbol: "".into(),
     });
-    h.reply(
-        "/api/v3/orders?symbol=XBTUSDTM",
-        r#"{"code":"200000","data":[]}"#,
-    );
+    h.reply("/api/v3/orders", r#"{"code":"200000","data":[]}"#);
     h.pace();
-    let stop = h.take("/api/v1/stopOrders?symbol=XBTUSDTM");
+    let stop = h.take("/api/v1/stopOrders");
     h.response(
         &stop,
         400,
@@ -908,5 +902,52 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
             |action| matches!(action, Action::Http(request) if request.method != Method::Get)
         ));
         assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+    }
+}
+
+#[test]
+fn uncached_cancel_ids_send_directly_and_do_not_block_known_ids_after_rejection() {
+    for reject_unknown in [false, true] {
+        let mut h = Harness::new();
+        h.set_order("known", OrderType::Limit, 2.0);
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["unknown".into(), "known".into()],
+        });
+        let unknown = h.take("/api/v1/orders/unknown");
+        assert!(unknown.url.ends_with("/api/v1/orders/unknown"));
+        assert_eq!(unknown.method, Method::Delete);
+        if reject_unknown {
+            h.response(&unknown, 400, r#"{"code":"100001","msg":"Unknown order"}"#);
+        } else {
+            h.response(
+                &unknown,
+                200,
+                r#"{"code":"200000","data":{"cancelledOrderIds":["unknown"]}}"#,
+            );
+        }
+        h.pace();
+        let known = h.take("/api/v1/orders/known?symbol=XBTUSDTM");
+        h.response(
+            &known,
+            200,
+            r#"{"code":"200000","data":{"cancelledOrderIds":["known"]}}"#,
+        );
+        h.pace();
+        assert_eq!(h.done(1).is_err(), reject_unknown);
+        assert!(!h.has("/api/v1/orders/unknown"));
+    }
+}
+
+#[test]
+fn an_empty_native_cancel_id_never_becomes_a_bulk_delete() {
+    for id in ["", "__stop_loss"] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec![id.into()],
+        });
+        assert!(!h.has("/api/v1/orders"));
+        assert!(h.done(1).is_err());
     }
 }
