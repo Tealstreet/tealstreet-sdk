@@ -31,7 +31,10 @@ export const buildBreakoutTape = ({ publicOnly = false } = {}) => {
   http('GET', `accounts/${encodeURIComponent(BREAKOUT_ACCOUNT)}/instruments/query`, { instrumentDetails: [...symbols, 'XBTUSD'].map((symbol) => ({ account: BREAKOUT_ACCOUNT, symbol, tradingStatus: 'FULL', minOrderSize: 0.01, maxOrderSize: { value: 724, limitType: 'LOTS' }, minOrderSizeIncrement: 0.01, marginRate: { rateType: 'FLAT', tiers: [{ endVolume: 'Infinity', value: 0.2 }] } })) });
   const quoteBody = JSON.stringify({ eventTypes: [{ type: 'Quote' }], symbols, account: BREAKOUT_ACCOUNT });
   http('POST', 'marketdata', { events: quotes() }, { requestBody: quoteBody, availableAfter: 0 });
-  if (!publicOnly) http('GET', `accounts/${encodeURIComponent(BREAKOUT_ACCOUNT)}/portfolio`, breakoutPortfolio([zeroCloseOrder]), { availableAfter: 0 });
+  if (!publicOnly) http('GET', `accounts/${encodeURIComponent(BREAKOUT_ACCOUNT)}/portfolio`, breakoutPortfolio([
+    zeroCloseOrder,
+    { ...zeroCloseOrder, orderId: 76515505, orderCode: '4471153:55641', clientOrderId: '' },
+  ]), { availableAfter: 0 });
   for (let t = 2000; t <= 20000; t += 2000) http('POST', 'marketdata', { events: quotes(t / 20000) }, { t, availableAfter: t, requestBody: quoteBody });
   if (!publicOnly) {
     records.push({ t: 22000, type: 'command', op: 'placeOrders', orders: [{ symbol: 'ETHUSD', type: 'limit', side: 'buy', amount: 0.0126, price: 3656.019 }] });

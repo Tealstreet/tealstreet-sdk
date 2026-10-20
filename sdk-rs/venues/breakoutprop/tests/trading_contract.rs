@@ -98,6 +98,26 @@ fn cancellation_history(filled: f64) -> serde_json::Value {
             "filledQuantity":filled,"remainingQuantity":0}]}]})
 }
 
+fn zero_close_order(kind: OrderType) -> Order {
+    Order {
+        kind,
+        amount: 0.0,
+        filled: 0.0,
+        remaining: 0.0,
+        reduce_only: true,
+        side: OrderSide::Sell,
+        ..open()
+    }
+}
+
+fn zero_close_history() -> serde_json::Value {
+    let mut history = cancellation_history(0.0);
+    history["orders"][0]["legs"][0]["quantity"] = json!(0);
+    history["orders"][0]["legs"][0]["positionEffect"] = json!("CLOSE");
+    history["orders"][0]["legs"][0]["side"] = json!("SELL");
+    history
+}
+
 #[test]
 fn native_limit_payload_rounds_steps_generates_attributed_code_and_uses_close() {
     let mut rig = private();
@@ -699,4 +719,216 @@ fn unsupported_max_slippage_fails_entire_batch_even_for_explicit_zero() {
         assert!(rig.result(10).is_err());
         assert!(rig.requests.is_empty());
     }
+}
+
+#[test]
+fn zero_close_limit_and_stop_price_amendments_require_native_cancellation_proof() {
+    for (kind, native_type, price_field, absent_price_field) in [
+        (OrderType::Limit, "LIMIT", "limitPrice", "stopPrice"),
+        (OrderType::StopLoss, "STOP", "stopPrice", "limitPrice"),
+    ] {
+        let mut rig = private();
+        rig.engine
+            .store_mut()
+            .set_orders(vec![zero_close_order(kind)]);
+        amend(&mut rig, 10);
+        let cancel = rig.next_request();
+        assert_eq!(cancel.method, Method::Delete);
+        rig.reply(
+            &cancel,
+            200,
+            r#"{"orderId":46073148,"updateOrderId":46073149}"#,
+        );
+        let confirmation = rig.next_request();
+        assert_eq!(confirmation.method, Method::Get);
+        assert!(
+            confirmation
+                .url
+                .ends_with("/orders/history?with-order-id=46073148&limit=2")
+        );
+        assert!(rig.requests.is_empty());
+        rig.reply(&confirmation, 200, &zero_close_history().to_string());
+        let replacement = rig.next_request();
+        assert_eq!(replacement.method, Method::Post);
+        let payload = body(&replacement);
+        assert_eq!(payload["quantity"], 0.0);
+        assert_eq!(payload["positionEffect"], "CLOSE");
+        assert_eq!(payload["type"], native_type);
+        assert_eq!(payload[price_field], 3660.0);
+        assert!(payload.get(absent_price_field).is_none());
+        assert!(payload.get("positionCode").is_none());
+        rig.reply(&replacement, 200, r#"{"orderId":42}"#);
+        assert_eq!(rig.result(10), &Ok("[\"42\"]".into()));
+    }
+}
+
+#[test]
+fn zero_close_amendment_fails_closed_when_native_cancellation_proof_is_unsafe() {
+    let mut cases = vec![json!({"orders":[]})];
+    for (field, value) in [
+        ("quantity", json!(1)),
+        ("filledQuantity", json!(0.01)),
+        ("positionEffect", json!("OPEN")),
+    ] {
+        let mut proof = zero_close_history();
+        proof["orders"][0]["legs"][0][field] = value;
+        cases.push(proof);
+    }
+    let mut completed = zero_close_history();
+    completed["orders"][0]["status"] = json!("COMPLETED");
+    cases.push(completed);
+    for kind in [OrderType::Limit, OrderType::StopLoss] {
+        for proof in &cases {
+            let mut rig = private();
+            rig.engine
+                .store_mut()
+                .set_orders(vec![zero_close_order(kind)]);
+            amend(&mut rig, 10);
+            let cancel = rig.next_request();
+            rig.reply(
+                &cancel,
+                200,
+                r#"{"orderId":46073148,"updateOrderId":46073149}"#,
+            );
+            let confirmation = rig.next_request();
+            assert_eq!(confirmation.method, Method::Get);
+            rig.reply(&confirmation, 200, &proof.to_string());
+            assert!(rig.result(10).is_err(), "{proof}");
+            assert!(rig.requests.is_empty(), "{proof}");
+        }
+    }
+}
+
+#[test]
+fn zero_open_or_partially_filled_close_order_cannot_be_amended() {
+    for kind in [OrderType::Limit, OrderType::StopLoss] {
+        for reduce_only in [false, true] {
+            let mut rig = private();
+            let mut existing = zero_close_order(kind);
+            existing.reduce_only = reduce_only;
+            if reduce_only {
+                existing.filled = 0.01;
+            }
+            rig.engine.store_mut().set_orders(vec![existing]);
+            amend(&mut rig, 10);
+            assert!(rig.result(10).is_err());
+            assert!(rig.requests.is_empty());
+        }
+    }
+}
+
+#[test]
+fn empty_client_aliases_do_not_drop_native_orders_from_symbol_or_all_cancellation() {
+    for symbol in ["ETHUSD", ""] {
+        let mut rig = private();
+        let mut first = open();
+        first.client_order_id = Some(String::new());
+        let mut second = first.clone();
+        second.id = "816099:6".into();
+        rig.engine.store_mut().set_orders(vec![first, second]);
+        rig.command(Command::CancelSymbolOrders {
+            command: 10,
+            symbol: symbol.into(),
+        });
+        let cancellations = [rig.next_request(), rig.next_request()];
+        assert!(
+            cancellations
+                .iter()
+                .any(|request| request.url.ends_with("/orders/816099%3A5"))
+        );
+        assert!(
+            cancellations
+                .iter()
+                .any(|request| request.url.ends_with("/orders/816099%3A6"))
+        );
+        for request in cancellations {
+            rig.reply(&request, 200, "{}");
+        }
+        assert!(rig.result(10).is_ok());
+    }
+}
+
+#[test]
+fn native_cancellation_dedup_and_locks_ignore_empty_client_aliases() {
+    let mut rig = private();
+    let mut rows = Vec::new();
+    for id in ["816099:5", "816099:6", "816099:7"] {
+        let mut row = open();
+        row.id = id.into();
+        row.client_order_id = Some(String::new());
+        rows.push(row);
+    }
+    rig.engine.store_mut().set_orders(rows);
+    rig.command(Command::CancelOrders {
+        command: 10,
+        ids: vec!["816099:5".into(), "816099:6".into(), "816099:5".into()],
+    });
+    let first = rig.next_request();
+    let second = rig.next_request();
+    rig.command(Command::CancelOrders {
+        command: 11,
+        ids: vec!["816099:6".into()],
+    });
+    assert!(rig.result(11).is_err());
+    rig.command(Command::CancelOrders {
+        command: 12,
+        ids: vec!["816099:7".into()],
+    });
+    let third = rig.next_request();
+    assert!(third.url.ends_with("/orders/816099%3A7"));
+    rig.reply(&first, 200, "{}");
+    rig.reply(&second, 200, "{}");
+    rig.reply(&third, 200, "{}");
+    assert!(rig.result(10).is_ok());
+    assert!(rig.result(12).is_ok());
+    assert_eq!(done_count(&rig, 10), 1);
+}
+
+#[test]
+fn empty_store_client_alias_does_not_shadow_ack_routing_or_duplicate_its_client_code() {
+    let mut rig = private();
+    place(&mut rig, 10, vec![limit()]);
+    let placement = rig.next_request();
+    let code = body(&placement)["orderCode"].as_str().unwrap().to_owned();
+    rig.reply(&placement, 200, r#"{"orderId":42}"#);
+    let mut row = open();
+    row.id = "42".into();
+    row.client_order_id = Some(String::new());
+    rig.engine.store_mut().set_orders(vec![row]);
+    rig.command(Command::CancelOrders {
+        command: 11,
+        ids: vec!["42".into(), code.clone()],
+    });
+    let cancellation = rig.next_request();
+    assert!(cancellation.url.ends_with(&format!("/orders/{code}")));
+    rig.command(Command::CancelOrders {
+        command: 12,
+        ids: vec![code],
+    });
+    assert!(rig.result(12).is_err());
+    rig.reply(&cancellation, 200, "{}");
+    assert!(rig.result(11).is_ok());
+    assert!(rig.requests.is_empty());
+}
+
+#[test]
+fn empty_client_alias_cannot_authorize_history_for_a_different_native_order_code() {
+    let mut rig = private();
+    let mut existing = open();
+    existing.client_order_id = Some(String::new());
+    rig.engine.store_mut().set_orders(vec![existing]);
+    amend(&mut rig, 10);
+    let cancel = rig.next_request();
+    rig.reply(
+        &cancel,
+        200,
+        r#"{"orderId":46073148,"updateOrderId":46073149}"#,
+    );
+    let confirmation = rig.next_request();
+    let mut proof = cancellation_history(0.0);
+    proof["orders"][0]["orderCode"] = json!("different-native-order");
+    proof["orders"][0]["clientOrderId"] = json!("");
+    rig.reply(&confirmation, 200, &proof.to_string());
+    assert!(rig.result(10).is_err());
+    assert!(rig.requests.is_empty());
 }

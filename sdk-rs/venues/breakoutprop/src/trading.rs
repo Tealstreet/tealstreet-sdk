@@ -314,6 +314,7 @@ fn confirm_canceled(
         || expected
             .client_order_id
             .as_deref()
+            .filter(|client| !client.is_empty())
             .is_some_and(|client| order.client_order_id.as_deref() == Some(client));
     if order.account != account
         || order.order_id.text()? != native_id
@@ -375,6 +376,7 @@ impl TradingState {
         store
             .order(id)
             .and_then(|order| order.client_order_id.as_deref())
+            .filter(|client| !client.is_empty())
             .or_else(|| self.acknowledged.get(id).map(|ack| ack.code.as_str()))
             .unwrap_or(id)
     }
@@ -543,10 +545,14 @@ impl BreakoutProp {
                 "Breakout Prop order cancellation or replacement is already in progress".into(),
             );
         }
+        let zero_close = order.reduce_only
+            && order.amount == 0.0
+            && order.filled == 0.0
+            && order.remaining == 0.0;
         if !order.filled.is_finite()
             || order.filled != 0.0
             || !order.remaining.is_finite()
-            || order.remaining <= 0.0
+            || (order.remaining <= 0.0 && !zero_close)
         {
             return Err("Breakout Prop cannot safely replace a partially filled order".into());
         }

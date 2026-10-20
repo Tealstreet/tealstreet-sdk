@@ -160,3 +160,13 @@ verification.
   existing 5-second timeout unchanged. Root's other 25 tasks passed/cached.
   The CI matrix now runs the honestly scripted Breakout public/private gates
   plus the compiled host/Store/config tests; live provenance is not implied.
+- The adversarial zero-CLOSE/identity findings are fixed: exact zero CLOSE
+  LIMIT/STOP price amendments still require terminal zero-fill history proof;
+  empty optional client IDs cannot merge native cancellation identities,
+  bypass busy locks, authorize unrelated proof, or create broad tombstones.
+  Account tests cover successful atomic publication and failed conservation;
+  private tape includes valid native zero-CLOSE rows, including empty client ID.
+  Trading integration: 33/33 pass; strict all-target clippy passes.
+- Final native crate result after the account/trading follow-ups: 100/100 pass;
+  workspace formatting passes. Pre-landing checks are being refreshed against
+  the fetched landing head `1f9e9a5206` before final artifact/replay measurements.

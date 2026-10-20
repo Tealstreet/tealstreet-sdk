@@ -655,7 +655,7 @@ impl BreakoutProp {
             order.id == id || order.id == code || order.client_order_id.as_deref() == Some(code)
         }) {
             self.terminal_orders.insert(order.id.clone(), cx.now);
-            if let Some(client) = &order.client_order_id {
+            if let Some(client) = order.client_order_id.as_ref().filter(|id| !id.is_empty()) {
                 self.terminal_orders.insert(client.clone(), cx.now);
             }
         }

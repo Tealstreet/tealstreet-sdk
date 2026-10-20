@@ -247,7 +247,10 @@ pub(crate) fn parse_portfolio(
             || leg.filled_quantity > leg.quantity + tolerance
             || leg.remaining_quantity > leg.quantity + tolerance
             || leg.quantity < 0.0
-            || (leg.quantity == 0.0 && leg.position_effect != "CLOSE")
+            || (leg.quantity == 0.0
+                && (leg.position_effect != "CLOSE"
+                    || leg.filled_quantity != 0.0
+                    || leg.remaining_quantity != 0.0))
             || leg.filled_quantity < 0.0
             || leg.remaining_quantity < 0.0
             || leg.price < 0.0
@@ -283,7 +286,10 @@ pub(crate) fn parse_portfolio(
             remaining: leg.remaining_quantity,
             reduce_only,
             close: None,
-            client_order_id: order.client_order_id.map(Cow::into_owned),
+            client_order_id: order
+                .client_order_id
+                .filter(|id| !id.is_empty())
+                .map(Cow::into_owned),
             time_in_force: Some(TimeInForce::GoodTillCancel),
             last_update: crate::wire::timestamp(&order.transaction_time)?,
             trigger_type: None,

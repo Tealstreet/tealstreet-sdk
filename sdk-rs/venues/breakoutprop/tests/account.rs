@@ -3,6 +3,7 @@ use safe_cex_engine::Notice;
 use safe_cex_venue_breakoutprop::Options;
 use support::{QUOTES, Rig};
 const PORTFOLIO: &str = r#"{"portfolios":[{"account":"default:00002","version":86,"balances":[{"account":"default:00002","currency":"USD","value":4999.96}],"positions":[{"account":"default:00002","positionCode":"76515503","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3656.01,"marginRate":0.2,"lastUpdateTime":"2024-12-11T06:00:49.087Z"},{"account":"default:00002","positionCode":"76515542","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3660,"marginRate":0.2,"lastUpdateTime":"2024-12-11T05:56:26.400Z"}],"orders":[]}]}"#;
+const ZERO_CLOSE: &str = r#"{"account":"default:00002","orderId":76515504,"orderCode":"4471153:55640","clientOrderId":"55640","instrument":"ETHUSD","type":"STOP","status":"WORKING","finalStatus":false,"transactionTime":"2024-12-11T05:55:49.900Z","legs":[{"instrument":"ETHUSD","side":"SELL","positionEffect":"CLOSE","price":3500,"quantity":0,"filledQuantity":0,"remainingQuantity":0}]}"#;
 fn rig() -> Rig {
     let mut rig = Rig::new(Options {
         key: "example-user".into(),
@@ -132,4 +133,73 @@ fn rejected_refresh_login_stops_account_polling_without_clearing_snapshot() {
     assert!(rig.notices.contains(&Notice::Deactivate));
     assert_eq!(*rig.engine.store().balance(), before);
     assert_eq!(rig.engine.store().positions().len(), 2);
+}
+
+#[test]
+fn zero_close_order_reconciles_with_cash_positions_and_following_polls() {
+    let mut rig = rig();
+    let request = rig.next_request();
+    let body = PORTFOLIO
+        .replace("\"version\":86", "\"version\":87")
+        .replace("4999.96", "5100")
+        .replace("\"orders\":[]", &format!("\"orders\":[{ZERO_CLOSE}]"));
+    rig.reply(&request, 200, &body);
+    let store = rig.engine.store();
+    assert_eq!(store.orders().len(), 1);
+    let order = &store.orders()[0];
+    assert_eq!(order.id, "4471153:55640");
+    assert!(order.reduce_only);
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (0.0, 0.0, 0.0)
+    );
+    assert_eq!(store.positions().len(), 2);
+    assert_eq!(store.balance().used, 0.004);
+    assert!((store.balance().total - (5100.0 + store.balance().upnl)).abs() < 1e-10);
+    let quote = rig.next_request();
+    assert!(quote.url.ends_with("/marketdata"));
+    rig.reply(&quote, 200, QUOTES);
+    assert!(rig.next_request().url.ends_with("/portfolio"));
+}
+
+#[test]
+fn zero_open_or_nonzero_execution_on_zero_close_rejects_the_whole_snapshot() {
+    for invalid in [
+        ZERO_CLOSE.replace("CLOSE", "OPEN"),
+        ZERO_CLOSE.replace("\"filledQuantity\":0", "\"filledQuantity\":1e-13"),
+        ZERO_CLOSE.replace("\"remainingQuantity\":0", "\"remainingQuantity\":1e-13"),
+    ] {
+        let mut rig = rig();
+        let before = rig.engine.store().balance().clone();
+        let request = rig.next_request();
+        let body = PORTFOLIO
+            .replace("\"version\":86", "\"version\":87")
+            .replace("4999.96", "100")
+            .replace("\"orders\":[]", &format!("\"orders\":[{invalid}]"));
+        rig.reply(&request, 200, &body);
+        assert_eq!(*rig.engine.store().balance(), before);
+        assert_eq!(rig.engine.store().positions().len(), 2);
+        assert!(rig.engine.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn empty_and_missing_client_ids_keep_distinct_native_order_identities() {
+    let mut rig = rig();
+    let first = ZERO_CLOSE.replace("\"clientOrderId\":\"55640\"", "\"clientOrderId\":\"\"");
+    let second = ZERO_CLOSE
+        .replace("\"clientOrderId\":\"55640\",", "")
+        .replace("4471153:55640", "4471153:55641")
+        .replace("76515504", "76515505");
+    let request = rig.next_request();
+    rig.reply(
+        &request,
+        200,
+        &PORTFOLIO.replace("\"orders\":[]", &format!("\"orders\":[{first},{second}]")),
+    );
+    let orders = rig.engine.store().orders();
+    assert_eq!(orders.len(), 2);
+    assert_eq!(orders[0].id, "4471153:55640");
+    assert_eq!(orders[1].id, "4471153:55641");
+    assert!(orders.iter().all(|order| order.client_order_id.is_none()));
 }
