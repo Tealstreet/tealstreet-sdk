@@ -213,3 +213,34 @@ Rust linear memory is 1.5 MB for public and 0.3 MB for private replay.
 All touched Spot products, their parent perpetual products and Binance now pass
 the public/private gates. Combined-host validation, PR correctness reviews and
 green-CI landing remain pending.
+
+## Final local gates and consumer checkpoint
+
+Gates 1–6 PASS on the integrated branch, including the five public and five
+private spot/parent/Binance replays above. The latest GRVT-only landing merge
+`f95f50007c` preserves its optimization exactly; independent full harness rerun
+passes 565 tests. Both TS venues remain present and selected by default.
+
+The combined default WASM passes 396 SDK tests across 12 files, including all
+46 registered Rust aliases through actual worker startup, transferred frames
+and late-consumer snapshots. Spot identities are independently derived from
+raw metadata. Host tests pass 68/68; compiled Hyperliquid spot contracts 3/3
+and Kraken spot contracts 4/4 also pass against this combined artifact.
+An initial combined run caught missing Kraken Spot request-auditor initialization
+in the consumer test transport, repaired with the existing scoped Kraken setup;
+no native or fixture rewrite was needed. The native author independently audited
+that setup and confirmed Hyperliquid requires no counterpart change.
+
+Root `yarn typecheck`, `yarn lint` and `yarn test` pass; safe-cex runs 7,434
+tests before the final two private-protocol regressions, followed by passing
+affected suites. Independent final review passes 23 SDK tests and 30 native
+spot tests with no findings. The two native crates total 210 passing tests
+(88 Hyperliquid and 122 Kraken); full workspace strict Clippy, default WASM
+strict Clippy, formatting, bans, license and secret-scan checks pass.
+Crypto helpers remain shared by the parent products; this extension replaces
+no crypto implementation and leaves no newly provable unused crypto helper.
+
+Remaining process: push and PR into `feat/rust-rewrite`, post independent
+code-correctness reviews, fix/review findings, merge only after green CI, then
+cut a fresh follow-up branch. Private live credentials remain unverified;
+scripted private coverage must not be presented as a live account test.

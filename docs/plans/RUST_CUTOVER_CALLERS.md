@@ -45,9 +45,9 @@ of saved accounts.
 | `kucoin` | Yes | TS default; futures adapter, native contract-unit and broker configuration gates. |
 | `kucoinspot` | No | TS required; futures coverage cannot substitute for saved spot accounts. |
 | `hyperliquid` | Yes | TS default; perps/HIP-3 adapter. Public builder/agent utilities and `hyperliquid.cloid` still have callers. |
-| `hyperliquidspot` | Yes | TS default; distinct spot product in the existing Hyperliquid crate. Native spot identities, balances, signing and consumer gates tracked in [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md); no combined perps/spot account claim. Preserve wallet/builder/agent and cloid helper callers before deletion. |
+| `hyperliquidspot` | Yes | TS default; distinct spot product in the existing Hyperliquid crate. Native spot identities, balances, signing, live public/documented private gates and native worker/late-consumer checks pass ([RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md)); no combined perps/spot account claim. Preserve wallet/builder/agent and cloid helper callers before deletion. |
 | `kraken` | Yes | TS default; futures adapter. |
-| `krakenspot` | Yes | TS default; distinct spot state machine in the existing Kraken crate, including Spot form signing, WS v2 token authentication and atomic txid amend. Exact scope/reviews/live-public versus documented-private evidence tracked in [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md); preserve futures regression and consumer/default migration prerequisites. |
+| `krakenspot` | Yes | TS default; distinct spot state machine in the existing Kraken crate, including Spot form signing, WS v2 token authentication and atomic txid amend. Live public/documented private gates and native worker/late-consumer checks pass; exact scope and independent review evidence are in [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md); preserve futures regression and consumer/default migration prerequisites. |
 | `lighter` | Yes | TS default; keep wallet approval/account-tier helpers and prove all current credential/remote-signing modes. |
 | `lighter-robinhood` | No | TS required; it loads `LighterExchange`, but the Rust alias/config is not registered. Must prove broker config and add an explicit alias before cutover. |
 | `mexc` | Yes | TS default; conditional/trailing and native-unit proofs still required when removing reference coverage. |

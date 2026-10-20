@@ -409,7 +409,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
 | Hyperliquid perps | done (#1306) |
-| Hyperliquid Spot, Kraken Spot | implemented in existing crates; phase reviews and live public/documented private gates in progress ([spot plan](RUST_SPOT_PRODUCTS.md)); no TS venue deletion |
+| Hyperliquid Spot, Kraken Spot | verified opt-in products in existing crates; local gates 1–6, live public/documented private and all-46-alias consumer checks pass ([spot plan](RUST_SPOT_PRODUCTS.md)); PR correctness reviews/green CI required before landing; no TS venue deletion |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
 | Bitrue futures | done (#1314) |
@@ -508,9 +508,9 @@ ported. The linked inventory records exact callers and product constraints.
 | `cryptocom` | Opt-in; preserve account/product option and routing gates. |
 | `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
 | `hyperliquid` | Opt-in perps/HIP-3; preserve wallet/builder/agent and caller-ID helpers. The separate spot alias does not enable combined `enableSpotMarkets` accounts. |
-| `hyperliquidspot` | Opt-in spot product in the Hyperliquid crate; implementation/review and live public/documented private gates tracked in [spot plan](RUST_SPOT_PRODUCTS.md). TS/default migration and wallet/helper consumers remain deletion prerequisites. |
+| `hyperliquidspot` | Opt-in spot product in the Hyperliquid crate; phase reviews, live public/documented private gates and native worker/late-consumer identity checks pass ([spot plan](RUST_SPOT_PRODUCTS.md)). TS/default migration and wallet/helper consumers remain deletion prerequisites. |
 | `kraken` | Opt-in futures; preserve futures authentication and protocol gates alongside the distinct spot product. |
-| `krakenspot` | Opt-in spot product in the Kraken crate, with separate REST authentication and WS v2 token state; implementation/review and live public/documented private gates tracked in [spot plan](RUST_SPOT_PRODUCTS.md). TS/default migration remains a deletion prerequisite. |
+| `krakenspot` | Opt-in spot product in the Kraken crate, with separate REST authentication and WS v2 token state; phase reviews, live public/documented private gates and native worker/late-consumer identity checks pass ([spot plan](RUST_SPOT_PRODUCTS.md)). TS/default migration remains a deletion prerequisite. |
 | `lighter` | Opt-in; retain wallet/account-tier exports; broker alias and remote-signing modes unresolved. |
 | `mexc` | Opt-in; preserve native sizing and conditional/trailing evidence. |
 | `paradex` | Opt-in; retain binary feed, native signing and routing evidence. |

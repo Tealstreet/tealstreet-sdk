@@ -114,7 +114,7 @@ export const realVenue = (name: ExchangeName) => {
     );
 
   const venue = venueOf(name === 'binancepm' ? 'binance' : name);
-  if (name === 'kraken') venue.initializeReplay('rust');
+  if (name === 'kraken' || name === 'krakenspot') venue.initializeReplay('rust');
   const options: ExchangeOptions = {
     key: '',
     secret: '',
