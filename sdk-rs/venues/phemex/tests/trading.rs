@@ -1,10 +1,10 @@
 //! Documented g-API payloads and mutation lifecycle regressions.
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response, SocketId};
+mod support;
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 use serde_json::{Value, json};
+use support::Engine;
 
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"69000","askRp":"69001","lastRp":"69000","markRp":"69000","indexRp":"69000","openRp":"69000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
@@ -57,7 +57,12 @@ fn done(actions: &[Action]) -> Result<String, String> {
 }
 fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
     e.handle(1000., Event::Command(c));
-    e.drain_actions().collect()
+    let actions = e.drain_actions().collect();
+    e.wait_for(actions, |a| {
+        !requests(a).is_empty()
+            || a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+    })
 }
 fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
     let mut e = Engine::new(PhemexPerpetuals::new(Options {
@@ -69,6 +74,7 @@ fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
     let a: Vec<_> = e.drain_actions().collect();
     let a = raw(&mut e, &requests(&a)[0], PRODUCTS);
     let a = raw(&mut e, &requests(&a)[0], DAILY);
+    let a = e.wait_for(a, |a| requests(a).len() == 2);
     let socket = a
         .iter()
         .filter_map(|a| {

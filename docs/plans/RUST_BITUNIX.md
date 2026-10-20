@@ -1282,3 +1282,52 @@ Add quota/FIFO/freshsignatures/stale/stream/private+unlimited regressions.
 Independent plan+implementation audits, fullnativechecks andrebuiltprivate/
 unchanged3runpublicgates required. Nooraclehash/bookdeletion, thresholds,
 sampling, readinessorfixturetiming changes. Coinbaseholduntilreviewedpass.
+
+ActualproductionTSdispatchtrace /tmp/phemex-trace-ts.log proveswindowcarry:
+first1000mstimerwall567.001; productsdispatch570.526,response578.945;
+tickers592.524/592.774; clock.startwall699.047 leaves868ms. BTCsnapshot
+dispatch228/completion+callback252 slot3; ETHslot4 dispatches868, recorded
+response266 alreadypast, callback868. InstrumentedtracefirstETHflush1200
+vsuntraced784 exposesrealstartupremainingtimer dependence, notHTTPpromise
+drain. Nativebudgetusescallback-anchored hosttimer preservingstartupcarry;
+no freshvirtual0window. Sourceunchangedfortrace, scoresnotreused.
+
+NativePhemexbudget independentimplementationreview PASS (exactroutebypass,
+FIFO/callbackwindow/norefund/freshsignature/stalepending/429pause semantics).
+Rebuiltmodule730,910bytes, actionsregression+private16framegate PASS.
+Nativefunctionaltrace534frames/errors0 confirmsnewqueueenforced: products
+wall1921.161, tickers2386.551, clock.start2557.583; BTCvirtual228/252, ETH
+quotareset+dispatch363. Thusrealbootstrap~637ms leaves363ms, vsTS132ms
+leaving868ms; originalremainingtimer carrycauses128vs126bookevents even
+withmatchingratebudgetalgorithms. No freshquotareset/hashdrop/seedwarmup
+barrier orpervenueoffsetallowed. Independentread-only clockplan audit now
+assessesgenericdeterministiclogicalstartup drivenactualreadiness/transport
+whilecountingallconstructorCPU/memory. Preserveprotocoltimerdurations,
+recordedHTTPcausality, signingcontinuity andallpriorfixtures. No clocksources
+changedyet; fullnativequota+fixturetestverification stillinprogress.
+
+Phemexnative correction COMPLETE/reviewed:93tests (86original+7directquota/
+FIFO/freshsign/stream/staleread/retry/startupcallbackcarry/429pause controls),
+bans/fmt/strictpackagealltargets+WASMClippy PASS. Independentfinalaudit
+confirmsfixturehelpers preserveALLEmittedactions/clearedtimers/assertions,
+fireearliestactualtimeronlywhenrequiredHTTP/CommandDoneabsent,100bound
+fail-loud; noquotareset/refundhooks. Private16framegate/actionsPASS and
+module730,910bytes. Commitnativefixseparately beforeharnessclockcorrection.
+
+### Public startup clock correction plan
+
+Read-onlytwo-agent audit approvespublic-only logicalstartup (privatepaced/
+continuoussigningunchanged): activate afterrealsettledmemory+CPUbaselines
+andbeforemeasuredconstructors. One serializedscheduler, synchronousreadiness
+predicates, fullnativeHTTP/TSadapterbody ownership+explicitexternalprepare
+blockers distinguishrunnableI/O fromselectedfuturerecordedresponse waits.
+Preserve firstdispatchtimerduration andgenuine100mssetuplogicaltime; rebase
+onlyremainingLOGICALduration atplaybacktransition, neverfreshresetquota.
+Inlinelifecyclemustnotadvancepastnextundeliveredrecord; recordedresponse
+times/availableAfter, everyframe/tick/count, typedauth/writes preserved.
+Regressionsmustfailoldwallcarry withunequalCPUcostsametimertrace, retain
+100mssetup→900msquota, rejectearlyresponse/readavailability, awaitslow
+stream/asyncprepare beforewatchdog, preserveBitunixopens/reconnects/bootstrap
+andprivateclock+metrics. NoN-idleturn/quiettimeoutguess, snapshotwarmup,
+hashdrop, pervenueoffset, orperformancepolicychanges. Independentreview
+andallhelpers+actualprobes requiredbeforeunchangedpublicgates.

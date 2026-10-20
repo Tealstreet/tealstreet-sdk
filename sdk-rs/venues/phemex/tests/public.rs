@@ -1,8 +1,8 @@
 //! Oracles: https://phemex-docs.github.io/ USDⓈ-M public response examples.
-use safe_cex_engine::{
-    Action, Command, Engine, Event, Notice, RequestId, Response, SocketId, Venue,
-};
+use safe_cex_engine::{Action, Command, Event, Notice, RequestId, Response, SocketId, Venue};
+mod support;
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use support::Engine;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"20690.1","askRp":"20690.2","lastRp":"20690.2","markRp":"20690.3","indexRp":"20690","openRp":"20000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
 fn respond(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str) {
@@ -19,12 +19,17 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str) {
     )
 }
 fn request(e: &mut Engine<PhemexPerpetuals>, path: &str) -> RequestId {
-    e.drain_actions()
-        .find_map(|a| match a {
-            Action::Http(r) if r.url.contains(path) => Some(r.id),
-            _ => None,
-        })
-        .unwrap()
+    let actions = e.drain_actions().collect();
+    e.wait_for(actions, |a| {
+        a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains(path)))
+    })
+    .into_iter()
+    .find_map(|a| match a {
+        Action::Http(r) if r.url.contains(path) => Some(r.id),
+        _ => None,
+    })
+    .unwrap()
 }
 fn started() -> (Engine<PhemexPerpetuals>, SocketId) {
     let mut e = Engine::new(PhemexPerpetuals::new(Options {
@@ -174,10 +179,9 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         }) if error.contains("rate limited")
     )));
     e.handle(now + 60_000., candles(9));
-    assert!(e.drain_actions().any(|a| matches!(
-        a,
-        Action::Http(r) if r.url == "https://api.phemex.com/exchange/public/md/v2/kline/list?symbol=BTCUSDT&resolution=60&from=1699970060&to=1700000060"
-    )));
+    let actions = e.drain_actions().collect();
+    let actions = e.wait_for(actions, |a| a.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.url == "https://api.phemex.com/exchange/public/md/v2/kline/list?symbol=BTCUSDT&resolution=60&from=1699970060&to=1700000060")));
 }
 #[test]
 fn delayed_snapshot_applies_newer_diffs_and_discards_old() {
@@ -355,10 +359,7 @@ fn malformed_full_ws_snapshot_heals_without_publishing_an_empty_book() {
         })
         .unwrap();
     e.handle(1003., Event::TimerFired { timer });
-    assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::Http(r) if r.url.contains("fullbook")))
-    );
+    request(&mut e, "fullbook");
 }
 
 #[test]

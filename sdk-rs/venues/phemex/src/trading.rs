@@ -937,6 +937,10 @@ impl PhemexPerpetuals {
         None
     }
 
+    pub(crate) fn trade_request_current(&self, request: &Request) -> bool {
+        self.trading.jobs.contains_key(&request.command)
+    }
+
     fn trade_next(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;

@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod history;
+mod http;
 mod sign;
 mod trading;
 mod wire;
@@ -82,6 +83,7 @@ pub struct PhemexPerpetuals {
     account: account::State,
     trading: trading::State,
     history: history::State,
+    http_budget: http::Budget,
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
@@ -104,6 +106,7 @@ impl PhemexPerpetuals {
             account: account::State::default(),
             trading: trading::State::default(),
             history: history::State::default(),
+            http_budget: http::Budget::default(),
         }
     }
     fn native_symbol<'a>(&'a self, symbol: &'a str) -> &'a str {
@@ -124,37 +127,6 @@ impl PhemexPerpetuals {
             "wss://testnet-api.phemex.com/ws"
         } else {
             "wss://ws.phemex.com"
-        }
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        query: &str,
-        body: Option<String>,
-        pending: Pending,
-        stream: Option<ArrayAt>,
-    ) {
-        let headers = self
-            .credentials
-            .as_ref()
-            .map(|c| c.headers(path, query, body.as_deref().unwrap_or(""), cx.now))
-            .unwrap_or_default();
-        let url = format!(
-            "{}{path}{}",
-            self.rest(),
-            if query.is_empty() {
-                String::new()
-            } else {
-                format!("?{query}")
-            }
-        );
-        if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending);
-        } else {
-            cx.request(method, url, headers, body, pending);
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -591,7 +563,10 @@ impl Venue for PhemexPerpetuals {
         self.fail(cx, p, error)
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
+        if self.http_timer(cx, timer)
+            || self.account_timer(cx, timer)
+            || self.history_timer(cx, timer)
+        {
             return;
         }
         if self.startup_retry == Some(timer) {

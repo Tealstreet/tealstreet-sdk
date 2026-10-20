@@ -175,6 +175,10 @@ fn optional_integer<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64
     Ok(Option::<Number>::deserialize(d)?.map(|n| n.0))
 }
 impl PhemexPerpetuals {
+    pub(crate) fn account_request_current(&self, request: &Request) -> bool {
+        request.cycle == self.account.cycle
+    }
+
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
             return;
