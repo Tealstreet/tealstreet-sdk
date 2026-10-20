@@ -1,7 +1,8 @@
 //! Shapes and depth values from the official Aster V3 API's market-data examples.
 //! github.com/asterdex/api-docs: V3(Recommended)/EN/aster-finance-futures-api-v3.md
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketChannel,
+    SocketId, TimerId,
 };
 use safe_cex_venue_asterdex::{AsterDex, Options, sign::Version};
 
@@ -18,10 +19,15 @@ struct Harness {
     timers: Vec<(TimerId, f64)>,
     closed: Vec<SocketId>,
     done: Vec<(u32, Result<String, String>)>,
+    fired: usize,
 }
 
 impl Harness {
     fn start(options: Options) -> Self {
+        Self::start_with_policy(options, PublicFeedPolicy::Direct)
+    }
+
+    fn start_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut harness = Self {
             engine: Engine::new(AsterDex::new(options)),
             now: 1_700_000_000_000.0,
@@ -31,7 +37,9 @@ impl Harness {
             timers: Vec::new(),
             closed: Vec::new(),
             done: Vec::new(),
+            fired: 0,
         };
+        harness.engine.set_public_feed_policy(policy).unwrap();
         harness.engine.start(harness.now);
         harness.collect();
         harness
@@ -47,6 +55,12 @@ impl Harness {
     }
 
     fn load(&mut self) {
+        self.bootstrap();
+        let socket = self.socket();
+        self.event(Event::WsOpened { socket });
+    }
+
+    fn bootstrap(&mut self) {
         if self
             .requests
             .iter()
@@ -62,8 +76,6 @@ impl Harness {
             200,
             r#"[{"symbol":"BTCUSDT","openInterest":"123.45"}]"#,
         );
-        let socket = self.socket();
-        self.event(Event::WsOpened { socket });
     }
 
     fn socket(&self) -> SocketId {
@@ -140,6 +152,7 @@ impl Harness {
             self.timers.remove(0);
             self.now = at;
             self.event(Event::TimerFired { timer });
+            self.fired += 1;
         }
         self.now = until;
     }
@@ -672,6 +685,26 @@ fn supervisor_backs_off_open_flaps_and_retires_a_connection_that_never_opens() {
         code: 1006,
     });
     assert_eq!(h.sockets.len(), count);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::start_with_policy(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    h.bootstrap();
+    h.subscribe();
+    h.advance(600_000.0);
+    assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(
+        h.fired, 2,
+        "only the unanswered interest and clock refreshes fire"
+    );
 }
 
 // AsterDEX used to serve unsupported intervals as 1h candles under the

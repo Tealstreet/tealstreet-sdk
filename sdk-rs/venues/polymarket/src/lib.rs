@@ -13,7 +13,8 @@ use safe_cex_engine::model::{
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -321,7 +322,10 @@ impl Polymarket {
         if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
-        c.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            c.supervisor.connecting(cx);
+        }
         c.socket = Some(cx.connect_feed(
             SOCKETS[index],
             if index == 0 {

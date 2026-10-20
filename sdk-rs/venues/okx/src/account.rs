@@ -1233,7 +1233,7 @@ impl Okx {
                 let reopened = self.account.authenticated_once[channel];
                 self.account.authenticated_once[channel] = true;
                 self.connections[channel].authenticated = true;
-                self.connections[channel].auth_deadline = None;
+                self.connections[channel].supervisor.authenticated(cx);
                 self.subscribe_private(cx, channel);
                 self.subscribe(cx, channel);
                 if self.account.configured {
