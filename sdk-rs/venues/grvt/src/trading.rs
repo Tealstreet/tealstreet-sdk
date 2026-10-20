@@ -21,6 +21,8 @@ const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
 pub(crate) struct Trading {
     queue: VecDeque<Command>,
     busy: bool,
+    // A builder check finished after the queued front command started waiting on it.
+    builder_checked: bool,
 }
 pub struct Request {
     plan: Box<Plan>,
@@ -780,11 +782,20 @@ impl Grvt {
                     "GRVT builder fee authorization cap is below 300; re-authorize builder".into(),
                 );
             }
-            _ => {
+            BuilderState::Unauthorized => {
                 return Err(
                     "GRVT builder is not authorized; authorize builder before placing orders"
                         .into(),
                 );
+            }
+            BuilderState::Unknown | BuilderState::Checking => {
+                return Err(format!(
+                    "GRVT builder authorization could not be checked ({}); retry the order",
+                    self.account
+                        .builder_error
+                        .as_deref()
+                        .unwrap_or("check pending")
+                ));
             }
         }
         let market = cx
@@ -1223,7 +1234,9 @@ impl Grvt {
             }
             _ => {}
         }
-        if let Err(error) = self.trade_plan(cx, command.clone()) {
+        if !self.awaits_builder(&command)
+            && let Err(error) = self.trade_plan(cx, command.clone())
+        {
             cx.done(id, Err(error));
             return true;
         }
@@ -1231,10 +1244,31 @@ impl Grvt {
         self.trade_next(cx);
         true
     }
+    fn awaits_builder(&self, command: &Command) -> bool {
+        matches!(
+            command,
+            Command::PlaceOrders { .. } | Command::AmendOrder { .. }
+        ) && matches!(
+            self.account.builder,
+            BuilderState::Unknown | BuilderState::Checking
+        ) && self.account.trading_account_id.is_some()
+    }
+    pub(crate) fn builder_checked(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading.builder_checked = !self.trading.queue.is_empty();
+        self.trade_next(cx);
+    }
     fn trade_next(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.busy {
             return;
         }
+        let Some(front) = self.trading.queue.front() else {
+            return;
+        };
+        if self.awaits_builder(front) && !self.trading.builder_checked {
+            self.check_builder(cx);
+            return;
+        }
+        self.trading.builder_checked = false;
         let Some(command) = self.trading.queue.pop_front() else {
             return;
         };
@@ -1345,8 +1379,17 @@ impl Grvt {
         self.refresh_positions(cx);
         self.trade_next(cx);
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        let error = if let Effect::Place(order) = &request.step.effect {
+    /// `unknown_outcome` is false only when the write definitively did not reach the book.
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        unknown_outcome: bool,
+    ) {
+        let error = if let Effect::Place(order) = &request.step.effect
+            && unknown_outcome
+        {
             format!(
                 "{error}; reconcile GRVT client order ID {} before retrying",
                 order.id
@@ -1363,7 +1406,8 @@ impl Grvt {
         response: Response<'_>,
     ) {
         if let Err(error) = crate::wire::check(&response) {
-            self.trade_failed(cx, request, &error);
+            let unknown = !crate::wire::venue_rejected(&response);
+            self.trade_failed(cx, request, &error, unknown);
             return;
         }
         let result = (|| -> Result<(), String> {
@@ -1600,7 +1644,7 @@ impl Grvt {
                 }
                 self.trade_step(cx, *request.plan);
             }
-            Err(error) => self.trade_failed(cx, request, &error),
+            Err(error) => self.trade_failed(cx, request, &error, true),
         }
     }
 }

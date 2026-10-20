@@ -489,8 +489,11 @@ enum ActionOut<'a> {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
+        /// The message, or the partial-batch JSON `host.mjs` unpacks.
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<std::borrow::Cow<'a, str>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'a safe_cex_engine::VenueError>,
     },
 }
 
@@ -587,7 +590,14 @@ fn encode(actions: &[Action]) -> String {
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
                 result: result.as_ref().ok().map(String::as_str),
-                error: result.as_ref().err().map(String::as_str),
+                error: result.as_ref().err().map(|error| error.as_str().into()),
+                detail: None,
+            },
+            Action::Notice(Notice::CommandFailed { command, error }) => ActionOut::Done {
+                command: *command,
+                result: None,
+                error: Some(error.legacy_text().into()),
+                detail: Some(error),
             },
         })
         .collect();
@@ -712,6 +722,7 @@ impl WasmEngine {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
+                    read_credentials: options.read_credentials.clone(),
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),
@@ -1441,6 +1452,35 @@ mod tests {
         assert!(
             rows.iter()
                 .all(|row| row["headers"] == serde_json::json!([]))
+        );
+    }
+
+    #[test]
+    fn structured_failures_keep_the_legacy_error_text_beside_their_detail() {
+        let ids = ["a".to_owned()];
+        let actions = [
+            Action::Notice(Notice::CommandFailed {
+                command: 1,
+                error: safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1),
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 2,
+                result: Err("plain".into()),
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 3,
+                result: Ok("[]".into()),
+            }),
+        ];
+        assert_eq!(
+            encode(&actions),
+            concat!(
+                r#"[{"op":"done","command":1,"#,
+                r#""error":"{\"message\":\"leg 2 rejected\",\"partialOrderIds\":[\"a\"],\"partialOrderCount\":1,\"totalOrderCount\":2,\"failedOrderIndex\":1}","#,
+                r#""detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}},"#,
+                r#"{"op":"done","command":2,"error":"plain"},"#,
+                r#"{"op":"done","command":3,"result":"[]"}]"#,
+            )
         );
     }
 

@@ -1,10 +1,11 @@
 use crate::sign::Params;
 use crate::wire::{Envelope, Message};
-use crate::{Cryptocom, Pending, quoted};
+use crate::{Cryptocom, Pending, Skipped, quoted};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, TimerId, num};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Copy)]
@@ -35,6 +36,9 @@ pub struct Request {
     pub revision: u64,
     pub rows: Rows,
     pub invalid: bool,
+    pub skipped: Skipped,
+    /// Identities of unmappable snapshot rows; their known state is kept.
+    pub kept: Vec<String>,
     pub retries: u8,
 }
 
@@ -60,7 +64,7 @@ pub struct Account {
 #[derive(Deserialize)]
 pub struct OrderRow<'a> {
     #[serde(borrow)]
-    pub order_id: &'a serde_json::value::RawValue,
+    pub order_id: &'a RawValue,
     pub instrument_name: &'a str,
     pub order_type: &'a str,
     pub side: &'a str,
@@ -74,15 +78,15 @@ pub struct OrderRow<'a> {
     #[serde(default)]
     pub trigger_price: Option<&'a str>,
     #[serde(default)]
-    pub cumulative_quantity: &'a str,
+    pub cumulative_quantity: Option<&'a str>,
     #[serde(default)]
     pub status: Option<&'a str>,
     #[serde(default)]
     pub order_status: Option<&'a str>,
     #[serde(default)]
-    pub time_in_force: &'a str,
+    pub time_in_force: Option<&'a str>,
     #[serde(default)]
-    pub exec_inst: Vec<&'a str>,
+    pub exec_inst: Option<Vec<&'a str>>,
     #[serde(default)]
     pub update_time: Option<f64>,
     #[serde(default)]
@@ -93,7 +97,7 @@ pub struct OrderRow<'a> {
     pub time_created: Option<f64>,
 }
 
-pub fn id(raw: &serde_json::value::RawValue) -> String {
+pub fn id(raw: &RawValue) -> String {
     serde_json::from_str::<String>(raw.get()).unwrap_or_else(|_| raw.get().to_owned())
 }
 pub fn side(value: &str) -> OrderSide {
@@ -119,9 +123,13 @@ pub fn status(value: &str) -> OrderStatus {
     }
 }
 impl OrderRow<'_> {
-    pub fn order(&self, now: f64) -> Order {
+    /// Null optional fields keep the `known` order's values rather than resetting them.
+    pub fn order(&self, now: f64, known: Option<&Order>) -> Order {
         let amount = num::parse(self.quantity);
-        let filled = num::parse(self.cumulative_quantity);
+        let filled = self
+            .cumulative_quantity
+            .map_or_else(|| known.map_or(0.0, |o| o.filled), num::parse);
+        let exec_inst = self.exec_inst.as_deref().unwrap_or_default();
         Order {
             id: id(self.order_id),
             parent_id: None,
@@ -138,19 +146,22 @@ impl OrderRow<'_> {
             amount,
             filled,
             remaining: (amount - filled).max(0.0),
-            reduce_only: self.exec_inst.contains(&"REDUCE_ONLY"),
+            reduce_only: exec_inst.contains(&"REDUCE_ONLY"),
             close: None,
             client_order_id: self.client_oid.map(str::to_owned),
-            time_in_force: Some(if self.exec_inst.contains(&"POST_ONLY") {
-                TimeInForce::PostOnly
+            time_in_force: if exec_inst.contains(&"POST_ONLY") {
+                Some(TimeInForce::PostOnly)
             } else {
                 match self.time_in_force {
-                    "IMMEDIATE_OR_CANCEL" => TimeInForce::ImmediateOrCancel,
-                    "FILL_OR_KILL" => TimeInForce::FillOrKill,
-                    "POST_ONLY" => TimeInForce::PostOnly,
-                    _ => TimeInForce::GoodTillCancel,
+                    Some("IMMEDIATE_OR_CANCEL") => Some(TimeInForce::ImmediateOrCancel),
+                    Some("FILL_OR_KILL") => Some(TimeInForce::FillOrKill),
+                    Some("POST_ONLY") => Some(TimeInForce::PostOnly),
+                    None if self.exec_inst.is_none() => known
+                        .and_then(|o| o.time_in_force)
+                        .or(Some(TimeInForce::GoodTillCancel)),
+                    _ => Some(TimeInForce::GoodTillCancel),
                 }
-            }),
+            },
             last_update: self
                 .update_time
                 .or(self.time_updated)
@@ -171,15 +182,15 @@ struct PositionRow<'a> {
     quantity: &'a str,
     cost: &'a str,
     #[serde(default)]
-    open_position_pnl: &'a str,
+    open_position_pnl: Option<&'a str>,
     #[serde(default)]
-    isolation_type: &'a str,
+    isolation_type: Option<&'a str>,
     #[serde(default)]
     leverage: Option<&'a str>,
     #[serde(default)]
     target_leverage: Option<&'a str>,
     #[serde(default)]
-    liquidation_price: &'a str,
+    liquidation_price: Option<&'a str>,
     #[serde(default)]
     update_timestamp_ms: Option<f64>,
 }
@@ -212,10 +223,10 @@ impl PositionRow<'_> {
             },
             notional: cost.abs(),
             leverage: num::parse(self.leverage.or(self.target_leverage).unwrap_or("1")),
-            unrealized_pnl: num::parse(self.open_position_pnl),
+            unrealized_pnl: self.open_position_pnl.map_or(0.0, num::parse),
             contracts,
-            liquidation_price: num::parse(self.liquidation_price),
-            margin_type: Some(if self.isolation_type == "ISOLATED_MARGIN" {
+            liquidation_price: self.liquidation_price.map_or(0.0, num::parse),
+            margin_type: Some(if self.isolation_type == Some("ISOLATED_MARGIN") {
                 MarginType::Isolated
             } else {
                 MarginType::Cross
@@ -249,13 +260,60 @@ impl BalanceRow<'_> {
 #[derive(Deserialize)]
 struct Execution<'a> {
     #[serde(borrow)]
-    trade_id: &'a serde_json::value::RawValue,
+    trade_id: &'a RawValue,
     #[serde(borrow)]
-    order_id: &'a serde_json::value::RawValue,
+    order_id: &'a RawValue,
     instrument_name: &'a str,
     side: &'a str,
     traded_price: &'a str,
     traded_quantity: &'a str,
+}
+
+#[derive(Deserialize)]
+struct RowKey<'a> {
+    #[serde(borrow, default)]
+    order_id: Option<&'a RawValue>,
+    #[serde(borrow, default)]
+    trade_id: Option<&'a RawValue>,
+    #[serde(default)]
+    instrument_name: Option<&'a str>,
+}
+fn row_key(raw: &str) -> Option<RowKey<'_>> {
+    serde_json::from_str(raw).ok()
+}
+fn row_label(key: &RowKey<'_>) -> Option<String> {
+    key.trade_id
+        .or(key.order_id)
+        .map(id)
+        .or(key.instrument_name.map(str::to_owned))
+}
+// Rows for instruments outside the loaded markets are ignored whether or not they map.
+fn foreign(cx: &Cx<'_, Pending>, key: Option<&RowKey<'_>>) -> bool {
+    key.and_then(|k| k.instrument_name)
+        .is_some_and(|symbol| cx.store.market(symbol).is_none())
+}
+
+/// Applies each mappable row of a pushed frame; bad rows are skipped with one summary per frame.
+fn each_row<'a, T: Deserialize<'a>>(
+    cx: &mut Cx<'_, Pending>,
+    kind: &str,
+    data: &'a RawValue,
+    mut apply: impl FnMut(&mut Cx<'_, Pending>, T),
+) -> serde_json::Result<()> {
+    let mut skipped = Skipped::default();
+    json::each::<&RawValue>(data.get(), |raw| {
+        match serde_json::from_str::<T>(raw.get()) {
+            Ok(row) => apply(cx, row),
+            Err(_) => {
+                let key = row_key(raw.get());
+                if !foreign(cx, key.as_ref()) {
+                    skipped.add(key.as_ref().and_then(row_label).as_deref());
+                }
+            }
+        }
+    })?;
+    skipped.report(cx, kind);
+    Ok(())
 }
 
 impl Cryptocom {
@@ -321,6 +379,8 @@ impl Cryptocom {
                 revision: self.account.revision,
                 rows,
                 invalid: false,
+                skipped: Skipped::default(),
+                kept: vec![],
                 retries,
             }),
             true,
@@ -359,7 +419,7 @@ impl Cryptocom {
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
-                    rows.push(row.order(cx.now));
+                    rows.push(row.order(cx.now, cx.store.order(&id(row.order_id))));
                 }
             }),
             Rows::Balance(balance) => serde_json::from_str::<BalanceRow>(item).map(|row| {
@@ -368,7 +428,29 @@ impl Cryptocom {
                 }
             }),
         };
-        request.invalid |= result.is_err();
+        if result.is_ok() {
+            return;
+        }
+        let key = row_key(item);
+        if foreign(cx, key.as_ref()) {
+            return;
+        }
+        // A row without its identity cannot be kept, so the read fails as a whole.
+        let identity = match &request.rows {
+            Rows::Positions(_) => key.and_then(|k| k.instrument_name.map(str::to_owned)),
+            Rows::Orders(_) => key.and_then(|k| k.order_id.map(id)),
+            Rows::Balance(Some(_)) => {
+                request.skipped.add(None);
+                return;
+            }
+            Rows::Balance(None) => None,
+        };
+        let Some(identity) = identity else {
+            request.invalid = true;
+            return;
+        };
+        request.skipped.add(Some(&identity));
+        request.kept.push(identity);
     }
     pub(crate) fn account_response(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if request.invalid {
@@ -376,9 +458,28 @@ impl Cryptocom {
             return;
         }
         let fresh_balance = request.revision >= self.account.balance_revision;
+        request.skipped.report(
+            cx,
+            match request.rows {
+                Rows::Positions(_) => "position",
+                Rows::Balance(_) => "balance",
+                Rows::Orders(_) => "order",
+            },
+        );
+        let skipped = request.kept;
         match request.rows {
             Rows::Positions(rows) => {
                 let mut rows = rows;
+                rows.extend(
+                    cx.store
+                        .positions()
+                        .iter()
+                        .filter(|p| {
+                            skipped.contains(&p.symbol) && !rows.iter().any(|row| row.id == p.id)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
                 // Resolve cached rows before applying closure fences: a newer live
                 // reopen must survive an old snapshot row from before the closure.
                 for row in &mut rows {
@@ -486,7 +587,15 @@ impl Cryptocom {
                     self.schedule_reconcile(cx);
                 }
             }
-            Rows::Orders(rows) => {
+            Rows::Orders(mut rows) => {
+                rows.extend(
+                    cx.store
+                        .orders()
+                        .iter()
+                        .filter(|o| skipped.contains(&o.id))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
                 if matches!(request.read, Read::Orders) {
                     self.account.order_rows = Some(rows);
                     self.read_account(cx, Read::AdvancedOrders, 0);
@@ -573,11 +682,11 @@ impl Cryptocom {
                 if channel.starts_with("user.order")
                     || channel.starts_with("user.advance.order") =>
             {
-                json::each::<OrderRow>(message.data.get(), |row| {
+                each_row(cx, "order", message.data, |cx, row: OrderRow| {
                     if cx.store.market(row.instrument_name).is_none() {
                         return;
                     }
-                    let order = row.order(cx.now);
+                    let order = row.order(cx.now, cx.store.order(&id(row.order_id)));
                     if cx
                         .store
                         .order(&order.id)
@@ -601,7 +710,7 @@ impl Cryptocom {
                 })?;
             }
             "user.positions" => {
-                json::each::<PositionRow>(message.data.get(), |row| {
+                each_row(cx, "position", message.data, |cx, row: PositionRow| {
                     if cx.store.market(row.instrument_name).is_none() {
                         return;
                     }
@@ -670,7 +779,7 @@ impl Cryptocom {
             }
             "user.balance" => {
                 let mut first = true;
-                json::each::<BalanceRow>(message.data.get(), |row| {
+                each_row(cx, "balance", message.data, |cx, row: BalanceRow| {
                     if first {
                         first = false;
                         self.account.revision += 1;
@@ -680,7 +789,7 @@ impl Cryptocom {
                 })?;
             }
             "user.trade" => {
-                json::each::<Execution>(message.data.get(), |row| {
+                each_row(cx, "execution", message.data, |cx, row: Execution| {
                     if cx.store.market(row.instrument_name).is_none() {
                         return;
                     }

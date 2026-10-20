@@ -3,7 +3,7 @@
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
-use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
+use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -334,7 +334,21 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let text = encode_notice(ServerNotice::Done {
                             command: pending.original,
                             result: result.as_deref().ok(),
-                            error: result.as_ref().err().map(String::as_str),
+                            error: result.as_ref().err().map(|error| error.as_str().into()),
+                            detail: None,
+                        });
+                        self.send(client, Outgoing::Text(text));
+                    }
+                }
+                Notice::CommandFailed { command, error } => {
+                    if let Some(pending) = self.pending.remove(&command)
+                        && let Some(client) = pending.client
+                    {
+                        let text = encode_notice(ServerNotice::Done {
+                            command: pending.original,
+                            result: None,
+                            error: Some(error.legacy_text().into()),
+                            detail: Some(&error),
                         });
                         self.send(client, Outgoing::Text(text));
                     }
@@ -652,8 +666,10 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::FetchOrderBook { command, .. }
         | Command::SetStpMode { command, .. }
         | Command::FetchLeverage { command, .. }
+        | Command::FetchMaxLeverage { command, .. }
         | Command::Query { command, .. }
-        | Command::FetchCandles { command, .. } => Some(command),
+        | Command::FetchCandles { command, .. }
+        | Command::Venue { command, .. } => Some(command),
         Command::SetTickerSymbols { .. }
         | Command::SubscribeOrderBook { .. }
         | Command::UnsubscribeOrderBook { .. }
@@ -670,7 +686,9 @@ enum ServerNotice<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<std::borrow::Cow<'a, str>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'a VenueError>,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -685,7 +703,7 @@ enum ServerNotice<'a> {
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)
-        .expect("notice contains only strings and integers")
+        .expect("notice contains only strings, numbers and enums")
         .into()
 }
 

@@ -32,12 +32,12 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         ranges: HashMap<String, f64>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Tickers {
         rows: Vec<Ticker>,
         indexes: HashMap<String, u32>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Funding {
         rows: Vec<(String, f64, f64)>,
@@ -227,7 +227,7 @@ impl Woo {
                 Pending::Tickers {
                     indexes: HashMap::new(),
                     rows: Vec::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         } else {
@@ -236,7 +236,7 @@ impl Woo {
                 Pending::Markets {
                     rows: Vec::new(),
                     ranges: HashMap::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         };
@@ -383,6 +383,7 @@ impl Woo {
         state.generation = self.generation;
         state.book.clear();
         state.sync = Sync::Retry(cx.set_timer(1000.0));
+        cx.book_changed(symbol);
     }
     fn apply(book: &mut Book, delta: Delta) {
         for (side, rows) in [(BookSide::Bids, delta.bids), (BookSide::Asks, delta.asks)] {
@@ -407,7 +408,11 @@ impl Woo {
             Sync::Buffer(rows) if rows.len() < 2000 => rows.push(Buffered { time, delta }),
             Sync::Buffer(_) => self.book_retry(cx, symbol),
             Sync::Live(previous) => {
-                if time < *previous {
+                if time <= *previous {
+                    return;
+                }
+                if delta.previous.is_some_and(|p| p != *previous) {
+                    self.book_retry(cx, symbol);
                     return;
                 }
                 *previous = time;
@@ -595,6 +600,10 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -714,7 +723,8 @@ impl Venue for Woo {
             Some(cx.set_timer(
                 (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
             ));
-        for state in self.depth.values_mut() {
+        for (symbol, state) in &mut self.depth {
+            cx.book_changed(symbol);
             self.generation += 1;
             state.generation = self.generation;
             state.book.clear();
@@ -726,16 +736,19 @@ impl Venue for Woo {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets { rows, ranges, bad } => {
+            Pending::Markets {
+                rows,
+                ranges,
+                skipped,
+            } => {
                 let raw = match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| !s.symbol.starts_with("PERP_"))
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if !s.symbol.starts_with("PERP_") => (),
+                            Ok(s) => skipped.add(Some(&s.symbol)),
+                            Err(_) => skipped.add(None),
                         }
-                        *bad = true;
                         return;
                     }
                 };
@@ -751,7 +764,7 @@ impl Venue for Woo {
                     || raw.base_min <= 0.0
                     || raw.base_max < raw.base_min
                 {
-                    *bad = true;
+                    skipped.add(Some(&raw.symbol));
                     return;
                 }
                 let symbol = compact(&raw.symbol);
@@ -796,16 +809,19 @@ impl Venue for Woo {
                     maker_fee: None,
                 });
             }
-            Pending::Tickers { rows, indexes, bad } => {
+            Pending::Tickers {
+                rows,
+                indexes,
+                skipped,
+            } => {
                 let raw = match serde_json::from_str::<Statistics<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| cx.store.market(&compact(&s.symbol)).is_none())
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if cx.store.market(&compact(&s.symbol)).is_none() => (),
+                            Ok(s) => skipped.add(Some(&s.symbol)),
+                            Err(_) => skipped.add(None),
                         }
-                        *bad = true;
                         return;
                     }
                 };
@@ -813,8 +829,8 @@ impl Venue for Woo {
                 let Some(m) = cx.store.market(&symbol) else {
                     return;
                 };
-                if raw.open <= 0.0 || raw.close <= 0.0 {
-                    *bad = true;
+                if raw.close <= 0.0 {
+                    skipped.add(Some(&raw.symbol));
                     return;
                 }
                 indexes.insert(raw.symbol.to_string(), rows.len() as u32);
@@ -826,8 +842,11 @@ impl Venue for Woo {
                     last: raw.close,
                     mark: raw.mark_price,
                     index: raw.index_price.unwrap_or(f64::NAN),
-                    percentage: num::round_half_up((raw.close - raw.open) / raw.open * 10000.0)
-                        / 100.0,
+                    percentage: if raw.open > 0.0 {
+                        num::round_half_up((raw.close - raw.open) / raw.open * 10000.0) / 100.0
+                    } else {
+                        0.0
+                    },
                     open_interest: raw.open_interest,
                     funding_rate: raw.last_funding_rate,
                     funding_time: raw.next_funding_time,
@@ -880,14 +899,21 @@ impl Venue for Woo {
         match pending {
             Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
-            Pending::Markets { rows, ranges, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Markets {
+                rows,
+                ranges,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("markets") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Markets {
                             rows: vec![],
                             ranges: HashMap::new(),
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO markets",
                     );
@@ -898,14 +924,21 @@ impl Venue for Woo {
                 self.seed_attempts = 0;
                 self.seed(cx, true);
             }
-            Pending::Tickers { rows, indexes, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Tickers {
+                rows,
+                indexes,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("tickers") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Tickers {
                             indexes: HashMap::new(),
                             rows: vec![],
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO tickers",
                     );
@@ -988,7 +1021,14 @@ impl Venue for Woo {
                 }
                 let mut last = raw.timestamp;
                 for b in buffer {
-                    if b.time > raw.timestamp && b.time >= last {
+                    if b.time > last {
+                        // The first delta may overlap a REST snapshot between WS ticks.
+                        if b.delta.previous.is_some_and(|previous| {
+                            previous > last || (last > raw.timestamp && previous != last)
+                        }) {
+                            self.book_retry(cx, &symbol);
+                            return;
+                        }
                         last = b.time;
                         Self::apply(&mut state.book, b.delta);
                     }
@@ -1150,12 +1190,7 @@ impl Venue for Woo {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.depth
-                .iter()
-                .filter(|(_, s)| matches!(s.sync, Sync::Live(_)))
-                .map(|(s, d)| (s.as_str(), &d.book)),
-        )
+        Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
 }
 

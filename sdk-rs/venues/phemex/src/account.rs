@@ -25,6 +25,10 @@ pub struct Request {
     positions: Vec<Position>,
     contexts: HashMap<String, Context>,
     versions: HashMap<String, u64>,
+    /// Symbols whose rows failed to map; the store keeps their positions.
+    skipped: HashSet<String>,
+    /// A row without a usable symbol: keep every stored position of this slice.
+    unattributed: bool,
     invalid: bool,
 }
 #[derive(Default)]
@@ -251,6 +255,8 @@ impl PhemexPerpetuals {
                 positions: vec![],
                 contexts: HashMap::new(),
                 versions: HashMap::new(),
+                skipped: HashSet::new(),
+                unattributed: false,
                 invalid: false,
             };
             self.request(
@@ -305,17 +311,27 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
+        // A bad row never blocks the slice's balance; its positions keep the store's copy.
         let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
-            request.invalid = true;
+            cx.log(
+                LogLevel::Warning,
+                "Phemex skipped an unreadable position row",
+            );
+            request.unattributed = true;
             return;
         };
-        let Some(market) = cx.store.market(&row.symbol.to_ascii_uppercase()) else {
+        let symbol = row.symbol.to_ascii_uppercase();
+        let Some(market) = cx.store.market(&symbol) else {
             return;
         };
         if market.quote != CURRENCIES[request.currency]
             || (!row.currency.is_empty() && row.currency != CURRENCIES[request.currency])
         {
-            request.invalid = true;
+            cx.log(
+                LogLevel::Warning,
+                format!("Phemex skipped {symbol} position with mismatched settlement"),
+            );
+            request.skipped.insert(symbol);
             return;
         }
         let prior = request
@@ -324,7 +340,11 @@ impl PhemexPerpetuals {
             .copied()
             .or_else(|| self.account.context(&row.symbol.to_ascii_uppercase()));
         let Some((context, position)) = row.map(cx.store, prior) else {
-            request.invalid = true;
+            cx.log(
+                LogLevel::Warning,
+                format!("Phemex skipped unmappable {symbol} position row"),
+            );
+            request.skipped.insert(symbol);
             return;
         };
         request
@@ -368,6 +388,7 @@ impl PhemexPerpetuals {
         if request.write_revision == self.account.write_revision
             && request.slice_revision == self.account.slices[currency].revision
         {
+            let kept = |p: &Position| request.unattributed || request.skipped.contains(&p.symbol);
             let mut positions: Vec<_> = cx
                 .store
                 .positions()
@@ -376,6 +397,7 @@ impl PhemexPerpetuals {
                     cx.store
                         .market(&p.symbol)
                         .is_none_or(|m| m.quote != CURRENCIES[currency])
+                        || kept(p) && !request.positions.iter().any(|r| r.id == p.id)
                 })
                 .cloned()
                 .collect();
@@ -391,6 +413,8 @@ impl PhemexPerpetuals {
                     .store
                     .market(symbol)
                     .is_some_and(|m| m.quote == CURRENCIES[currency])
+                    || request.unattributed
+                    || request.skipped.contains(symbol)
                 {
                     continue;
                 }
@@ -620,9 +644,24 @@ impl PhemexPerpetuals {
                 return true;
             }
         };
+        let skipped = orders.iter().flatten().filter(|row| {
+            cx.store.market(&row.symbol.to_ascii_uppercase()).is_some() && row.unrecognized()
+        });
+        let skipped = skipped
+            .map(|row| {
+                format!(
+                    "Phemex skipped order {} with unsupported status {} or type {}",
+                    row.order_id, row.status, row.kind
+                )
+            })
+            .collect::<Vec<_>>();
+        for message in skipped {
+            cx.log(LogLevel::Warning, message);
+        }
         if orders.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| {
                 cx.store.market(&row.symbol.to_ascii_uppercase()).is_some()
+                    && !row.unrecognized()
                     && row.orders(cx.now).is_none()
             })
         }) {
@@ -666,19 +705,20 @@ impl PhemexPerpetuals {
                     .get(&symbol)
                     .copied()
                     .or_else(|| self.account.context(&symbol));
+                // A bad row keeps the store's copy; the rest of the frame still applies.
                 let Some((context, position)) = row.map(cx.store, prior) else {
                     cx.log(
                         LogLevel::Warning,
-                        "Phemex invalid position mapping; retaining private frame",
+                        format!("Phemex skipped unmappable {symbol} position row"),
                     );
-                    return true;
+                    continue;
                 };
                 if !row.currency.is_empty() && row.currency != CURRENCIES[currency] {
                     cx.log(
                         LogLevel::Warning,
-                        "Phemex mismatched position settlement; retaining private frame",
+                        format!("Phemex skipped {symbol} position with mismatched settlement"),
                     );
-                    return true;
+                    continue;
                 }
                 let version = if row.transact_time_ns > 0 {
                     row.transact_time_ns
@@ -734,9 +774,8 @@ impl PhemexPerpetuals {
         }) {
             cx.log(
                 LogLevel::Warning,
-                "Phemex invalid account mapping; retaining private frame",
+                "Phemex skipped an invalid account row; applying the rest of the frame",
             );
-            return true;
         }
         if let Some(sequence) = message.sequence {
             self.account.sequence = Some(sequence);
@@ -747,6 +786,20 @@ impl PhemexPerpetuals {
             let mut staged = Vec::new();
             for row in &rows {
                 if cx.store.market(&row.symbol.to_ascii_uppercase()).is_none() {
+                    continue;
+                }
+                if row.unrecognized() {
+                    // Executions stand alone; the store keeps its copy of the order.
+                    if !snapshot {
+                        let version = if row.version() > 0 {
+                            row.version()
+                        } else {
+                            message.timestamp
+                        };
+                        self.account_fill(cx, row, version);
+                    } else if safe_snapshot && let Some(order) = cx.store.order(&row.order_id) {
+                        staged.push(order.clone());
+                    }
                     continue;
                 }
                 let mapped = row.orders(cx.now).expect("validated order row");

@@ -734,6 +734,13 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1085,6 +1092,9 @@ impl Venue for BreakoutProp {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let entry = self.books.entry(symbol).or_default();
                 entry.0 += 1;
@@ -1153,6 +1163,10 @@ impl Venue for BreakoutProp {
             }
             Command::Query { command, query } => history::query(cx, command, query),
             Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
+            Command::FetchMaxLeverage { command, .. } => cx.done(
+                command,
+                Err("Maximum leverage queries are unavailable for DXtrade".into()),
+            ),
             Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }

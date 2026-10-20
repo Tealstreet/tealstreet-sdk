@@ -80,11 +80,7 @@ fn http_date(value: &str) -> Option<f64> {
     {
         return None;
     }
-    let y = year - i64::from(month <= 2);
-    let era = y / 400;
-    let yoe = y - era * 400;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    let days = safe_cex_engine::time::days_from_civil(year, month, day);
     Some(((days * 86400 + time[0] * 3600 + time[1] * 60 + time[2]) * 1000) as f64)
 }
 #[cfg(test)]
