@@ -8,7 +8,8 @@ use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt, Response,
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt,
+    Outcome, Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -78,9 +79,42 @@ struct Job {
     preparing: Option<Preparation>,
     operations: VecDeque<Operation>,
     results: Vec<String>,
-    errors: Vec<String>,
+    errors: Vec<VenueError>,
     attempt_all: bool,
     placement: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
+}
+impl Job {
+    /// One failure keeps its classification; several join their text and share
+    /// an outcome only when they agree. Any Unknown leg makes the command Unknown.
+    fn failure(mut self) -> VenueError {
+        let unknown = self
+            .errors
+            .iter()
+            .any(|e| e.outcome == Some(Outcome::Unknown));
+        let mut error = if self.errors.len() == 1 {
+            self.errors.pop().expect("one failure")
+        } else {
+            let outcome = self.errors[0].outcome;
+            let message: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
+            let error = VenueError::new(message.join("; "));
+            match outcome {
+                Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
+                    error.outcome(outcome)
+                }
+                _ => error,
+            }
+        };
+        if unknown {
+            error.outcome = Some(Outcome::Unknown);
+        } else if (self.effective || !self.results.is_empty())
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
+            error.outcome = None;
+        }
+        error
+    }
 }
 struct Preparation {
     orders: Vec<PlaceOrderOpts>,
@@ -435,9 +469,10 @@ impl Trading {
         | Command::FetchAccount { command }
         | Command::FetchOrderBook { command, .. } = &command
         {
-            cx.done(
+            cx.fail(
                 *command,
-                Err("This query or control is not supported by Paradex".into()),
+                not_sent("This query or control is not supported by Paradex")
+                    .kind(ErrorKind::Unsupported),
             );
             return true;
         }
@@ -447,7 +482,7 @@ impl Trading {
             if let Err(error) =
                 place_operations(orders, cx, account, &HashMap::new(), price_bands, false)
             {
-                cx.done(*command, Err(error));
+                cx.fail(*command, not_sent(error));
                 return true;
             }
             let mut seen = HashSet::new();
@@ -473,6 +508,7 @@ impl Trading {
                     errors: vec![],
                     attempt_all: true,
                     placement: true,
+                    effective: false,
                 },
             );
             self.advance(cx, account, job);
@@ -641,9 +677,9 @@ impl Trading {
             _ => return false,
         };
         if account.credentials().is_none() {
-            cx.done(
+            cx.fail(
                 command,
-                Err("Paradex private account is not initialized".into()),
+                not_sent("Paradex private account is not initialized"),
             );
             return true;
         }
@@ -661,11 +697,12 @@ impl Trading {
                         errors: Vec::new(),
                         attempt_all,
                         placement,
+                        effective: false,
                     },
                 );
                 self.advance(cx, account, job);
             }
-            Err(error) => cx.done(command, Err(error)),
+            Err(error) => cx.fail(command, not_sent(error)),
         }
         true
     }
@@ -708,7 +745,7 @@ impl Trading {
                 }
                 Err(error) => {
                     let state = self.jobs.remove(&job).expect("pending job");
-                    cx.done(state.command, Err(error));
+                    cx.fail(state.command, not_sent(error));
                     return;
                 }
             }
@@ -720,7 +757,19 @@ impl Trading {
             if let Kind::Amend { id, target } = &operation.kind {
                 if let Err(error) = account.begin_amend(id, (**target).clone()) {
                     let state = self.jobs.remove(&job).expect("pending amendment");
-                    cx.done(state.command, Err(error));
+                    let effective = state.effective || !state.results.is_empty();
+                    let error = not_sent(error);
+                    cx.fail(
+                        state.command,
+                        if effective {
+                            VenueError {
+                                outcome: None,
+                                ..error
+                            }
+                        } else {
+                            error
+                        },
+                    );
                     return;
                 }
                 self.amend_locks.insert(id.clone());
@@ -743,17 +792,17 @@ impl Trading {
             );
         } else {
             let state = self.jobs.remove(&job).unwrap();
-            let result =
-                if state.errors.is_empty() || (state.placement && !state.results.is_empty()) {
-                    if state.placement {
-                        serde_json::to_string(&state.results).map_err(|e| e.to_string())
-                    } else {
-                        Ok("[]".into())
-                    }
+            if state.errors.is_empty() || (state.placement && !state.results.is_empty()) {
+                let result = if state.placement {
+                    serde_json::to_string(&state.results).map_err(|e| e.to_string())
                 } else {
-                    Err(state.errors.join("; "))
+                    Ok("[]".into())
                 };
-            cx.done(state.command, result);
+                cx.done(state.command, result);
+            } else {
+                let command = state.command;
+                cx.fail(command, state.failure());
+            }
         }
     }
     pub fn on_response(
@@ -777,7 +826,8 @@ impl Trading {
                     }
                     self.advance(cx, account, request.job);
                 }
-                Err(error) => self.complete(cx, account, request, Err(error), false),
+                // A read before any write: nothing was sent.
+                Err(error) => self.complete(cx, account, request, Err(not_sent(error)), false),
             }
             return;
         }
@@ -786,7 +836,8 @@ impl Trading {
         } = &request.kind
         {
             let result = crate::success(response)
-                .and_then(|()| decode_placement(response.body, expected, *batch));
+                .map_err(|error| answer_failure(response.status, error))
+                .and_then(|()| decode_placement(response.body, expected, *batch).map_err(unproven));
             let result = match result {
                 Ok(PlacementResult {
                     ids,
@@ -795,7 +846,8 @@ impl Trading {
                     if let Some(job) = self.jobs.get_mut(&request.job) {
                         job.results.extend(ids);
                     }
-                    Err(error)
+                    // Explicit per-order refusals without a documented code table.
+                    Err(VenueError::new(error))
                 }
                 Ok(PlacementResult { ids, error: None }) => Ok(ids),
                 Err(error) => Err(error),
@@ -848,6 +900,10 @@ impl Trading {
             }
             _ => Ok(Vec::new()),
         });
+        let result = result.map_err(|error| match crate::success(response) {
+            Err(_) => answer_failure(response.status, error),
+            Ok(()) => unproven(error),
+        });
         if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
             account.amend_ack(cx, response.body);
         }
@@ -885,7 +941,24 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.complete(cx, account, request, Err(error.into()), false);
+        let error = VenueError::new(error).kind(ErrorKind::Network);
+        let error = match request.kind {
+            // Reads: the quote read precedes the placement, which was never sent.
+            Kind::Quotes(_) => error.outcome(Outcome::NotSent),
+            Kind::Rails(_) => error,
+            _ => error.outcome(Outcome::Unknown),
+        };
+        self.complete(cx, account, request, Err(error), false);
+    }
+    /// Failed before it was sent: authentication or signing never completed.
+    pub fn on_unsent(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        request: Request,
+        error: &str,
+    ) {
+        self.complete(cx, account, request, Err(not_sent(error)), true);
     }
     pub fn on_sign_failed(
         &mut self,
@@ -894,14 +967,14 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.complete(cx, account, request, Err(error.into()), true);
+        self.complete(cx, account, request, Err(not_sent(error)), true);
     }
     fn complete(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         account: &mut Account,
         request: Request,
-        result: Result<Vec<String>, String>,
+        result: Result<Vec<String>, VenueError>,
         rejected: bool,
     ) {
         if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
@@ -916,7 +989,12 @@ impl Trading {
             return;
         };
         match result {
-            Ok(ids) => job.results.extend(ids),
+            Ok(ids) => {
+                if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+                    job.effective = true;
+                }
+                job.results.extend(ids);
+            }
             Err(error) => {
                 if let Kind::Place { leg, expected, .. } = &request.kind {
                     let next_leg = match job.operations.front().map(|op| &op.kind) {
@@ -1344,6 +1422,32 @@ fn decode_cancels(body: &str, ids: &[String]) -> Result<(), String> {
         return Err("Paradex batch cancellation missing IDs".into());
     }
     Ok(())
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A 2xx answer that does not prove what happened.
+fn unproven(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// A refused answer. 408 and 5xx do not prove the venue refused it; a 2xx
+/// error envelope is an explicit refusal without a documented code table.
+fn answer_failure(status: u16, message: String) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match status {
+        200..=299 => error,
+        401 => rejected(error, ErrorKind::AuthInvalid),
+        403 => rejected(error, ErrorKind::AuthPermission),
+        429 => rejected(error, ErrorKind::RateLimited),
+        408 => error.outcome(Outcome::Unknown),
+        400..=499 => rejected(error, ErrorKind::Rejected),
+        _ => error.outcome(Outcome::Unknown),
+    }
 }
 
 #[cfg(test)]

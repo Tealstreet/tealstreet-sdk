@@ -1138,3 +1138,95 @@ fn batch_receipts_bind_exact_native_generated_and_requested_ids_before_http() {
     assert_ne!(expected[1].identity, "caller");
     assert_receipts(&h, &request, 77, expected);
 }
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    for (status, body, classified, text) in [
+        (503, "", (None, Some(Outcome::Unknown)), "Paradex HTTP 503"),
+        (408, "", (None, Some(Outcome::Unknown)), "Paradex HTTP 408"),
+        (
+            403,
+            "",
+            rejected(ErrorKind::AuthPermission),
+            "Paradex HTTP 403",
+        ),
+        (
+            429,
+            "",
+            rejected(ErrorKind::RateLimited),
+            "Paradex HTTP 429",
+        ),
+        (
+            400,
+            r#"{"error":"INVALID_PRICE","message":"outside price bands"}"#,
+            rejected(ErrorKind::Rejected),
+            "Paradex HTTP 400: INVALID_PRICE: outside price bands",
+        ),
+        (
+            200,
+            r#"{"error":"INSUFFICIENT_MARGIN","message":"no margin"}"#,
+            (None, None),
+            "Paradex request rejected: INSUFFICIENT_MARGIN: no margin",
+        ),
+    ] {
+        let mut h = private();
+        place(&mut h, 8, vec![opts(OrderType::Limit)]);
+        let request = h.take("/orders");
+        h.respond(request, status, body);
+        assert_eq!(h.result(8), Err(text), "{status} {body}");
+        let error = &h.failures[0];
+        assert_eq!((error.kind, error.outcome), classified, "{status} {body}");
+    }
+    // A malformed 2xx acknowledgement does not prove what happened.
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let request = h.take("/orders");
+    h.respond(request, 200, "{}");
+    assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
+    // Transport loss on a write is Unknown.
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let request = h.take("/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "reset",
+        },
+    );
+    h.collect();
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    // Unsupported controls were never sent.
+    let mut h = private();
+    h.command(Command::FetchStpMode { command: 9 });
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Unsupported), Some(Outcome::NotSent))
+    );
+}
+
+#[test]
+fn several_failed_placements_share_an_outcome_only_when_they_agree() {
+    use safe_cex_engine::Outcome;
+    for (second, outcome) in [(503, Some(Outcome::Unknown)), (400, None)] {
+        let mut h = private();
+        let mut other = opts(OrderType::Market);
+        other.client_order_id = Some("second".into());
+        place(&mut h, 73, vec![opts(OrderType::Market), other]);
+        let first = h.take("/orders");
+        h.respond(
+            first,
+            200,
+            r#"{"error":"FIRST_REJECTED","message":"first reason"}"#,
+        );
+        let request = h.take("/orders");
+        h.respond(request, second, "");
+        assert_eq!(h.failures.len(), 1);
+        assert_eq!(h.failures[0].outcome, outcome, "{second}");
+    }
+}

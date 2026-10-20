@@ -218,7 +218,13 @@ impl Paradex {
                 break;
             }
             for (pending, error) in failed {
-                self.dispatch_failed(cx, pending, &error);
+                match pending {
+                    Pending::Trade(request) => {
+                        self.trading
+                            .on_unsent(cx, &mut self.account, request, &error)
+                    }
+                    other => self.dispatch_failed(cx, other, &error),
+                }
             }
         }
     }
