@@ -75,6 +75,58 @@ impl OrderVersion {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct AmendTarget {
+    market: String,
+    side: String,
+    kind: String,
+    size: String,
+    price: String,
+    trigger: String,
+}
+impl AmendTarget {
+    pub(crate) fn new(
+        row: &NativeOrder,
+        size: &str,
+        price: &str,
+        trigger: Option<&str>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            market: row.market.clone(),
+            side: row.side.clone(),
+            kind: row.kind.clone(),
+            size: crate::sign::quantum(size)?,
+            price: Self::quantity(price)?,
+            trigger: Self::quantity(trigger.unwrap_or(""))?,
+        })
+    }
+    fn quantity(text: &str) -> Result<String, String> {
+        crate::sign::quantum(if text.is_empty() { "0" } else { text })
+    }
+    fn same_identity(&self, row: &NativeOrder) -> bool {
+        self.market == row.market && self.side == row.side && self.kind == row.kind
+    }
+    fn matches(&self, row: &NativeOrder) -> bool {
+        self.same_identity(row)
+            && crate::sign::quantum(&row.size).is_ok_and(|n| n == self.size)
+            && Self::quantity(&row.price).is_ok_and(|n| n == self.price)
+            && Self::quantity(&row.trigger_price).is_ok_and(|n| n == self.trigger)
+    }
+}
+struct AmendFence {
+    target: AmendTarget,
+    floor: f64,
+    pending: bool,
+    sent: bool,
+    previous: Option<Box<AmendFence>>,
+}
+#[derive(PartialEq)]
+enum OrderEvidence {
+    Ignore,
+    Unresolved,
+    Coherent,
+}
+
 struct Queued {
     method: Method,
     path: String,
@@ -118,6 +170,7 @@ pub struct Account {
     balance_busy: bool,
     margins_busy: bool,
     native: HashMap<String, NativeOrder>,
+    amend_fences: HashMap<String, AmendFence>,
     order_versions: HashMap<String, OrderVersion>,
     order_version_ids: VecDeque<String>,
     terminals: HashSet<String>,
@@ -163,6 +216,7 @@ impl Account {
             balance_busy: false,
             margins_busy: false,
             native: HashMap::new(),
+            amend_fences: HashMap::new(),
             order_versions: HashMap::new(),
             order_version_ids: VecDeque::new(),
             terminals: HashSet::new(),
@@ -194,6 +248,63 @@ impl Account {
         {
             self.remember_order(id, version);
         }
+    }
+    pub(crate) fn begin_amend(&mut self, id: &str, target: AmendTarget) -> Result<(), String> {
+        if !self.amend_fences.contains_key(id) && self.amend_fences.len() >= RETAINED {
+            return Err("Paradex amendment reconciliation capacity reached".into());
+        }
+        self.invalidate_order(id);
+        let floor = self.order_versions.get(id).map_or(0., |v| v.updated);
+        let previous = self.amend_fences.remove(id).map(Box::new);
+        self.amend_fences.insert(
+            id.into(),
+            AmendFence {
+                target,
+                floor,
+                pending: true,
+                sent: false,
+                previous,
+            },
+        );
+        Ok(())
+    }
+    pub(crate) fn amend_ack(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        if let Ok(row) = serde_json::from_str::<NativeOrder>(text)
+            && self
+                .amend_fences
+                .get(&row.id)
+                .is_some_and(|f| f.target.matches(&row))
+        {
+            // A complete Modify response is venue evidence; an id-only ACK is not.
+            self.apply_order(cx, row);
+        }
+    }
+    pub(crate) fn finish_amend(&mut self, id: &str, now: f64, rejected: bool) {
+        let Some(mut fence) = self.amend_fences.remove(id) else {
+            return;
+        };
+        fence.floor = fence
+            .floor
+            .max(now)
+            .max(self.order_versions.get(id).map_or(0., |v| v.updated));
+        if rejected || !fence.sent {
+            if let Some(mut previous) = fence.previous.take() {
+                previous.floor = previous.floor.max(fence.floor);
+                self.amend_fences.insert(id.into(), *previous);
+            }
+            self.invalidate_order(id);
+            return;
+        }
+        fence.pending = false;
+        fence.previous = None;
+        if !self
+            .native
+            .get(id)
+            .is_some_and(|row| fence.target.matches(row))
+        {
+            self.invalidate_order(id);
+        }
+        self.amend_fences.insert(id.into(), fence);
     }
     pub fn native_order(&self, id: &str) -> Option<&NativeOrder> {
         self.native.get(id)
@@ -293,7 +404,13 @@ impl Account {
         self.queue.push_back(request);
         self.refresh(cx);
     }
-    fn dispatch(&self, cx: &mut Cx<'_, Pending>, request: Queued) {
+    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, request: Queued) {
+        if let Pending::Trade(trade) = &request.pending
+            && let Some(id) = trade.amend_id()
+            && let Some(fence) = self.amend_fences.get_mut(id)
+        {
+            fence.sent = true;
+        }
         let mut headers = vec![
             (
                 "Authorization",
@@ -1121,7 +1238,12 @@ impl Account {
                         else {
                             continue;
                         };
-                        if self.stale_order(&row.id, version) {
+                        let evidence = if self.stale_order(&row.id, version) {
+                            OrderEvidence::Ignore
+                        } else {
+                            self.order_evidence(&row, version, order.status != OrderStatus::Open)
+                        };
+                        if evidence == OrderEvidence::Ignore {
                             // A read started after a live event can still hit an
                             // older replica. Preserve both store and signing
                             // evidence, without reviving invalidated amend data.
@@ -1138,7 +1260,9 @@ impl Account {
                         self.remember_order(&row.id, version);
                         if order.status == OrderStatus::Open {
                             mapped.push(order);
-                            native.insert(row.id.clone(), row);
+                            if evidence == OrderEvidence::Coherent {
+                                native.insert(row.id.clone(), row);
+                            }
                         } else {
                             self.terminal_order(&row.id);
                         }
@@ -1206,6 +1330,46 @@ impl Account {
         }
         valid
     }
+    fn order_evidence(
+        &mut self,
+        row: &NativeOrder,
+        version: OrderVersion,
+        terminal: bool,
+    ) -> OrderEvidence {
+        if self.terminals.contains(&row.id) {
+            return OrderEvidence::Ignore;
+        }
+        let Some(fence) = self.amend_fences.get_mut(&row.id) else {
+            return OrderEvidence::Coherent;
+        };
+        if !fence.target.same_identity(row) {
+            return OrderEvidence::Ignore;
+        }
+        if terminal {
+            return OrderEvidence::Coherent;
+        }
+        if fence.target.matches(row) {
+            fence.floor = fence.floor.max(version.updated);
+            return OrderEvidence::Coherent;
+        }
+        if fence.pending {
+            // Executions can advance while the write is in flight. They remain
+            // visible, but old mutable attributes are never signing evidence.
+            fence.floor = fence.floor.max(version.updated);
+            return OrderEvidence::Unresolved;
+        }
+        if version.updated > fence.floor {
+            // A strictly newer coherent venue version may be an external edit.
+            if let Ok(target) =
+                AmendTarget::new(row, &row.size, &row.price, Some(&row.trigger_price))
+            {
+                fence.target = target;
+                fence.floor = version.updated;
+                return OrderEvidence::Coherent;
+            }
+        }
+        OrderEvidence::Ignore
+    }
     fn stale_order(&self, id: &str, version: OrderVersion) -> bool {
         let old = self.order_versions.get(id).copied().or_else(|| {
             self.native
@@ -1225,6 +1389,7 @@ impl Account {
         }
     }
     fn terminal_order(&mut self, id: &str) {
+        self.amend_fences.remove(id);
         if self.terminals.insert(id.into()) {
             self.terminal_ids.push_back(id.into());
         }
@@ -1247,14 +1412,20 @@ impl Account {
         if self.stale_order(&row.id, version) {
             return false;
         }
+        let evidence = self.order_evidence(&row, version, order.status != OrderStatus::Open);
+        if evidence == OrderEvidence::Ignore {
+            return false;
+        }
         self.remember_order(&row.id, version);
         self.bump_orders();
         order.last_update = cx.now;
         if order.status != OrderStatus::Open {
             self.native.remove(&row.id);
             self.terminal_order(&row.id);
-        } else {
+        } else if evidence == OrderEvidence::Coherent {
             self.native.insert(row.id.clone(), row.clone());
+        } else {
+            self.native.remove(&row.id);
         }
         if !row.cancel_reason.is_empty() {
             cx.log(

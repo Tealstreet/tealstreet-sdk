@@ -132,7 +132,8 @@ const KNOWN_TS_FIXES = {
   // validate public-trade query windows and deduplicate native fill IDs/quantity.
   // Walk empty history cursor pages and keep polled candle buckets/volume monotonic.
   // Rust also fences lagging order-repair rows with native timestamps/exact fill
-  // quanta; adversarial native tests cover this without rewriting TS replay output.
+  // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
+  // adversarial native tests cover this without rewriting TS replay output.
   paradex() {},
   // Independent documented-tape oracle; native request/protocol counters remain exact.
   orderly: (ts) => fixOrderly(ts, tapeRecords),

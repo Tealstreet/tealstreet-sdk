@@ -1,4 +1,9 @@
-use crate::{Pending, account::Account, sign::Credentials, wire::Number};
+use crate::{
+    Pending,
+    account::{Account, AmendTarget},
+    sign::Credentials,
+    wire::Number,
+};
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response};
@@ -33,7 +38,10 @@ enum Kind {
         child: bool,
         batch: bool,
     },
-    Amend(String),
+    Amend {
+        id: String,
+        target: Box<AmendTarget>,
+    },
     Cancel(Vec<String>),
     Empty,
     Rails(String),
@@ -73,6 +81,15 @@ struct Quote {
 pub struct Request {
     job: u64,
     kind: Kind,
+}
+impl Request {
+    pub(crate) fn amend_id(&self) -> Option<&str> {
+        if let Kind::Amend { id, .. } = &self.kind {
+            Some(id)
+        } else {
+            None
+        }
+    }
 }
 #[derive(Default)]
 pub struct Trading {
@@ -617,9 +634,13 @@ impl Trading {
             return;
         };
         if let Some(operation) = state.operations.pop_front() {
-            if let Kind::Amend(id) = &operation.kind {
+            if let Kind::Amend { id, target } = &operation.kind {
+                if let Err(error) = account.begin_amend(id, (**target).clone()) {
+                    let state = self.jobs.remove(&job).expect("pending amendment");
+                    cx.done(state.command, Err(error));
+                    return;
+                }
                 self.amend_locks.insert(id.clone());
-                account.invalidate_order(id);
             }
             account.bump_orders();
             account.bump_positions();
@@ -669,7 +690,7 @@ impl Trading {
                     }
                     self.advance(cx, account, request.job);
                 }
-                Err(error) => self.complete(cx, account, request, Err(error)),
+                Err(error) => self.complete(cx, account, request, Err(error), false),
             }
             return;
         }
@@ -681,7 +702,7 @@ impl Trading {
             Kind::Place {
                 expected, batch, ..
             } => decode_placement(response.body, expected, *batch),
-            Kind::Amend(id) => {
+            Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
                     .map_err(|_| "invalid Paradex amend response")?;
                 if row.id != *id {
@@ -721,6 +742,9 @@ impl Trading {
             }
             _ => Ok(Vec::new()),
         });
+        if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
+            account.amend_ack(cx, response.body);
+        }
         if let Some(symbol) = rails
             && result.is_ok()
         {
@@ -742,7 +766,10 @@ impl Trading {
                 );
             }
         } else {
-            self.complete(cx, account, request, result);
+            let rejected = ((400..500).contains(&response.status)
+                && !matches!(response.status, 408 | 429))
+                || ((200..300).contains(&response.status) && crate::success(response).is_err());
+            self.complete(cx, account, request, result, rejected);
         }
     }
     pub fn on_failed(
@@ -752,7 +779,7 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.complete(cx, account, request, Err(error.into()));
+        self.complete(cx, account, request, Err(error.into()), false);
     }
     fn complete(
         &mut self,
@@ -760,14 +787,15 @@ impl Trading {
         account: &mut Account,
         request: Request,
         result: Result<Vec<String>, String>,
+        rejected: bool,
     ) {
         if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
             account.bump_orders();
             account.bump_positions();
         }
-        if let Kind::Amend(id) = &request.kind {
+        if let Kind::Amend { id, .. } = &request.kind {
             self.amend_locks.remove(id);
-            account.invalidate_order(id);
+            account.finish_amend(id, cx.now, rejected);
         }
         let Some(job) = self.jobs.get_mut(&request.job) else {
             return;
@@ -944,7 +972,15 @@ impl Trading {
                 })
                 .unwrap(),
             ),
-            kind: Kind::Amend(id.into()),
+            kind: Kind::Amend {
+                id: id.into(),
+                target: Box::new(AmendTarget::new(
+                    raw,
+                    &num::format(size),
+                    &num::format(price),
+                    trigger_price.map(num::format).as_deref(),
+                )?),
+            },
         }]))
     }
 }

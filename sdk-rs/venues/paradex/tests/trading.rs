@@ -419,3 +419,306 @@ fn accepted_amend_fences_reads_started_in_flight_and_requires_fresh_reconciliati
     assert_eq!(payload.price.as_deref(), Some("101"));
     assert_eq!(payload.size.as_deref(), Some("3"));
 }
+
+const AMEND_ROW: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000000000}"#;
+fn amendment_account(row: &str) -> (Harness, safe_cex_engine::SocketId) {
+    let mut h = private();
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    amendment_update(&mut h, socket, row);
+    (h, socket)
+}
+fn amendment_update(h: &mut Harness, socket: safe_cex_engine::SocketId, row: &str) {
+    let text = format!(
+        r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"orders.ALL","data":{row}}}}}"#
+    );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    h.collect();
+}
+fn amend(h: &mut Harness, command: u32, price: Option<f64>, amount: Option<f64>) {
+    h.command(Command::AmendOrder {
+        command,
+        id: "123".into(),
+        price,
+        amount,
+    });
+}
+
+#[test]
+fn post_ack_repair_cannot_restore_old_amendment_attributes_even_after_a_same_stamp_match() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    h.now += 500.; // Target matches remain valid even behind host completion time.
+    amend(&mut h, 101, Some(101.), None);
+    let request = h.take("/orders/123");
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    assert_eq!(h.result(101), Ok("[\"123\"]"));
+    // Begin the GET strictly after the successful write response.
+    h.timer(h.now + 500.);
+    h.reply("/orders", &format!(r#"{{"results":[{AMEND_ROW}]}}"#));
+    amend(&mut h, 102, None, Some(3.));
+    assert!(h.result(102).is_err());
+    assert!(h.pending.is_empty());
+    // The venue can echo changed attributes with the same server timestamp.
+    let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
+    amendment_update(&mut h, socket, &matching);
+    amendment_update(&mut h, socket, AMEND_ROW);
+    assert_eq!(h.e.store().order("123").unwrap().price, 101.);
+    amend(&mut h, 103, None, Some(3.));
+    let next = h.take("/orders/123");
+    let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.price.as_deref(), Some("101"));
+    assert_eq!(payload.size.as_deref(), Some("3"));
+}
+
+#[test]
+fn post_ack_size_and_trigger_changes_require_all_exact_mutable_attributes() {
+    for trigger in [false, true] {
+        let row = if trigger {
+            AMEND_ROW
+                .replace("\"type\":\"LIMIT\"", "\"type\":\"STOP_LIMIT\"")
+                .replace("\"status\":\"OPEN\"", "\"status\":\"UNTRIGGERED\"")
+                .replace(
+                    "\"price\":\"99\"",
+                    "\"price\":\"99\",\"trigger_price\":\"110\"",
+                )
+        } else {
+            AMEND_ROW.into()
+        };
+        let (mut h, socket) = amendment_account(&row);
+        amend(&mut h, 110, trigger.then_some(120.), Some(3.));
+        let request = h.take("/orders/123");
+        h.respond(request, 200, r#"{"id":"123"}"#);
+        amendment_update(&mut h, socket, &row);
+        amend(&mut h, 111, None, Some(4.));
+        assert!(h.result(111).is_err());
+        let changed = row
+            .replace("\"size\":\"2\"", "\"size\":\"3\"")
+            .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"3\"");
+        if trigger {
+            amendment_update(&mut h, socket, &changed);
+            amend(&mut h, 112, None, Some(4.));
+            assert!(h.result(112).is_err());
+        }
+        let changed = if trigger {
+            changed.replace("\"trigger_price\":\"110\"", "\"trigger_price\":\"120\"")
+        } else {
+            changed
+        };
+        amendment_update(&mut h, socket, &changed);
+        amend(&mut h, 113, None, Some(4.));
+        let request = h.take("/orders/123");
+        let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.price.as_deref(), Some("99"));
+        assert_eq!(payload.trigger_price.as_deref(), trigger.then_some("120"));
+    }
+}
+
+#[test]
+fn fills_while_amending_do_not_unlock_old_attributes_and_matching_smaller_sizes_remain_valid() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    h.now += 5_000.;
+    amend(&mut h, 120, Some(101.), Some(1.5));
+    let request = h.take("/orders/123");
+    let fill = AMEND_ROW
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000006000",
+        );
+    amendment_update(&mut h, socket, &fill);
+    assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    amendment_update(&mut h, socket, &fill);
+    amend(&mut h, 121, None, Some(3.));
+    assert!(h.result(121).is_err());
+    let matching = fill
+        .replace("\"size\":\"2\"", "\"size\":\"1.5\"")
+        .replace("\"remaining_size\":\"1\"", "\"remaining_size\":\"0.5\"")
+        .replace("\"price\":\"99\"", "\"price\":\"101\"");
+    amendment_update(&mut h, socket, &matching);
+    amend(&mut h, 122, None, Some(3.));
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"101\"")
+    );
+}
+
+#[test]
+fn accepted_amendments_can_reconcile_a_strictly_newer_coherent_external_edit() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    h.now += 5_000.;
+    amend(&mut h, 130, Some(101.), None);
+    let request = h.take("/orders/123");
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    let external = AMEND_ROW
+        .replace("\"price\":\"99\"", "\"price\":\"105\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000006000",
+        );
+    amendment_update(&mut h, socket, &external);
+    amendment_update(&mut h, socket, AMEND_ROW);
+    amend(&mut h, 131, None, Some(3.));
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"105\"")
+    );
+}
+
+#[test]
+fn definitive_amend_rejection_allows_unchanged_reconciliation_but_transport_failure_stays_guarded()
+{
+    for outcome in ["400", "business", "lost", "500", "bad-id", "408", "429"] {
+        let ambiguous = !matches!(outcome, "400" | "business");
+        let (mut h, socket) = amendment_account(AMEND_ROW);
+        amend(&mut h, 140, Some(101.), None);
+        let request = h.take("/orders/123");
+        match outcome {
+            "lost" => {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "response lost",
+                    },
+                );
+                h.collect();
+            }
+            "business" => h.respond(request, 200, r#"{"error":"INVALID_ORDER"}"#),
+            "bad-id" => h.respond(request, 200, r#"{"id":"different-order"}"#),
+            _ => h.respond(
+                request,
+                outcome.parse().unwrap(),
+                r#"{"error":"INVALID_ORDER"}"#,
+            ),
+        }
+        amendment_update(&mut h, socket, AMEND_ROW);
+        amend(&mut h, 141, None, Some(3.));
+        if ambiguous {
+            assert!(h.result(141).is_err());
+            assert!(h.pending.is_empty());
+            let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
+            amendment_update(&mut h, socket, &matching);
+            amend(&mut h, 142, None, Some(3.));
+        }
+        let request = h.take("/orders/123");
+        let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            payload.price.as_deref(),
+            Some(if ambiguous { "101" } else { "99" })
+        );
+    }
+}
+
+#[test]
+fn a_rejected_followup_amend_restores_the_previous_settled_guard() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    amend(&mut h, 150, Some(101.), None);
+    let request = h.take("/orders/123");
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
+    amendment_update(&mut h, socket, &matching);
+    amend(&mut h, 151, Some(102.), None);
+    let request = h.take("/orders/123");
+    h.respond(request, 400, r#"{"error":"INVALID_ORDER"}"#);
+    amendment_update(&mut h, socket, AMEND_ROW);
+    amend(&mut h, 152, None, Some(3.));
+    assert!(h.result(152).is_err());
+    amendment_update(&mut h, socket, &matching);
+    amend(&mut h, 153, None, Some(3.));
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"101\"")
+    );
+}
+
+#[test]
+fn a_full_matching_modify_response_is_reconciled_but_terminal_events_close_the_order() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    amend(&mut h, 160, Some(101.), None);
+    let request = h.take("/orders/123");
+    let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
+    h.respond(request, 200, &matching);
+    assert_eq!(h.e.store().order("123").unwrap().price, 101.);
+    amend(&mut h, 161, None, Some(3.));
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"101\"")
+    );
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    // The terminal event can still describe the last executable price.
+    let terminal = matching.replace("\"status\":\"OPEN\"", "\"status\":\"CLOSED\"");
+    amendment_update(&mut h, socket, &terminal);
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    amendment_update(&mut h, socket, &matching);
+    amend(&mut h, 162, None, Some(4.));
+    assert!(h.result(162).is_err());
+    assert!(h.pending.is_empty());
+}
+
+#[test]
+fn an_amend_that_never_left_the_jwt_queue_does_not_keep_an_uncertain_target() {
+    let (mut h, socket) = amendment_account(AMEND_ROW);
+    h.now += 181_000.;
+    amend(&mut h, 170, Some(101.), None);
+    let auth = h.take("/auth/");
+    assert!(!h.pending.iter().any(|r| r.method == Method::Put));
+    h.respond(auth, 503, r#"{"error":"UNAVAILABLE"}"#);
+    assert!(h.result(170).is_err());
+    amendment_update(&mut h, socket, AMEND_ROW);
+    amend(&mut h, 171, None, Some(3.));
+    h.reply("/auth/", r#"{"jwt_token":"fresh"}"#);
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"99\"")
+    );
+}

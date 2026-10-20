@@ -14,13 +14,16 @@ is available from the current upstream service.
 Private mode supports local StarkNet subkeys and the SDK's Ethereum-key account
 derivation. It needs the Paradex account/subkey addresses and system configuration
 for the selected environment. Remote/payload signing rejects before account I/O.
-Public-only mode needs no credentials. The SDK registration is opt-in until
-application realm-loader adoption and default-runtime retirement land.
+Public-only mode needs no credentials. The SDK registration is opt-in; its shared
+default loader initializes generated WASM assets for the current realm. Default
+runtime retirement remains a separate landing phase.
 
 Orders support limits, market orders, capped market IOC limits, conditional and
 bracket orders, native amendments, and per-market cross leverage. Fixed cross
 margin and one-way mode requests complete without a write; isolated/hedged mode
 requests reject. Failed or ambiguous writes are never automatically replayed.
+After an amendment, another amendment requires coherent native order evidence;
+an old replica response cannot restore the previous signed price, size or trigger.
 
 `docs/plans/RUST_PARADEX.md` records phase reviews and replay gates. The harness
 verifies emitted authentication/order signatures independently and replays

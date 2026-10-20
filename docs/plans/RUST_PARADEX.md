@@ -272,3 +272,31 @@ findings will be posted as PR comments and addressed before merging on green CI.
   after merging those ports; the shared options now include both features.
 - Repository full test rerun passes all27 tasks, in addition to typecheck/lint.
   Fresh artifact/replay gates and green CI are required after these review fixes.
+
+### Final amendment review and Orderly integration
+
+- A fresh adversarial reproduction found an additional P1: a repair GET started
+  after an amendment's id-only ACK could restore the old price at the same venue
+  timestamp. The next amount-only amend could then silently undo the accepted
+  price. Typed per-order target guards now retain exact price/size/trigger
+  expectations after accepted or ambiguous writes, including after matching
+  same-timestamp evidence. Pending fills remain visible without becoming signing
+  evidence. Definite rejection restores the previous settled expectation; an
+  unsent JWT-queue failure releases its target. No uncertain write is replayed.
+- Matching full Modify responses reconcile immediately. Independently newer
+  coherent venue updates may retarget the guard; actual terminal events release
+  it. Bounded reconciliation capacity fails before a new write rather than
+  discarding an unresolved expectation. Eight additional native regressions cover
+  post-ACK reads, repeated old evidence, size/trigger changes, pending fills,
+  external edits, rejection/transport ambiguity, full ACKs and unsent failures.
+- The independent reproduction now rejects the unsafe second write, accepts the
+  matching same-timestamp row, ignores another old row and preserves the accepted
+  price on the next signed amendment. Final review found no remaining blocker.
+- Merged landing through Orderly #1318, preserving its dynamic socket feeds,
+  default realm loader and disposal/recovery behavior alongside binary ingress.
+  The venue remains opt-in; shared default loader adoption is now implemented,
+  while default TS runtime retirement remains separate. Updated Orderly handler
+  assertions retain the new binary callback. Engine and single-Orderly WASM
+  Clippy pass; merged replay harness passes224 checks.
+- Final artifact/replay gates and exact-head green CI remain required before
+  landing. Earlier checkpoint measurements above are historical, not a waiver.
