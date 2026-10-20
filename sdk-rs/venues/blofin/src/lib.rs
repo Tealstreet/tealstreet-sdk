@@ -673,6 +673,7 @@ impl Venue for Blofin {
                 return;
             }
             Pending::Trade(request) => {
+                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
                 self.trade_failed(cx, request, error);
                 return;
             }

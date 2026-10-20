@@ -834,6 +834,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
         e,
         pending: vec![],
         actions: vec![],
+        failures: vec![],
         private: SocketId(0),
         tick: TimerId(0),
     };
@@ -1386,5 +1387,73 @@ fn closed_position_restores_account_margin_default_before_next_order() {
                 serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
             assert_eq!(payload[0]["marginMode"], "isolated");
         }
+    }
+}
+
+#[test]
+fn trading_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome, Response};
+    let market = r#"[{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}]"#;
+    let mut h = Harness::new();
+    h.seed();
+    place(&mut h, market);
+    let r = h.take("batch-orders");
+    h.e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    h.collect();
+    assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(h.failures[0].kind, Some(ErrorKind::Network));
+
+    for (status, body, kind, outcome) in [
+        (502, "Bad Gateway", None, Some(Outcome::Unknown)),
+        (
+            429,
+            "{}",
+            Some(ErrorKind::RateLimited),
+            Some(Outcome::Rejected),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Insufficient balance"}]}"#,
+            None,
+            Some(Outcome::Rejected),
+        ),
+        (
+            200,
+            r#"{"code":"0","msg":"","data":[]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        place(&mut h, market);
+        let r = h.take("batch-orders");
+        h.e.handle(
+            2.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        h.collect();
+        let [error] = h.failures.as_slice() else {
+            panic!("{status} {body}: {:?}", h.failures);
+        };
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, outcome),
+            "{status} {body}: {}",
+            error.message
+        );
     }
 }
