@@ -116,6 +116,18 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
   with every HTTP anchor. This retains native heartbeat/watchdog opportunities.
   Frozen fixtures, metrics, thresholds and output normalizers are unchanged.
 
+- `34552182ee` fixes a Rust-specific Crypto.com auth parser issue discovered
+  during gate preparation: missing `code` inherited a generic envelope default
+  of zero. Private auth now requires an explicit numeric success code. Missing,
+  null, boolean and string codes cannot cancel the deadline; 49 native tests and
+  an independent focused review pass. TS already checks explicit success here.
+- `5a0c5fc088` merges landing `fc809a9d85` (consumer/shared public feeds).
+  Independent module exports and GRVT documentation sections were the only
+  conflicts; both additions were retained. A read-only integration review
+  found no production-impact issues in shared-feed/Supervisor ownership,
+  public-connect suppression or retained ApeX/GRVT private PnL hooks. Workspace,
+  artifact and replay verification is being repeated on this integrated source.
+
 ## Public alias discovery and coverage limitation
 
 On 2026-10-20, Bitget USDC's live contracts/tickers returned 49 native symbols,
