@@ -72,6 +72,10 @@ export function smokeOrder(market, book, rules = {}) {
   return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice };
 }
 
+export const selectSmokeMarket = (markets, symbol) => markets.find((market) => symbol ? market.symbol === symbol :
+  (market.flags & MARKET_FLAG.ACTIVE) && !(market.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING)) &&
+  ['USDT', 'USDC', 'USD', 'pUSD', 'SUSDT', 'SUSDC'].includes(market.quote));
+
 export function smokeArgs(args) {
   const { values } = parseArgs({ args, options: {
     venue: { type: 'string' }, symbol: { type: 'string' }, out: { type: 'string' },
@@ -170,8 +174,7 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     if (initial.orders.length || initial.positions) fail('account-not-empty');
     if (initial.status.hedged) fail('hedged-account-unsupported');
     if (!initial.balance || !Number.isFinite(initial.balance.free) || initial.balance.free <= 0) fail('account-not-funded');
-    selected = initial.markets.find((m) => symbol ? m.symbol === symbol :
-      (m.flags & MARKET_FLAG.ACTIVE) && !(m.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING)) && ['USDT', 'USDC', 'USD', 'pUSD'].includes(m.quote));
+    selected = selectSmokeMarket(initial.markets, symbol);
     if (!selected) fail('market-not-found');
     const setting = initial.settings.find((s) => s.symbol === selected.symbol);
     originalLeverage = setting?.leverage;

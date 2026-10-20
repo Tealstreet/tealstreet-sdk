@@ -152,6 +152,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
       return;
     }
     if (typeof value !== 'string' || !value.trim()) throw new Error(`Invalid environment variable ${variable}`);
+    if (['key', 'secret', 'passphrase', 'privateKey', 'omniKeySeed', 'apiKey', 'apiSecret', 'apiPassphrase'].includes(path.split('.').at(-1)) && value.length < 4)
+      throw new Error(`Credential environment variable ${variable} must contain at least four characters`);
     if (path === 'polymarket.marketSlugs') {
       const slugs = value.split(',').map((slug) => slug.trim());
       if (!slugs.length || slugs.length > 100 || slugs.some((slug) => !slug) || new Set(slugs).size !== slugs.length)

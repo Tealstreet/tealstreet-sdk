@@ -401,6 +401,10 @@ only from the process environment, never command-line arguments or committed
 configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
 environment's official URLs and redacts credential material before writing.
+Credential fields shorter than four characters are refused before I/O because
+their arbitrary echoes cannot be scrubbed without corrupting unrelated values;
+short public account/API-key indices remain valid. Unrecordable returned auth
+material fails the capture instead of persisting a usable credential.
 Availability below describes the **current Rust engine's endpoint support**,
 not every environment a venue might offer. Profiles reject arbitrary endpoint
 overrides and refuse unsupported environments before reading credentials.

@@ -111,3 +111,19 @@ native network primitives provide its transport. No engine shapes change.
   Incoming polling records remain opt-in and preserve Binance private pacing.
   Independent merge review PASS. Root 27 test tasks passed immediately before
   this incoming merge; final PR CI runs the full combined state.
+- Opened [PR #1332](https://github.com/Tealstreet/tealstreet-sdk/pull/1332) into
+  feat/rust-rewrite. Posted three adversarial reviewers' findings at exact head
+  `6de2cc4470`: default Bitget simulation quote selection, short credential
+  echoes, and delayed reads exposed before their command stage.
+- Round 2 repairs: `0220a38471` plus selector/profile guards. Sensitive short
+  returned auth refuses recording; failures latch across headers, URLs, bodies
+  and decoding. Environment credentials require at least four characters while
+  public numeric indices remain valid. Reads fence at full response completion;
+  mutations retain their issuing stage. SUSDT/SUSDC are selectable by default.
+  Independent repair re-review PASS, 117 recorder/Tape cases and all 9 real-Wasm
+  fake scenarios pass. Combined harness now 513 passing cases.
+- Latest post-Breakout Binance public gate (3 runs): TS/Rust CPU 317.7/176.2 ms,
+  steady CPU 176.2/84.4 ms, retained memory 16.4/3.3 MB. Existing private gate
+  PASS. Bans/fmt/current wasm clippy and secret scan pass; no size budget change.
+  Pending only pushing reviewed repairs, posting their passing re-review, and
+  exact-head green CI before normal merge/fresh branch.

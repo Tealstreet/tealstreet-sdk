@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { smokeArgs, smokeOrder, marketRules, fencedTransport } from './live-smoke.mjs';
+import { smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket } from './live-smoke.mjs';
 import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { subscriptionKey } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
@@ -14,6 +14,14 @@ test('CLI never infers a mainnet request and accepts exactly one environment', (
   assert.equal(smokeArgs(['--venue', 'binance', '--mainnet']).mode, 'mainnet');
   for (const args of [[], ['--venue', 'binance', '--demo', '--testnet'], ['--venue', 'binance', '--timeout-ms', 'NaN'], ['--venue', 'binance', '--secret', 'bad']])
     assert.throws(() => smokeArgs(args));
+});
+
+test('default selection includes reviewed Bitget simulation quotes', () => {
+  for (const quote of ['SUSDT', 'SUSDC']) {
+    const simulated = { ...market, quote, symbol: `BTC${quote}` };
+    assert.equal(selectSmokeMarket([{ ...simulated, flags: 0 }, simulated]), simulated);
+    assert.equal(selectSmokeMarket([{ ...simulated, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.READ_ONLY }]), undefined);
+  }
 });
 
 test('minimum resting order is aligned and covers notional at its lower amended price', () => {

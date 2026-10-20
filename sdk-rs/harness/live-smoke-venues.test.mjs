@@ -88,6 +88,17 @@ test('credential errors reveal names only', () => {
   }), /^Error: Invalid environment variable RUST_LIVE_SMOKE_POLYMARKET_SIGNER_TYPE$/);
 });
 
+test('short credential material refuses before I/O while numeric public indices remain valid', () => {
+  assert.throws(() => liveSmokeProfile('binance', 'testnet', {
+    RUST_LIVE_SMOKE_BINANCE_KEY: 'fake-key', RUST_LIVE_SMOKE_BINANCE_SECRET: 'abc',
+  }), (error) => error.message.includes('at least four') && !error.message.includes('abc'));
+  const lighter = liveSmokeProfile('lighter', 'testnet', {
+    RUST_LIVE_SMOKE_LIGHTER_PRIVATE_KEY: 'fake-signing-key', RUST_LIVE_SMOKE_LIGHTER_ACCOUNT_INDEX: '1', RUST_LIVE_SMOKE_LIGHTER_API_KEY_INDEX: '2',
+  });
+  assert.equal(lighter.options.applicationId, '1');
+  assert.equal(lighter.options.apiKeyIndex, '2');
+});
+
 test('profiles accept no URL credentials, fragments, insecure schemes, host suffixes or alternate ports', () => {
   const profile = liveSmokeProfile('binance', 'testnet', env);
   for (const url of [
