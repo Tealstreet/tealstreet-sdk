@@ -221,7 +221,7 @@ impl Backpack {
             }
         }
         cx.store.set_tickers(tickers);
-        self.public.socket = Some(cx.connect(WS));
+        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         self.account_start(cx);
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
             cx.store.set_orders(vec![]);
@@ -807,7 +807,8 @@ impl Venue for Backpack {
         }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
-            self.public.socket = Some(cx.connect(WS));
+            self.public.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         } else if self.public.watchdog == Some(timer) {
             self.public.watchdog = None;
             if cx.now - self.public.received >= 20000.0 {

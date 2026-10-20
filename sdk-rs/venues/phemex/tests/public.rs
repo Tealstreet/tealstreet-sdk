@@ -37,7 +37,11 @@ fn started() -> (Engine<PhemexPerpetuals>, SocketId) {
     let socket = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::WsConnect { socket, .. } => Some(socket),
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Public),
+                ..
+            } => Some(socket),
             _ => None,
         })
         .unwrap();

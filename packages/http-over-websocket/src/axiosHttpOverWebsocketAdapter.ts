@@ -55,6 +55,20 @@ export class TradeTunnelTimeoutError extends Error {
   }
 }
 
+export class TradeTunnelDisposedError extends Error {
+  constructor(readonly config: unknown, readonly owner: object) {
+    super('HTTP-over-WebSocket adapter disposed');
+    this.name = 'TradeTunnelDisposedError';
+  }
+}
+
+export class TradeTunnelCanceledError extends Error {
+  constructor(readonly config: unknown, readonly owner: object) {
+    super('HTTP-over-WebSocket request canceled');
+    this.name = 'TradeTunnelCanceledError';
+  }
+}
+
 function decodeBase64(encoded: string): ArrayBuffer {
   const binary = globalThis.atob(encoded);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -269,26 +283,48 @@ const refreshBadAuthOnce = (howWebSocket: HOWWebSocket, refresh: () => Promise<s
   return refreshPromise;
 };
 
+export type DisposableAxiosAdapter = AxiosAdapter & { dispose(): void };
+
 const createAxiosHttpOverWebsocketAdapter = (
   options?: CreateAxiosHttpOverWebsocketAdapterOptions | ((str: string) => any),
-): AxiosAdapter => {
+): DisposableAxiosAdapter => {
   // Support legacy signature: createAxiosHttpOverWebsocketAdapter(customParser)
   const opts: CreateAxiosHttpOverWebsocketAdapterOptions =
     typeof options === 'function' ? { customParser: options } : options || {};
-  const { customParser, region } = opts;
+  const { customParser, region, WebSocket: WebSocketCtor } = opts;
+  const ownedSockets = new Map<'JA' | 'SG', HOWWebSocket>();
+  const abort = new AbortController();
+  let disposed = false;
+  const owner = {};
+  const disposedError = (config: unknown) => new TradeTunnelDisposedError(config, owner);
 
-  return (config) => {
+  const adapter: AxiosAdapter = (config) => {
+    const requestOwner = {};
+    const canceledError = () => new TradeTunnelCanceledError(config, requestOwner);
+    if (disposed) return Promise.reject(disposedError(config));
+    if (config.signal?.aborted) return Promise.reject(canceledError());
+    const addAbort = (listener: () => void) => {
+      abort.signal.addEventListener('abort', listener, { once: true });
+      config.signal?.addEventListener?.('abort', listener, { once: true });
+    };
+    const removeAbort = (listener: () => void) => {
+      abort.signal.removeEventListener('abort', listener);
+      config.signal?.removeEventListener?.('abort', listener);
+    };
+    const abortError = () => disposed ? disposedError(config) : canceledError();
     let badAuthRetries = 0;
-    // Use forced region if provided, otherwise auto-detect from URL
+    const selectedRegion = region ?? (config.baseURL && isTokyoEgress(config.baseURL) ? 'JA' : 'SG');
     let howWebSocket: HOWWebSocket;
-    if (region === 'JA') {
-      howWebSocket = howWebSocketJA;
-    } else if (region === 'SG') {
-      howWebSocket = howWebSocketSG;
+    if (WebSocketCtor) {
+      let owned = ownedSockets.get(selectedRegion);
+      if (!owned) {
+        owned = new HOWWebSocket(selectedRegion === 'JA' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS, WebSocketCtor);
+        ownedSockets.set(selectedRegion, owned);
+      }
+      howWebSocket = owned;
     } else {
-      howWebSocket = config.baseURL && isTokyoEgress(config.baseURL) ? howWebSocketJA : howWebSocketSG;
+      howWebSocket = selectedRegion === 'JA' ? howWebSocketJA : howWebSocketSG;
     }
-    const selectedRegion = howWebSocket === howWebSocketJA ? 'JA' : 'SG';
     const baseRouteContext: TradeTunnelRouteContext = {
       selectedRegion,
       tunnelHost: selectedRegion === 'JA' ? 'tokyo' : 'singapore',
@@ -349,7 +385,11 @@ const createAxiosHttpOverWebsocketAdapter = (
           route,
           url: websocketRequest.url,
         });
-      const remainingTime = () => deadline - Date.now();
+      const remainingTime = () => {
+        if (disposed) throw disposedError(config);
+        if (config.signal?.aborted) throw canceledError();
+        return deadline - Date.now();
+      };
       const awaitWithinDeadline = <T>(promise: Promise<T>, route?: TradeTunnelRouteContext): Promise<T> =>
         new Promise<T>((resolve, reject) => {
           const remaining = remainingTime();
@@ -358,14 +398,25 @@ const createAxiosHttpOverWebsocketAdapter = (
             return;
           }
 
-          const timer = setTimeout(() => reject(createTimeoutError(route)), remaining);
+          const onAbort = () => {
+            clearTimeout(timer);
+            removeAbort(onAbort);
+            reject(abortError());
+          };
+          const timer = setTimeout(() => {
+            removeAbort(onAbort);
+            reject(createTimeoutError(route));
+          }, remaining);
+          addAbort(onAbort);
           promise.then(
             (value) => {
               clearTimeout(timer);
+              removeAbort(onAbort);
               resolve(value);
             },
             (error) => {
               clearTimeout(timer);
+              removeAbort(onAbort);
               reject(error);
             },
           );
@@ -448,6 +499,7 @@ const createAxiosHttpOverWebsocketAdapter = (
 
         // Helper to safely send token with retry on WebSocket state issues
         const safeSendToken = async (token: string, retries = 0): Promise<void> => {
+          if (remainingTime() <= 0) throw createTimeoutError();
           // Never send an empty token
           if (!token) {
             console.error('[HOW] Attempted to send empty token, skipping');
@@ -470,6 +522,7 @@ const createAxiosHttpOverWebsocketAdapter = (
             const isNodeOrBunServer =
               typeof process !== 'undefined' && (Boolean(process.versions?.node) || Boolean((process as any).isBun));
             const source = isBrowserWorker || isNodeOrBunServer ? 'worker' : 'frontend';
+            if (remainingTime() <= 0) throw createTimeoutError();
             howWebSocket.sendToken({ type: 'rpc.auth', token, source });
           } catch (err: any) {
             if (err?.name === 'WebSocketNotReadyError' && retries < MAX_RETRIES) {
@@ -531,13 +584,12 @@ const createAxiosHttpOverWebsocketAdapter = (
                 }),
               );
             } catch (error) {
-              // A joined refresh may have been owned by a shorter-deadline
-              // request. Its timeout belongs only to that caller; retry this
-              // request's loop so it can elect a new owner under its own
-              // deadline. All non-timeout refresh failures still propagate.
-              if (error instanceof TradeTunnelTimeoutError && error.config !== config) {
-                continue;
-              }
+              // An owner's deadline or disposal must not cancel other accounts
+              // sharing this connection. Survivors elect a fresh token attempt.
+              const foreignTimeout = error instanceof TradeTunnelTimeoutError && error.config !== config;
+              const foreignDisposal = error instanceof TradeTunnelDisposedError && error.owner !== owner;
+              const foreignCancellation = error instanceof TradeTunnelCanceledError && error.owner !== requestOwner;
+              if (foreignTimeout || foreignDisposal || foreignCancellation) continue;
               throw error;
             }
           }
@@ -556,14 +608,20 @@ const createAxiosHttpOverWebsocketAdapter = (
             reject(createTimeoutError(routeContext));
             return;
           }
+          const onAbort = () => {
+            clearTimeout(timeoutTimer);
+            howWebSocket.off('sub:' + nonce);
+            removeAbort(onAbort);
+            reject(abortError());
+          };
           const timeoutTimer = setTimeout(() => {
+            removeAbort(onAbort);
             howWebSocket.off('sub:' + nonce);
             reject(createTimeoutError(routeContext));
           }, responseTimeoutMs);
+          addAbort(onAbort);
 
           howWebSocket.once('sub:' + nonce, async (data: any) => {
-            clearTimeout(timeoutTimer);
-
             try {
               // Log response before processing
               logTradeTunnelResponse(websocketRequest, data, routeContext);
@@ -597,8 +655,13 @@ const createAxiosHttpOverWebsocketAdapter = (
               // Tunnel frames carry only {data, status, headers}, so without this
               // the response config is empty and per-request suppression flags
               // are lost.
+              if (remainingTime() <= 0) throw createTimeoutError(routeContext);
               resolve({ ...data, config });
             } catch (error) {
+              if (error instanceof TradeTunnelTimeoutError || error instanceof TradeTunnelDisposedError || error instanceof TradeTunnelCanceledError) {
+                reject(error);
+                return;
+              }
               const tunnelError = error instanceof Error ? error : new Error(String(error));
               tunnelError.name = 'TradeTunnelResponseDecodeError';
               (tunnelError as any).url = websocketRequest.url;
@@ -606,40 +669,60 @@ const createAxiosHttpOverWebsocketAdapter = (
               (tunnelError as any).tradeTunnelRoute = routeContext;
               (tunnelError as any).config = config;
               reject(tunnelError);
+            } finally {
+              clearTimeout(timeoutTimer);
+              removeAbort(onAbort);
             }
           });
 
-          const data = parseWebsocketData(customParser || JSON.parse, websocketRequest);
+          try {
+            const data = parseWebsocketData(customParser || JSON.parse, websocketRequest);
 
-          // Log request before sending
-          logTradeTunnelRequest(
-            {
-              url: websocketRequest.url,
-              method: websocketRequest.method,
-              params: websocketRequest.params,
-              data: data,
-            },
-            routeContext,
-          );
+            // Log request before sending
+            logTradeTunnelRequest(
+              {
+                url: websocketRequest.url,
+                method: websocketRequest.method,
+                params: websocketRequest.params,
+                data: data,
+              },
+              routeContext,
+            );
 
-          howWebSocket.send({
-            type: 'rpc.http',
-            rpc_version: TRADE_TUNNEL_RPC_VERSION,
-            ...(customParser
-              ? {
-                  format: 'raw',
-                  accept_encoding: TRADE_TUNNEL_ACCEPT_ENCODING,
-                  accept_binary: true,
-                }
-              : {}),
-            ...(shouldBypassProxy ? { bypass_proxy: true } : {}),
-            nonce,
-            arg: { ...websocketRequest, data },
-          });
+            if (remainingTime() <= 0) throw createTimeoutError(routeContext);
+            howWebSocket.send({
+              type: 'rpc.http',
+              rpc_version: TRADE_TUNNEL_RPC_VERSION,
+              ...(customParser
+                ? {
+                    format: 'raw',
+                    accept_encoding: TRADE_TUNNEL_ACCEPT_ENCODING,
+                    accept_binary: true,
+                  }
+                : {}),
+              ...(shouldBypassProxy ? { bypass_proxy: true } : {}),
+              nonce,
+              arg: { ...websocketRequest, data },
+            });
+          } catch (error) {
+            clearTimeout(timeoutTimer);
+            removeAbort(onAbort);
+            howWebSocket.off('sub:' + nonce);
+            reject(error);
+          }
         });
       }
     })();
   };
+  return Object.assign(adapter, {
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      abort.abort();
+      for (const socket of ownedSockets.values()) socket.dispose();
+      ownedSockets.clear();
+    },
+  });
 };
 
 function parseWebsocketData(parser: (str: string) => any, websocketRequest: any) {

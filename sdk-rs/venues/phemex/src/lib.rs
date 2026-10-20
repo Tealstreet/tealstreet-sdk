@@ -158,7 +158,8 @@ impl PhemexPerpetuals {
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect(self.ws()));
+        self.public.socket =
+            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Public));
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5_000.));
     }

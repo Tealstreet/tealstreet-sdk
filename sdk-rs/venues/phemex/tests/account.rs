@@ -61,7 +61,12 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
     let socket = a
         .iter()
         .filter_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
+            if let Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } = a
+            {
                 Some(*socket)
             } else {
                 None
@@ -410,7 +415,12 @@ fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
             let fresh = a
                 .iter()
                 .find_map(|a| {
-                    if let Action::WsConnect { socket, .. } = a {
+                    if let Action::WsConnect {
+                        socket,
+                        channel: Some(safe_cex_engine::SocketChannel::Private),
+                        ..
+                    } = a
+                    {
                         Some(*socket)
                     } else {
                         None

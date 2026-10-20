@@ -147,7 +147,10 @@ impl Bingx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect(paths::PUBLIC_WS.to_owned()));
+        self.public.socket = Some(cx.connect_channel(
+            paths::PUBLIC_WS.to_owned(),
+            safe_cex_engine::SocketChannel::Public,
+        ));
         self.public.open = false;
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5000.));

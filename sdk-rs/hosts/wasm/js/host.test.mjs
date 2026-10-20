@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
+import { once } from 'node:events';
+import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
 
 for (const entry of ['legacy', 'actions', 'bytes']) {
@@ -123,6 +125,30 @@ test('byte scratch is released when a custom synchronous engine throws', () => {
   host.dispose();
 });
 
+test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(server, 'listening');
+  const connected = once(server, 'connection');
+  const Socket = nativeTransport().WebSocket;
+  const headers = { Origin: 'https://preview.tealstreet.io', 'User-Agent': 'fixture-browser' };
+  const client = new Socket(`ws://127.0.0.1:${server.address().port}/tunnel?v=2&t=1`, [], { headers });
+  client.on('error', () => {});
+  let peer;
+  try {
+    const opened = once(client, 'open');
+    const connection = await connected;
+    peer = connection[0];
+    assert.equal(connection[1].url, '/tunnel?v=2&t=1');
+    assert.equal(connection[1].headers.origin, headers.Origin);
+    assert.equal(connection[1].headers['user-agent'], headers['User-Agent']);
+    await opened;
+  } finally {
+    client.terminate();
+    peer?.terminate();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('command failures preserve partial placement metadata', async () => {
   const details = { message: 'second order rejected', partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1 };
   const engine = {
@@ -187,6 +213,18 @@ test('required upgrade headers are forwarded only to capable transports', () => 
   }
 });
 
+test('feed roles survive the engine action boundary for identical upstream URLs', () => {
+  const roles = [];
+  const host = new EngineHost({}, {
+    now: () => 0,
+    connect: (url, handlers) => { roles.push([url, handlers.channel]); return { close() {}, send() {} }; },
+  });
+  for (const [socket, channel] of ['public', 'private', 'business'].entries()) {
+    host.execute({ op: 'wsConnect', socket, url: 'wss://venue.test/stream', channel });
+  }
+  assert.deepEqual(roles, ['public', 'private', 'business'].map((role) => ['wss://venue.test/stream', role]));
+});
+
 for (const closeBeforeOpen of [false, true]) {
   test(`Node socket reports ${closeBeforeOpen ? 'close before open' : 'a refused upgrade'} once without an unhandled error`, async () => {
     const server = createServer();
@@ -223,6 +261,19 @@ test('disposing a host cannot schedule a reconnect through close callbacks', () 
   closeHandler(1006);
   assert.equal(closedEvents, 0);
   assert.equal(host.sockets.size, 0);
+});
+
+test('disposing an engine releases account-owned transport resources', () => {
+  const order = [];
+  const host = new EngineHost({}, {
+    now: () => 0,
+    connect: () => ({ send() {}, close: () => order.push('socket') }),
+    dispose: () => order.push('transport'),
+  });
+  host.execute({ op: 'wsConnect', socket: 1, url: 'wss://venue.test/stream' });
+  host.dispose();
+  host.dispose();
+  assert.deepEqual(order, ['socket', 'transport']);
 });
 
 for (const continuation of ['chunk', 'end', 'error']) {
@@ -324,4 +375,19 @@ test('an asynchronous binary message cannot enter a disposed engine', async () =
   host.dispose();
   await decoded;
   assert.equal(calls, 0);
+});
+
+
+test('socket feed identity and protocol recovery reach the account transport', () => {
+  let received;
+  const host = new EngineHost({}, {
+    connect: (url, handlers) => {
+      received = { url, channel: handlers.channel, context: handlers.context };
+      return { send() {}, close() {} };
+    },
+  });
+  const context = { feed: 'book-2', recover: true };
+  host.execute({ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'public', context });
+  assert.deepEqual(received, { url: 'wss://venue.test/shared', channel: 'public', context });
+  host.dispose();
 });

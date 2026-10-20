@@ -243,7 +243,8 @@ impl PhemexPerpetuals {
         }
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.socket = Some(cx.connect(self.ws()));
+        self.account.socket =
+            Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Private));
         self.account.authenticated = false;
         self.account.snapshot = false;
         self.account.snapshot_revision = self.account.order_revision;

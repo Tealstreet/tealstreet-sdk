@@ -422,3 +422,23 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
     assert_eq!(engine.store().tickers()[0].symbol, "BTCUSDT");
     assert_eq!(engine.store().tickers()[0].last, 301.0);
 }
+
+#[test]
+fn shared_public_socket_urls_keep_independent_feed_identities() {
+    let h = Harness::public();
+    let feeds: std::collections::HashSet<_> = h
+        .socket_contexts
+        .iter()
+        .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
+        .map(|(_, _, context)| context.as_ref().expect("feed context").feed)
+        .collect();
+    assert_eq!(
+        feeds,
+        std::collections::HashSet::from(["primary", "secondary-1", "secondary-2"])
+    );
+    assert!(
+        h.socket_contexts
+            .iter()
+            .all(|(_, _, context)| !context.as_ref().unwrap().recover)
+    );
+}

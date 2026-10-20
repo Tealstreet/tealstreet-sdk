@@ -75,6 +75,7 @@ export class EngineHost {
   }
 
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
     this.commands.clear();
@@ -83,6 +84,7 @@ export class EngineHost {
     this.sockets.clear();
     this.wsScratch = undefined;
     this.timers.clear();
+    this.transport.dispose?.();
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
@@ -135,6 +137,8 @@ export class EngineHost {
           break;
         }
         const socket = transport.connect(action.url, {
+          channel: action.channel,
+          context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
           onMessage: (text) => {
@@ -287,6 +291,7 @@ export const nativeTransport = () => {
     }
   } catch { /* Browser and restricted renderer transports keep REST fallback. */ }
   return {
+  WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
@@ -301,8 +306,9 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
+  async request({ method, url, headers, body, signal }) {
+    const deadline = AbortSignal.timeout(20_000);
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
