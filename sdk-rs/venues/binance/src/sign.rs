@@ -48,27 +48,28 @@ impl Query {
         }
     }
 
+    pub fn unsigned(self) -> String {
+        self.0
+    }
+
     #[cfg(test)]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Append `timestamp`, `recvWindow` and the HMAC-SHA256 `signature`.
-    #[cfg(test)]
-    pub fn signed(self, credentials: &Credentials, now_ms: f64) -> String {
-        self.signed_window(credentials, now_ms, None)
-    }
-
-    pub fn signed_window(
+    pub fn signed(
         self,
         credentials: &Credentials,
         now_ms: f64,
-        window: Option<u32>,
+        recv_window: Option<f64>,
     ) -> String {
-        let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
         let mut query = self
             .num("timestamp", now_ms.floor())
-            .num("recvWindow", f64::from(window))
+            .num(
+                "recvWindow",
+                recv_window.unwrap_or(f64::from(RECV_WINDOW_MS)),
+            )
             .0;
         let signature = hmac_sha256(
             credentials.secret.as_bytes(),
@@ -122,9 +123,10 @@ mod tests {
             ),
             "3c661234138461fcc7a7d8746c6558c9842d4e10870d2ecbedf7777cad694af9"
         );
-        let signed = Query::new()
-            .str("symbol", "BTCUSDT")
-            .signed(&credentials, 1591702613943.7);
+        let signed =
+            Query::new()
+                .str("symbol", "BTCUSDT")
+                .signed(&credentials, 1591702613943.7, None);
         assert!(
             signed
                 .starts_with("symbol=BTCUSDT&timestamp=1591702613943&recvWindow=20000&signature=")
@@ -148,20 +150,21 @@ mod security_receive_window {
     use super::*;
 
     #[test]
-    fn smaller_receive_window_is_signed_and_unbounded_windows_are_clamped() {
+    fn configured_receive_window_is_signed_without_changing_supported_values() {
         let c = Credentials {
             key: "k".into(),
             secret: "s".into(),
         };
         for (window, expected) in [
-            (None, 20_000),
-            (Some(500), 500),
-            (Some(0), 1),
-            (Some(u32::MAX), 20_000),
+            (None, 20_000.0),
+            (Some(500.0), 500.0),
+            (Some(0.0), 0.0),
+            (Some(500.125), 500.125),
+            (Some(60_000.0), 60_000.0),
         ] {
             let query = Query::new()
                 .str("symbol", "BTCUSDT")
-                .signed_window(&c, 1000.0, window);
+                .signed(&c, 1000.0, window);
             let (payload, signature) = query.split_once("&signature=").unwrap();
             assert!(payload.ends_with(&format!("recvWindow={expected}")));
             assert_eq!(

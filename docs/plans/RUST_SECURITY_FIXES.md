@@ -595,3 +595,29 @@ live trading, weakened parity oracle, or performance threshold changes.
   signer nonces, short Paradex auth, host boundaries, Bitrue diagnostics and
   complete-item JSON validation. Commit/push for final CI under the explicit
   inherited-Hyro exception; make no profiling or universal PASS claim.
+
+### Final merge race: Binance/Bybit follow-up
+
+- Head `c11f8047c4` completes 39/40 green checks, with only the authorized
+  inherited Hyro failure. Reviewed receipts preserve 99 passing replays,
+  one actual FAIL, four NOT RUN cases, 3070 native tests and a 163-file clean
+  scan. Posted final metrics, then attempted a normal merge; GitHub rejected
+  it because landing had advanced to `3686c4ffa1` during CI.
+- Integrate incoming Binance/Bybit fixes under standing conflict authority.
+  Preserve incoming Binance f64 receive-window API, including explicit zero
+  and fractional values required by its newly landed caller regressions.
+  This retires our redundant Binance-only u32/1..20000 clamp: the production
+  contract now supports those caller values and must not silently alter them.
+  Default and shorter-window signing still have independent HMAC regressions;
+  Bybit/MEXC tightening, generic parse errors and credential ownership remain.
+  Keep incoming auth/history capability behavior and TS forwarding superset.
+- Scoped load rule applies: CARGO_BUILD_JOBS=4, touched-crate tests/Clippy/fmt
+  and two touched TS test files only; no local release build or replay sweep.
+  Independent merge correctness review, commit/push and fresh CI follow. No
+  queued follow-up has begun; inherited Hyro timing remains separately owned.
+- Resolved integration passes 377 Binance/Bybit tests (30 suite results),
+  11 Binance-only native host tests, 13 focused TS tests across two files,
+  strict Clippy for touched venues plus Binance-only and Bybit/MEXC host
+  features, touched-crate formatting and bans. Independent static review
+  accepts the receive-window contract and retained security boundaries.
+  Commit/push the resolved merge; all new release/gate work stays in CI.

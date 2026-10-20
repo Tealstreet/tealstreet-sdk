@@ -579,7 +579,7 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
         .transpose()
 }
 
-#[cfg(any(feature = "binance", feature = "bybit", feature = "mexc"))]
+#[cfg(any(feature = "bybit", feature = "mexc"))]
 fn tighter_recv_window(value: Option<f64>) -> Option<u32> {
     value
         .filter(|value| value.is_finite() && *value > 0.0)
@@ -1035,7 +1035,7 @@ impl WasmEngine {
             #[cfg(feature = "binance")]
             "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
                 Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
-                    recv_window: tighter_recv_window(options.recv_window),
+                    recv_window: options.recv_window,
                     read_credentials: options.read_credentials.take(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
@@ -1451,7 +1451,7 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(any(feature = "binance", feature = "bybit", feature = "mexc"))]
+    #[cfg(any(feature = "bybit", feature = "mexc"))]
     #[test]
     fn tighter_receive_windows_survive_the_host_boundary() {
         assert_eq!(tighter_recv_window(Some(5_000.0)), Some(5_000));
