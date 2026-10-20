@@ -693,3 +693,177 @@ fn inverse_position_uses_native_mark_before_last_when_the_ticker_mark_is_cold() 
     assert_eq!(inverse.notional, 1000.0);
     assert_eq!(inverse.contracts, 0.01);
 }
+
+// https://bybit-exchange.github.io/docs/v5/websocket/public/ticker (option example, an object)
+#[test]
+fn documented_option_ticker_frame_updates_quotes_and_change() {
+    let mut h = ready(false);
+    let symbol = "BTC-25DEC26-100000-C-USDT";
+    let frame = |bid: &str| {
+        format!(
+            r#"{{"id":"tickers.{symbol}-1","topic":"tickers.{symbol}","ts":1672917511074,"data":{{"symbol":"{symbol}","bidPrice":"{bid}","bidSize":"1","bidIv":"0.4","askPrice":"1020","askSize":"2","askIv":"0.6","lastPrice":"1001","highPrice24h":"1100","lowPrice24h":"900","markPrice":"1003","indexPrice":"99100","markPriceIv":"0.5","underlyingPrice":"99050","openInterest":"3","turnover24h":"10","volume24h":"5","totalVolume":"6","totalTurnover":"11","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8","predictedDeliveryPrice":"0","change24h":"-0.05"}},"type":"snapshot"}}"#
+        )
+    };
+    h.message("public/option", &frame("990"));
+    let t = h.engine.store().ticker(symbol).unwrap().clone();
+    assert_eq!(
+        (t.bid, t.ask, t.last, t.mark),
+        (990.0, 1020.0, 1001.0, 1003.0)
+    );
+    assert!((t.percentage + 5.0).abs() < 1e-9, "{}", t.percentage);
+    h.message("public/option", &frame("0"));
+    assert_eq!(h.engine.store().ticker(symbol).unwrap().bid, 0.0);
+    // Derivative frames keep their own spelling.
+    h.message(
+        "public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"41000","ask1Price":"41001","price24hPcnt":"0.01"}}"#,
+    );
+    let t = h.engine.store().ticker("BTCUSDT").unwrap();
+    assert_eq!((t.bid, t.ask), (41000.0, 41001.0));
+    assert!((t.percentage - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn failed_option_catalog_does_not_stall_linear_and_inverse_and_recovers_later() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    let failed = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("instruments-info") && r.url.contains("category=option"))
+        .unwrap();
+    let failed = h.requests.remove(failed);
+    h.reply(failed.id, 503, "upstream unavailable");
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    assert!(
+        h.engine.store().loaded().markets,
+        "option failure withheld working markets"
+    );
+    let linear_index = h
+        .engine
+        .store()
+        .markets()
+        .iter()
+        .position(|m| m.symbol == "BTCUSDT")
+        .unwrap();
+    respond(
+        &mut h,
+        "tickers",
+        "inverse",
+        None,
+        &support::TICKERS
+            .replace("BTCUSDT", "BTCUSD")
+            .replace("ETHUSDT", "ETHUSD"),
+    );
+    respond(&mut h, "tickers", "linear", None, support::TICKERS);
+    assert!(h.engine.store().loaded().tickers);
+    assert!(h.socket("public/linear").is_some() && h.socket("public/inverse").is_some());
+    assert!(h.socket("public/option").is_none());
+    assert!(h.logs.iter().any(|m| m.contains("Failed to fetch Bybit")));
+    // A live linear quote must survive the option catalog joining later.
+    let socket = h.socket("public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"41234"}}"#,
+    );
+    h.advance(1_000.0);
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    assert!(h.engine.store().market(OPTION).is_some());
+    assert_eq!(
+        h.engine
+            .store()
+            .markets()
+            .iter()
+            .position(|m| m.symbol == "BTCUSDT"),
+        Some(linear_index),
+        "late option catalog moved existing market indexes"
+    );
+    respond(&mut h, "tickers", "option", Some("baseCoin=ETH"), EMPTY);
+    respond(&mut h, "tickers", "option", Some("baseCoin=BTC"), QUOTE);
+    assert_eq!(h.engine.store().ticker(OPTION).unwrap().bid, 1000.0);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().bid, 41234.0);
+    assert!(h.socket("public/option").is_some());
+}
+
+#[test]
+fn failed_option_seed_after_other_seeds_still_publishes_working_products() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    respond(
+        &mut h,
+        "tickers",
+        "inverse",
+        None,
+        &support::TICKERS
+            .replace("BTCUSDT", "BTCUSD")
+            .replace("ETHUSDT", "ETHUSD"),
+    );
+    respond(&mut h, "tickers", "linear", None, support::TICKERS);
+    respond(&mut h, "tickers", "option", Some("baseCoin=ETH"), EMPTY);
+    let failed = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
+        .unwrap();
+    let failed = h.requests.remove(failed);
+    h.reply(failed.id, 503, "upstream unavailable");
+    assert!(
+        h.engine.store().loaded().tickers,
+        "option seed failure withheld tickers"
+    );
+    assert!(h.socket("public/linear").is_some());
+    // Recovery publishes the option rows and clears the degraded state.
+    h.advance(1_000.0);
+    respond(&mut h, "tickers", "option", Some("baseCoin=BTC"), QUOTE);
+    assert_eq!(h.engine.store().ticker(OPTION).unwrap().bid, 1000.0);
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("option markets recovered"))
+    );
+}

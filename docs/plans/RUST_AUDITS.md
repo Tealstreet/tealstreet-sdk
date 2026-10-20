@@ -26,7 +26,8 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
    deleting a family.
 
-Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error;
+Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error
+(futures and spot; spot was placing the entry unprotected until verification);
 Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
 obvious improvements (clearer errors, better messages) need no decision.
 
@@ -85,9 +86,12 @@ High:
   ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
+  Verification found liquidation (`x=CALCULATED`) fills dropped; they emit again.
 
 Medium:
 - ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
+  Verification found the uncertain-placement fence never cleared on Phemex (cancel-all
+  failed for the session); a post-failure `activeList` read now reconciles it.
 - ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
 - ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
 - ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
@@ -373,6 +377,8 @@ per-venue canary holding the circular-evidence venues last.
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
   blank or malformed seed quotes start at 0 (row kept for live updates); a failed
   or unusable catalog/ticker read retries the whole product chain with backoff.
+  Verification: JSON `null` quotes now behave like blanks (they dropped the row),
+  live nulls keep the last good value, and an all-undecodable ticker read retries.
 - ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
   read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
@@ -431,9 +437,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
 
 ### Bybit family
-- High: Brazil inverse/option sockets routed to the linear host (engine
+- ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`).
+  `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
+  by native URL (`publicWsRoutes`): inverse/spot use the `bybitinverse`/`bybitspot`
+  hosts as TS does; options stay direct (no option proxy is deployed).
 - ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
   (equity, else wallet balance; USD value, else amount) from every accepted wallet
   read, merged from stream pushes with explicit zeros; failed reads keep holdings.
@@ -444,15 +452,25 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   income ids keep TS's shape; distinct native rows that would share one (same-
   instant hedge legs) get their native id, side and signed size appended, and
   exact page repeats still collapse.
-- Medium: option failures stall linear startup (`lib.rs:857`).
+- ~~Medium: option failures stall linear startup (`lib.rs:857`).~~ Fixed: a failed
+  option catalog or seed lets the other products publish (markets, tickers,
+  sockets, account); options join later by appending (stable indexes, live rows kept).
 - ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
   documentation explicitly permits `baseCoin=All` for `category=option`.
-- Medium: live candles lack trade aggregation and seconds intervals.
-- Medium: option WS ticker field names likely wrong.
+- ~~Medium: live candles lack trade aggregation and seconds intervals.~~ Fixed:
+  `publicTrade` extends the native kline bar (every trade in a packet, in order;
+  Monday weeks, UTC months), seconds intervals are built from trades alone; Hyro
+  stays native-kline-only.
+- ~~Medium: option WS ticker field names likely wrong.~~ Fixed: documented option
+  `bidPrice`/`askPrice`/`change24h` (REST option rows: `change24h`) now update quotes.
 - ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
   with `accountType only support UNIFIED` switches the account to UTA and retries
   once; other errors never change the account type.
-- Medium: demo reduce-only fill check missing.
+- ~~Medium: demo reduce-only fill check missing.~~ Fixed: a locally published Demo
+  reduce-only limit is checked against its executions at 1 s, 3 s and 8.25 s; a
+  complete cursor walk (20 pages, as TS) proving a full fill retires it (terminal
+  fence); otherwise, or on failure, orders are re-read after the grace. Partial,
+  failed or capped walks never prove a fill.
 - ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
   read failing in transport or at the venue keeps the ready stream and last-good
   state and retries next tick; malformed content and initial snapshots still
@@ -596,7 +614,8 @@ TxFlow loses nothing (master TS was a placeholder).
 - Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
   (uncached IDs sent directly; later cancellations continue and failures surface);
   ~~one malformed REST row freezes reconciliation (`account.rs:652`)~~ (skipped
-  with the store's copy kept; still counted in the page census);
+  with the store's copy kept; still counted in the page census; verification fixed
+  attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
@@ -618,7 +637,8 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
-  its executions still emit, the store keeps its copy).
+  its executions still emit, the store keeps its copy; verification: documented
+  `Deactivated`/`Expired` rows now cancel instead of leaving the order Open).
 - Medium: one bad public row stops startup; ~~one bad position row freezes a
   currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
   store copy; the slice balance still commits); no fallback read when a symbol's mode or
@@ -820,7 +840,9 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 
 ### Cross-venue: silent partial failures
 - Child-leg failures (TP/SL after an entry) must surface as errors on every
-  venue (~~Paradex logs at Warning~~; now Error with a native regression).
+  venue (~~Paradex logs at Warning~~; now Error with a native regression;
+  verification: a rejected TP no longer drops the queued SL, and wrong-side
+  brackets reject before any write instead of placing a bare entry).
 - Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
   Binance COIN-M, Bitrue cancels).
 - Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;

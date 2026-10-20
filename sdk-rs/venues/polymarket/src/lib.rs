@@ -9,6 +9,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, PredictionMarket, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -120,17 +121,6 @@ pub struct Polymarket {
     quote_times: HashMap<String, f64>,
     trade_times: HashMap<String, f64>,
     tick_times: HashMap<String, f64>,
-}
-pub(crate) fn encode(text: &str) -> String {
-    let mut s = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            s.push(b as char);
-        } else {
-            s.push_str(&format!("%{b:02X}"));
-        }
-    }
-    s
 }
 pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
     if !(200..300).contains(&response.status) {
