@@ -79,7 +79,14 @@ interest from attached accounts; late book subscribers receive the native
 snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
-sections or account metadata. A running/loaded direct source is mandatory.
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`). One hub per source keeps a single store
+subscription and broadcasts changed tickers every 250 ms. Like TS, it is lenient:
+private startup continues after 30 s without a loaded source, account markets the
+source has not listed are tolerated, and book/candle requests for them wait. A real
+field mismatch still fails. Testnet accounts ignore the venue-keyed source and run
+their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means

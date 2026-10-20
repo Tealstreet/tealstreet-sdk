@@ -143,17 +143,20 @@ test('public timers advance by recorded time with cancellation and repeated inte
   }
 });
 
-test('private replay can freeze startup timestamps while startup timers still run', async () => {
+test('private startup advances by timer deadlines and rebases pending timers at tape readiness', async () => {
   const epoch = 1700000000000;
   const clock = new ReplayClock(epoch, true);
   clock.install();
   try {
     assert.equal(Date.now(), epoch);
     await new Promise((resolve) => setTimeout(resolve, 1));
-    assert.equal(Date.now(), epoch);
-    clock.start();
+    assert.equal(Date.now(), epoch + 1);
     let observed;
     setTimeout(() => { observed = Date.now(); }, 100);
+    clock.start();
+    assert.equal(Date.now(), epoch);
+    await clock.advance(99);
+    assert.equal(observed, undefined);
     await clock.advance(100);
     assert.equal(observed, epoch + 100);
   } finally { clock.restore(); }

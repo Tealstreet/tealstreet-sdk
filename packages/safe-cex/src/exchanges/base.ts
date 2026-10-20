@@ -1,3 +1,4 @@
+import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
 import type { PositionRecord } from '../journal/position.types';
@@ -1552,6 +1553,9 @@ export class BaseExchange implements Exchange {
   }
 
   private workerFrameApplier?: FrameApplier;
+
+  /** Engine-backed venues take the record a snapshot frame carries; others have none. */
+  protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
   private workerFrameRecoveryPending = false;
 
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
@@ -1576,13 +1580,7 @@ export class BaseExchange implements Exchange {
   }
 
   private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
-    this.workerFrameApplier ??= new FrameApplier(
-      this.store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.workerFrameApplier ??= new FrameApplier(this.store);
     let frame: Frame | undefined;
     let needsSnapshot = false;
     try {
@@ -1593,6 +1591,12 @@ export class BaseExchange implements Exchange {
       console.error('Invalid engine frame', error);
     }
     if (frame) {
+      try {
+        const capabilities = frame.capabilities();
+        if (capabilities) this.adoptEngineCapabilities(capabilities);
+      } catch (error) {
+        console.error('Engine capabilities section failed', error);
+      }
       try {
         this.workerFrameApplier.apply(frame);
       } catch (error) {
