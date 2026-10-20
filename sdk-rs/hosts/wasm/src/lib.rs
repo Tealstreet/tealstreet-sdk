@@ -4,6 +4,7 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
+    feature = "grvt",
     feature = "bitrue",
     feature = "binance",
     feature = "blofin",
@@ -41,6 +42,8 @@ use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "grvt")]
+use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "mexc")]
@@ -94,6 +97,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "grvt",
     feature = "bitrue",
     feature = "backpack",
     feature = "weex",
@@ -104,6 +108,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
     #[cfg(any(
+        feature = "grvt",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -146,6 +151,15 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_trading_account_id: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_signer_address: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_session_proxy: bool,
 }
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
@@ -565,6 +579,7 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "grvt",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -572,6 +587,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "grvt",
         feature = "bitrue",
         feature = "backpack",
         feature = "weex",
@@ -589,6 +605,16 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "grvt")]
+            "grvt" => Box::new(Engine::new(Grvt::new(GrvtOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                trading_account_id: options.grvt_trading_account_id,
+                signer_address: options.grvt_signer_address,
+                session_proxy: options.grvt_session_proxy,
+            }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

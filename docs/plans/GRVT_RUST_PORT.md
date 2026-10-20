@@ -33,3 +33,11 @@ Branch `feat/rust-grvt`, based on `origin/feat/rust-rewrite`. PR and merge targe
 - Public phase implemented. Independent review verified live subscription ACKs and fixed four findings: advertised nonzero first delta baseline, independent candle-interval feeds, documented empty-string ticker clears, and stale books after resubscribe. Re-review found unsupported Unicode interval panic; fixed with ASCII validation and regression.
 - Public verification: 10 native tests PASS; crate clippy and bans PASS; paired TS public delta regression PASS. Package typecheck/lint running. TS repairs preserve buy/sell rolling volumes/open across deltas, derive quote volume/percentage from current last, and handle clears/nanosecond times. `KNOWN_TS_FIXES.grvt` documents these; no output normalization.
 - Signing design reviewed against actual SDK and official examples; exact signatures and native integer bounds have 5 isolated tests PASS. Session/private implementation is staged separately for phase 2 integration.
+
+### Private checkpoint
+
+- Session/private phase independent review PASS after fixes for stale REST rows, exact nanosecond watermarks, authoritative empty snapshot tombstones, reused client IDs and actual CROSS/ISOLATED metadata. Private sequence ACKs, duplicate suppression and gap-triggered reconnect/reconciliation are covered. Proxy auth waits for acknowledgement; native direct uses upgrade headers; only explicit code 1000 gets one preserved-body resend.
+- Account tests 13 PASS, public tests 10 PASS, all-target clippy PASS. Paired TS public/private regressions 4 PASS. Public package typecheck/lint passed; repeated checks cover option forwarding/private corrections.
+- GRVT real-URL host/WASM/SDK registrations integrated, including routing-derived session-proxy selection. Standalone GRVT native check and release WASM build pass. No host routing policy copied into the venue.
+- Live capture: 20 seconds, 4,694 websocket frames, 194 perpetual markets/tickers, two books. Fixture committed in a later gates checkpoint. First public gate matches output and wins CPU (TS 341.9 ms / Rust 263.5 ms; steady 212.4 / 177.2), but memory 1.1 / 1.2 MB FAIL. Memory optimization remains required; no gate thresholds changed.
+- Trading and query modules drafted in disjoint files; integration and their independent reviews follow this checkpoint.

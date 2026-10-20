@@ -2,6 +2,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { resolveTransportRouting } from '../../transport/registry';
 import {
   LogSeverity,
+  MarginType,
   Order,
   OrderSide,
   OrderStatus,
@@ -808,6 +809,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         unrealizedPnl,
         contracts,
         liquidationPrice,
+        marginType: (feed.mt ?? feed.margin_type) === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
       };
     } catch (error) {
       this.parent.emitAndLogError(`Error parsing position: ${error}`);

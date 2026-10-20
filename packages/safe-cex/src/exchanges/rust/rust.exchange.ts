@@ -26,6 +26,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
+import { resolveTransportRouting } from '../../transport/registry';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -44,6 +45,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bitgetusdc: 'bitgetusdc',
   blofin: 'blofin',
   bitrue: 'bitrue',
+  grvt: 'grvt',
   mexc: 'mexc',
   bingx: 'bingx',
   bybit: 'bybit',
@@ -82,6 +84,10 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
+  grvt: {
+    label: 'GRVT', requirement: 'be a canonical decimal integer between 1 and 9223372036854775807',
+    isValid: (id) => /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n,
+  },
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `ts${uuid()}`.slice(0, 36) }),
@@ -184,6 +190,11 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(this.name === 'grvt' ? {
+          grvtTradingAccountId: this.options.grvtTradingAccountId,
+          grvtSignerAddress: this.options.grvtSignerAddress,
+          grvtSessionProxy: Boolean(resolveTransportRouting(this.name, this.options).wsPrivate.host),
+        } : {}),
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
@@ -353,7 +364,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'bitrue', 'grvt', 'hyperliquid'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -362,7 +373,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue', 'grvt'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };

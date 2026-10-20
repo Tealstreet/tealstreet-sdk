@@ -241,3 +241,12 @@ impl<'de> Deserialize<'de> for DeltaNumber {
         }
     }
 }
+
+pub fn code(response: &safe_cex_engine::Response<'_>) -> String {
+    serde_json::from_str::<Envelope<'_>>(response.body)
+        .map(|e| {
+            e.error
+                .map_or_else(|| e.code.to_string(), |e| e.code.to_string())
+        })
+        .unwrap_or_default()
+}

@@ -1,4 +1,5 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
+mod account;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -39,13 +40,14 @@ pub struct InstrumentInfo {
     pub quote_decimals: Option<u32>,
 }
 pub struct Pending {
-    pub path: &'static str,
-    pub body: String,
-    pub job: Job,
-    pub attempts: u8,
-    pub auth_resent: bool,
+    pub(crate) path: &'static str,
+    pub(crate) body: String,
+    pub(crate) job: Job,
+    pub(crate) attempts: u8,
+    pub(crate) auth_resent: bool,
 }
-pub enum Job {
+pub(crate) enum Job {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
@@ -53,8 +55,6 @@ pub enum Job {
     },
     Candles {
         command: u32,
-        symbol: String,
-        interval: String,
         rows: Vec<Candle>,
         failed: bool,
     },
@@ -82,6 +82,7 @@ struct TickerState {
 }
 pub struct Grvt {
     options: Options,
+    account: account::Account,
     metadata: HashMap<String, InstrumentInfo>,
     public: Connection,
     books: HashMap<String, Depth>,
@@ -127,6 +128,7 @@ impl Grvt {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            account: account::Account::default(),
             metadata: HashMap::new(),
             public: Connection::default(),
             books: HashMap::new(),
@@ -170,14 +172,54 @@ impl Grvt {
         );
     }
     fn send_request(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
-        cx.request_streamed_body(
-            Method::Post,
-            format!("{}{}", self.mdg(), pending.path),
-            vec![("Content-Type", "application/json".into())],
-            Some(pending.body.clone()),
-            ArrayAt::Envelope(&[&["r"], &["result"]]),
-            pending,
-        );
+        let (base, headers, at) = match &pending.job {
+            Job::Markets { .. } | Job::Candles { .. } => (
+                self.mdg(),
+                vec![("Content-Type", "application/json".into())],
+                Some(ArrayAt::Envelope(&[&["r"], &["result"]])),
+            ),
+            Job::Account(account::Request::Login) => (
+                if self.options.testnet {
+                    "https://edge.testnet.grvt.io"
+                } else {
+                    "https://edge.grvt.io"
+                },
+                vec![
+                    ("Content-Type", "application/json".into()),
+                    ("X-Grvt-Remember-Me", "true".into()),
+                    ("Cookie", "rm=true".into()),
+                ],
+                None,
+            ),
+            Job::Account(request) => (
+                if self.options.testnet {
+                    "https://trades.testnet.grvt.io"
+                } else {
+                    "https://trades.grvt.io"
+                },
+                self.account_headers(),
+                request.array_at(),
+            ),
+        };
+        let url = format!("{base}{}", pending.path);
+        let body = Some(pending.body.clone());
+        if let Some(at) = at {
+            cx.request_streamed_body(Method::Post, url, headers, body, at, pending);
+        } else {
+            cx.request(Method::Post, url, headers, body, pending);
+        }
+    }
+    fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending.job {
+            Job::Account(request) => self.account_failed(cx, request, error),
+            Job::Markets { .. } => {
+                cx.log(LogLevel::Warning, "GRVT instrument read failed");
+                if self.startup_retry.is_none() {
+                    self.startup_retry = Some(cx.set_timer(5000.));
+                }
+            }
+            Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
+        }
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         self.request(
@@ -453,6 +495,7 @@ impl Grvt {
                         t.percentage = (t.last - state.open) / state.open * 100.;
                     }
                 });
+                self.sync_balance_upnl(cx);
             }
             "v1.book.s" => {
                 let Some(depth) = self
@@ -520,6 +563,9 @@ impl Venue for Grvt {
         self.fetch_markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account_open(cx, socket) {
+            return;
+        }
         if let Some(interval) = self
             .candle_sockets
             .iter()
@@ -564,6 +610,9 @@ impl Venue for Grvt {
     }
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account_message(cx, socket, text) {
+            return;
+        }
         if let Some(connection) = self
             .candle_sockets
             .values_mut()
@@ -583,6 +632,9 @@ impl Venue for Grvt {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account_close(cx, socket) {
+            return;
+        }
         if let Some(connection) = self
             .candle_sockets
             .values_mut()
@@ -600,8 +652,9 @@ impl Venue for Grvt {
             self.disconnect(cx, false);
         }
     }
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
+            Job::Account(request) => self.account_item(cx, request, item),
             Job::Markets {
                 rows,
                 metadata,
@@ -669,10 +722,20 @@ impl Venue for Grvt {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Err(error) = wire::check(&response) {
-            self.on_request_failed(cx, pending, &error);
+            let code = wire::code(&response);
+            if code == "1000"
+                && !pending.auth_resent
+                && !matches!(pending.job, Job::Account(account::Request::Login))
+                && !matches!(pending.job, Job::Markets { .. } | Job::Candles { .. })
+            {
+                self.account_refresh(cx, pending);
+            } else {
+                self.fail_pending(cx, pending, &error);
+            }
             return;
         }
         match pending.job {
+            Job::Account(request) => self.account_response(cx, request, response),
             Job::Markets {
                 rows,
                 metadata,
@@ -698,10 +761,14 @@ impl Venue for Grvt {
                             })
                     })
                     .collect();
+                let first = !cx.store.loaded().markets;
                 self.metadata = metadata;
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
                 self.connect(cx);
+                if first {
+                    self.private_start(cx);
+                }
                 if self.public.open {
                     self.ticker_offset = 0;
                     self.ticker_batch(cx);
@@ -728,8 +795,17 @@ impl Venue for Grvt {
             }
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, _error: &str) {
-        if pending.attempts < 5 {
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if wire::check(&response).is_err(){self.on_response(cx,pending,response);}else{self.fail_pending(cx,pending,"Missing GRVT response array");}
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        let read = !matches!(pending.job, Job::Account(account::Request::Login));
+        if read && pending.attempts < 5 {
             pending.attempts += 1;
             match &mut pending.job {
                 Job::Markets {
@@ -745,21 +821,17 @@ impl Venue for Grvt {
                     rows.clear();
                     *failed = false;
                 }
+                Job::Account(request) => request.reset(),
             }
             self.send_request(cx, pending);
             return;
         }
-        match pending.job {
-            Job::Markets { .. } => {
-                cx.log(LogLevel::Warning, "GRVT instrument read failed");
-                if self.startup_retry.is_none() {
-                    self.startup_retry = Some(cx.set_timer(5_000.));
-                }
-            }
-            Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
-        }
+        self.fail_pending(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if let Some(timeframe) = self
             .candle_sockets
             .iter()
@@ -945,8 +1017,6 @@ impl Venue for Grvt {
                     body,
                     Job::Candles {
                         command,
-                        symbol,
-                        interval: timeframe,
                         rows: vec![],
                         failed: false,
                     },

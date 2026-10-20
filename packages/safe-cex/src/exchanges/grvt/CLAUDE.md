@@ -540,7 +540,7 @@ GRVT uses nanosecond timestamps throughout:
 Uses `/lite/v1/aggregated_account_summary`:
 
 - `total` = `parseFloat(aggData.te)` (total_equity)
-- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity
+- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity only when absent; an explicit zero stays zero
 - `used` = total - free
 - Spot balances parsed from `aggData.sb` array
 
@@ -609,7 +609,7 @@ Initial tickers are placeholders with all zeros (`fetchTickers()` just creates s
 ## Exchange Metadata
 
 - **Position Mode**: One-way (`getPositionMode()` returns `PositionMode.OneWay`)
-- **Margin Type**: Isolated (`MarginType.Isolated` used in positions, `grvt.exchange.ts:789`)
+- **Margin Type**: native `mt` / `margin_type` (`CROSS` or `ISOLATED`); legacy missing fields retain isolated fallback.
 - **Default Leverage**: 10x (`grvt.exchange.ts:73`)
 - **SDK Package**: `@tealstreet/grvt-ts-sdk` (forked) for signing, `@tealstreet/grvt-client` (forked from `@grvt/client`) for API
 

@@ -980,7 +980,7 @@ export class GrvtExchange extends BaseExchange {
           totalEquity = parseFloat(aggData.te || aggData.total_equity || '0');
           // Available balance from aggregated summary
           availableBalance = parseFloat(
-            aggData.ts2 || aggData.total_sub_account_available_balance || aggData.te || aggData.total_equity || '0',
+            aggData.ts2 ?? aggData.total_sub_account_available_balance ?? aggData.te ?? aggData.total_equity ?? '0',
           );
           const totalUpnlRaw = aggData.tu ?? aggData.total_upnl;
           if (totalUpnlRaw !== undefined && totalUpnlRaw !== null) {
@@ -1014,7 +1014,7 @@ export class GrvtExchange extends BaseExchange {
 
       return {
         total: totalEquity,
-        free: availableBalance > 0 ? availableBalance : totalEquity,
+        free: availableBalance,
         used: totalEquity - availableBalance,
         upnl: unrealizedPnl,
         currencies: currencies as any,
@@ -1111,7 +1111,7 @@ export class GrvtExchange extends BaseExchange {
 
         const side = size > 0 ? PositionSide.Long : PositionSide.Short;
         const contracts = Math.abs(size);
-        const entryPrice = parseFloat(grvtPos.ep || grvtPos.entry_price || grvtPos.ep1 || '0');
+        const entryPrice = parseFloat(grvtPos.ep ?? grvtPos.entry_price ?? '0');
         const unrealizedPnl = parseFloat(grvtPos.up || grvtPos.unrealized_pnl || '0');
         const realizedPnl = parseFloat(grvtPos.rp || grvtPos.realized_pnl || '0');
 
@@ -1142,7 +1142,7 @@ export class GrvtExchange extends BaseExchange {
           unrealizedPnl,
           realizedPnl,
           liquidationPrice,
-          marginType: MarginType.Isolated,
+          marginType: (grvtPos.mt ?? grvtPos.margin_type) === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
           positionMode,
           lastUpdate: virtualClock.getCurrentTimeMs(),
           info: grvtPos,

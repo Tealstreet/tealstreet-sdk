@@ -143,6 +143,17 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  grvt: {
+    rust: 'grvt',
+    ts: { module: `${root}/grvt/grvt.exchange.ts`, className: 'GrvtExchange', name: 'grvt' },
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
+    options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
+    marketFilter: (row) => row.symbol.endsWith('_PERP'),
+    requestBodies: true,
+    isPrivateRecord: (record) => record.type === 'ws' && (new URL(record.url).hostname.startsWith('trades.') || /v1\.(order|position|fill)/.test(record.text)),
+    privateSocket: '/private-grvt',
+    isWrite: (_method, url) => /\/(create_order|cancel_order|cancel_all_orders|set_initial_leverage|set_position_config)$/.test(new URL(url).pathname),
+  },
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,

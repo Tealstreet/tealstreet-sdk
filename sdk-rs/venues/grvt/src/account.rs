@@ -1,0 +1,1618 @@
+//! Session authentication, private streams and atomic REST reconciliation.
+use crate::wire::{Number, Str, Text};
+use crate::{Grvt, Job, Pending};
+use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::model::{
+    Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
+    PositionSide, StopTriggerType, TimeInForce,
+};
+use safe_cex_engine::store::Store;
+use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId};
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+const AUTH: &str = "/auth/api_key/login";
+const SUMMARY: &str = "/lite/v1/aggregated_account_summary";
+const POSITIONS: &str = "/lite/v1/positions";
+const ORDERS: &str = "/lite/v1/open_orders";
+const LEVERAGE: &str = "/lite/v1/get_all_initial_leverage";
+const BUILDERS: &str = "/full/v1/get_authorized_builders";
+const RECENT_LIMIT: usize = 1000;
+pub(crate) const BUILDER_MAINNET: &str = "0xee8f3559f298fffa79b8253437969d15b5dccff3";
+pub(crate) const BUILDER_TESTNET: &str = "0xb0108ae4c07218ce320e5e22dd911a01c2042162";
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BuilderState {
+    #[default]
+    Unknown,
+    Unauthorized,
+    CapTooLow(u32),
+    Authorized,
+}
+pub(crate) struct Session {
+    pub cookie: String,
+    pub account_id: String,
+}
+#[derive(Default)]
+pub(crate) struct Account {
+    pub session: Option<Session>,
+    pub trading_account_id: Option<String>,
+    pub builder: BuilderState,
+    pub native_ids: HashMap<String, String>,
+    pub orders_revision: u64,
+    pub positions_revision: u64,
+    pub settings_revision: u64,
+    pub socket: Option<SocketId>,
+    started: bool,
+    login_pending: bool,
+    waiting: Vec<Pending>,
+    summary_pending: bool,
+    orders_pending: bool,
+    positions_pending: bool,
+    leverage_pending: bool,
+    authenticated: bool,
+    authentication_failed: bool,
+    refresh_attempts: u8,
+    healthy_since: Option<f64>,
+    last_received: f64,
+    ping_sent: bool,
+    request_id: u32,
+    health: Option<TimerId>,
+    reconnect: Option<TimerId>,
+    tick: Option<TimerId>,
+    orders_timer: Option<TimerId>,
+    positions_timer: Option<TimerId>,
+    fills: HashSet<String>,
+    fill_queue: VecDeque<String>,
+    terminal: HashMap<String, (u64, Option<String>)>,
+    terminal_queue: VecDeque<String>,
+    identity_queue: VecDeque<String>,
+    position_times: HashMap<String, u64>,
+    order_times: HashMap<String, u64>,
+    order_created: HashMap<String, u64>,
+    sequences: HashMap<(String, String), u64>,
+    first_sequence: HashMap<(String, String), u64>,
+}
+pub(crate) enum Request {
+    Login,
+    Summary,
+    Positions {
+        revision: u64,
+        issued_at: f64,
+        rows: Vec<PositionRecord>,
+        failed: bool,
+    },
+    Orders {
+        revision: u64,
+        issued_at: f64,
+        rows: Vec<DecodedOrder>,
+        failed: bool,
+    },
+    Leverage {
+        revision: u64,
+        rows: Vec<Leverage>,
+        failed: bool,
+    },
+    Builders {
+        cap: Option<u32>,
+        failed: bool,
+    },
+}
+impl Request {
+    pub(crate) fn array_at(&self) -> Option<ArrayAt> {
+        match self {
+            Self::Positions { .. }
+            | Self::Orders { .. }
+            | Self::Leverage { .. }
+            | Self::Builders { .. } => {
+                Some(ArrayAt::Envelope(&[&["r"], &["result"], &["results"]]))
+            }
+            _ => None,
+        }
+    }
+    pub(crate) fn reset(&mut self) {
+        match self {
+            Self::Positions { rows, failed, .. } => {
+                rows.clear();
+                *failed = false;
+            }
+            Self::Orders { rows, failed, .. } => {
+                rows.clear();
+                *failed = false;
+            }
+            Self::Leverage { rows, failed, .. } => {
+                rows.clear();
+                *failed = false;
+            }
+            Self::Builders { cap, failed } => {
+                *cap = None;
+                *failed = false;
+            }
+            _ => {}
+        }
+    }
+}
+#[derive(Deserialize)]
+struct LoginBody<'a> {
+    #[serde(borrow, default)]
+    sub_account_id: Text<'a>,
+}
+#[derive(Deserialize)]
+struct SummaryEnvelope<'a> {
+    #[serde(borrow, rename = "r", alias = "result")]
+    result: Summary<'a>,
+}
+#[derive(Deserialize)]
+struct Summary<'a> {
+    #[serde(rename = "te", alias = "total_equity")]
+    equity: Number,
+    #[serde(rename = "ts2", alias = "total_sub_account_available_balance", default)]
+    available: Option<Number>,
+    #[serde(rename = "tu", alias = "total_upnl", default)]
+    upnl: Option<Number>,
+    #[serde(borrow, rename = "sas", alias = "sub_account_summaries", default)]
+    subaccounts: Vec<Subaccount<'a>>,
+}
+#[derive(Deserialize)]
+struct Subaccount<'a> {
+    #[serde(borrow, rename = "si", alias = "sub_account_id")]
+    id: Text<'a>,
+}
+#[derive(Deserialize)]
+struct PositionWire<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+    #[serde(rename = "s", alias = "size")]
+    size: Number,
+    #[serde(rename = "ep", alias = "entry_price", default)]
+    entry: Option<Number>,
+    #[serde(rename = "n", alias = "notional", default)]
+    notional: Option<Number>,
+    #[serde(rename = "up", alias = "unrealized_pnl", default)]
+    upnl: Option<Number>,
+    #[serde(rename = "rp", alias = "realized_pnl", default)]
+    realized: Option<Number>,
+    #[serde(rename = "l", alias = "leverage", default)]
+    leverage: Option<Number>,
+    #[serde(
+        rename = "el",
+        alias = "est_liquidation_price",
+        alias = "liquidation_price",
+        alias = "lp",
+        default
+    )]
+    liquidation: Option<Number>,
+    #[serde(
+        borrow,
+        rename = "et",
+        alias = "event_time",
+        alias = "ut",
+        alias = "update_time",
+        default
+    )]
+    update_time: Text<'a>,
+    #[serde(borrow, rename = "mt", alias = "margin_type", default)]
+    margin: Option<Str<'a>>,
+}
+#[derive(Deserialize)]
+struct LeverageWire<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+    #[serde(rename = "l", alias = "leverage")]
+    leverage: Number,
+    #[serde(rename = "ml", alias = "min_leverage", default)]
+    min: Option<Number>,
+    #[serde(rename = "ml1", alias = "max_leverage", default)]
+    max: Option<Number>,
+    #[serde(borrow, rename = "mt", alias = "margin_type", default)]
+    margin: Option<Str<'a>>,
+}
+pub(crate) struct Leverage {
+    symbol: String,
+    value: f64,
+    min: Option<f64>,
+    max: Option<f64>,
+    margin: Option<MarginType>,
+}
+#[derive(Deserialize)]
+struct BuilderWire<'a> {
+    #[serde(borrow, rename = "ba", alias = "builder_account_id")]
+    address: Str<'a>,
+    #[serde(
+        rename = "mfr",
+        alias = "max_futures_fee_rate",
+        alias = "max_fee_rate",
+        default
+    )]
+    cap: Option<Number>,
+}
+#[derive(Deserialize)]
+struct OrderWire<'a> {
+    #[serde(borrow, rename = "oi", alias = "order_id", default)]
+    id: Text<'a>,
+    #[serde(rename = "im", alias = "is_market")]
+    market: bool,
+    #[serde(rename = "ro", alias = "reduce_only", default)]
+    reduce_only: bool,
+    #[serde(rename = "po", alias = "post_only", default)]
+    post_only: bool,
+    #[serde(borrow, rename = "ti", alias = "time_in_force", default)]
+    tif: Str<'a>,
+    #[serde(borrow, rename = "l", alias = "legs")]
+    legs: Vec<Leg<'a>>,
+    #[serde(borrow, rename = "m", alias = "metadata", default)]
+    metadata: Option<Metadata<'a>>,
+    #[serde(borrow, rename = "s1", alias = "state")]
+    state: OrderState<'a>,
+}
+#[derive(Deserialize)]
+struct Leg<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+    #[serde(rename = "s", alias = "size")]
+    size: Number,
+    #[serde(rename = "lp", alias = "limit_price", default)]
+    price: Number,
+    #[serde(rename = "ib", alias = "is_buying_asset")]
+    buying: bool,
+}
+#[derive(Default, Deserialize)]
+struct Metadata<'a> {
+    #[serde(borrow, rename = "co", alias = "client_order_id", default)]
+    client_id: Text<'a>,
+    #[serde(borrow, rename = "ct", alias = "create_time", default)]
+    create_time: Text<'a>,
+    #[serde(borrow, rename = "t", alias = "trigger", default)]
+    trigger: Option<Trigger<'a>>,
+}
+#[derive(Deserialize)]
+struct Trigger<'a> {
+    #[serde(borrow, rename = "tt", alias = "trigger_type")]
+    kind: Str<'a>,
+    #[serde(borrow, rename = "t", alias = "tpsl")]
+    tpsl: TriggerDetails<'a>,
+}
+#[derive(Deserialize)]
+struct TriggerDetails<'a> {
+    #[serde(rename = "tp", alias = "trigger_price")]
+    price: Number,
+    #[serde(borrow, rename = "tb", alias = "trigger_by")]
+    by: Str<'a>,
+    #[serde(rename = "cp", alias = "close_position", default)]
+    close: Option<bool>,
+}
+#[derive(Deserialize)]
+struct OrderState<'a> {
+    #[serde(borrow, rename = "s", alias = "status")]
+    status: Str<'a>,
+    #[serde(rename = "ts", alias = "traded_size")]
+    traded: Vec<Number>,
+    #[serde(borrow, rename = "ut", alias = "update_time", default)]
+    update_time: Text<'a>,
+}
+pub(crate) struct DecodedOrder {
+    pub order: Order,
+    pub native_id: Option<String>,
+    pub updated_ns: u64,
+    pub created_ns: u64,
+}
+pub(crate) struct PositionRecord {
+    position: Position,
+    time: u64,
+}
+fn market<'a>(store: &'a Store, instrument: &str) -> Option<&'a safe_cex_engine::model::Market> {
+    store
+        .market_by_id(instrument)
+        .or_else(|| store.market(&instrument.to_ascii_uppercase()))
+}
+fn timestamp(text: &str, fallback: f64) -> f64 {
+    text.parse::<u64>()
+        .ok()
+        .map_or(fallback, |n| (n / 1_000_000) as f64)
+}
+fn nanos(text: &str, fallback: f64) -> u64 {
+    text.parse::<u64>()
+        .unwrap_or_else(|_| (fallback.max(0.) as u64).saturating_mul(1_000_000))
+}
+fn margin_type(text: Option<&str>) -> Result<Option<MarginType>, String> {
+    match text {
+        Some("CROSS") => Ok(Some(MarginType::Cross)),
+        Some("ISOLATED") => Ok(Some(MarginType::Isolated)),
+        None => Ok(None),
+        _ => Err("Unknown GRVT margin type".into()),
+    }
+}
+pub(crate) fn decode_order(text: &str, store: &Store, now: f64) -> Result<DecodedOrder, String> {
+    let wire: OrderWire<'_> = serde_json::from_str(text).map_err(|_| "Invalid GRVT order")?;
+    if wire.legs.len() != 1 || wire.state.traded.len() != 1 {
+        return Err("Unsupported GRVT multi-leg order".into());
+    }
+    let leg = &wire.legs[0];
+    let market = market(store, &leg.instrument).ok_or("Unknown GRVT order instrument")?;
+    let metadata = wire.metadata.unwrap_or_default();
+    let native_id = (!wire.id.is_empty() && !matches!(&*wire.id, "0x00" | "0x0" | "0"))
+        .then(|| wire.id.to_string());
+    let client_id = (!metadata.client_id.is_empty() && &*metadata.client_id != "0")
+        .then(|| metadata.client_id.to_string());
+    let id = client_id
+        .clone()
+        .or_else(|| native_id.clone())
+        .ok_or("GRVT order has no identity")?;
+    let status = match &*wire.state.status {
+        "OPEN" | "PENDING" => OrderStatus::Open,
+        "FILLED" => OrderStatus::Closed,
+        "CANCELLED" | "REJECTED" => OrderStatus::Canceled,
+        _ => return Err("Unknown GRVT order status".into()),
+    };
+    let filled = wire.state.traded[0].0;
+    if leg.size.0 <= 0. || filled < 0. || filled > leg.size.0 || leg.price.0 < 0. {
+        return Err("Invalid GRVT order amounts".into());
+    }
+    let tif = match (&*wire.tif, wire.post_only) {
+        ("GOOD_TILL_TIME", true) => Some(TimeInForce::PostOnly),
+        ("GOOD_TILL_TIME", false) => Some(TimeInForce::GoodTillCancel),
+        ("IMMEDIATE_OR_CANCEL", false) => Some(TimeInForce::ImmediateOrCancel),
+        ("FILL_OR_KILL", false) => Some(TimeInForce::FillOrKill),
+        _ => None,
+    };
+    let mut kind = if wire.market {
+        OrderType::Market
+    } else {
+        OrderType::Limit
+    };
+    let mut price = leg.price.0;
+    let mut trigger_type = None;
+    let mut close = None;
+    if let Some(trigger) = metadata.trigger {
+        kind = match &*trigger.kind {
+            "STOP_LOSS" => OrderType::StopLoss,
+            "TAKE_PROFIT" => OrderType::TakeProfit,
+            _ => return Err("Unknown GRVT trigger".into()),
+        };
+        if trigger.tpsl.price.0 <= 0. {
+            return Err("Invalid GRVT trigger price".into());
+        }
+        price = trigger.tpsl.price.0;
+        trigger_type = match &*trigger.tpsl.by {
+            "LAST" => Some(StopTriggerType::LastPrice),
+            "MARK" => Some(StopTriggerType::MarkPrice),
+            "INDEX" => Some(StopTriggerType::IndexPrice),
+            _ => None,
+        };
+        close = trigger.tpsl.close;
+    }
+    Ok(DecodedOrder {
+        native_id,
+        created_ns: metadata.create_time.parse().unwrap_or(0),
+        updated_ns: wire
+            .state
+            .update_time
+            .parse::<u64>()
+            .unwrap_or_else(|_| nanos(&metadata.create_time, now)),
+        order: Order {
+            id,
+            parent_id: None,
+            status,
+            symbol: market.symbol.clone(),
+            kind,
+            side: if leg.buying {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            },
+            price,
+            amount: leg.size.0,
+            filled,
+            remaining: (leg.size.0 - filled).max(0.),
+            reduce_only: wire.reduce_only,
+            close,
+            client_order_id: client_id,
+            time_in_force: tif,
+            last_update: timestamp(
+                &wire.state.update_time,
+                timestamp(&metadata.create_time, now),
+            ),
+            trigger_type,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        },
+    })
+}
+
+fn position(text: &str, store: &Store, now: f64) -> Result<PositionRecord, String> {
+    let wire: PositionWire<'_> = serde_json::from_str(text).map_err(|_| "Invalid GRVT position")?;
+    let market = market(store, &wire.instrument).ok_or("Unknown GRVT position instrument")?;
+    if wire.size.0 != 0.
+        && (wire.entry.is_none()
+            || wire.notional.is_none()
+            || wire.upnl.is_none()
+            || wire.leverage.is_none()
+            || wire.liquidation.is_none())
+    {
+        return Err("Incomplete GRVT position".into());
+    }
+    let entry = wire.entry.unwrap_or_default().0;
+    let notional = wire.notional.unwrap_or_default().0;
+    let upnl = wire.upnl.unwrap_or_default().0;
+    let liquidation = wire.liquidation.unwrap_or_default().0;
+    let leverage = if wire.leverage.is_some_and(|n| n.0 > 0.) {
+        wire.leverage.unwrap_or_default().0
+    } else {
+        store
+            .setting(&market.symbol)
+            .map_or(10., |s| s.leverage)
+            .max(1.)
+    };
+    if entry < 0. || liquidation < 0. {
+        return Err("Invalid GRVT position amounts".into());
+    }
+    let margin = margin_type(wire.margin.as_deref())?
+        .or_else(|| store.setting(&market.symbol).and_then(|s| s.margin_type));
+    Ok(PositionRecord {
+        time: nanos(&wire.update_time, now),
+        position: Position {
+            id: market.symbol.clone(),
+            symbol: market.symbol.clone(),
+            side: if wire.size.0 < 0. {
+                PositionSide::Short
+            } else {
+                PositionSide::Long
+            },
+            entry_price: entry,
+            notional: notional.abs(),
+            leverage,
+            margin_type: margin.or(Some(MarginType::Isolated)),
+            position_mode: Some(PositionMode::Oneway),
+            unrealized_pnl: upnl,
+            realized_pnl: wire.realized.map(|n| n.0),
+            contracts: wire.size.0.abs(),
+            liquidation_price: liquidation,
+            margin_size: None,
+            last_update: Some(timestamp(&wire.update_time, now)),
+        },
+    })
+}
+#[derive(Default, Deserialize)]
+struct PrivateMessage<'a> {
+    #[serde(borrow, rename = "type", default)]
+    kind: Str<'a>,
+    #[serde(borrow, rename = "s", alias = "stream", default)]
+    stream: Str<'a>,
+    #[serde(borrow, rename = "s1", alias = "selector", default)]
+    selector: Str<'a>,
+    #[serde(borrow, rename = "sn", alias = "sequence_number", default)]
+    sequence: Text<'a>,
+    #[serde(borrow, rename = "f", alias = "feed", default)]
+    feed: Option<&'a RawValue>,
+    #[serde(borrow, rename = "e", alias = "error", default)]
+    error: Option<crate::wire::Error<'a>>,
+    #[serde(borrow, rename = "c", alias = "code", default)]
+    code: Text<'a>,
+    #[serde(borrow, rename = "r", alias = "result", default)]
+    result: Option<crate::wire::SubscriptionResult<'a>>,
+    #[serde(borrow, rename = "subs", default)]
+    subs: Vec<Str<'a>>,
+    #[serde(borrow, rename = "first_sequence_number", default)]
+    first: Vec<Text<'a>>,
+}
+#[derive(Deserialize)]
+struct FillWire<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+    #[serde(borrow, rename = "ti", alias = "trade_id")]
+    trade_id: Text<'a>,
+    #[serde(borrow, rename = "co", alias = "client_order_id", default)]
+    client_id: Text<'a>,
+    #[serde(borrow, rename = "oi", alias = "order_id", default)]
+    native_id: Text<'a>,
+    #[serde(rename = "ib", alias = "is_buyer")]
+    buyer: bool,
+    #[serde(rename = "s", alias = "size")]
+    size: Number,
+    #[serde(rename = "p", alias = "price")]
+    price: Number,
+}
+impl Grvt {
+    pub(crate) fn account_headers(&self) -> Vec<(&'static str, String)> {
+        let mut headers = vec![("Content-Type", "application/json".into())];
+        if let Some(session) = &self.account.session {
+            headers.push(("X-Ts-Grvt-Session", session.cookie.clone()));
+            headers.push(("Cookie", format!("rm=true; gravity={}", session.cookie)));
+            headers.push(("X-Grvt-Account-Id", session.account_id.clone()));
+        }
+        headers
+    }
+    pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.options.public_data_only {
+            return;
+        }
+        self.account.trading_account_id = self.options.trading_account_id.clone();
+        if !self.account.login_pending {
+            self.login(cx);
+        }
+    }
+    fn login(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.login_pending || self.account.authentication_failed {
+            return;
+        }
+        let Some(key) = self.options.key.as_deref() else {
+            cx.log(LogLevel::Error, "GRVT private account requires an API key");
+            return;
+        };
+        #[derive(Serialize)]
+        struct Body<'a> {
+            api_key: &'a str,
+        }
+        let body = serde_json::to_string(&Body { api_key: key }).expect("serialize login");
+        self.account.login_pending = true;
+        self.request(cx, AUTH, body, Job::Account(Request::Login));
+    }
+    pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
+        if self.account.authentication_failed {
+            self.fail_pending(cx, pending, "GRVT authentication failed closed");
+            return;
+        }
+        pending.auth_resent = true;
+        if let Job::Account(request) = &mut pending.job {
+            request.reset();
+        }
+        self.account.waiting.push(pending);
+        self.account.session = None;
+        self.account.authenticated = false;
+        if let Some(socket) = self.account.socket.take() {
+            cx.close(socket);
+        }
+        if let Some(timer) = self.account.health.take() {
+            cx.clear_timer(timer);
+        }
+        self.login(cx);
+    }
+    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.authentication_failed
+            || self.account.socket.is_some()
+            || self.account.trading_account_id.is_none()
+        {
+            return;
+        }
+        let Some(session) = self.account.session.as_ref() else {
+            return;
+        };
+        let url = if self.options.testnet {
+            "wss://trades.testnet.grvt.io/ws"
+        } else {
+            "wss://trades.grvt.io/ws"
+        };
+        let socket = if self.options.session_proxy {
+            cx.connect_channel(url, SocketChannel::Private)
+        } else {
+            cx.connect_with_headers_channel(
+                url,
+                vec![
+                    ("Cookie", format!("rm=true; gravity={}", session.cookie)),
+                    ("X-Grvt-Account-Id", session.account_id.clone()),
+                ],
+                SocketChannel::Private,
+            )
+        };
+        self.account.socket = Some(socket);
+        self.account.last_received = cx.now;
+        self.account.authenticated = false;
+        self.account.health = Some(cx.set_timer(15_000.));
+    }
+    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.last_received = cx.now;
+        self.account.healthy_since = None;
+        self.account.sequences.clear();
+        self.account.first_sequence.clear();
+        if self.options.session_proxy {
+            #[derive(Serialize)]
+            struct Auth<'a> {
+                r#type: &'static str,
+                session_cookie: String,
+                account_id: &'a str,
+                testnet: bool,
+            }
+            if let Some(session) = &self.account.session {
+                cx.send(
+                    socket,
+                    serde_json::to_string(&Auth {
+                        r#type: "auth",
+                        session_cookie: format!("rm=true; gravity={}", session.cookie),
+                        account_id: &session.account_id,
+                        testnet: self.options.testnet,
+                    })
+                    .expect("serialize auth"),
+                );
+            }
+        } else {
+            self.subscribe_private(cx);
+        }
+        true
+    }
+    fn subscribe_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        let (Some(socket), Some(subaccount)) = (
+            self.account.socket,
+            self.account.trading_account_id.as_deref(),
+        ) else {
+            return;
+        };
+        #[derive(Serialize)]
+        struct Subscribe<'a> {
+            request_id: u32,
+            method: &'static str,
+            stream: &'static str,
+            feed: [&'a str; 1],
+            is_full: bool,
+        }
+        self.account.authenticated = true;
+        for stream in ["v1.order", "v1.position", "v1.fill"] {
+            self.account.request_id += 1;
+            cx.send(
+                socket,
+                serde_json::to_string(&Subscribe {
+                    request_id: self.account.request_id,
+                    method: "subscribe",
+                    stream,
+                    feed: [subaccount],
+                    is_full: false,
+                })
+                .expect("serialize subscription"),
+            );
+        }
+        self.refresh_orders(cx);
+        self.refresh_positions(cx);
+    }
+    fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authentication_failed = true;
+        self.account.authenticated = false;
+        self.account.session = None;
+        if let Some(socket) = self.account.socket.take() {
+            cx.close(socket);
+        }
+        if let Some(timer) = self.account.health.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some(timer) = self.account.reconnect.take() {
+            cx.clear_timer(timer);
+        }
+        cx.log(LogLevel::Error,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+    }
+    fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.login_pending || self.account.authentication_failed {
+            return;
+        }
+        if self
+            .account
+            .healthy_since
+            .is_some_and(|at| cx.now - at >= 300_000.)
+        {
+            self.account.refresh_attempts = 0;
+            self.account.healthy_since = None;
+        }
+        if self.account.refresh_attempts >= 1 {
+            self.fail_authentication(cx);
+            return;
+        }
+        self.account.refresh_attempts += 1;
+        self.account.authenticated = false;
+        self.account.session = None;
+        if let Some(socket) = self.account.socket.take() {
+            cx.close(socket);
+        }
+        if let Some(timer) = self.account.health.take() {
+            cx.clear_timer(timer);
+        }
+        self.login(cx);
+    }
+    pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.socket = None;
+        self.account.authenticated = false;
+        self.account.orders_revision += 1;
+        self.account.positions_revision += 1;
+        self.account.sequences.clear();
+        self.account.first_sequence.clear();
+        if let Some(timer) = self.account.health.take() {
+            cx.clear_timer(timer);
+        }
+        if !self.account.authentication_failed && self.account.reconnect.is_none() {
+            self.account.reconnect = Some(cx.set_timer(1_000.));
+        }
+        true
+    }
+    fn summary(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.summary_pending || self.account.session.is_none() {
+            return;
+        }
+        self.account.summary_pending = true;
+        self.request(cx, SUMMARY, "{}".into(), Job::Account(Request::Summary));
+    }
+    pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_pending || self.account.session.is_none() {
+            return;
+        }
+        let Some(subaccount) = self.account.trading_account_id.as_deref() else {
+            return;
+        };
+        self.account.orders_pending = true;
+        let body = serde_json::to_string(&SubaccountRequest { sa: subaccount })
+            .expect("serialize account");
+        self.request(
+            cx,
+            ORDERS,
+            body,
+            Job::Account(Request::Orders {
+                revision: self.account.orders_revision,
+                issued_at: cx.now,
+                rows: vec![],
+                failed: false,
+            }),
+        );
+    }
+    pub(crate) fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.positions_pending || self.account.session.is_none() {
+            return;
+        }
+        let Some(subaccount) = self.account.trading_account_id.as_deref() else {
+            return;
+        };
+        self.account.positions_pending = true;
+        let body = serde_json::to_string(&SubaccountRequest { sa: subaccount })
+            .expect("serialize account");
+        self.request(
+            cx,
+            POSITIONS,
+            body,
+            Job::Account(Request::Positions {
+                revision: self.account.positions_revision,
+                issued_at: cx.now,
+                rows: vec![],
+                failed: false,
+            }),
+        );
+    }
+    pub(crate) fn refresh_leverage(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.leverage_pending || self.account.session.is_none() {
+            return;
+        }
+        let Some(subaccount) = self.account.trading_account_id.as_deref() else {
+            return;
+        };
+        self.account.leverage_pending = true;
+        let body = serde_json::to_string(&SubaccountRequest { sa: subaccount })
+            .expect("serialize account");
+        self.request(
+            cx,
+            LEVERAGE,
+            body,
+            Job::Account(Request::Leverage {
+                revision: self.account.settings_revision,
+                rows: vec![],
+                failed: false,
+            }),
+        );
+    }
+    pub(crate) fn account_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
+        match request {
+            Request::Positions { rows, failed, .. } => match position(item, cx.store, cx.now) {
+                Ok(p) => rows.push(p),
+                Err(_) => *failed = true,
+            },
+            Request::Orders { rows, failed, .. } => match decode_order(item, cx.store, cx.now) {
+                Ok(o) => rows.push(o),
+                Err(_) => *failed = true,
+            },
+            Request::Leverage { rows, failed, .. } => {
+                match serde_json::from_str::<LeverageWire<'_>>(item) {
+                    Ok(w)
+                        if w.leverage.0 > 0.
+                            && w.min.is_none_or(|n| n.0 > 0.)
+                            && w.max.is_none_or(|n| n.0 > 0.) =>
+                    {
+                        if let Some(m) = market(cx.store, &w.instrument) {
+                            let Ok(margin) = margin_type(w.margin.as_deref()) else {
+                                *failed = true;
+                                return;
+                            };
+                            rows.push(Leverage {
+                                symbol: m.symbol.clone(),
+                                value: w.leverage.0,
+                                min: w.min.map(|n| n.0),
+                                max: w.max.map(|n| n.0),
+                                margin,
+                            });
+                        }
+                    }
+                    _ => *failed = true,
+                }
+            }
+            Request::Builders { cap, failed } => {
+                match serde_json::from_str::<BuilderWire<'_>>(item) {
+                    Ok(w) => {
+                        let expected = if self.options.testnet {
+                            BUILDER_TESTNET
+                        } else {
+                            BUILDER_MAINNET
+                        };
+                        if w.address.eq_ignore_ascii_case(expected) {
+                            match w.cap {
+                                Some(n) if n.0 >= 0. && n.0 * 10_000. <= u32::MAX as f64 => {
+                                    *cap = Some((n.0 * 10_000.).round() as u32)
+                                }
+                                _ => *failed = true,
+                            }
+                        }
+                    }
+                    Err(_) => *failed = true,
+                }
+            }
+            _ => {}
+        }
+    }
+    fn remember_identity(&mut self, decoded: &DecodedOrder) {
+        if !self.account.order_times.contains_key(&decoded.order.id) {
+            self.account
+                .identity_queue
+                .push_back(decoded.order.id.clone());
+        }
+        self.account
+            .order_times
+            .insert(decoded.order.id.clone(), decoded.updated_ns);
+        if decoded.created_ns > 0 {
+            self.account
+                .order_created
+                .insert(decoded.order.id.clone(), decoded.created_ns);
+        }
+        if let Some(native) = &decoded.native_id {
+            self.account
+                .native_ids
+                .insert(decoded.order.id.clone(), native.clone());
+        }
+        while self.account.identity_queue.len() > RECENT_LIMIT {
+            if let Some(id) = self.account.identity_queue.pop_front() {
+                self.account.native_ids.remove(&id);
+                self.account.order_times.remove(&id);
+                self.account.order_created.remove(&id);
+            }
+        }
+    }
+    fn accept_order(&mut self, store: &Store, decoded: &DecodedOrder) -> bool {
+        let id = &decoded.order.id;
+        let created = self.account.order_created.get(id).copied().unwrap_or(0);
+        if decoded.created_ns > 0 && decoded.created_ns < created {
+            return false;
+        }
+        let mut new_lifecycle = created > 0 && decoded.created_ns > created;
+        if let Some((time, native)) = self.account.terminal.get(id) {
+            if new_lifecycle
+                || (decoded.native_id.is_some()
+                    && &decoded.native_id != native
+                    && decoded.updated_ns > *time
+                    && decoded.created_ns >= created)
+            {
+                new_lifecycle = true;
+            } else {
+                return false;
+            }
+        }
+        if new_lifecycle {
+            self.account.terminal.remove(id);
+            self.account.terminal_queue.retain(|old| old != id);
+            self.account.order_times.remove(id);
+            self.account.native_ids.remove(id);
+            self.account.identity_queue.retain(|old| old != id);
+        } else {
+            if self
+                .account
+                .order_times
+                .get(id)
+                .is_some_and(|old| *old > decoded.updated_ns)
+            {
+                return false;
+            }
+            if let (Some(known), Some(incoming)) =
+                (self.account.native_ids.get(id), decoded.native_id.as_ref())
+                && known != incoming
+            {
+                return false;
+            }
+            if store
+                .order(id)
+                .is_some_and(|old| old.filled > decoded.order.filled)
+            {
+                return false;
+            }
+        }
+        true
+    }
+    fn remember_terminal(&mut self, id: String, time: u64, native: Option<String>) {
+        if !self.account.terminal.contains_key(&id) {
+            self.account.terminal_queue.push_back(id.clone());
+        }
+        self.account.terminal.insert(id, (time, native));
+        while self.account.terminal_queue.len() > RECENT_LIMIT {
+            if let Some(id) = self.account.terminal_queue.pop_front() {
+                self.account.terminal.remove(&id);
+            }
+        }
+    }
+    pub(crate) fn account_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        if crate::wire::check(&response).is_err() {
+            self.account_failed(cx, request, "GRVT private read rejected");
+            return;
+        }
+        self.refresh_session_headers(&response);
+        match request {
+            Request::Login => {
+                self.account.login_pending = false;
+                if self.account.session.is_none() {
+                    self.fail_authentication(cx);
+                    self.fail_waiting(cx);
+                    return;
+                }
+                if self.account.trading_account_id.is_none()
+                    && let Ok(login) = serde_json::from_str::<LoginBody<'_>>(response.body)
+                    && valid_account(&login.sub_account_id)
+                {
+                    self.account.trading_account_id = Some(login.sub_account_id.to_string());
+                }
+                for pending in std::mem::take(&mut self.account.waiting) {
+                    self.send_request(cx, pending);
+                }
+                if self.account.started {
+                    self.connect_private(cx);
+                } else {
+                    self.summary(cx);
+                }
+            }
+            Request::Summary => {
+                self.account.summary_pending = false;
+                match serde_json::from_str::<SummaryEnvelope<'_>>(response.body) {
+                    Ok(summary) => {
+                        let summary = summary.result;
+                        if self.account.trading_account_id.is_none() {
+                            self.account.trading_account_id = summary
+                                .subaccounts
+                                .iter()
+                                .find(|a| valid_account(&a.id))
+                                .map(|a| a.id.to_string());
+                        }
+                        let free = summary.available.map_or(summary.equity.0, |n| n.0);
+                        let upnl = summary.upnl.map_or_else(
+                            || cx.store.positions().iter().map(|p| p.unrealized_pnl).sum(),
+                            |n| n.0,
+                        );
+                        cx.store.set_balance(Balance {
+                            total: summary.equity.0,
+                            free,
+                            used: summary.equity.0 - free,
+                            upnl,
+                        });
+                    }
+                    Err(_) => {
+                        cx.log(
+                            LogLevel::Error,
+                            "Malformed GRVT account summary; retaining previous balance",
+                        );
+                        cx.store.set_balance(cx.store.balance().clone());
+                    }
+                }
+                self.start_private_account(cx);
+                if cx.store.loaded().positions {
+                    self.sync_balance_upnl(cx);
+                }
+                if self.account.tick.is_none() {
+                    self.account.tick = Some(cx.set_timer(60_000.));
+                }
+            }
+            Request::Positions {
+                revision,
+                issued_at,
+                rows,
+                failed,
+            } => {
+                self.account.positions_pending = false;
+                if !failed && revision == self.account.positions_revision {
+                    let seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
+                    let mut accepted = Vec::with_capacity(rows.len());
+                    for record in rows {
+                        let time = record.time;
+                        let position = record.position;
+                        if self
+                            .account
+                            .position_times
+                            .get(&position.id)
+                            .is_some_and(|old| *old > time)
+                        {
+                            if let Some(previous) = cx.store.position(&position.id) {
+                                accepted.push(previous.clone());
+                            }
+                        } else {
+                            self.account
+                                .position_times
+                                .insert(position.id.clone(), time);
+                            if let Some(margin) = position.margin_type {
+                                cx.store.update_setting(&position.symbol, |s| {
+                                    s.margin_type = Some(margin)
+                                });
+                            }
+                            if position.contracts > 0. {
+                                accepted.push(position);
+                            }
+                        }
+                    }
+                    for previous in cx.store.positions() {
+                        if !seen.contains(&previous.id) {
+                            let time = self
+                                .account
+                                .position_times
+                                .entry(previous.id.clone())
+                                .or_default();
+                            *time = (*time).max(nanos("", issued_at));
+                        }
+                    }
+                    cx.store.set_positions(accepted);
+                    self.sync_balance_upnl(cx);
+                } else {
+                    cx.store.set_positions(cx.store.positions().to_vec());
+                    if revision != self.account.positions_revision
+                        && self.account.positions_timer.is_none()
+                    {
+                        self.account.positions_timer = Some(cx.set_timer(500.));
+                    }
+                    if failed {
+                        cx.log(
+                            LogLevel::Error,
+                            "Malformed GRVT positions; retaining previous positions",
+                        );
+                    }
+                }
+            }
+            Request::Orders {
+                revision,
+                issued_at,
+                rows,
+                failed,
+            } => {
+                self.account.orders_pending = false;
+                if !failed && revision == self.account.orders_revision {
+                    let mut orders = Vec::with_capacity(rows.len());
+                    for decoded in rows {
+                        if !self.accept_order(cx.store, &decoded) {
+                            if let Some(previous) = cx.store.order(&decoded.order.id) {
+                                orders.push(previous.clone());
+                            }
+                        } else if decoded.order.status == OrderStatus::Open {
+                            self.remember_identity(&decoded);
+                            orders.push(decoded.order);
+                        }
+                    }
+                    for previous in cx.store.orders() {
+                        if !orders.iter().any(|order| order.id == previous.id) {
+                            self.remember_terminal(
+                                previous.id.clone(),
+                                nanos("", issued_at),
+                                self.account.native_ids.get(&previous.id).cloned(),
+                            );
+                        }
+                    }
+                    cx.store.set_orders(orders);
+                } else {
+                    cx.store.set_orders(cx.store.orders().to_vec());
+                    if revision != self.account.orders_revision
+                        && self.account.orders_timer.is_none()
+                    {
+                        self.account.orders_timer = Some(cx.set_timer(1_000.));
+                    }
+                    if failed {
+                        cx.log(
+                            LogLevel::Error,
+                            "Malformed GRVT orders; retaining previous orders",
+                        );
+                    }
+                }
+            }
+            Request::Leverage {
+                revision,
+                rows,
+                failed,
+            } => {
+                self.account.leverage_pending = false;
+                if !failed && revision == self.account.settings_revision {
+                    for row in rows {
+                        cx.store.update_setting(&row.symbol, |s| {
+                            s.leverage = row.value;
+                            if let Some(margin) = row.margin {
+                                s.margin_type = Some(margin);
+                            }
+                        });
+                        cx.store.update_positions(|p| {
+                            if p.symbol == row.symbol {
+                                p.leverage = row.value;
+                                if row.margin.is_some() {
+                                    p.margin_type = row.margin;
+                                }
+                            }
+                        });
+                        cx.store.update_markets(|m| {
+                            if m.symbol == row.symbol {
+                                if let Some(min) = row.min {
+                                    m.limits.leverage.min = min;
+                                }
+                                if let Some(max) = row.max {
+                                    m.limits.leverage.max = max;
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    cx.log(
+                        LogLevel::Error,
+                        "Malformed GRVT leverage settings; retaining previous settings",
+                    );
+                }
+            }
+            Request::Builders { cap, failed } => {
+                self.account.builder = if failed {
+                    BuilderState::Unknown
+                } else {
+                    match cap {
+                        Some(n) if n >= 300 => BuilderState::Authorized,
+                        Some(n) => BuilderState::CapTooLow(n),
+                        None => BuilderState::Unauthorized,
+                    }
+                };
+            }
+        }
+    }
+    fn refresh_session_headers(&mut self, response: &Response<'_>) {
+        let cookie = response
+            .header("x-ts-grvt-session")
+            .map(str::to_owned)
+            .or_else(|| {
+                response
+                    .headers
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .filter(|(name, _)| name.trim().eq_ignore_ascii_case("set-cookie"))
+                    .find_map(|(_, value)| {
+                        value
+                            .trim()
+                            .strip_prefix("gravity=")
+                            .and_then(|v| v.split(';').next())
+                            .filter(|v| !v.is_empty())
+                            .map(str::to_owned)
+                    })
+            });
+        let account = response
+            .header("x-grvt-account-id")
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned);
+        match (&mut self.account.session, cookie, account) {
+            (Some(session), cookie, account) => {
+                if let Some(cookie) = cookie {
+                    session.cookie = cookie;
+                }
+                if let Some(account) = account {
+                    session.account_id = account;
+                }
+            }
+            (session @ None, Some(cookie), Some(account_id)) => {
+                *session = Some(Session { cookie, account_id })
+            }
+            _ => {}
+        }
+    }
+    fn fail_waiting(&mut self, cx: &mut Cx<'_, Pending>) {
+        for pending in std::mem::take(&mut self.account.waiting) {
+            self.fail_pending(cx, pending, "GRVT session refresh failed");
+        }
+    }
+    fn start_private_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.started {
+            return;
+        }
+        cx.store.set_hedged(false);
+        let symbols: Vec<_> = cx
+            .store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect();
+        for symbol in symbols {
+            cx.store.update_setting(&symbol, |s| {
+                if !s.leverage.is_finite() {
+                    s.leverage = 10.;
+                }
+                s.margin_type = Some(MarginType::Isolated);
+            });
+        }
+        if self.account.trading_account_id.is_some() {
+            self.account.started = true;
+            self.refresh_leverage(cx);
+            self.request(
+                cx,
+                BUILDERS,
+                "{}".into(),
+                Job::Account(Request::Builders {
+                    cap: None,
+                    failed: false,
+                }),
+            );
+            self.connect_private(cx);
+            self.refresh_positions(cx);
+            self.refresh_orders(cx);
+        } else {
+            cx.log(
+                LogLevel::Error,
+                "GRVT trading account ID was not returned; configure a subaccount",
+            );
+            cx.store.set_orders(cx.store.orders().to_vec());
+            cx.store.set_positions(cx.store.positions().to_vec());
+        }
+    }
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        _error: &str,
+    ) {
+        match request {
+            Request::Login => {
+                self.account.login_pending = false;
+                self.fail_authentication(cx);
+                self.fail_waiting(cx);
+            }
+            Request::Summary => {
+                self.account.summary_pending = false;
+                cx.store.set_balance(cx.store.balance().clone());
+                self.start_private_account(cx);
+                if self.account.tick.is_none() {
+                    self.account.tick = Some(cx.set_timer(60_000.));
+                }
+            }
+            Request::Positions { .. } => {
+                self.account.positions_pending = false;
+                cx.store.set_positions(cx.store.positions().to_vec());
+            }
+            Request::Orders { .. } => {
+                self.account.orders_pending = false;
+                cx.store.set_orders(cx.store.orders().to_vec());
+            }
+            Request::Leverage { .. } => self.account.leverage_pending = false,
+            Request::Builders { .. } => self.account.builder = BuilderState::Unknown,
+        }
+        cx.log(
+            LogLevel::Error,
+            "GRVT private request failed; retaining previous account state",
+        );
+    }
+    pub(crate) fn account_message(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: SocketId,
+        text: &str,
+    ) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.last_received = cx.now;
+        self.account.ping_sent = false;
+        if text == "pong" {
+            return true;
+        }
+        if text == "ping" {
+            cx.send(socket, "pong");
+            return true;
+        }
+        let Ok(message) = serde_json::from_str::<PrivateMessage<'_>>(text) else {
+            cx.log(LogLevel::Warning, "Malformed GRVT private message");
+            return true;
+        };
+        let code = message.error.as_ref().map_or(&*message.code, |e| &*e.code);
+        if message.kind == "error" || code == "1000" {
+            self.refresh_stream_session(cx);
+            return true;
+        }
+        if message.kind == "auth_success" {
+            if !self.account.authenticated {
+                self.subscribe_private(cx);
+            }
+            return true;
+        }
+        if !code.is_empty() && code != "0" {
+            cx.log(
+                LogLevel::Error,
+                format!("GRVT private stream rejected (code {code})"),
+            );
+            return true;
+        }
+        if !self.account.authenticated {
+            return true;
+        }
+        if let Some(ack) = message.result {
+            self.private_ack(cx, &ack.stream, &ack.subs, &ack.first);
+            return true;
+        }
+        if !message.first.is_empty() {
+            self.private_ack(cx, &message.stream, &message.subs, &message.first);
+            return true;
+        }
+        let Some(feed) = message.feed else {
+            return true;
+        };
+        if matches!(
+            &*message.stream,
+            "v1.order" | "v1.state" | "v1.cancel" | "v1.position" | "v1.fill"
+        ) && !message.sequence.is_empty()
+        {
+            let Ok(sequence) = message.sequence.parse::<u64>() else {
+                self.private_gap(cx, socket);
+                return true;
+            };
+            if sequence != 0 {
+                let selector = self.private_selector(&message.selector).to_owned();
+                let key = (message.stream.to_string(), selector);
+                let previous = self.account.sequences.get(&key).copied();
+                if previous.is_some_and(|old| sequence <= old) {
+                    return true;
+                }
+                let expected = previous
+                    .and_then(|old| old.checked_add(1))
+                    .or_else(|| self.account.first_sequence.get(&key).copied())
+                    .or_else(|| {
+                        self.account
+                            .first_sequence
+                            .get(&(message.stream.to_string(), String::new()))
+                            .copied()
+                    });
+                if expected.is_some_and(|expected| sequence != expected)
+                    || self.account.sequences.len() > cx.store.markets().len() * 6 + 6
+                {
+                    self.private_gap(cx, socket);
+                    return true;
+                }
+                self.account.sequences.insert(key, sequence);
+            }
+        }
+        match &*message.stream {
+            "v1.order" | "v1.state" | "v1.cancel" => {
+                match decode_order(feed.get(), cx.store, cx.now) {
+                    Ok(decoded) => {
+                        self.account.healthy_since.get_or_insert(cx.now);
+                        self.account.orders_revision += 1;
+                        if !self.accept_order(cx.store, &decoded) {
+                            return true;
+                        }
+                        self.remember_identity(&decoded);
+                        let updated_ns = decoded.updated_ns;
+                        let native = decoded.native_id;
+                        let order = decoded.order;
+                        if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                            self.remember_terminal(order.id.clone(), updated_ns, native);
+                            cx.store.remove_orders(&[&order.id]);
+                        } else if !self.account.terminal.contains_key(&order.id)
+                            && cx.store.order(&order.id).is_none_or(|old| {
+                                old.last_update <= order.last_update && old.filled <= order.filled
+                            })
+                        {
+                            cx.store.upsert_order(order);
+                        }
+                    }
+                    Err(_) => cx.log(LogLevel::Warning, "Malformed GRVT order event; reconciling"),
+                }
+                if let Some(timer) = self.account.orders_timer.take() {
+                    cx.clear_timer(timer);
+                }
+                self.account.orders_timer = Some(cx.set_timer(1_000.));
+            }
+            "v1.position" => {
+                match position(feed.get(), cx.store, cx.now) {
+                    Ok(record) => {
+                        self.account.healthy_since.get_or_insert(cx.now);
+                        self.account.positions_revision += 1;
+                        let time = record.time;
+                        let position = record.position;
+                        if self
+                            .account
+                            .position_times
+                            .get(&position.id)
+                            .is_none_or(|old| *old <= time)
+                        {
+                            self.account
+                                .position_times
+                                .insert(position.id.clone(), time);
+                            if let Some(margin) = position.margin_type {
+                                cx.store.update_setting(&position.symbol, |s| {
+                                    s.margin_type = Some(margin)
+                                });
+                            }
+                            cx.store.upsert_position(position);
+                        }
+                        self.sync_balance_upnl(cx);
+                    }
+                    Err(_) => cx.log(
+                        LogLevel::Warning,
+                        "Malformed GRVT position event; reconciling",
+                    ),
+                }
+                if self.account.positions_timer.is_none() {
+                    self.account.positions_timer = Some(cx.set_timer(500.));
+                }
+            }
+            "v1.fill" => {
+                if let Ok(fill) = serde_json::from_str::<FillWire<'_>>(feed.get())
+                    && fill.size.0 > 0.
+                    && fill.price.0 > 0.
+                    && !fill.trade_id.is_empty()
+                    && let Some(market) = market(cx.store, &fill.instrument)
+                {
+                    self.account.healthy_since.get_or_insert(cx.now);
+                    let key = format!("{}:{}", market.id, fill.trade_id);
+                    if self.account.fills.insert(key.clone()) {
+                        self.account.fill_queue.push_back(key);
+                        while self.account.fill_queue.len() > RECENT_LIMIT {
+                            if let Some(old) = self.account.fill_queue.pop_front() {
+                                self.account.fills.remove(&old);
+                            }
+                        }
+                        let id = if !fill.client_id.is_empty() && &*fill.client_id != "0" {
+                            fill.client_id.to_string()
+                        } else {
+                            self.account
+                                .native_ids
+                                .iter()
+                                .find(|(_, native)| native.as_str() == &*fill.native_id)
+                                .map_or_else(|| fill.native_id.to_string(), |(id, _)| id.clone())
+                        };
+                        cx.fill(Fill {
+                            order_id: id,
+                            symbol: market.symbol.clone(),
+                            side: if fill.buyer {
+                                OrderSide::Buy
+                            } else {
+                                OrderSide::Sell
+                            },
+                            price: fill.price.0,
+                            amount: fill.size.0,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+    pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.health == Some(timer) {
+            self.account.health = None;
+            if let Some(socket) = self.account.socket {
+                let idle = cx.now - self.account.last_received;
+                if idle >= 90_000. {
+                    cx.close(socket);
+                    self.account_close(cx, socket);
+                } else {
+                    if idle >= 60_000. && !self.account.ping_sent {
+                        cx.send(socket, "ping");
+                        self.account.ping_sent = true;
+                    }
+                    self.account.health = Some(cx.set_timer(15_000.));
+                }
+            }
+        } else if self.account.reconnect == Some(timer) {
+            self.account.reconnect = None;
+            self.connect_private(cx);
+        } else if self.account.tick == Some(timer) {
+            self.account.tick = None;
+            self.summary(cx);
+        } else if self.account.orders_timer == Some(timer) {
+            self.account.orders_timer = None;
+            self.refresh_orders(cx);
+        } else if self.account.positions_timer == Some(timer) {
+            self.account.positions_timer = None;
+            self.refresh_positions(cx);
+        } else {
+            return false;
+        }
+        true
+    }
+    fn private_selector<'a>(&self, selector: &'a str) -> &'a str {
+        let Some(account) = self.account.trading_account_id.as_deref() else {
+            return selector;
+        };
+        if selector == account {
+            ""
+        } else {
+            selector
+                .strip_prefix(&format!("{account}-"))
+                .unwrap_or(selector)
+        }
+    }
+    fn private_ack(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        stream: &str,
+        subs: &[Str<'_>],
+        first: &[Text<'_>],
+    ) {
+        for (selector, number) in subs.iter().zip(first) {
+            if self.account.first_sequence.len() > cx.store.markets().len() * 6 + 6 {
+                break;
+            }
+            if let Ok(number) = number.parse::<u64>() {
+                let key = (
+                    stream.to_owned(),
+                    self.private_selector(selector).to_owned(),
+                );
+                self.account.first_sequence.entry(key).or_insert(number);
+            }
+        }
+    }
+    fn private_gap(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        cx.log(
+            LogLevel::Warning,
+            "GRVT private sequence gap; reconnecting and reconciling account state",
+        );
+        cx.close(socket);
+        self.account_close(cx, socket);
+        self.refresh_orders(cx);
+        self.refresh_positions(cx);
+    }
+    pub(crate) fn sync_balance_upnl(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started {
+            return;
+        }
+        let updates: Vec<_> = cx
+            .store
+            .positions()
+            .iter()
+            .filter_map(|position| {
+                let last = cx.store.ticker(&position.symbol)?.last;
+                if last <= 0. || position.entry_price <= 0. {
+                    return None;
+                }
+                let direction = if position.side == PositionSide::Long {
+                    1.
+                } else {
+                    -1.
+                };
+                let upnl = direction * (last - position.entry_price) * position.contracts;
+                upnl.is_finite().then(|| (position.id.clone(), upnl))
+            })
+            .collect();
+        if !updates.is_empty() {
+            cx.store.update_positions(|p| {
+                if let Some((_, upnl)) = updates.iter().find(|(id, _)| id == &p.id) {
+                    p.unrealized_pnl = *upnl;
+                }
+            });
+        }
+        let mut balance = cx.store.balance().clone();
+        balance.upnl = cx.store.positions().iter().map(|p| p.unrealized_pnl).sum();
+        cx.store.set_balance(balance);
+    }
+}
+#[derive(Serialize)]
+struct SubaccountRequest<'a> {
+    sa: &'a str,
+}
+fn valid_account(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) && text.parse::<u64>().is_ok()
+}

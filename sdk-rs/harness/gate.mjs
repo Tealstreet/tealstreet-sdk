@@ -122,6 +122,11 @@ const KNOWN_TS_FIXES = {
   // ticker deltas; derive quote volume/change from current last; accept native
   // empty-string clears and nanosecond funding timestamps in either JSON form.
   // Rust also anchors sequences from subscribe ACKs and isolates candle intervals.
+  // Private reads preserve zero free collateral, exact native IDs/timestamps and
+  // CROSS margin metadata; failed/malformed/stale reads never clear live state.
+  // Successful revision-matching empty snapshots remove ghosts and retain
+  // tombstones against delayed stream events. Session code 1000 refreshes once
+  // even when delivered in an HTTP-200 error envelope.
   grvt() {},
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
