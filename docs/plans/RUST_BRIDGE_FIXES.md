@@ -591,3 +591,29 @@ and actual account resync are still separate implementation work.
   no blind replacement of all `set_timer` calls. Independent source/test review,
   scoped tests/strict Clippy/fmt, then a combined rebuild and actual SDK controls
   precede acceptance. No network-resync completion claim from these timers.
+
+## Phase 4a native account-frame API plan and audit
+
+Root owns this independent core/host slice while venue poll activation proceeds.
+`Store::account_snapshot()` selects full private ORDERS/POSITIONS/BALANCE/
+SETTINGS/STATUS with the existing position Greeks/prediction extensions; omit
+all public tables, books, candles and fills. `Engine::account_snapshot_frame`
+uses the existing encoder and reusable snapshot buffer without draining dirty
+tracking, queued events or ticker/book baselines. Expose it as WASM
+`accountSnapshotFrame` and guarded `EngineHost.accountSnapshot()` returning a
+frame for the caller to apply/forward explicitly. It does not emit callbacks or
+claim network refresh; unsupported older engines fail visibly.
+
+Frame headers contain no blanket snapshot-reset bit; only present sections are
+replaced by FrameApplier. Public state therefore survives account-only frames.
+Catalog readiness remains the SDK integration's prerequisite because native
+private rows use market indexes. The subsequent SDK slice must synchronize
+before private reads and bulk/direct CLI/chaser decisions, retain native close
+quantities and never treat this snapshot as successful REST resync.
+
+Verify complete zero-row private sections, retained pending private/public
+deltas and queued events, unchanged book baselines, repeatable current balance/
+settings, and host trap/dead/dispose boundaries. No raw native JSON readback or
+changes to existing position/order unit conversions. Core/host checks and an
+independent review precede this API checkpoint; actual SDK consumer proof follows
+after policy propagation releases the wrapper file.
