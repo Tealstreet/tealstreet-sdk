@@ -493,3 +493,133 @@ fn request_parity_hyro_position_pages_use_its_fifty_row_limit() {
     assert!(next.url.contains("limit=50&cursor=next"));
     assert!(!h.has_request("/v5/account/info"));
 }
+
+// https://bybit-exchange.github.io/docs/v5/websocket/private/execution
+#[test]
+fn execution_id_dedupes_batches_repeated_frames_and_reconnects() {
+    for variant in [
+        Variant::Linear,
+        Variant::Demo,
+        Variant::Inverse,
+        Variant::Spot,
+    ] {
+        let mut h = startup(variant);
+        emitted_fills(&mut h);
+        let category = if variant.is_inverse() {
+            "inverse"
+        } else if variant.is_spot() {
+            "spot"
+        } else {
+            "linear"
+        };
+        let symbol = if variant.is_inverse() {
+            "BTCUSD"
+        } else {
+            "BTCUSDT"
+        };
+        let row = |id: &str| {
+            format!(
+                r#"{{"category":"{category}","symbol":"{symbol}","orderId":"execution-order","execId":"{id}","side":"Buy","execQty":"2","execPrice":"50000","execType":"Trade"}}"#
+            )
+        };
+        let packet = format!(
+            r#"{{"topic":"execution","data":[{},{},{}]}}"#,
+            row("exec-a"),
+            row("exec-a"),
+            row("exec-b")
+        );
+        h.message("/v5/private", &packet);
+        assert_eq!(
+            emitted_fills(&mut h),
+            vec![(50000.0, 2.0), (50000.0, 2.0)],
+            "{variant:?}: exec ID, not same price/qty/order, identifies fills"
+        );
+        h.message("/v5/private", &packet);
+        assert!(
+            emitted_fills(&mut h).is_empty(),
+            "{variant:?}: replayed packet"
+        );
+        let old = h.socket("/v5/private").unwrap();
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        h.advance(2000.0);
+        let new = h.socket("/v5/private").unwrap();
+        assert_ne!(old, new);
+        h.event(Event::WsOpened { socket: new });
+        h.message("/v5/private", &packet);
+        assert!(
+            emitted_fills(&mut h).is_empty(),
+            "{variant:?}: reconnect replay"
+        );
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"execution","data":[{}]}}"#, row("exec-c")),
+        );
+        assert_eq!(emitted_fills(&mut h), vec![(50000.0, 2.0)]);
+    }
+}
+
+#[test]
+fn malformed_execution_does_not_consume_identity_and_missing_ids_stay_distinct() {
+    let mut h = startup(Variant::Linear);
+    emitted_fills(&mut h);
+    let row = r#"{"topic":"execution","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"execution-order","execId":"corrected","side":"Buy","execQty":"2","execPrice":"50000","execType":"Trade"}]}"#;
+    for (from, to) in [
+        ("50000", "0"),
+        ("50000", "NaN"),
+        ("50000", "inf"),
+        (r#""execQty":"2""#, r#""execQty":"NaN""#),
+        (r#""side":"Buy""#, r#""side":"unknown""#),
+        (r#""execType":"Trade""#, r#""execType":"Funding""#),
+    ] {
+        h.message("/v5/private", &row.replace(from, to));
+        assert!(emitted_fills(&mut h).is_empty());
+    }
+    h.message("/v5/private", row);
+    assert_eq!(emitted_fills(&mut h), vec![(50000.0, 2.0)]);
+    h.message("/v5/private", row);
+    assert!(emitted_fills(&mut h).is_empty());
+    let idless = row.replace(r#""execId":"corrected","#, "");
+    h.message("/v5/private", &idless);
+    h.message("/v5/private", &idless);
+    assert_eq!(
+        emitted_fills(&mut h),
+        vec![(50000.0, 2.0), (50000.0, 2.0)],
+        "missing execution IDs cannot safely use economic fields as identity"
+    );
+}
+
+#[test]
+fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
+    let mut h = startup(Variant::Inverse);
+    emitted_fills(&mut h);
+    let row = r#"{"topic":"execution.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"native-order-id","orderLinkId":"client-link-id","execId":"execution-id","side":"Sell","execQty":"750","execPrice":"50000","execType":"Trade"}]}"#;
+    h.message("/v5/private", row);
+    h.message("/v5/private", row);
+    let frame = h.engine.take_frame(h.now).unwrap();
+    let fills = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 11)
+        .unwrap()
+        .1;
+    let word = |payload: &[u8], at: usize| {
+        u32::from_le_bytes(payload[at..at + 4].try_into().unwrap()) as usize
+    };
+    assert_eq!(word(fills, 0), 1);
+    let id = word(fills, 4);
+    let strings = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 1)
+        .unwrap()
+        .1;
+    let base = 4 + (word(strings, 0) + 1) * 4;
+    let start = base + word(strings, 4 + id * 4);
+    let end = base + word(strings, 8 + id * 4);
+    assert_eq!(&strings[start..end], b"native-order-id");
+    let number = |at| f64::from_le_bytes(fills[at..at + 8].try_into().unwrap());
+    assert_eq!(
+        (number(16), number(24)),
+        (50000.0, 750.0),
+        "inverse fills stay in native contract units"
+    );
+}

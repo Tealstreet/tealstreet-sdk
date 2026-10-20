@@ -369,7 +369,13 @@ fn order_and_execution_frames_drive_the_lifecycle_and_report_each_execution() {
         "/v5/private",
         &order_frame("Filled", "0.002", "0", "EC_NoError"),
     );
-    h.message("/v5/private", &execution_frame("0.001", "97001"));
+    h.message(
+        "/v5/private",
+        &execution_frame("0.001", "97001").replace(
+            "0ab1bdf7-4219-438b-b30a-32ec863018f7",
+            "0ab1bdf7-4219-438b-b30a-32ec863018f8",
+        ),
+    );
     assert_eq!(
         h.engine.store().order(id).unwrap().status,
         OrderStatus::Closed
