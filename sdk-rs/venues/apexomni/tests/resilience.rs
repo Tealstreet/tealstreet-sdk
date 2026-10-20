@@ -401,7 +401,7 @@ fn invalid_omni_seed_keeps_read_only_monitoring_and_rejects_placement() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { command: 4, result: Err(error) })
-            if error.contains("OmniKey seed")
+        Action::Notice(Notice::CommandFailed { command: 4, error })
+            if error.message.contains("OmniKey seed")
     )));
 }

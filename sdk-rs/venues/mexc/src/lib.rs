@@ -9,7 +9,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, PublicFeedPolicy, Response,
+    SocketId, TimerId, Venue, VenueError,
 };
 use std::collections::{BTreeSet, HashMap};
 use wire::*;
@@ -499,7 +500,16 @@ impl MexcFutures {
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request.command, error),
+            Pending::Trade(request) => {
+                let error = VenueError::new(error).kind(ErrorKind::Network);
+                // The amend read precedes the replacement, which was never sent.
+                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                    error.outcome(Outcome::NotSent)
+                } else {
+                    error.outcome(Outcome::Unknown)
+                };
+                self.trade_failed(cx, request.command, error)
+            }
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 cx.log(LogLevel::Warning, error);

@@ -99,3 +99,34 @@ pub fn ready_with_payloads(
 // AssetPairs REST identities are legacy XDG; WS v2 uses DOGE in every quote currency.
 pub const DOGE_META: &str = r#"{"error":[],"result":{"XXDGZUSD":{"altname":"XDGUSD","wsname":"XDG/USD","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"},"XDGUSDT":{"altname":"XDGUSDT","wsname":"XDG/USDT","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"},"XDGUSDC":{"altname":"XDGUSDC","wsname":"XDG/USDC","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"}}}"#;
 pub const DOGE_TICKERS: &str = r#"{"error":[],"result":{"XXDGZUSD":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"},"XDGUSDT":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"},"XDGUSDC":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"}}}"#;
+/// Drains actions with failures as the plain text the host renders.
+pub trait Plain {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action>;
+}
+impl<V: safe_cex_engine::Venue> Plain for Engine<V> {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action> {
+        use safe_cex_engine::Notice;
+        self.drain_actions()
+            .map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    })
+                }
+                a => a,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+}
+/// Drains the classified failures, dropping every other action.
+pub fn failures<V: safe_cex_engine::Venue>(e: &mut Engine<V>) -> Vec<safe_cex_engine::VenueError> {
+    use safe_cex_engine::Notice;
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}

@@ -10,7 +10,8 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -349,7 +350,10 @@ impl Bitrue {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
     }
     fn subscription(
@@ -869,7 +873,7 @@ impl Venue for Bitrue {
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
-            Job::Trade(r) => self.trade_failed(cx, r, error),
+            Job::Trade(r) => self.trade_lost(cx, r, error),
             Job::History(r) => self.history_failed(cx, r, error),
         }
     }
