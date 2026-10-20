@@ -4,22 +4,42 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
-import { consumerFrame } from '../cutover/consumerFrame';
 
 const wasm = vi.hoisted(() => ({ loads: [] as string[], engines: [] as string[] }));
 
 vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
+  // Prove native startup from decoded tables, rather than caller-preloaded JS
+  // flags. Empty validated tables keep this loader-only fixture independent of
+  // venue metadata.
+  const startupFrame = () => {
+    const bytes = new Uint8Array(72);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, 0x46584353, true);
+    view.setUint16(4, 1, true);
+    view.setUint16(6, 3, true);
+    let at = 16;
+    for (const [kind, length] of [[2, 8], [3, 8], [10, 16]]) {
+      view.setUint16(at, kind, true);
+      view.setUint32(at + 4, length, true);
+      if (kind === 10) view.setUint32(at + 8, 31, true);
+      at += 8 + length;
+    }
+    return bytes;
+  };
   const engineModule = {
     WasmEngine: class {
       constructor(venue: string) {
         wasm.engines.push(venue);
       }
 
-      start = () => '';
+      private pending = false;
+      start = () => { this.pending = true; return ''; };
       command = () => '';
-      takeFrame = () => new Uint8Array(consumerFrame({
-        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-      }));
+      takeFrame = () => {
+        if (!this.pending) return undefined;
+        this.pending = false;
+        return startupFrame();
+      };
       snapshotFrame = () => Uint8Array.of(1);
       wsOpen = () => '';
       wsMessage = () => '';

@@ -86,6 +86,9 @@ impl Harness {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 _ => {}
             }
         }
@@ -431,13 +434,17 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
         200,
         r#"[[1499040000000,"1","2","0.5","1.5","2",0,"0",1,"0","0","0"],["bad"]]"#,
     );
+    let error = h
+        .done
+        .iter()
+        .find(|(command, _)| *command == 13)
+        .unwrap()
+        .1
+        .clone()
+        .unwrap_err();
     assert!(
-        h.done
-            .iter()
-            .find(|(command, _)| *command == 13)
-            .unwrap()
-            .1
-            .is_err()
+        error.starts_with("Aster klines HTTP 200 or malformed payload: row 1: "),
+        "{error}"
     );
 }
 
@@ -511,6 +518,67 @@ fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     assert_eq!(h.engine.store().markets().len(), 1);
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].symbol, "OLDUSDT");
+}
+
+#[test]
+fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
+    let mut h = Harness::start(Options {
+        key: Some("synthetic-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Options::default()
+    });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    h.reply("/exchangeInfo", 200, &MARKETS.replacen("[", "[{},", 1));
+    assert_eq!(h.engine.store().markets().len(), 1);
+    assert!(h.requests.iter().any(|r| r.url.contains("/account")));
+    assert!(!h.engine.store().loaded().tickers);
+    h.reply("/leverageBracket", 200, "[]");
+    h.reply("/ticker/24hr", 503, "unavailable");
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .find(|(_, at)| *at == h.now + 1000.)
+        .unwrap();
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("/ticker/24hr", 200, &DAILY.replacen("[", "[{},", 1));
+    assert_eq!(h.engine.store().tickers().len(), 1);
+    assert_eq!(h.engine.store().tickers()[0].last, 4.000002);
+}
+
+#[test]
+fn all_malformed_discovery_rows_retry_and_preserve_existing_catalogue_and_quotes() {
+    let mut h = Harness::start(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    h.reply("/exchangeInfo", 200, r#"{"symbols":[{}]}"#);
+    assert!(!h.engine.store().loaded().markets);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/leverageBracket"))
+    );
+    h.advance(1000.0);
+    h.reply("/exchangeInfo", 200, MARKETS);
+    let markets = h.engine.store().markets().to_vec();
+    h.reply("/leverageBracket", 200, "[]");
+    let prior = safe_cex_engine::model::Ticker {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        last: 123.0,
+        ..Default::default()
+    };
+    h.engine.store_mut().set_tickers(vec![prior.clone()]);
+    h.reply("/ticker/24hr", 200,
+        r#"[{},{"symbol":"","lastPrice":"1","priceChangePercent":"0","volume":"1","quoteVolume":"1"}]"#);
+    assert_eq!(h.engine.store().markets(), markets);
+    assert_eq!(h.engine.store().ticker("BTCUSDT"), Some(&prior));
+    h.advance(1000.0);
+    h.reply("/ticker/24hr", 200, DAILY);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 4.000002);
 }
 
 #[test]

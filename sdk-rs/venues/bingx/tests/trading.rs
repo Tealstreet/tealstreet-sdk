@@ -1334,3 +1334,31 @@ fn write_failures_are_classified_without_changing_their_text() {
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
     assert_eq!(h.failures[0].kind, Some(ErrorKind::Network));
 }
+
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let app = |kind: &str, price: f64, trigger: Option<f64>| {
+        let mut o: PlaceOrderOpts = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","side":"sell","type":kind,"notional":180,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":price,"amount":1})).unwrap();
+        o.trigger_price = trigger;
+        o
+    };
+    for (kind, price) in [("stop_market", 90.0), ("take_profit_market", 110.0)] {
+        let mut sent = vec![];
+        for trigger in [Some(price), None] {
+            let mut h = Harness::new(None);
+            h.engine.store_mut().set_positions(vec![position()]);
+            h.place(vec![app(kind, price, trigger)]);
+            assert_eq!(h.requests.len(), 1, "{kind}");
+            let mut body: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+            body.as_object_mut().unwrap().remove("clientOrderId");
+            sent.push((h.requests[0].url.clone(), body));
+        }
+        assert_eq!(sent[0].1["stopPrice"], price, "{kind}");
+        assert_eq!(sent[0], sent[1], "{kind}");
+    }
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.place(vec![app("stop_market", 90.0, Some(89.0))]);
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}

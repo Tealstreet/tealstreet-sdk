@@ -216,7 +216,10 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
             text: update,
         },
     );
-    assert!(e.store().tickers().is_empty());
+    assert_eq!(e.store().tickers().len(), 2);
+    assert!(!e.store().loaded().tickers);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 90.);
+    assert_eq!(e.store().ticker("ETHUSDT").unwrap().last, 101.);
     // Daily order differs from market order, and Premium removes the leading daily row.
     respond(
         &mut e,
@@ -230,12 +233,23 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
             text: update,
         },
     );
-    assert!(e.store().tickers().is_empty());
+    assert_eq!(e.store().tickers().len(), 2);
+    assert!(!e.store().loaded().tickers);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 90.);
+    assert_eq!(e.store().ticker("ETHUSDT").unwrap().last, 101.);
     respond(
         &mut e,
         3.,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"80","indexPrice":"80","lastFundingRate":"0.01","nextFundingTime":0}]}"#,
     );
+    assert_eq!(
+        e.store().ticker("BTCUSDT").unwrap().last,
+        90.,
+        "late REST cannot replace live quotes"
+    );
+    // Like TS, a market the funding read omitted is dropped even though live
+    // frames staged a row for it before the seed committed.
+    assert!(e.store().ticker("ETHUSDT").is_none());
     e.handle(
         4.,
         Event::WsMessage {
@@ -246,7 +260,10 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
     assert_eq!(e.store().tickers().len(), 1);
     assert_eq!(e.store().tickers()[0].symbol, "BTCUSDT");
     assert_eq!(e.store().tickers()[0].last, 90.);
-    assert!(e.store().ticker("ETHUSDT").is_none());
+    assert!(
+        e.store().ticker("ETHUSDT").is_none(),
+        "live frames after the seed cannot recreate a market TS omits"
+    );
     e.drain_actions().for_each(drop);
     e.handle(
         5.,
