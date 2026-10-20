@@ -70,6 +70,8 @@ impl Default for Supervisor {
 }
 
 impl Supervisor {
+    // Venue constants let validation fold away at construction.
+    #[inline(always)]
     pub fn new(config: Config) -> Self {
         let positive = |n: f64| n.is_finite() && n > 0.0;
         assert!(positive(config.connect_timeout_ms));
@@ -169,7 +171,7 @@ impl Supervisor {
             return;
         }
         self.cancel(cx);
-        let nominal = (self.config.backoff_base_ms * 2f64.powi(self.failures.min(31) as i32))
+        let nominal = (self.config.backoff_base_ms * f64::from(1u32 << self.failures.min(31)))
             .min(self.config.backoff_cap_ms);
         self.failures = self.failures.saturating_add(1);
         let bits = self.mix(cx.now.to_bits() ^ u64::from(self.failures));
