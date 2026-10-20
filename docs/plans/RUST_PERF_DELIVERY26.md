@@ -994,3 +994,42 @@ five additional harness cases. The repository CI run passes all 7,846 safe-cex
 tests; no new current-source performance measurement is inferred. Native strict
 all-target workspace Clippy passes; Rust workspace tests and WASM Clippy remain
 in the same original check pipeline. No new optimization phase has started.
+
+
+Wind-down source checkpoint is committed and pushed as `abf59848ee`; independent
+correctness/evidence reviews are posted on PR #1344 (comment6293591024).
+The original broad Rust check pipeline reached approximately30 minutes, with
+native Clippy passed and workspace test binaries still compiling/linking. It was
+progressing without a compiler diagnostic. Under the explicit wind-down request,
+stop that owned pipeline at this clean checkpoint and preserve its interrupted
+state. Full workspace tests and final WASM Clippy are NOT passing claims. Keep
+all original logs plus a separate interruption/descendant-cleanup receipt.
+Focused engine116/replay7, repository44/28/27, harness675 and host203 remain PASS.
+
+The merge push did not automatically start Rust CI; its first current-source run
+was explicitly dispatched at `abf59848ee` (Actions39442779593), not a numeric
+retry. Repository CI is Actions39441886761. Neither is a green claim. GitHub PR
+metadata still reports conflicts; the actual landing ref has advanced to
+`d17518bc5f52ff687580a675b46d599230cc8713` while cached PR base reportsc44.
+The completed merge containsc44 as its second parent; future continuation must
+fetch and merge the new landing before final validation. Do not chase another
+merge or start a new optimization phase during wind-down.
+
+
+Final local cleanup is confirmed: source driver session40555 is reaped, no owned
+Cargo/rustc/linker descendants remain, and all457 frozen source hashes match.
+The interrupted workspace command exitsSIGTERM(-15), not an assertion-failure
+verdict; final WASM Clippy was never started. Preserve the original terminal
+proof (`5d83163cde6cbf26eb539ac8768bcecc497713ce0b59d6c4f416f346735dc454`)
+and interruption receipt (`3c3e85addcb705c7915020e5c23b9d1f900918f2946b5e4665910b7ac66d4fbf`).
+
+`RUST_PERF_DELIVERY30_SOURCE_CHECKPOINT.json.gz` seals22 files, including positive
+checks, initial engine test failure/fix, interrupted Rust logs and cleanup,
+SHA-256 `2f62df79280dd8e8c06d540b9f0193b279bce7d44d936afd3db81dfbb5f63dc4`.
+Root audit verifies every embedded raw byte/hash. It rejected the first archive
+because text reads normalized carriage returns in one repository log; that
+rejected artifact is preserved inside the fixed archive, and original raw files
+were never changed. This artifact explicitly records partial source verification,
+no current-source release/actual-WASM validation, and failed historical performance
+acceptance. PR #1344 remains draft/unmerged; the exact remaining work is handed
+off under the overseer's wind-down instruction. No new branch or follow-up starts.
