@@ -111,7 +111,7 @@ export const resolveEngineRoutingPlan = (
     throw new Error('Custom transports must supply their own native host routing plan');
   }
   const { routing, restRouting } = resolved(exchange, options, provider);
-  const publicCorsProxy = exchange === 'asterdex' ? provider.publicCorsProxy() : undefined;
+  const publicCorsProxy = ['asterdex', 'txflow'].includes(exchange) ? provider.publicCorsProxy() : undefined;
   const http = (headers: Record<string, string>): EngineHttpRoute => {
     const route = restRoute(provider, exchange, options, restRouting, { method: 'GET', url: baseURL, headers });
     const target = route.baseURL ?? baseURL;

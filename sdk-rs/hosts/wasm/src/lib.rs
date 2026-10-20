@@ -20,6 +20,7 @@
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
@@ -131,6 +132,7 @@ struct KucoinExtra {
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
@@ -158,6 +160,7 @@ struct EngineOptions {
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "orderly",
         feature = "lighter",
         feature = "bitget",
@@ -185,6 +188,7 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
+        feature = "txflow",
         feature = "asterdex",
         feature = "orderly",
         feature = "lighter",
@@ -192,7 +196,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     application_id: Option<String>,
-    #[cfg(feature = "hyperliquid")]
+    #[cfg(any(feature = "hyperliquid", feature = "txflow"))]
     #[serde(default)]
     vault: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -733,6 +737,7 @@ impl WasmEngine {
         feature = "weex",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "orderly",
         feature = "lighter",
         feature = "okx"
@@ -757,6 +762,19 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "txflow")]
+            "txflow" => {
+                let options = safe_cex_venue_txflow::Options {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                };
+                options.validate().map_err(|e| JsError::new(&e))?;
+                Box::new(Engine::new(safe_cex_venue_txflow::TxFlow::new(options)))
+            }
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
                 testnet: options.testnet,

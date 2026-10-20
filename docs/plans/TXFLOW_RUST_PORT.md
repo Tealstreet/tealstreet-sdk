@@ -8,8 +8,8 @@ rebase, force-push, or target master.
 ## Initial audit and verification constraint
 
 Read the TxFlow `CLAUDE.md` before the implementation. The checked-in
-`txflow.exchange.ts` is a Phase 0 scaffold whose `start()` unconditionally
-rejects with `TXFLOW_PHASE_0_UNIMPLEMENTED_MESSAGE`. It has no public, private,
+At the initial audit, `txflow.exchange.ts` was a Phase 0 scaffold whose `start()` unconditionally
+rejects with `TXFLOW_PHASE_0_UNIMPLEMENTED_MESSAGE`. It had no public, private,
 trading or query implementation. This is a missing reference implementation,
 not evidence that the venue lacks these APIs.
 
@@ -28,8 +28,9 @@ gate skip, or report these gates passing. Functional landing requires a real
 testnet reference adapter or an explicit change to the verification contract.
 
 An independent sub-agent reviewed this audit and the signing/reuse plan. It
-confirmed the oracle constraint and the protocol differences below. Scope
-clarification is pending; no functional capability is enabled by this plan.
+confirmed the oracle constraint and the protocol differences below. The port
+includes the missing testnet TS reference as a prerequisite to its replay
+gates. It remains testnet-only with all production/preview flags disabled.
 
 ## Reuse audit
 
@@ -211,5 +212,48 @@ and all local gates passing. Cut a fresh branch from fetched landing afterward.
 ## Progress
 
 - Initial source/API/reuse audit complete; independent review confirms plan.
-- Functional phases and all replay/performance gates pending: working TS oracle
-  is absent. No passing functional gate or production capability is claimed.
+- Implementing the missing testnet TS reference alongside Rust so the required
+  comparisons exercise real native behavior. Public mapping, private
+  reconciliation and trading have deterministic tests; phase reviews ongoing.
+- Signing phase independently reviewed: exact official domain, MessagePack
+  connection ID, digest and signatures match; four native tests pass. Reuses
+  Hyperliquid preimage hashing directly; no copied parent venue state machine.
+- Functional replay/performance gates pending; no passing replay gate or
+  production capability is claimed.
+
+### Reviewed implementation checkpoint
+
+- Public phase: independent review accepted after fixing duplicate metadata,
+  pre-metadata subscription intent loss, wrong-instrument REST seeds and atomic
+  seed readiness. Native public tests 15/15, TS public tests 5/5.
+- Private phase: independent review accepted after preserving executions in the
+  first response after startup, learning flat-account hedge mode from native
+  settings, and bounding retired order identity state. Native account 12/12,
+  TS account 7/7.
+- Trading phase: independent review accepted after fixing discarded pure order
+  fetches and queued-amend protection clearing; native trading 9 integration
+  tests plus 5 unit tests pass. Unknown/pending execution acknowledgements never
+  authorize a retry. Scalar hedge leverage is explicitly refused.
+- Query phase: review findings fixed (local bounds/symbol filters, empty ledger
+  identities, unknown status rejection and funding-leg identity collisions).
+  Native history 6/6, independently authored TS history proofs 14/14. Ledger
+  income additionally requires documented completed settlement status.
+- Signing: 4 native official-vector proofs and 2 TS proofs. Full safe-cex
+  typecheck passes. Client-ID regression exposed synchronous guard throws; the
+  TS overrides now reject asynchronously while emitting before any write.
+- First live public recording: 20 seconds, 78 markets/tickers, two full books.
+  Public replay PASS: CPU TS 165.1 ms / Rust 59.7 ms (2.77x), retained memory
+  TS 14.6 MB / Rust 1.2 MB (12.05x), single-venue Wasm 896,428 bytes.
+- Private tape: 19 WS frames, 15 commands, one close, 8 signed writes, exactly
+  one expected execution. Initial gate matched all account/writes/query results;
+  one preflight error-text mismatch is being corrected without normalization.
+- Harness generic startup-clock option keeps deterministic private session
+  timestamps and existing default behavior. Native recorder explicitly declares
+  direct egress only for public-CORS reads; browser/account routing remains
+  configured and fail-closed. Independent harness protocol review in progress.
+- Shared crypto audit: no helper becomes unused through this port; it directly
+  reuses the existing Hyperliquid preimage and Ethereum/EIP-712 primitives.
+  Removed the redundant direct TxFlow MessagePack dependency.
+- Remaining: final gate review, full root/host/workspace checks, latest landing
+  merge, PR code-correctness reviews, green exact-head CI, merge and follow-up
+  branch. No merge or completion claim yet.

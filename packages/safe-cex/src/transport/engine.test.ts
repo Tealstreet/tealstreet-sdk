@@ -1083,16 +1083,16 @@ describe('typed public HTTP route hints', () => {
     },
   );
 
-  it('fails unconfigured CORS before network and preserves ordinary direct requests', async () => {
+  it.each(['asterdex', 'txflow'] as const)('fails unconfigured CORS before network for %s and preserves ordinary direct requests', async (exchange) => {
     const raw = makeRaw();
-    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const routed = createEngineTransport(exchange, options({ transport: directTransport }), raw);
     const input = { method: 'GET', url: 'https://fapi.asterdex.com/fapi/v1/time', headers: {} };
     await expect(routed.request({ ...input, route: 'publicCors' })).rejects.toThrow('not configured');
     expect(raw.request).not.toHaveBeenCalled();
     await routed.request(input);
     expect(raw.request.mock.lastCall![0].url).toBe(input.url);
     expect(
-      resolveEngineRoutingPlan('asterdex', options({ transport: directTransport }), 'https://fapi.asterdex.com'),
+      resolveEngineRoutingPlan(exchange, options({ transport: directTransport }), 'https://fapi.asterdex.com'),
     ).not.toHaveProperty('publicCorsHttp');
     routed.dispose!();
   });

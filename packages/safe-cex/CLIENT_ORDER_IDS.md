@@ -35,6 +35,7 @@ market's max size, or an unknown market.
 | Backpack                     | uint32                   | 9-digit number      | header               | **dropped** — mapper keeps no `info`                      |
 | GRVT                         | decimal, < 2^63          | 9-digit number      | builder fee          | **`Order.id`**                                            |
 | Hyperliquid (+spot)          | `0x` + 32 lowercase hex  | random `0x…`        | builder fee          | **`Order.clientOrderId`** (WS and REST)                   |
+| TxFlow (testnet)             | 1–64 UTF-8 bytes, no `0x` prefix | `ts_…` | none configured | `Order.clientOrderId` (WS and REST) |
 
 Hyperliquid is the one venue that honors (and mints for) every shape it places,
 stops and brackets included; only a trailing stop, which it does not support,

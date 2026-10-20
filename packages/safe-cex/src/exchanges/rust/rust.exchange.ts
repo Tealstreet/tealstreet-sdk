@@ -52,6 +52,7 @@ import {
 } from '../bybit/bybit.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { txflowClientOrderIdRule } from '../txflow/txflow.trading';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
@@ -82,6 +83,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
   hyperliquid: 'hyperliquid',
+  txflow: 'txflow',
   kraken: 'kraken',
   lighter: 'lighter',
   okx: 'okx',
@@ -123,6 +125,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
   },
   hyperliquid: hyperliquidClientOrderIdRule,
+  txflow: txflowClientOrderIdRule,
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
   }),
@@ -285,7 +288,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'lighter'].includes(this.name) &&
+      !['hyperliquid', 'lighter', 'txflow'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
@@ -689,7 +692,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue', 'txflow'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
