@@ -2,7 +2,9 @@
 //! An execution acknowledgement carries no order IDs: identity comes from reads/streams.
 use crate::{Pending, TxFlow, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, Method, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -11,7 +13,6 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
-    nonce: u64,
     last_write: Option<f64>,
     pace: Option<TimerId>,
     reconcile: Option<TimerId>,
@@ -631,7 +632,7 @@ impl TxFlow {
             step = match self.amend_step(cx, id, *price, *amount) {
                 Ok(step) => step,
                 Err(error) => {
-                    self.finish_trade(cx, Err(error));
+                    self.finish_trade(cx, Err(error.into()));
                     return;
                 }
             };
@@ -664,10 +665,13 @@ impl TxFlow {
             self.finish_trade(cx, Err("TxFlow market is halted".into()));
             return;
         }
-        let nonce = match next_nonce(cx.now, self.trading.nonce) {
+        let nonce = match safe_cex_crypto::nonce::ethereum_agent(
+            self.options.secret.as_deref().unwrap_or(""),
+            cx.now,
+        ) {
             Ok(n) => n,
             Err(e) => {
-                self.finish_trade(cx, Err(e));
+                self.finish_trade(cx, Err(e.into()));
                 return;
             }
         };
@@ -679,11 +683,10 @@ impl TxFlow {
         ) {
             Ok(s) => s,
             Err(e) => {
-                self.finish_trade(cx, Err(e));
+                self.finish_trade(cx, Err(e.into()));
                 return;
             }
         };
-        self.trading.nonce = nonce;
         let (kind, response_type) = action.kind();
         let body = serde_json::to_string(&Envelope {
             action: TypedAction {
@@ -749,15 +752,14 @@ impl TxFlow {
             return;
         }
         self.trading.inflight = false;
-        if let Err(error) = response
-            .map_err(str::to_owned)
+        // A transport or HTTP failure may follow execution.
+        if let Err(mut error) = response
+            .map_err(unknown)
             .and_then(|r| parse_reply(r, request.response_type))
         {
             self.acknowledge_write(cx);
-            self.finish_trade(
-                cx,
-                Err(format!("{error}; reconcile before any resubmission")),
-            );
+            error.message = format!("{}; reconcile before any resubmission", error.message);
+            self.finish_trade(cx, Err(error));
             return;
         }
         match request.effect {
@@ -836,40 +838,36 @@ impl TxFlow {
             self.trading.reconcile = None;
             self.trading.reconcile_count += 1;
             if self.trading.reconcile_count >= 8 {
-                self.finish_trade(cx, Err("TxFlow executed placement has unresolved identity; reconcile by clientOrderId before resubmitting".into()));
+                self.finish_trade(cx, Err(unknown("TxFlow executed placement has unresolved identity; reconcile by clientOrderId before resubmitting")));
             } else {
                 self.refresh_orders(cx);
                 self.trading_reconcile(cx);
             }
         }
     }
-    fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), String>) {
+    fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
         self.trading.inflight = false;
         if let Some(timer) = self.trading.reconcile.take() {
             cx.clear_timer(timer);
         }
         self.trading.reconcile_count = 0;
         if let Some(job) = self.trading.active.take() {
-            cx.done(
-                job.command,
-                result.map(|_| serde_json::to_string(&job.ids).unwrap()),
-            );
+            match result {
+                // Unclassified failures keep the plain path until TxFlow migrates to `fail`.
+                Err(error) if error.outcome.is_some() => cx.fail(job.command, error),
+                result => cx.done(
+                    job.command,
+                    result
+                        .map(|_| serde_json::to_string(&job.ids).unwrap())
+                        .map_err(|error| error.message),
+                ),
+            }
         }
         self.pump_trades(cx);
     }
 }
 pub(crate) fn valid_cloid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && !id.starts_with("0x")
-}
-fn next_nonce(now: f64, previous: u64) -> Result<u64, String> {
-    if !now.is_finite() || !(0.0..=9_007_199_254_740_991.0).contains(&now) {
-        return Err("Invalid TxFlow signing time".into());
-    }
-    let nonce = (now.floor() as u64).max(previous.checked_add(1).ok_or("TxFlow nonce exhausted")?);
-    if nonce > 9_007_199_254_740_991 {
-        return Err("TxFlow nonce exhausted".into());
-    }
-    Ok(nonce)
 }
 fn checked_number(value: f64, step: f64) -> Result<String, String> {
     if !value.is_finite() || value <= 0.0 || !step.is_finite() || step <= 0.0 {
@@ -913,36 +911,42 @@ enum Status {
     Text(String),
     Error { error: String },
 }
-fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), String> {
+fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError> {
     if response.status != 200 {
-        return Err(format!(
+        return Err(unknown(format!(
             "TxFlow HTTP {} execution outcome is uncertain",
             response.status
-        ));
+        )));
     }
-    let reply: Reply =
-        serde_json::from_str(response.body).map_err(|_| "Invalid TxFlow execution response")?;
+    let reply: Reply = serde_json::from_str(response.body)
+        .map_err(|_| unknown("Invalid TxFlow execution response"))?;
     if reply.status == "err" {
         return Err(reply
             .message
             .or(reply.response)
-            .unwrap_or_else(|| "TxFlow action rejected".into()));
+            .unwrap_or_else(|| "TxFlow action rejected".into())
+            .into());
     }
     if reply.status != "ok" || reply.code != Some(0) || reply.confirm.as_deref() != Some("executed")
     {
-        return Err("TxFlow execution outcome is uncertain".into());
+        return Err(unknown("TxFlow execution outcome is uncertain"));
     }
     let data = reply
         .data
-        .ok_or("TxFlow queued response does not confirm execution")?;
+        .ok_or_else(|| unknown("TxFlow queued response does not confirm execution"))?;
     if data.r#type != expected || data.data.statuses.len() != 1 {
-        return Err("Invalid TxFlow whole-action acknowledgement".into());
+        return Err(unknown("Invalid TxFlow whole-action acknowledgement"));
     }
     match data.data.statuses.into_iter().next().unwrap() {
         Status::Text(s) if s == "success" => Ok(()),
-        Status::Error { error } => Err(error),
-        _ => Err("Unknown TxFlow execution status".into()),
+        Status::Error { error } => Err(error.into()),
+        _ => Err(unknown("Unknown TxFlow execution status")),
     }
+}
+
+/// The write may have executed; reconcile before resubmitting.
+fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
 
 #[cfg(test)]
@@ -955,12 +959,7 @@ mod tests {
         assert!(!valid_cloid("0xcaller"));
         assert!(!valid_cloid(""));
     }
-    #[test]
-    fn nonce_monotonic_checked_and_clock_validated() {
-        assert_eq!(next_nonce(1000.9, 1001).unwrap(), 1002);
-        assert!(next_nonce(f64::NAN, 0).is_err());
-        assert!(next_nonce(1.0, u64::MAX).is_err());
-    }
+
     #[test]
     fn one_status_ack_applies_to_entire_action_and_never_yields_id() {
         let r = Response {
