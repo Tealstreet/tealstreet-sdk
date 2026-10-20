@@ -1,4 +1,6 @@
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
+
+import { QUANTITY_UNITS } from '@tealstreet/safe-cex-wasm/wire';
 import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 
 const ORDERLY = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
@@ -40,6 +42,15 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     amendWithSymbol: is('kucoinspot'),
     orderBookQuery: is('asterdex', 'polymarket'),
     options: false,
+    quantityUnits: is('mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot')
+      ? 'nativePlacement'
+      : is('bitgetinverse')
+        ? 'inverseNative'
+        : is(...OKX)
+          ? 'contractCount'
+          : is('binanceinverse')
+            ? 'inverseContractSized'
+            : 'base',
     accountTier: is('lighter', 'lighter-robinhood'),
     ...overrides,
   };
@@ -48,6 +59,10 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
 
 /** Adopts the exchange's record as engine creation would, for tests that inject their own host. */
 export const adoptEngineCapabilities = (exchange: RustEngineExchange, overrides: Partial<EngineCapabilities> = {}) =>
-  (exchange as unknown as { adoptCapabilities(record: EngineCapabilities): void }).adoptCapabilities(
+  (exchange as unknown as { adoptEngineCapabilities(record: EngineCapabilities): void }).adoptEngineCapabilities(
     JSON.parse(engineCapabilities(exchange.name, overrides)),
   );
+
+/** The venue's market quantity-units code, as the engine writes it into MARKETS flags. */
+export const quantityUnitsCode = (venue: string): number =>
+  QUANTITY_UNITS.indexOf((JSON.parse(engineCapabilities(venue)) as EngineCapabilities).quantityUnits);

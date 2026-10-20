@@ -1,3 +1,4 @@
+import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
 import type { PositionRecord } from '../journal/position.types';
@@ -251,7 +252,46 @@ export type EngineSnapshot = {
   fetchedLeverage: Record<string, FetchedLeverage>;
 };
 
+/** Trading methods a main-thread Rust mirror forwards whole to its worker's engine. */
+export const WORKER_TRADING_METHODS = [
+  'placeOrder',
+  'placeOrders',
+  'placeOrderWithClientOrderId',
+  'updateOrder',
+  'cancelOrders',
+  'cancelSymbolOrders',
+  'cancelAllOrders',
+  'findOrderByClientOrderId',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+] as const;
+
+export type WorkerTradingMethod = (typeof WORKER_TRADING_METHODS)[number];
+
+/** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
+export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<CallableMethodsInWorker>([
+  'setLeverage',
+  'scheduleCancel',
+  'changePositionMode',
+  'changeMarginType',
+  ...WORKER_TRADING_METHODS.filter((method) => method !== 'findOrderByClientOrderId'),
+]);
+
+/** Caller client order IDs a worker placement RPC carries, for an interrupted write's outcome. */
+export const workerCallClientOrderIds = (method: unknown, args: unknown): string[] | undefined => {
+  if (!Array.isArray(args)) return undefined;
+  let orders: unknown[] = [];
+  if (method === 'placeOrders' && Array.isArray(args[0])) orders = args[0];
+  else if (method === 'placeOrder' || method === 'placeOrderWithClientOrderId') orders = [args[0]];
+  const ids = orders
+    .map((order) => (order as { clientOrderId?: unknown } | null | undefined)?.clientOrderId)
+    .filter((id): id is string => typeof id === 'string');
+  return ids.length ? ids : undefined;
+};
+
 export type CallableMethodsInWorker =
+  | WorkerTradingMethod
   | 'setLeverage'
   | 'scheduleCancel'
   | 'changePositionMode'
@@ -1483,6 +1523,9 @@ export class BaseExchange implements Exchange {
   }
 
   private workerFrameApplier?: FrameApplier;
+
+  /** Engine-backed venues take the record a snapshot frame carries; others have none. */
+  protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
   private workerFrameRecoveryPending = false;
 
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
@@ -1507,13 +1550,7 @@ export class BaseExchange implements Exchange {
   }
 
   private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
-    this.workerFrameApplier ??= new FrameApplier(
-      this.store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.workerFrameApplier ??= new FrameApplier(this.store);
     let frame: Frame | undefined;
     let needsSnapshot = false;
     try {
@@ -1524,6 +1561,12 @@ export class BaseExchange implements Exchange {
       console.error('Invalid engine frame', error);
     }
     if (frame) {
+      try {
+        const capabilities = frame.capabilities();
+        if (capabilities) this.adoptEngineCapabilities(capabilities);
+      } catch (error) {
+        console.error('Engine capabilities section failed', error);
+      }
       try {
         this.workerFrameApplier.apply(frame);
       } catch (error) {
@@ -1625,9 +1668,9 @@ export class BaseExchange implements Exchange {
     });
   };
 
-  protected workerCommandTimeoutMs = () => 5000;
+  protected workerCommandTimeoutMs = (_method: CallableMethodsInWorker) => 5000;
 
-  protected workerCommandTimeoutError = (_method: CallableMethodsInWorker): Error =>
+  protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
     new Error('Timeout callMethodInWorker');
 
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
@@ -1641,8 +1684,8 @@ export class BaseExchange implements Exchange {
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
-        reject(this.workerCommandTimeoutError(method));
-      }, this.workerCommandTimeoutMs());
+        reject(this.workerCommandTimeoutError(method, args));
+      }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);

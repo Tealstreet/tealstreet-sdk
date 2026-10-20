@@ -19,15 +19,16 @@ const frame = (overrides: object = {}) =>
     candles: () => undefined,
     ...overrides,
   }) as unknown as Frame;
-const markets = (symbols: string[]) => ({
+// `units` is the QUANTITY_UNITS index each market carries in flag bits 8..12.
+const markets = (symbols: string[], units = 0) => ({
   count: symbols.length,
   id: (i: number) => symbols[i],
   symbol: (i: number) => symbols[i],
   base: (i: number) => symbols[i],
   quote: () => 'USD',
+  flags: Float64Array.from(symbols, () => 1 | (units << 8)),
   ...Object.fromEntries(
     [
-      'flags',
       'precisionAmount',
       'precisionPrice',
       'minAmount',
@@ -76,12 +77,16 @@ it('keeps the last good table and uses explicit fill identity when new market me
   expect(() => applier.apply(frame())).not.toThrow();
 });
 
-it.each(['native', 'contracts', 'inverse'] as const)(
-  'retains orphan identity without deriving NaN %s position quantities',
-  (profile) => {
+it.each(
+  ([['native', 1], ['contracts', 3], ['inverse', 2]] as const).flatMap(([profile, units]) =>
+    [[], ['OTHER']].map((table) => [profile, units, table] as const),
+  ),
+)(
+  'retains orphan identity without deriving NaN %s position quantities (units %i, table %j)',
+  (_profile, units, table) => {
     const store = new DefaultStore();
-    const applier = new FrameApplier(store, profile === 'native', profile === 'inverse', profile === 'contracts');
-    applier.apply(frame({ markets: () => markets(['ORPHAN']) }));
+    const applier = new FrameApplier(store);
+    applier.apply(frame({ markets: () => markets(['ORPHAN'], units) }));
     const positions = {
       count: 1,
       market: Uint32Array.of(0xffffffff),
@@ -102,7 +107,8 @@ it.each(['native', 'contracts', 'inverse'] as const)(
         ].map((key) => [key, Float64Array.of(1)]),
       ),
     };
-    applier.apply(frame({ markets: () => markets([]), positions: () => positions }));
+    // Orphan rows keep the venue's units: the table's, or the last table's when it empties.
+    applier.apply(frame({ markets: () => markets([...table], units), positions: () => positions }));
     expect(store.positions[0]).toMatchObject({ id: 'orphan-position', symbol: 'ORPHAN' });
     expect(store.positions[0].extra).toBeUndefined();
   },
