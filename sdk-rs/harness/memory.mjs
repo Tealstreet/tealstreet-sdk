@@ -43,8 +43,13 @@ export const settledMemory = async ({
   let previous;
   let stableSince = now();
   let stable = 0;
+  let samples = 0;
+  let longestCollectionMs = 0;
   while (now() <= deadline) {
+    const collectStarted = now();
     collect();
+    longestCollectionMs = Math.max(longestCollectionMs, now() - collectStarted);
+    samples++;
     await pause();
     const memory = sample();
     const time = now();
@@ -57,5 +62,5 @@ export const settledMemory = async ({
     if (stable >= 2 && time - stableSince >= quietMs) return memory;
     previous = memory.arrayBuffers;
   }
-  throw new Error('Backing-buffer memory did not settle');
+  throw new Error(`Backing-buffer memory did not settle (${samples} samples, ${stable} equal samples, longest GC ${longestCollectionMs.toFixed(1)}ms, last buffers ${previous ?? 'unavailable'})`);
 };
