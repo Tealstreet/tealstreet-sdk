@@ -574,3 +574,22 @@ Do not treat earlier passing timings as proof of this combined artifact.
 Profiling one canonical replay is underway before choosing another optimization;
 keep every comparison, audit and threshold intact. Final landing still requires
 both applicable local gates and green exact-head CI.
+
+### Profiled replay overhead
+
+One canonical combined-artifact diagnostic replay identified shared benchmark
+work rather than another guessed venue change. The 525 WS messages contain
+257,620 bytes and no Bitget `arg`. Sampling attributed 22 self ticks to the
+unconditional Bitget-only JSON parse, 36 inclusive ticks to repeated URL
+canonicalization under socket selection, versus 26 inclusive handler samples.
+These whole-process samples and diagnostic timings are not gate measurements
+or a before/after speedup claim.
+
+Guard the unused `arg` parse by the existing Bitget selector, and reuse the
+already-computed canonical socket key. Each active-socket check still reads the
+live map/set and applies the same closed/ordinal/stream/subscription/matcher
+checks; nothing caches selected sockets across waiters or reconnects. All
+Bitget routing and every delivery/audit hook remain intact. Independent review
+accepts the change; all 455 harness tests pass, including existing fanout and
+lifecycle proofs. No fixture or gate threshold changes. Final performance and
+correctness gates are still required on the resulting combined artifact.

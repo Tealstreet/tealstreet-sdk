@@ -736,8 +736,9 @@ export class Tape {
     if (this.venue.subscriptionRouting && !stream && bound && !bound.closed) return bound;
     if (!openingOnly && (stream || streams?.size) && this.venue.subscriptionRouting) ordinal = undefined;
     const subscribed = (socket, target) => [...socket.subscriptions].some((topic) => target === topic || target.startsWith(`${topic}.`));
-    const active = () => this.sockets(url, ordinal).filter((socket) =>
-      (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target)))
+    const active = () => [...(this.open.get(key) ?? [])].filter((socket) =>
+      !socket.closed && (ordinal === undefined || socket.ordinal === ordinal)
+      && (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target)))
       && (openingOnly || ordinal !== undefined || text === undefined || !this.venue.socketMatches
         || this.venue.socketMatches(socket, text)));
     if (!active().length) {
@@ -818,10 +819,12 @@ export class Tape {
     }
     if (frame.type === 'open') return;
     let arg;
-    try {
-      arg = JSON.parse(frame.text)?.arg;
-    } catch {
-      /* Plain heartbeat. */
+    if (this.bitget) {
+      try {
+        arg = JSON.parse(frame.text)?.arg;
+      } catch {
+        /* Plain heartbeat. */
+      }
     }
     const key = this.bitget && arg && this.topicKey(arg);
     const matching = key ? sockets.filter((socket) => socket.topics.has(key)) : sockets;
