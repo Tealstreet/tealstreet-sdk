@@ -433,6 +433,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `polymarket` | `POLYMARKET` | `PRIVATE_KEY` | None wired; explicit `--mainnet` only. Optional complete L2 tuple: `API_KEY`, `API_SECRET`, `API_PASSPHRASE`; absent tuple derives credentials with L1 auth. Optional `FUNDER_ADDRESS`, `SIGNER_TYPE` (`0`–`3`; default `0`). |
 | `hyrotrader` | — | — | No reviewed built-in profile; refused, including with `--mainnet`. Simulation URLs cannot be inferred safely from caller-supplied endpoints. |
 | `grvt` | — | — | Newly landed during this harness change. Engine has testnet endpoints, but its pinned replay auth/routing contract currently accepts production origins only. No reviewed live-smoke profile yet; refused before credential access. |
+| `breakoutprop` | — | — | Newly landed during this harness change; no reviewed credential/environment/sizing profile yet. Refused before credential access. |
 
 The environment table and credential option mapping live in
 `sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling

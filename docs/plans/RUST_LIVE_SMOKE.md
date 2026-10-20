@@ -102,3 +102,12 @@ native network primitives provide its transport. No engine shapes change.
 - All phase reviews pass after repairs. Next: final secret scan and landing
   refresh, PR into feat/rust-rewrite, posted adversarial reviews, exact-head green
   CI, normal merge and fresh follow-up branch.
+- Final landing refresh also brought BreakoutProp/polling infrastructure as
+  `c2cee66bf4`. Preserve its workspace/SDK/harness changes; the new venue has no
+  reviewed live-smoke profile and explicitly refuses before credential access.
+  Re-run shared harness, current default wasm build and the fake lifecycle gate.
+- Post-Breakout build and replay PASS: 503 harness cases, 9 real-Wasm fake
+  lifecycle scenarios, full default wasm build, 44 typecheck and 28 lint tasks.
+  Incoming polling records remain opt-in and preserve Binance private pacing.
+  Independent merge review PASS. Root 27 test tasks passed immediately before
+  this incoming merge; final PR CI runs the full combined state.

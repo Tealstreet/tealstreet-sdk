@@ -7,7 +7,7 @@ const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
 
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
-    if (['hyrotrader', 'grvt'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
