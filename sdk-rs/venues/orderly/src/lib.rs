@@ -8,8 +8,9 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -74,17 +75,33 @@ pub enum Pending {
         to: Option<f64>,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
     payload_at: f64,
     recover: bool,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Connection {
+    fn new(auth_timeout_ms: Option<f64>) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            payload_at: 0.0,
+            recover: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms,
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(10_000.0),
+                ..Config::default()
+            }),
+        }
+    }
+    fn payload_stale(&self, now: f64) -> bool {
+        now - self.payload_at >= 30_000.0
+    }
 }
 struct Delta {
     ts: u64,
@@ -124,7 +141,7 @@ impl Orderly {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
-            public: Connection::default(),
+            public: Connection::new(None),
             books: HashMap::new(),
             candles: HashMap::new(),
             native: HashMap::new(),
@@ -179,15 +196,23 @@ impl Orderly {
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.open = false;
-        self.public.received = cx.now;
         self.public.payload_at = cx.now;
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_feed(
             self.public_url(),
             safe_cex_engine::SocketChannel::Public,
             "market",
             self.public.recover,
         ));
-        self.public.watchdog = Some(cx.set_timer(10000.0));
+    }
+    fn drop_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(socket) = self.public.socket {
+            cx.close(socket);
+            self.on_close(cx, socket, 1006);
+        }
     }
     fn public_topic_available(&self, cx: &mut Cx<'_, Pending>) -> bool {
         if self.books.len() + self.candles.len() >= 97 {
@@ -469,7 +494,6 @@ impl Orderly {
                     {
                         self.public.payload_at = cx.now;
                         self.public.recover = false;
-                        self.public.attempts = 0;
                         cx.store.update_ticker(&symbol, |t| match topic {
                             "tickers" => {
                                 t.last = r.close.unwrap().0;
@@ -594,13 +618,9 @@ impl Venue for Orderly {
         if self.public.socket != Some(socket) || self.public.open {
             return;
         }
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         self.public.open = true;
-        self.public.received = cx.now;
         self.public.ping_at = cx.now;
-        self.public.watchdog = Some(cx.set_timer(10000.0));
+        self.public.supervisor.opened(cx);
         cx.send(socket, "{\"event\":\"ping\"}");
         for topic in ["tickers", "bbos", "markprices"] {
             self.subscribe(cx, topic, true);
@@ -642,7 +662,7 @@ impl Venue for Orderly {
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         if let Err(e) = self.public_message(cx, text) {
             cx.log(LogLevel::Error, e);
         }
@@ -660,9 +680,7 @@ impl Venue for Orderly {
         }
         self.public.open = false;
         self.public.socket = None;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
+        self.public.supervisor.retry(cx);
         for state in self.books.values_mut() {
             state.last = None;
             state.bridge = true;
@@ -674,10 +692,6 @@ impl Venue for Orderly {
                 cx.clear_timer(t);
             }
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(self.public.attempts.min(6) as i32 - 1)).min(30000.0)),
-        );
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         if let Pending::Account(request) = pending {
@@ -909,28 +923,26 @@ impl Venue for Orderly {
             self.seed(cx, kind);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if !self.public.open
-                || cx.now - self.public.received >= 20000.0
-                || cx.now - self.public.payload_at >= 30000.0
-            {
-                self.public.recover =
-                    !self.public.open || cx.now - self.public.payload_at >= 30000.0;
-                let socket = self.public.socket.unwrap();
-                cx.close(socket);
-                self.on_close(cx, socket, 1006);
-            } else {
-                self.public.ping_at = cx.now;
-                cx.send(self.public.socket.unwrap(), "{\"event\":\"ping\"}");
-                self.public.watchdog = Some(cx.set_timer(10000.0));
+        match self.public.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => {}
+            SocketTick::Reconnect => return self.connect_public(cx),
+            SocketTick::Ping if self.public.payload_stale(cx.now) => {
+                self.public.recover = true;
+                return self.drop_public(cx);
             }
-            return;
+            SocketTick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    self.public.ping_at = cx.now;
+                    cx.send(socket, "{\"event\":\"ping\"}");
+                }
+                return;
+            }
+            SocketTick::TimedOut(timeout) => {
+                self.public.recover =
+                    timeout == Timeout::Connect || self.public.payload_stale(cx.now);
+                return self.drop_public(cx);
+            }
+            SocketTick::Handled => return,
         }
         let timed = self
             .books

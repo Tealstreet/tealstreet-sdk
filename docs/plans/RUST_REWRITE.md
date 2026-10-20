@@ -186,8 +186,8 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 ## Correctness gate
 
 Recorded traffic (websocket frames, REST responses, user commands, timestamps)
-is replayed through TS and Rust. The final `StoreData`, the emitted
-order-book/candle deltas and the outbound REST/WS requests must match after
+is replayed through TS and Rust. The `StoreData` at startup, fixed tape quarters, every
+command and terminal checkpoints, the emitted order-book/candle deltas and the outbound REST/WS requests must match after
 normalisation: numbers compared as numbers, map order ignored. A known TS bug
 is fixed in Rust and listed in the PR. The test is the same outcome, not
 byte-identical behaviour.
@@ -197,13 +197,25 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS. A CPU objective under 10 ms TS allows Rust 1 ms
-  above TS: at that size tied runs differ by up to 0.9 ms
-  (`RUST_GATE_TIMING.md`).
-- Peak and steady memory (Wasm linear memory plus JS heap retained by the
-  worker): Rust < TS.
+- At least seven fresh interleaved public pairs with alternating first runner.
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
+  90% of TS. A main or steady CPU objective under 10 ms TS instead allows Rust
+  1 ms above TS: at that size tied runs differ by up to 0.9 ms
+  (`RUST_GATE_TIMING.md`). Include cold implementation loading/WASM compilation in total CPU;
+  exclude audit callbacks, checkpoint reconstruction and baseline collection.
+- Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
+  reservation; never clamp releases to zero. Each measured run must reproduce
+  its implementation's audited output and transport receipt.
+- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
+  use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
 
-Every venue PR states both numbers. A PR that loses on either does not merge.
+Peak memory and browser cold-start remain cutover requirements; this replay
+gate measures idle-loaded retained memory rather than establishing either.
+
+Every venue PR states the measurements and incomplete evidence. A venue port
+that loses does not merge. Gate-infrastructure changes may land explicit,
+tape-hash-bound known failures in `harness/known-gate-failures.json`; they retain
+strict FAIL and do not certify venue parity. New or invalid evidence fails CI.
 
 ## Banned (CI fails)
 
@@ -418,6 +430,12 @@ fixture assumptions, not a live-feed bandwidth forecast.
   wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
+
+The stricter gate-honesty matrix has 107 mandatory cases. Its single
+[`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
+list records exact venue/tape/diagnostic failures; accepted known failures stay
+FAIL and do not certify parity. Port states below describe implementation and
+historical checks, not a claim that every stricter replay case passes.
 
 ### 8. Remaining venues — in progress
 

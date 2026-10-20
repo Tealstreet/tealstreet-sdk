@@ -10,18 +10,21 @@ pub mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use sign::{Credentials, Query, Signed};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
+const MIN_RECONNECT_DELAY_MS: f64 = 500.0;
 const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
 const DEPTH_SNAPSHOT_LIMIT: u32 = 1000;
-/// Every socket is checked this often; one silent for `SILENCE_LIMIT_MS` is
-/// treated as dead (a half-open socket never reports a close).
-const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
+/// Probed sockets get a cheap request this often; any socket silent for
+/// `SILENCE_LIMIT_MS` is treated as dead (a half-open socket never reports a close).
+const PROBE_INTERVAL_MS: f64 = 5_000.0;
 const SILENCE_LIMIT_MS: f64 = 20_000.0;
 /// Background reads pause at 80% of the 2,400 request-weight budget.
 const WEIGHT_PAUSE_THRESHOLD: f64 = 1_920.0;
@@ -125,10 +128,7 @@ enum Channel {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    attempts: u32,
-    reconnect: Option<TimerId>,
-    watchdog: Option<TimerId>,
-    last_received: f64,
+    supervisor: Supervisor,
     next_request_id: u64,
     subscriptions: Vec<u64>,
     send_queue: VecDeque<(String, Vec<String>)>,
@@ -137,14 +137,17 @@ struct Connection {
 }
 
 impl Connection {
-    fn new() -> Self {
+    fn new(probed: bool) -> Self {
         Self {
             socket: None,
             open: false,
-            attempts: 0,
-            reconnect: None,
-            watchdog: None,
-            last_received: 0.0,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: SILENCE_LIMIT_MS,
+                ping_interval_ms: probed.then_some(PROBE_INTERVAL_MS),
+                backoff_base_ms: MIN_RECONNECT_DELAY_MS,
+                backoff_cap_ms: MAX_RECONNECT_DELAY_MS,
+                ..Config::default()
+            }),
             next_request_id: 10,
             subscriptions: Vec::new(),
             send_queue: VecDeque::new(),
@@ -253,6 +256,7 @@ impl BinanceFutures {
             Variant::Spot => &paths::SPOT,
         };
         let urls = Urls::for_options(&options, paths);
+        let spot = options.variant == Variant::Spot;
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
                 Some(Credentials {
@@ -267,9 +271,9 @@ impl BinanceFutures {
             urls,
             paths,
             credentials,
-            public: Connection::new(),
-            market: Connection::new(),
-            private: Connection::new(),
+            public: Connection::new(spot),
+            market: Connection::new(false),
+            private: Connection::new(true),
             spot_tickers: Vec::new(),
             books: HashMap::new(),
             snapshot_generation: 0,
@@ -423,6 +427,10 @@ impl BinanceFutures {
         } else {
             safe_cex_engine::SocketChannel::Public
         };
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.connection(channel).supervisor.connecting(cx);
+        }
         let socket = if self.is_spot() && channel != Channel::Private {
             let feed = match channel {
                 Channel::SpotTicker(index) => format!("spot-ticker-{index}"),
@@ -472,39 +480,31 @@ impl BinanceFutures {
         now < self.background_paused_until
     }
 
-    fn watch(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let timer = cx.set_timer(WATCHDOG_INTERVAL_MS);
-        let connection = self.connection(channel);
-        if let Some(previous) = connection.watchdog.replace(timer) {
-            cx.clear_timer(previous);
+    fn on_supervisor_tick(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, tick: Tick) {
+        match tick {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => self.probe(cx, channel),
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.connection(channel).socket {
+                    cx.close(socket);
+                }
+                self.on_socket_closed(cx, channel, 4000);
+            }
+            Tick::Handled | Tick::Unhandled => {}
         }
     }
 
-    /// A socket silent too long is closed and reconnected; the private socket
-    /// is pinged first because it can be quiet for good reason.
-    fn on_watchdog(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let now = cx.now;
-        let connection = self.connection(channel);
-        connection.watchdog = None;
-        let (Some(socket), true) = (connection.socket, connection.open) else {
+    /// Spot market sockets and the private socket are probed; the latter can be
+    /// quiet for good reason.
+    fn probe(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        let Some(socket) = self.connection(channel).socket else {
             return;
         };
-        if now - connection.last_received > SILENCE_LIMIT_MS {
-            cx.close(socket);
-            self.on_socket_closed(cx, channel, 4000);
-            return;
+        match channel {
+            Channel::Private if self.is_spot() => self.ping_spot_account(cx),
+            Channel::Private => cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
+            _ => cx.send(socket, "{\"id\":0,\"method\":\"LIST_SUBSCRIPTIONS\"}"),
         }
-        if matches!(channel, Channel::Public | Channel::SpotTicker(_)) && self.is_spot() {
-            cx.send(socket, "{\"id\":0,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-        }
-        if channel == Channel::Private {
-            if self.is_spot() {
-                self.ping_spot_account(cx);
-            } else {
-                cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-            }
-        }
-        self.watch(cx, channel);
     }
 
     fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
@@ -517,20 +517,14 @@ impl BinanceFutures {
             cx.clear_timer(timer);
         }
         connection.next_send_at = 0.0;
-        connection.attempts += 1;
-        if let Some(watchdog) = connection.watchdog.take() {
-            cx.clear_timer(watchdog);
-        }
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
-        let timer = cx.set_timer(delay);
-        self.connection(channel).reconnect = Some(timer);
+        connection.supervisor.retry(cx);
         if channel == Channel::Private {
             self.reset_spot_subscription(cx);
             self.account.resync_orders_on_open = true;
         }
         cx.log(
             LogLevel::Warning,
-            format!("Binance socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Binance socket closed ({code}); reconnecting"),
         );
     }
 
@@ -837,18 +831,18 @@ impl BinanceFutures {
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
         }
-        if self.public.socket.is_none() && self.public.reconnect.is_none() {
+        if self.public.socket.is_none() && !self.public.supervisor.is_waiting() {
             self.connect(cx, Channel::Public);
         }
         if self.is_spot() {
             while self.spot_tickers.len() < cx.store.markets().len().div_ceil(1_024) {
                 let index = self.spot_tickers.len();
-                self.spot_tickers.push(Connection::new());
+                self.spot_tickers.push(Connection::new(true));
                 self.connect(cx, Channel::SpotTicker(index));
             }
         } else if !self.shared_public_socket()
             && self.market.socket.is_none()
-            && self.market.reconnect.is_none()
+            && !self.market.supervisor.is_waiting()
         {
             self.connect(cx, Channel::Market);
         }
@@ -1333,12 +1327,9 @@ impl Venue for BinanceFutures {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        let now = cx.now;
         let connection = self.connection(channel);
         connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = now;
-        self.watch(cx, channel);
+        connection.supervisor.opened(cx);
         match channel {
             Channel::Public => {
                 let mut topics = if self.options.public_data_only {
@@ -1385,7 +1376,7 @@ impl Venue for BinanceFutures {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        self.connection(channel).last_received = cx.now;
+        self.connection(channel).supervisor.received(cx.now);
         if self.is_spot() && channel != Channel::Private {
             if event_type(text) == Some("serverShutdown") {
                 cx.close(socket);
@@ -1595,13 +1586,8 @@ impl Venue for BinanceFutures {
             .chain((0..self.spot_tickers.len()).map(Channel::SpotTicker))
             .collect::<Vec<_>>();
         for channel in channels {
-            if self.connection(channel).reconnect == Some(timer) {
-                self.connection(channel).reconnect = None;
-                self.connect(cx, channel);
-            }
-            if self.connection(channel).watchdog == Some(timer) {
-                self.on_watchdog(cx, channel);
-            }
+            let tick = self.connection(channel).supervisor.on_timer(cx, timer);
+            self.on_supervisor_tick(cx, channel, tick);
             if self.connection(channel).send_timer == Some(timer) {
                 self.connection(channel).send_timer = None;
                 self.pump_subscriptions(cx, channel);

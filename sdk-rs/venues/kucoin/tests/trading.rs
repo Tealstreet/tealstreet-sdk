@@ -7,8 +7,21 @@ use safe_cex_venue_kucoin::{Kucoin, Options};
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,
+    failures: Vec<safe_cex_engine::VenueError>,
     now: f64,
 }
+/// Records a failure and renders it as the plain text the host shows.
+fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Action {
+    match action {
+        Action::Notice(Notice::CommandFailed { command, error }) => {
+            let result = Err(error.legacy_text());
+            failures.push(error);
+            Action::Notice(Notice::CommandDone { command, result })
+        }
+        action => action,
+    }
+}
+
 impl Harness {
     fn new() -> Self {
         let mut engine = Engine::new(Kucoin::new(Options {
@@ -51,6 +64,7 @@ impl Harness {
         Self {
             engine,
             actions: vec![],
+            failures: vec![],
             now: 1_700_000_000_000.0,
         }
     }
@@ -85,6 +99,7 @@ impl Harness {
                     "actual KuCoin clientOid must be receipted before dispatch"
                 );
             }
+            let action = plain(action, &mut self.failures);
             self.actions.push(action);
         }
     }
@@ -1040,5 +1055,155 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
             |action| matches!(action, Action::Http(request) if request.method != Method::Get)
         ));
         assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+    }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified, text) in [
+        (503, "<html>", unknown, "Invalid KuCoin response (HTTP 503)"),
+        (
+            503,
+            r#"{"code":"500000","msg":"busy"}"#,
+            unknown,
+            "KuCoin API Error 500000: busy (HTTP 503)",
+        ),
+        (
+            429,
+            r#"{"code":"429000","msg":"too many"}"#,
+            rejected(ErrorKind::RateLimited),
+            "KuCoin API Error 429000: too many (HTTP 429)",
+        ),
+        (
+            200,
+            r#"{"code":"300003","msg":"Balance insufficient"}"#,
+            rejected(ErrorKind::Rejected),
+            "KuCoin API Error 300003: Balance insufficient (HTTP 200)",
+        ),
+        (
+            200,
+            r#"{"code":"400007","msg":"Access denied"}"#,
+            rejected(ErrorKind::AuthPermission),
+            "KuCoin API Error 400007: Access denied (HTTP 200)",
+        ),
+        (
+            200,
+            r#"{"code":"999999","msg":"new"}"#,
+            (None, None),
+            "KuCoin API Error 999999: new (HTTP 200)",
+        ),
+        (
+            200,
+            r#"{"code":"200000","data":{}}"#,
+            unknown,
+            "Missing KuCoin order id",
+        ),
+    ] {
+        let mut h = Harness::new();
+        place(&mut h, vec![order()]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        h.response(&request, status, body);
+        h.pace();
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text().as_str()),
+            (classified, text),
+            "{status} {body}"
+        );
+        if status == 200 && body.contains("300003") {
+            assert_eq!(error.venue_code.as_deref(), Some("300003"));
+        }
+    }
+    // Transport loss on a write is Unknown.
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "reset",
+    });
+    h.pace();
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    // Preflight refusals were never sent.
+    let mut h = Harness::new();
+    let mut invalid = order();
+    invalid.client_order_id = Some("bad id!".into());
+    place(&mut h, vec![invalid]);
+    assert_eq!(h.failures[0].outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn a_refusal_after_an_accepted_placement_is_never_rejected() {
+    let mut h = Harness::new();
+    let mut second = order();
+    second.client_order_id = Some("caller_second".into());
+    place(&mut h, vec![order(), second]);
+    h.metadata(false, "CROSS");
+    let first = h.take("/api/v1/orders");
+    h.response(&first, 200, r#"{"code":"200000","data":{"orderId":"one"}}"#);
+    h.pace();
+    let second = h.take("/api/v1/orders");
+    h.response(
+        &second,
+        200,
+        r#"{"code":"300003","msg":"Balance insufficient"}"#,
+    );
+    h.pace();
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(h.failures[0].outcome, None);
+}
+
+#[test]
+fn cancel_legs_combine_outcomes_without_overclaiming() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (first, second, outcome) in [
+        // A refused first leg then an undocumented answer: the outcome is not proven.
+        (
+            (400, r#"{"code":"100001","msg":"Unknown order"}"#),
+            (200, r#"{"code":"999999","msg":"new"}"#),
+            (Some(ErrorKind::Rejected), None),
+        ),
+        // A refused leg then a lost answer: Unknown, with the lost leg's kind.
+        (
+            (400, r#"{"code":"100001","msg":"Unknown order"}"#),
+            (0, ""),
+            (Some(ErrorKind::Network), Some(Outcome::Unknown)),
+        ),
+    ] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into(), "b".into()],
+        });
+        let a = h.take("/api/v1/orders/a");
+        h.response(&a, first.0, first.1);
+        h.pace();
+        let b = h.take("/api/v1/orders/b");
+        if second.0 == 0 {
+            h.event(Event::HttpFailed {
+                request: b.id,
+                error: "reset",
+            });
+        } else {
+            h.response(&b, second.0, second.1);
+        }
+        h.pace();
+        assert_eq!(
+            h.done(1).as_ref().unwrap_err(),
+            "KuCoin API Error 100001: Unknown order (HTTP 400)"
+        );
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!((error.kind, error.outcome), outcome);
+        if outcome.1.is_some() {
+            assert_eq!(error.venue_code, None);
+        }
     }
 }

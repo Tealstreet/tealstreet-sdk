@@ -1,183 +1,175 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { baselineBeforeSetup, memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
+import { idleLoadedBaseline, measureBeforeCapture, memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
-test('retained frame backing buffers are included', () => {
+const metricsFor = (before, after, wasmBytes = 0, wasmBeforeBytes = 0) => ({
+  baselineKind: 'idle-loaded', measuredMode: 'performance',
+  cpuMs: 5, processCpuMs: 7, steadyCpuMs: 2, wallMs: 20,
+  idleLoadCpuMs: 1, idleLoadProcessCpuMs: 2, idleLoadWallMs: 5,
+  runtimeCpuMs: 4, runtimeProcessCpuMs: 5, runtimeWallMs: 15,
+  heapBeforeBytes: before.heapUsed, heapUsedBytes: after.heapUsed,
+  buffersBefore: before.arrayBuffers, buffersAfter: after.arrayBuffers,
+  heapRetainedBytes: after.heapUsed - before.heapUsed,
+  bufferRetainedBytes: after.arrayBuffers - before.arrayBuffers,
+  wasmBeforeBytes, wasmBytes, wasmRetainedBytes: wasmBytes - wasmBeforeBytes,
+  retainedBytes: retainedMemory(before, after, wasmBytes, wasmBeforeBytes),
+});
+
+test('retained frame backing buffers remain included when GC releases heap', () => {
   const frameBytes = 16 * 1024 * 1024;
-  // GC may free heap while a transferred frame remains retained.
   const before = { heapUsed: 100_000, arrayBuffers: 400_000 };
   const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frameBytes };
   assert.equal(retainedMemory(before, after), frameBytes - 10_000);
+  assert.deepEqual(memoryMetricErrors(metricsFor(before, after)), []);
 });
-test('linear wasm memory is counted exactly once', () => {
-  const before = process.memoryUsage();
+
+test('static WASM reservation is excluded and runtime linear-memory growth counted exactly once', () => {
+  const before = { heapUsed: 1000, arrayBuffers: 100 };
+  const after = { heapUsed: 1200, arrayBuffers: 200 };
+  const page = 65_536;
   const memory = new WebAssembly.Memory({ initial: 16 });
-  const bytes = memory.buffer.byteLength;
-  const after = process.memoryUsage();
-  // Allocation may collect unrelated buffers, including Node's loaded source.
-  assert(after.arrayBuffers <= before.arrayBuffers, 'WASM must not produce observed JS backing-buffer growth');
-  assert.equal(
-    retainedMemory(before, after, bytes),
-    after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + bytes,
-  );
-  assert.equal(retainedMemory(before, after, bytes) - retainedMemory(before, after, 0), bytes);
+  const wasmBeforeBytes = memory.buffer.byteLength;
+  memory.grow(2);
+  const wasmBytes = memory.buffer.byteLength;
+  assert.equal(retainedMemory(before, after, wasmBytes, wasmBeforeBytes), 300 + 2 * page);
+  const metrics = metricsFor(before, after, wasmBytes, wasmBeforeBytes);
+  assert.equal(metrics.wasmRetainedBytes, 2 * page);
+  assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
-const metricsFor = (before, after, wasmBytes = 0) => ({
-  heapBeforeBytes: before.heapUsed,
-  heapUsedBytes: after.heapUsed,
-  buffersBefore: before.arrayBuffers,
-  buffersAfter: after.arrayBuffers,
-  heapRetainedBytes: after.heapUsed - before.heapUsed,
-  bufferRetainedBytes: after.arrayBuffers - before.arrayBuffers,
-  wasmBytes,
-  retainedBytes: retainedMemory(before, after, wasmBytes),
-});
-
-test('both replay implementations include setup allocations and their later release after the baseline', async () => {
+test('both implementations establish their idle baseline after setup, imports and tape loading', async () => {
   for (const impl of ['ts', 'rust']) {
-    const initial = { heapUsed: 1000, arrayBuffers: 200 };
-    const temporary = { heapUsed: 9000, arrayBuffers: 2200 };
-    let memory = initial;
+    let memory = { heapUsed: 1000, arrayBuffers: 200 };
     const calls = [];
-    const options = { applicationId: '42' };
-    const venue = {
-      async initializeReplay(selected, supplied) {
-        assert.equal(this, venue);
-        assert.equal(selected, impl);
-        assert.equal(supplied, options);
-        calls.push('initialize');
-        memory = temporary;
+    const loaded = { impl, module: {} };
+    const { memory: before, loaded: result } = await idleLoadedBaseline({
+      async load() {
+        calls.push('initialize', 'import', 'tape');
+        memory = { heapUsed: 9000, arrayBuffers: 2200 };
         await Promise.resolve();
-        calls.push('initialized');
+        return loaded;
       },
-    };
-    const before = await baselineBeforeSetup({
-      baseline: async () => {
-        calls.push('baseline');
-        return { ...memory };
-      },
-      initialize: () => venue.initializeReplay(impl, options),
+      async baseline() { calls.push('baseline'); return { ...memory }; },
     });
-    calls.push('load');
-    assert.deepEqual(calls, ['baseline', 'initialize', 'initialized', 'load']);
-    assert.deepEqual(before, initial);
-    memory = { heapUsed: 2000, arrayBuffers: 400 };
-    const retained = metricsFor(before, memory);
-    assert.equal(retained.retainedBytes, 1200);
-    assert.deepEqual(memoryMetricErrors(retained), []);
-    assert(memoryMetricErrors(metricsFor(temporary, memory)).some((error) => error.startsWith('invalid heapRetainedBytes')));
+    calls.push('runtime');
+    assert.deepEqual(calls, ['initialize', 'import', 'tape', 'baseline', 'runtime']);
+    assert.equal(result, loaded);
+    memory = { heapUsed: 9300, arrayBuffers: 2300 };
+    assert.equal(metricsFor(before, memory).retainedBytes, 400);
   }
 });
 
-test('setup waits for the baseline and completes before implementation loading', async () => {
-  let finishBaseline;
-  let finishSetup;
-  let initialized = false;
-  let loaded = false;
-  const baselineSample = { heapUsed: 1000, arrayBuffers: 200 };
-  const pending = baselineBeforeSetup({
-    baseline: () => new Promise((resolve) => { finishBaseline = resolve; }),
-    initialize: () => {
-      initialized = true;
-      return new Promise((resolve) => { finishSetup = resolve; });
+test('idle loading and baseline failures propagate before runtime allocation', async () => {
+  for (const failed of ['load', 'baseline']) {
+    const calls = [];
+    await assert.rejects(idleLoadedBaseline({
+      async load() { calls.push('load'); if (failed === 'load') throw new Error(failed); return {}; },
+      async baseline() { calls.push('baseline'); throw new Error(failed); },
+    }), new RegExp(failed));
+    assert.deepEqual(calls, failed === 'load' ? ['load'] : ['load', 'baseline']);
+  }
+});
+
+test('memory sampling waits for implementation loading to finish', async () => {
+  let finishLoad;
+  let sampled = false;
+  const pending = idleLoadedBaseline({
+    load: () => new Promise((resolve) => { finishLoad = resolve; }),
+    baseline: async () => { sampled = true; return { heapUsed: 1000, arrayBuffers: 100 }; },
+  });
+  assert.equal(sampled, false);
+  const loaded = {};
+  finishLoad(loaded);
+  assert.equal((await pending).loaded, loaded);
+  assert.equal(sampled, true);
+});
+
+test('cold loading CPU is measured separately from baseline collection without estimates', async () => {
+  let thread = 1000;
+  let processCpu = 2000;
+  let wall = 10;
+  const { loadMetrics } = await idleLoadedBaseline({
+    sample: () => ({ thread: { user: thread, system: 0 }, process: { user: processCpu, system: 0 }, wall }),
+    async load() { thread += 5000; processCpu += 9000; wall += 20; return {}; },
+    async baseline() {
+      // GC and idle wait after load must not enter the captured CPU interval.
+      thread += 1000000; processCpu += 2000000; wall += 1000;
+      return { heapUsed: 1000, arrayBuffers: 100 };
     },
-  }).then((before) => { loaded = true; return before; });
-  assert.equal(initialized, false);
-  finishBaseline(baselineSample);
-  await Promise.resolve();
-  assert.equal(initialized, true);
-  assert.equal(loaded, false);
-  finishSetup();
-  assert.equal(await pending, baselineSample);
-  assert.equal(loaded, true);
+  });
+  assert.deepEqual(loadMetrics, { idleLoadCpuMs: 5, idleLoadProcessCpuMs: 9, idleLoadWallMs: 20 });
 });
 
-test('baseline and setup failures propagate before implementation loading', async () => {
-  for (const failure of ['baseline', 'initialize']) {
-    const error = new Error(failure);
-    let initialized = 0;
-    let loaded = false;
-    await assert.rejects(async () => {
-      await baselineBeforeSetup({
-        baseline: async () => {
-          if (failure === 'baseline') throw error;
-          return { heapUsed: 1000, arrayBuffers: 200 };
-        },
-        initialize: async () => { initialized++; throw error; },
-      });
-      loaded = true;
-    }, (received) => received === error);
-    assert.equal(initialized, failure === 'baseline' ? 0 : 1);
-    assert.equal(loaded, false);
-  }
+test('negative heap, buffer and aggregate deltas remain signed and valid', () => {
+  const variants = [
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 500 }, 100),
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 100 }),
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 100 }),
+  ];
+  assert.equal(variants[0].heapRetainedBytes, -100);
+  assert.equal(variants[1].bufferRetainedBytes, -100);
+  assert.equal(variants[2].retainedBytes, -200);
+  for (const metrics of variants) assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
-test('negative buffer retention invalidates the before-import baseline', () => {
-  const metrics = metricsFor(
-    { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
-    { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
-  );
-  assert.equal(metrics.bufferRetainedBytes, -88);
-  assert.equal(metrics.retainedBytes, 2_923_592);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid bufferRetainedBytes (-88)')));
-});
-
-test('negative heap retention invalidates the before-import baseline', () => {
-  const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 500 }, 100);
-  assert.equal(metrics.heapRetainedBytes, -100);
-  assert.equal(metrics.retainedBytes, 300);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid heapRetainedBytes (-100)')));
-});
-
-test('invalid absolute counters and retained components fail validation', () => {
+test('invalid absolute counters and nonfinite deltas fail validation', () => {
   const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
-  for (const field of [
-    'heapBeforeBytes',
-    'heapUsedBytes',
-    'buffersBefore',
-    'buffersAfter',
-    'wasmBytes',
-    'retainedBytes',
-  ]) {
-    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
-      assert(
-        memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)),
-        `${field}=${value}`,
-      );
-    }
+  for (const field of ['cpuMs', 'processCpuMs', 'steadyCpuMs', 'wallMs',
+    'idleLoadCpuMs', 'idleLoadProcessCpuMs', 'idleLoadWallMs', 'runtimeCpuMs', 'runtimeProcessCpuMs', 'runtimeWallMs', 'heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBeforeBytes', 'wasmBytes', 'wasmRetainedBytes']) {
+    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined])
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
   }
-  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
-    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
-      assert(
-        memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)),
-        `${field}=${value}`,
-      );
-    }
+  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
+    for (const value of [NaN, Infinity, -Infinity, null, undefined])
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
   }
   assert(memoryMetricErrors(undefined).length > 0);
 });
 
-test('negative aggregate retention still invalidates the baseline', () => {
-  const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 250 });
-  assert.equal(metrics.retainedBytes, -50);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid retainedBytes (')));
+test('the required metric schema rejects old before-import baselines and unknown modes', () => {
+  const valid = metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 });
+  assert.deepEqual(memoryMetricErrors(valid), []);
+  for (const baselineKind of [undefined, 'before-import', null])
+    assert(memoryMetricErrors({ ...valid, baselineKind }).some((error) => error.includes('baselineKind')));
+  for (const measuredMode of [undefined, 'audit-free', null])
+    assert(memoryMetricErrors({ ...valid, measuredMode }).some((error) => error.includes('measuredMode')));
+  assert.deepEqual(memoryMetricErrors({ ...valid, measuredMode: 'correctness' }), []);
 });
 
-test('reported deltas and aggregate must exactly match the absolute samples', () => {
-  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
-  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
-    assert(
-      memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) =>
-        error.startsWith(`inconsistent ${field} (`),
-      ),
-      field,
-    );
-  }
-  assert.deepEqual(
-    memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })),
-    [],
-  );
+test('every reported delta and aggregate must exactly match the absolute samples', () => {
+  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 300, 200);
+  for (const field of ['cpuMs', 'processCpuMs', 'wallMs', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmRetainedBytes', 'retainedBytes'])
+    assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
+  assert(memoryMetricErrors({ ...valid, wasmBeforeBytes: 400 }).some((error) => error.startsWith('inconsistent wasmRetainedBytes')));
+});
+
+test('performance measures CPU and retained memory before diagnostic reconstruction allocates', async () => {
+  const events = [];
+  let allocated = 100;
+  let cpu = 5;
+  const result = await measureBeforeCapture(() => {
+    events.push('capture');
+    allocated += 10000;
+    cpu += 100;
+    return { rows: [{ value: 'diagnostic' }] };
+  }, async () => {
+    events.push('stop-cpu');
+    const measuredCpu = cpu;
+    await Promise.resolve();
+    events.push('sample-memory');
+    return { cpuMs: measuredCpu, retainedBytes: allocated };
+  });
+  assert.deepEqual(events, ['stop-cpu', 'sample-memory', 'capture']);
+  assert.deepEqual(result.metrics, { cpuMs: 5, retainedBytes: 100 });
+  assert.equal(cpu, 105);
+  assert.equal(allocated, 10100);
+});
+
+test('performance measurement and reconstruction failures remain fatal', async () => {
+  let captured = false;
+  await assert.rejects(measureBeforeCapture(() => { captured = true; return {}; }, async () => { throw new Error('measure failed'); }), /measure failed/);
+  assert.equal(captured, false);
+  await assert.rejects(measureBeforeCapture(() => { throw new Error('capture failed'); }, async () => ({})), /capture failed/);
 });
 
 test('three equal samples do not hide a delayed loader-buffer release', async () => {

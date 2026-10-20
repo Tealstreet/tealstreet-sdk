@@ -87,7 +87,7 @@ impl Coinbase {
             read_supplied: read_credentials.is_some(),
             read_credentials,
             rest: rest::Rest::default(),
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
         })

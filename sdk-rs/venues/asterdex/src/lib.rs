@@ -11,7 +11,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
+    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue, json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -299,7 +300,10 @@ impl AsterDex {
         if self.public.socket.is_some() {
             return;
         }
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
         self.public.open = false;
     }

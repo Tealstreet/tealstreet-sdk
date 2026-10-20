@@ -11,7 +11,8 @@ use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use std::collections::{BTreeMap, HashMap};
 use wire::*;
@@ -213,7 +214,10 @@ impl Cryptocom {
         if self.sockets[channel].socket.is_some() {
             return;
         }
-        self.sockets[channel].supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if channel != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.sockets[channel].supervisor.connecting(cx);
+        }
         let root = if self.options.testnet {
             "wss://uat-stream.3ona.co"
         } else {
