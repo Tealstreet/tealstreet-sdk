@@ -192,3 +192,13 @@ preserved. No gate or budget was relaxed.
 Independent review of the concrete feature separation passes with no findings.
 Isolated default engine tests: 66 passed; enabled profile: 69 passed; both
 all-target clippy profiles pass. Final size and updated acceptance runs follow.
+
+The feature split reduced Paradex to 1,262,571 bytes, still 4,280 over budget.
+Independent analysis then traced the remaining growth to the shared decoder's
+large Command conversion across a crate boundary. Forcing inlining on decoding
+and conversion preserves the original adjacent parse/dispatch optimization,
+without changing accepted JSON or command semantics. Actual isolated release
+build: **1,244,417 bytes** for both web and Node, under **1,258,291** and only
+79 bytes above the landing's 1,244,338-byte CI artifact. The build budget and
+compiler profiles remain unchanged. Default twenty-two-venue WASM clippy and
+all 53 native host tests also pass on the merged tree.

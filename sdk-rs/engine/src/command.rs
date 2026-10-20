@@ -160,6 +160,7 @@ enum CommandIn {
 }
 
 impl From<CommandIn> for Command {
+    #[inline(always)]
     fn from(command: CommandIn) -> Self {
         match command {
             #[cfg(feature = "command-apexomni")]
@@ -320,6 +321,8 @@ impl From<CommandIn> for Command {
 
 /// Decode the same typed command protocol on every host. Native hosts enable
 /// both command features; WASM retains the venue-specific parser size gates.
+// Inline both boundaries to avoid copying a large command enum across crates.
+#[inline(always)]
 pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
     serde_json::from_str::<CommandIn>(json).map(Command::from)
 }
