@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const wasm = vi.hoisted(() => ({ initialize: vi.fn(), generation: 0, engines: [] as WasmEngineLike[] }));
 
@@ -18,6 +19,7 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
         wasm.engines.push(this);
       }
 
+      capabilities = () => engineCapabilities('binance');
       start = () => '';
       command = () => '';
       takeFrame = () => new Uint8Array(consumerFrame({

@@ -7,11 +7,13 @@ import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/ru
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
+import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 it.each([true, false])('GRVT SDK uses the transport-selected authentication protocol when proxied=%s', async (proxied) => {
   const noop = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('grvt'),
     start: noop,
     command: (json) => {
       const command = JSON.parse(json);
@@ -53,6 +55,7 @@ it.each(['grvt', 'woo'] as const)('%s cancel-all reaches the engine even with an
   const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
   const command = vi.fn().mockResolvedValue([]);
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  adoptEngineCapabilities(exchange);
   try {
     await exchange.cancelAllOrders();
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });

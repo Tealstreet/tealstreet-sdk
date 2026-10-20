@@ -177,7 +177,7 @@ export const markBaseCapabilityFallback = <T extends object>(method: BaseCapabil
   return fn;
 };
 
-export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
+const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
   typeof value === 'function' && (value as BrandedCapabilityFallback)[baseCapabilityFallback] === method;
 
 /**
@@ -194,7 +194,7 @@ export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityM
  * is that the body, once comments are stripped, is exactly that one statement and nothing
  * else.
  */
-export const isEmptyStubCapability = (value: unknown): boolean => {
+const isEmptyStubCapability = (value: unknown): boolean => {
   if (typeof value !== 'function') return false;
 
   const source = Function.prototype.toString
@@ -222,8 +222,25 @@ export const isEmptyStubCapability = (value: unknown): boolean => {
  * implementation is an empty stub? This is the question a capability flag should be checked
  * against; `isBaseCapabilityFallback` alone answers only half of it.
  */
-export const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
+const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
   isBaseCapabilityFallback(value, method) || isEmptyStubCapability(value);
+
+/** The method behind each capability; a capability is present when its method does something. */
+export const CAPABILITY_METHODS = {
+  startup: 'start',
+  trading: 'placeOrder',
+  fillHistory: 'fetchHistoricalFills',
+  orderHistory: 'fetchHistoricalOrders',
+  incomeHistory: 'fetchIncomeHistory',
+  incomeRange: 'fetchIncomeHistoryRange',
+  closedPnl: 'fetchClosedPnl',
+  optionChain: 'fetchOptionChain',
+  optionExpiries: 'fetchOptionExpiries',
+  accountGreeks: 'fetchAccountGreeks',
+} as const satisfies Record<string, BaseCapabilityMethod>;
+
+/** What this venue can answer. The only supported way to ask; never inspect the methods. */
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
@@ -272,6 +289,8 @@ export interface Exchange {
 
   get name(): ExchangeName;
   get isOnline(): boolean;
+  /** What this venue can answer. Rust venues know theirs once the engine exists. */
+  get capabilities(): ExchangeCapabilities;
   /**
    * Returns true if this exchange is running in public-data-only mode.
    */
@@ -588,6 +607,15 @@ export class BaseExchange implements Exchange {
    */
   get isPublicDataOnly(): boolean {
     return this.options.publicDataOnly === true || !this.canSign;
+  }
+
+  get capabilities(): ExchangeCapabilities {
+    const answers = {} as ExchangeCapabilities;
+    for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
+      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+    >)
+      answers[capability] = !isInertCapability(this[method], method);
+    return answers;
   }
 
   /**
@@ -916,7 +944,11 @@ export class BaseExchange implements Exchange {
    * venues' fetchOrders return the store on failure. Venues with a single-order
    * endpoint override it. Never writes the store.
    */
-  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+  findOrderByClientOrderId = (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
+    this.findOrderFromOpenOrders(symbol, clientOrderId);
+
+  /** The lookup from open orders alone: a miss is never definitive. */
+  protected findOrderFromOpenOrders = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
     const notFound: ClientOrderLookup = { found: false, definitive: false };
     // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
     if (!this.clientOrderIdRule) return notFound;
@@ -1004,7 +1036,9 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  cancelAllOrders = async () => {
+  cancelAllOrders = () => this.cancelEachOrderSymbol();
+
+  protected cancelEachOrderSymbol = async () => {
     const symbols = uniq(this.store.orders.map((order) => order.symbol));
 
     await forEachSeries(symbols, async (symbol) => {
@@ -1082,7 +1116,7 @@ export class BaseExchange implements Exchange {
     opts: { account: string; from?: number; to?: number },
     config: { symbolScoped?: boolean } = {},
   ): Promise<PositionRecord[]> => {
-    if (isInertCapability(this.fetchHistoricalFills, 'fetchHistoricalFills')) {
+    if (!this.capabilities.fillHistory) {
       throw new Error(`${this.constructor.name}: no fills axis, cannot fold journal records`);
     }
 
@@ -1103,7 +1137,7 @@ export class BaseExchange implements Exchange {
   // Branded so support can be detected. `typeof exchange.fetchIncomeHistory` is TRUE
   // on every venue because this field always exists — any consumer duck-typing on that
   // silently treats all 11 exchanges as supported and then renders an empty ledger.
-  // Use `isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')`.
+  // Read `exchange.capabilities.incomeHistory`.
   fetchIncomeHistory = markBaseCapabilityFallback(
     'fetchIncomeHistory',
     async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {

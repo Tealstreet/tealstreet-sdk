@@ -4,6 +4,7 @@ import type { ExchangeOptions, Market, StoreData } from '../types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
+import { engineCapabilities } from '../__tests__/fixtures/engineCapabilities';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { OrderSide, OrderType } from '../types';
 import { virtualClock } from '../utils/virtualClock';
@@ -48,9 +49,10 @@ class ControlledEngine implements WasmEngineLike {
     balance: { total: 10, free: 10, used: 0, upnl: 0 },
     loaded: { markets: true, tickers: true, orders: true, positions: true, balance: true },
   };
-  constructor() {
+  constructor(readonly venue = 'binance') {
     sources.push(this);
   }
+  capabilities = () => engineCapabilities(this.venue);
   start = () => {
     if (trapStartup) throw new WebAssembly.RuntimeError('startup panic');
     this.started = true;

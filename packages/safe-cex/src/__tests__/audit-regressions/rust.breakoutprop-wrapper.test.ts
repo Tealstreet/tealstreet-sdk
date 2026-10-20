@@ -4,9 +4,9 @@ import type { ExchangeOptions } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { isInertCapability } from '../../exchanges/base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const running: RustEngineExchange[] = [];
@@ -14,6 +14,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, startupActions: unknown
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('breakoutprop'),
     start: () => JSON.stringify(startupActions),
     command(json) { commands.push(JSON.parse(json)); return '[]'; },
     takeFrame: () => new Uint8Array(consumerFrame({
@@ -85,20 +86,25 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
   });
   it('does not advertise the market maximum as a writable account leverage', async () => {
     const { exchange } = fixture();
+    await exchange.start();
     await expect(exchange.fetchLeverageForSymbol('ETHUSD')).resolves.toBeNull();
     await expect(exchange.fetchSymbolMaxLeverage('ETHUSD')).rejects.toThrow('Not implemented');
   });
-  it('retains branded empty history capabilities before startup without I/O', async () => {
-    const { exchange, construct } = fixture();
-    expect(isInertCapability(exchange.fetchHistoricalFills, 'fetchHistoricalFills')).toBe(true);
-    expect(isInertCapability(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
-    expect(isInertCapability(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
-    expect(isInertCapability(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+  it('brands empty history capabilities once the engine reports them, without I/O', async () => {
+    const { exchange, commands } = fixture();
+    await (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
+    const issued = commands.length;
+    expect(exchange.capabilities).toMatchObject({
+      fillHistory: false,
+      orderHistory: false,
+      incomeHistory: false,
+      incomeRange: false,
+    });
     await expect(exchange.fetchHistoricalFills({})).resolves.toEqual([]);
     await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistoryRange(0, 1000)).resolves.toEqual([]);
-    expect(construct).not.toHaveBeenCalled();
+    expect(commands).toHaveLength(issued);
   });
   it('validates a loaded public-only legacy session without private portfolio data', async () => {
     const { exchange } = fixture({ publicDataOnly: true });

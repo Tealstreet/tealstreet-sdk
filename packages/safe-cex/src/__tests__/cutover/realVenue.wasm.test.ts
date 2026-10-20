@@ -1,5 +1,4 @@
 // @vitest-environment node
-import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
@@ -41,7 +40,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
     vi.restoreAllMocks();
   });
 
-  it.each(Object.keys(RUST_VENUES) as ExchangeName[])(
+  it.each([...RUST_VENUES])(
     '%s starts natively and sends a complete late-consumer snapshot',
     async (name) => {
       const nativeTimeout = globalThis.setTimeout;

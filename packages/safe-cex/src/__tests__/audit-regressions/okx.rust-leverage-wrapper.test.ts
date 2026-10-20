@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const running: RustEngineExchange[] = [];
@@ -14,6 +15,7 @@ const fixture = (name: ExchangeName) => {
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: noActions,
     command(json) {
       const command = JSON.parse(json);

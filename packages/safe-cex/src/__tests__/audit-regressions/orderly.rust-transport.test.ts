@@ -14,6 +14,7 @@ import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const origin = 'https://api-evm.orderly.org';
@@ -140,10 +141,17 @@ describe('Orderly Rust transport boundary', () => {
     setRustEngineTransport(() => base);
     const noActions = () => '';
     const engine: WasmEngineLike = {
+      capabilities: () => engineCapabilities('mode'),
       start: vi.fn(() =>
         JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://ws-evm.orderly.org/ws/stream/account-id' }]),
       ),
-      command: noActions,
+      // The engine answers identity from its loaded private account.
+      command: vi.fn((json: string) => {
+        const command = JSON.parse(json);
+        if (command.op !== 'fetchAccount') return noActions();
+        const result = JSON.stringify({ userId: 'account-id', affiliateId: 'account-id' });
+        return JSON.stringify([{ op: 'done', command: command.command, result }]);
+      }),
       takeFrame: () => new Uint8Array(consumerFrame({
         loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
       })),

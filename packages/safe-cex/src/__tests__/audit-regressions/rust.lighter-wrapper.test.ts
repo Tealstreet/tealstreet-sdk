@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
@@ -14,6 +15,7 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
   const commands: Array<Record<string, unknown>> = [];
   const noop = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: noop,
     command: (json) => {
       const command = JSON.parse(json);

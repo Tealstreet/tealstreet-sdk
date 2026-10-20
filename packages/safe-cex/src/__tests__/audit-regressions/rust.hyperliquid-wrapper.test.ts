@@ -8,6 +8,7 @@ import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const CLOID = '0x0123456789abcdef0123456789abcdef';
@@ -50,6 +51,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('hyperliquid'),
     start: noActions,
     command: (json) => {
       const command = JSON.parse(json);

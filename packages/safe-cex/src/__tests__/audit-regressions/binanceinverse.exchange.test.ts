@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { BinanceInverseExchange } from '../../exchanges/binance/binanceinverse.exchange';
 import { BinanceInversePrivateWebsocket } from '../../exchanges/binance/binanceinverse.ws-private';
 import { DefaultStore } from '../../store/store.base';
@@ -237,9 +236,7 @@ describe('BinanceInverseExchange', () => {
   it('leaves ungraded history axes on base capability fallbacks', async () => {
     const { exchange } = makeExchange();
 
-    expect(isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')).toBe(true);
-    expect(isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
+    expect(exchange.capabilities).toMatchObject({ fillHistory: false, orderHistory: false, incomeHistory: false });
     await expect(exchange.fetchHistoricalPositions({ account: 'binanceinverse-test' })).rejects.toThrow(
       'no journal records path declared',
     );

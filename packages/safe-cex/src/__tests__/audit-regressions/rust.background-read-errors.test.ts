@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 // Symbol switches and chaser reconciliation read in the background. Their callers
 // own visibility (a warning, or the chaser's own error), so the command boundary
@@ -16,6 +17,7 @@ const rejecting = (name: ExchangeName) => {
   accounts.push(exchange);
   const command = vi.fn().mockRejectedValue(new Error('leverage unavailable'));
   (exchange as unknown as { host: unknown }).host = { command, flush: vi.fn(), dispose: vi.fn() };
+  adoptEngineCapabilities(exchange);
   const errors = vi.fn();
   exchange.on('error', errors);
   return { exchange, command, errors };

@@ -11,6 +11,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { LogSeverity, OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 type NativeCommand = { op: string; command?: number; [field: string]: unknown };
@@ -45,6 +46,7 @@ async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOp
   const commands: NativeCommand[] = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: () => '[{"op":"wsConnect","socket":7,"url":"wss://fixture.test"}]',
     wsOpen: idle,
     wsClose: idle,

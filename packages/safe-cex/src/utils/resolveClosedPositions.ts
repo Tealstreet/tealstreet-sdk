@@ -60,7 +60,7 @@ export const resolveClosedPositions = async (
   exchange: ClosedPositionSource,
   opts: HistoricalTradeOptions,
   /**
-   * Pass `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')`. Injected
+   * Pass `!exchange.capabilities.closedPnl`. Injected
    * rather than imported so this utility does not depend on `exchanges/base`.
    */
   isVenueReportedUnavailable: boolean,

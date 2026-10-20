@@ -10,6 +10,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
 
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => {
@@ -42,6 +43,9 @@ it.each([
       constructor(venue: string, options: string) {
         constructor(venue, JSON.parse(options));
       }
+      capabilities() {
+        return engineCapabilities('bybit', { options: enableOptionMarkets });
+      }
       free() {}
     }
     setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
@@ -60,6 +64,7 @@ it.each(['binance', 'okx', 'grvt', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hy
     const exchange = setup(name, { enableOptionMarkets: true });
     const command = vi.fn();
     Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+    adoptEngineCapabilities(exchange);
     expect(() => exchange.fetchOptionChain({ underlying: 'BTC' })).toThrow(/Options are not enabled/);
     expect(() => exchange.fetchOptionExpiries('BTC')).toThrow(/Options are not enabled/);
     expect(() => exchange.fetchAccountGreeks()).toThrow(/Options are not enabled/);
@@ -83,6 +88,9 @@ it('rejects legacy TS public providers before native product construction', asyn
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
     }
+    capabilities() {
+      return engineCapabilities('bybit', { options: true });
+    }
     free() {}
   }
   setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
@@ -102,6 +110,9 @@ it('keeps combined native products enabled with an explicit shared-feed policy',
   class Engine {
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
+    }
+    capabilities() {
+      return engineCapabilities('bybit', { options: true });
     }
     free() {}
   }
@@ -132,6 +143,7 @@ it('rejects non-finite IV before JSON could erase it and forwards supported opti
   const exchange = setup('bybit', { enableOptionMarkets: true });
   const command = vi.fn().mockResolvedValue([]);
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  adoptEngineCapabilities(exchange, { options: true });
   for (const impliedVolatility of [NaN, Infinity, 0, -1]) {
     await expect(
       exchange.placeOrder({

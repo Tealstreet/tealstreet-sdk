@@ -207,7 +207,7 @@ runtime if called. The base implementations of `fetchOHLCV`,
 `fetchHistoricalFills`, `fetchIncomeHistory`,
 `fetchIncomeHistoryRange`, `fetchHistoricalOrders` and `fetchClosedPnl` deliberately
 resolve to empty arrays **and are branded**, so a caller can tell that empty apart from a real one — callers must
-check `isBaseCapabilityFallback` and convert, rather than storing the `[]`
+check `exchange.capabilities` and convert, rather than storing the `[]`
 (`requestExecutions` returns `undefined`, `collectAccountAxes` records
 `unsupported`);
 `updateSymbolMetadata` is a no-op; and `listenOHLCV`, `listenOHLCVs`, and

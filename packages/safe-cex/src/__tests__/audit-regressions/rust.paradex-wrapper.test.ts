@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const credentials = { key: `0x${'1'.padStart(64, '0')}`, paradexAddress: '0x123', subkeyAddress: '0x456' };
@@ -25,6 +26,7 @@ describe('Rust Paradex account boundary', () => {
     const commands: Array<Record<string, unknown>> = [];
     const noActions = () => '[]';
     const engine: WasmEngineLike = {
+      capabilities: () => engineCapabilities('paradex'),
       start: noActions,
       command: (json) => {
         const command = JSON.parse(json);

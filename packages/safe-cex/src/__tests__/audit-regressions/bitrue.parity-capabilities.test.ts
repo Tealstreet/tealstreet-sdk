@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
 import { DefaultStore } from '../../store/store.base';
 
@@ -31,13 +30,12 @@ afterEach(() => vi.useRealTimers());
 describe('Bitrue current TS parity contract', () => {
   it('does not declare complete order, PnL or funding histories', () => {
     const { exchange, get } = make();
-    for (const method of [
-      'fetchHistoricalOrders',
-      'fetchClosedPnl',
-      'fetchIncomeHistory',
-      'fetchIncomeHistoryRange',
-    ] as const)
-      expect(isBaseCapabilityFallback(exchange[method], method)).toBe(true);
+    expect(exchange.capabilities).toMatchObject({
+      orderHistory: false,
+      closedPnl: false,
+      incomeHistory: false,
+      incomeRange: false,
+    });
     expect(get).not.toHaveBeenCalled();
   });
   it('does not support hedge or margin-mode changes', async () => {

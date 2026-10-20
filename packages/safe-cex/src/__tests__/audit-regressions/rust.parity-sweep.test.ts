@@ -10,6 +10,7 @@ import { OKXExchange } from '../../exchanges/okx/okx.exchange';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
@@ -18,6 +19,7 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
   const verdict = vi.fn((): unknown => ({ found: false, definitive: true }));
   const empty = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: empty,
     command: (json) => {
       const command = JSON.parse(json);

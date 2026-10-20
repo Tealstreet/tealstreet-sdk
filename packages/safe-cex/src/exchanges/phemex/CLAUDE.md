@@ -103,8 +103,8 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 ## History axes: NONE implemented, but the venue publishes up to three
 
 phemex's history method was an unconditional `return []` — an **unbranded stub**, so
-`isBaseCapabilityFallback` could not see it and it read as a real implementation. Use
-`isInertCapability` when the question is "does this do anything". More importantly, do not
+a brand check could not see it and it read as a real implementation.
+`exchange.capabilities` now treats such a stub as absent. More importantly, do not
 read that stub as a statement about phemex:
 
 | Venue route                               | Axis                          | Notes                                                                    |

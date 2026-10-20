@@ -3,6 +3,7 @@ import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
@@ -11,6 +12,7 @@ const setup = (reject = true) => {
   const empty = () => '[]';
   const start = vi.fn(() => reject ? '[{"op":"deactivate"}]' : '[]');
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('hyperliquidspot'),
     start, command: empty,
     takeFrame: () => new Uint8Array(consumerFrame({
       loaded: { markets: !reject, tickers: !reject, balance: !reject, orders: !reject, positions: !reject },

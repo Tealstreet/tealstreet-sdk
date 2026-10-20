@@ -37,6 +37,7 @@ import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 
 const hyroEnvironment = vi.hoisted(() => {
@@ -49,7 +50,7 @@ afterAll(() => {
   else process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL = hyroEnvironment;
 });
 
-const venues = Object.keys(RUST_VENUES) as ExchangeName[];
+const venues = [...RUST_VENUES];
 const native = ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'];
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -147,6 +148,7 @@ class FrameSource implements WasmEngineLike {
     this.current = state(venue as ExchangeName);
     sources.push(this);
   }
+  capabilities = () => engineCapabilities(this.venue);
   start = () => '[]';
   command = () => '[]';
   wsOpen = this.start;

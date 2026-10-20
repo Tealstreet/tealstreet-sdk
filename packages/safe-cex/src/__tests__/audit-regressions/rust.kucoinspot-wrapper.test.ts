@@ -1,13 +1,13 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, Market, PlaceOrderOpts } from '../../types';
+import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const market: Market = {
@@ -23,19 +23,25 @@ describe('KuCoin spot Rust SDK boundary', () => {
   const setup = (options: Partial<ExchangeOptions> = {}) => {
     const commands: Array<Record<string, unknown>> = [];
     const noActions = () => '[]';
+    let rails: StoreData['fetchedLeverage'] | undefined;
     const engine: WasmEngineLike = {
+      capabilities: () => engineCapabilities('kucoinspot'),
       start: noActions,
       command: (json) => {
         const command = JSON.parse(json);
         if (command.op === 'setTickerSymbols') return '[]';
         commands.push(command);
-        const result = command.op === 'getAccount' ? { userId: 'user', subId: null, affiliateId: null }
+        // KuCoin spot leverage is fixed: the engine confirms 1x rails for the symbol.
+        if (command.op === 'setLeverage') rails = { [command.symbol]: { buyLeverage: 1, sellLeverage: 1 } };
+        const result = command.op === 'fetchAccount' ? { userId: 'user', subId: null, affiliateId: null }
           : command.op === 'findOrderByClientOrderId' ? { found: false, definitive: false }
           : command.op === 'placeOrders' || command.op === 'amendOrderWithSymbol' ? ['native-id'] : null;
         return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
       },
       takeFrame: () => new Uint8Array(consumerFrame({
+        markets: [market],
         loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        ...(rails ? { fetchedLeverage: rails } : {}),
       })), snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
@@ -81,7 +87,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
       { op: 'cancelSymbolOrders', symbol: '' }, { op: 'setLeverage', symbol: 'BTC-USDT', leverage: 20 },
       { op: 'setMarginType', symbol: '', isolated: true }, { op: 'setPositionMode', hedged: true },
     ]);
-    expect(store.fetchedLeverage['BTC-USDT']).toEqual({ buyLeverage: 1, sellLeverage: 1 });
+    expect(store.fetchedLeverage['BTC-USDT']).toMatchObject({ buyLeverage: 1, sellLeverage: 1 });
   });
 
   it('keeps the supplied symbol when canceling or amending an uncached order', async () => {
@@ -98,11 +104,13 @@ describe('KuCoin spot Rust SDK boundary', () => {
 
   it('retains the TS unsupported-history brands for ingestion', async () => {
     const { exchange, commands } = setup();
-    for (const method of ['fetchHistoricalOrders', 'fetchClosedPnl', 'fetchIncomeHistory', 'fetchIncomeHistoryRange'] as const) {
-      expect(isBaseCapabilityFallback(exchange[method], method)).toBe(true);
-    }
+    await exchange.start();
+    const issued = commands.length;
+    expect(exchange.capabilities).toMatchObject({
+      orderHistory: false, closedPnl: false, incomeHistory: false, incomeRange: false,
+    });
     await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
-    expect(commands).toEqual([]);
+    expect(commands).toHaveLength(issued);
   });
 });

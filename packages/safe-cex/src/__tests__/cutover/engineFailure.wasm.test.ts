@@ -12,6 +12,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { virtualClock } from '../../utils/virtualClock';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 import { realVenue } from './realVenue';
 
@@ -35,7 +36,9 @@ it.each(['setTickerSymbols', 'setTickInterval'] as const)(
     vi.spyOn(console, 'trace').mockImplementation(() => {});
     let shouldTrap = false;
     const idle = () => '[]';
+    const venue = operation === 'setTickInterval' ? 'breakoutprop' : 'binance';
     const source: WasmEngineLike = {
+      capabilities: () => engineCapabilities(venue),
       start: idle,
       wsOpen: idle,
       wsMessage: idle,
@@ -76,7 +79,7 @@ it.each(['setTickerSymbols', 'setTickInterval'] as const)(
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     }));
     const exchange = new RustEngineExchange(
-      operation === 'setTickInterval' ? 'breakoutprop' : 'binance',
+      venue,
       { key: 'fixture-user', secret: 'fixture-password', publicDataOnly: true },
       new DefaultStore(),
     );

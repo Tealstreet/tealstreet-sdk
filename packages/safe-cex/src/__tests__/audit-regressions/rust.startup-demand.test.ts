@@ -12,6 +12,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const accounts: RustEngineExchange[] = [];
@@ -66,6 +67,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
   let constructed = 0;
   const idle = () => '';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: idle,
     wsOpen: idle,
     wsMessage: idle,

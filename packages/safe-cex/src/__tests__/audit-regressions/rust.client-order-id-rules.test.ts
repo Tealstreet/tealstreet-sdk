@@ -3,9 +3,9 @@ import type { ExchangeName, Market, PlaceOrderOpts } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { isInertCapability } from '../../exchanges/base';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 const MARKET: Market = {
   id: 'BTCUSDT',
@@ -33,6 +33,7 @@ const setup = (name: ExchangeName) => {
   const command = vi.fn().mockResolvedValue(['native-order']);
   // Record the actual engine-command boundary without starting any transport.
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   exchanges.push(exchange);
   return { exchange, command };
@@ -120,10 +121,12 @@ describe('Rust spot product selection and inherited capabilities', () => {
     const { exchange, command } = setup(name);
     expect(isRustVenue(name)).toBe(true);
     expect(exchange.isSpot).toBe(true);
-    expect(isInertCapability(exchange.fetchHistoricalFills, 'fetchHistoricalFills')).toBe(true);
-    expect(isInertCapability(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
-    expect(isInertCapability(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
-    expect(isInertCapability(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+    expect(exchange.capabilities).toMatchObject({
+      fillHistory: false,
+      orderHistory: false,
+      incomeHistory: false,
+      incomeRange: false,
+    });
     await expect(exchange.fetchHistoricalFills({})).resolves.toEqual([]);
     await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
