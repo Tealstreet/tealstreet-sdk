@@ -703,3 +703,15 @@ The latter is a helper-only source update:216 harness tests pass, including a
 sentinel counterexample proving a reused process directory leaves prior output
 untouched. Refresh the same gate helper into the original control before final
 input fingerprints. No crossover samples have been collected.
+
+
+Private gates exposed a merge regression before measurement: incoming replay
+pins Date.now to every finite recorded epoch, while our resolution retained an
+old MEXC-only guard. Lighter correctly rejected the resulting stale execution;
+its private gate failed with Rustfills=[] against independent tapedfill8001.
+Restore the generic recorded epoch without changing Rust or the output oracle.
+The exact same Lighter tape now passes14frames. Independent review against31ec
+and VM counterexamples prove RED before/GREEN after, including private-start
+clock reset and missing/nonfinite epoch fallback;218 harness tests pass. Retain
+the failed gate and rerun all18 private gates with the corrected shared helper.
+This correctness checkpoint precedes every new public performance sample.

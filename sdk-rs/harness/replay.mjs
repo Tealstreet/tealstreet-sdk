@@ -43,7 +43,8 @@ const bookSymbols = values.books.split(',').filter(Boolean);
 // and compared on its private state rather than its books.
 const metadata = records.find((record) => record.type === 'meta');
 let clockStart = performance.now();
-if (values.venue === 'mexc' && Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
+// Freshness checks and generated signatures share the recorded epoch on both runtimes.
+if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 const config = records.find((record) => record.type === 'config') ?? {};
 const isPrivate =
   config.private ?? metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
