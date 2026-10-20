@@ -276,3 +276,12 @@ remain readable. Bybit leaves those extras absent on legacy frames; Bitget
 inverse publishes native amount/filled, so its adapter can subtract those values
 when the exact optional tail is absent. Order rejection metadata must survive
 alongside the native sizing fields.
+
+## Prediction-market frame metadata
+
+Optional typed `PREDICTION_MARKETS` and `PREDICTION_HOLDINGS` sections carry
+outcome condition/question/tick/neg-risk metadata and redemption/merge flags.
+The numeric market and position tables retain their existing shapes. Both
+worker and main-thread FrameApplier instances retain metadata across later
+position-only frames; explicit empty sections clear it. Holdings removed from
+the authoritative position table lose their flags before later reopening.

@@ -105,7 +105,19 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
-| 13 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
+| 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
+| 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
+| 15 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
+
+Prediction venues map each outcome token to one ordinary market, with shares
+as base size and collateral as quote. Optional typed metadata sections preserve
+condition/outcome identity, display text and signing constraints without generic
+JSON blobs or fields on every venue's market/position record. They accompany
+MARKETS/POSITIONS replacements; missing sections clear that replacement's old
+metadata, while unrelated updates leave it intact. A new market table invalidates
+both indexed metadata tables. Holding flags survive updates for the same outcome,
+and are removed when its holding closes; authoritative holdings snapshots replace
+them explicitly. Other venues retain every existing section's byte layout.
 
 `TICKERS` appends identity string references only when a ticker has no current
 market row. Those rows retain market index `0xFFFFFFFF`; consumers use the tail
@@ -392,9 +404,10 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| GRVT, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| GRVT, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

@@ -74,11 +74,11 @@ enum CommandIn {
     FetchStpMode {
         command: u32,
     },
-    #[cfg(feature = "command-asterdex")]
+    #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
     FetchAccount {
         command: u32,
     },
-    #[cfg(feature = "command-asterdex")]
+    #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
     FetchOrderBook {
         command: u32,
         symbol: String,
@@ -216,9 +216,9 @@ impl From<CommandIn> for Command {
             }
             #[cfg(feature = "command-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(feature = "command-asterdex")]
+            #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(feature = "command-asterdex")]
+            #[cfg(any(feature = "command-asterdex", feature = "command-polymarket"))]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -320,7 +320,7 @@ impl From<CommandIn> for Command {
 }
 
 /// Decode the same typed command protocol on every host. Native hosts enable
-/// both command features; WASM retains the venue-specific parser size gates.
+/// all command features; WASM retains the venue-specific parser size gates.
 // Inline both boundaries to avoid copying a large command enum across crates.
 #[inline(always)]
 pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {

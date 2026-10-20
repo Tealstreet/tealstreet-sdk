@@ -12,7 +12,7 @@ independent sub-agent before considering the design checkpoint accepted.
 
 ## Phase 1 — book delta wire and consumers
 
-Add section 13 BOOK_DELTA: aligned u32 market/bid count/ask count/reserved,
+Add section 15 BOOK_DELTA (renumbered after Polymarket landed): aligned u32 market/bid count/ask count/reserved,
 then f64 price/amount pairs, bids then asks; zero amount deletes a price.
 Keep format 1 and existing BOOK unchanged. Opt in to deltas per engine;
 first publication, resubscription, snapshot replacement/gap, and changed market
@@ -202,3 +202,17 @@ build: **1,244,417 bytes** for both web and Node, under **1,258,291** and only
 79 bytes above the landing's 1,244,338-byte CI artifact. The build budget and
 compiler profiles remain unchanged. Default twenty-two-venue WASM clippy and
 all 53 native host tests also pass on the merged tree.
+
+### Landing integration — Polymarket
+
+Origin advanced to a0c11afd87 during acceptance. Its landed prediction metadata
+uses section IDs 13 and 14, colliding with this branch's unshipped delta ID.
+Merged the landing and moved BOOK_DELTA to **15** consistently in the Rust
+writer, JS decoder, declarations, consumers and tests, retaining the landed
+prediction layouts. Shared command parsing preserves Polymarket's account/book
+queries without enabling Aster-specific commands in its single-venue build.
+
+The interrupted twenty-two-venue workspace gate chain had not completed; it is
+not counted as passing evidence. Root typecheck did complete: all 44 tasks pass.
+Final acceptance now runs on the twenty-three-venue integrated tree, including
+coexisting prediction metadata and book deltas.

@@ -88,6 +88,20 @@ export type ExchangeOptions = {
   readonly grvtSignerAddress?: string;
   readonly grvtTradingAccountId?: string;
 
+  /** Polymarket CLOB V2; `key` is the local signing wallet's private key. */
+  readonly polymarket?: {
+    /** Discover only these Gamma market slugs; omitted means the full universe. */
+    readonly marketSlugs?: string[];
+    /** Supply all three L2 credentials together, or derive them with L1 auth. */
+    readonly apiKey?: string;
+    readonly apiSecret?: string;
+    readonly apiPassphrase?: string;
+    /** EOA, proxy, Safe, or ERC-1271 deposit wallet signing. Defaults to EOA. */
+    readonly signerType?: 0 | 1 | 2 | 3;
+    /** Deposit wallet/maker address; required for non-EOA signature types. */
+    readonly funderAddress?: string;
+  };
+
   readonly starkPrivateKey?: string;
   readonly vault?: string;
   readonly applicationId?: string;
