@@ -529,13 +529,17 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
-- Medium: isolated positions flip to cross when a WS row omits
+- ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
   spot `EGeneral:Permission denied` on an order deactivates the account
-  (`spot/account.rs:513`).
-- Decided: market entry with attached TP/SL is rejected (Rust behaviour);
-  the error must say the TP/SL legs are unsupported on market entry.
+  (`spot/account.rs:513`).~~ Fixed: a stream row without the field keeps the
+  REST-proven margin mode and leverage (as TS's cached preference does); a capped
+  candle page (Kraken serves 2000 bars from `from`) pages forward to `to`, bounded; permission denied on a spot write fails only that
+  command, while on a read it still deactivates.
+- ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
+  the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
+  rejection names the unsupported take-profit/stop-loss legs before any write.
 - Low: income over 500 rows errors (TS partial); one bad row rejects
   catalogue/tickers/open orders and blocks private start (startup lane);
   missing funding field set to 0; raw error text; spot 3m candles.
@@ -578,11 +582,14 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - High: ~~`SetPositionMode` has no symbol (`engine/src/command.rs:95`), so Phemex
   loops PUTs over every market and can half-switch (`phemex/src/trading.rs:858`).~~
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
-  one unknown order status/type drops the whole private frame incl. positions
-  and balances (`account_wire.rs:298`, `account.rs:601`).
+  ~~one unknown order status/type drops the whole private frame incl. positions
+  and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
+  its executions still emit, the store keeps its copy).
 - Medium: one bad public row stops startup; one bad position row freezes a
   currency slice (`account.rs:286`); no fallback read when a symbol's mode or
-  leverage context is uncached (`trading.rs:229,713`).
+  leverage context is uncached (`trading.rs:229,713`) — re-verified as low
+  impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
+  gap is the first cycle; TS also refuses a symbol that read omits.
 - Low: cancel batch refused on one uncached id; index triggers refused; daily
   candle `to`; no 1 s REST resync after terminal events.
 - Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
@@ -642,19 +649,23 @@ Normal inputs send the same requests as TS; the risk is resilience.
   `id` dropped; income row without asset fails the page; fetchLeverage returns max.
 
 ### Coinbase (already defaults to Rust)
-- High: one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
+- High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
   placement leaves a reservation that breaks cancel-symbol for the session
   (`trading.rs:1109,1283,1164`); CLI market orders with GTC rejected
-  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`); browser-side
+  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`)~~ (rows skip with
+  store copies and stay cancellable; 4xx releases, ambiguous outcomes release
+  after 30 s plus later order/position reads; GTC market sends IOC); browser-side
   `signWsAuth`/HTTP signing lost (decision 2).
-- Medium: reduce-only capacity counts protective stops against TPs and spot
+- Medium: ~~reduce-only capacity counts protective stops against TPs and spot
   reduce-only always rejected (`trading.rs:654,676`); portfolio probe stalls on
   404/other non-2xx (`account.rs:1322,1687`); one bad CFM position row rejects
-  the snapshot (`account.rs:1246`).
+  the snapshot (`account.rs:1246`)~~ (stops and other closes reserve separately;
+  spot reduce-only is plain; probe advances unless 408/429/5xx; bad position
+  rows skip keeping the store copy, flat side-less rows clear).
 - Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
-  OHLCV honours `from`; placement errors lose Coinbase's message.
+  OHLCV honours `from`; ~~placement errors lose Coinbase's message~~.
 
 ### Lighter
 
@@ -664,8 +675,8 @@ Signing, integer scaling, tx encoding and nonces match TS.
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
   margin-mode change signs max leverage (`trading.rs:567`).~~ Position-only
   ratio/percentage/tick normalization now has REST/WS and 5x signing regressions.
-- Medium: windowed fill history pages the whole account history then fails
-  (`history.rs:404,744`); one bad market/account row stalls startup or sync;
+- Medium: ~~windowed fill history pages the whole account history then fails
+  (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
   account tier not exposed and `changeAccountTier` missing.
 - Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
   re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
@@ -795,9 +806,10 @@ CLOB V2 signing and amounts match the official client.
 Alias→product mapping, credentials, testnet, routing and broker/builder
 attribution are correct for all 48 names (~~BloFin `brokerId` aside~~; repaired
 with its production/proxy gate).
-- Medium: Coinbase accounts with a saved read-only key fail to start — no
+- Medium: ~~Coinbase accounts with a saved read-only key fail to start — no
   `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
-  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.
+  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.~~ Read keys sign REST
+  reads after a same-portfolio `key_permissions` check.
 - Low/medium: polling controls ignored — `extra.tickInterval` (incl. `Infinity`
   to stop polling), the server slowdown multiplier and credential-rejection
   backoff reach only BreakoutProp (and raw tickInterval to Orderly, where
@@ -815,6 +827,7 @@ Signing, order payloads (incl. app stop shapes), amend, cancel and positions mat
 
 ### BreakoutProp (disabled in production)
 App stop payloads accepted; amend stricter than TS.
-- High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
+- High if re-enabled: ~~one unexpected portfolio row (XBTUSD lot, terminal-placed
   order type, multi-leg order) rejects the whole snapshot
-  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).
+  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
+  skipped and logged; off-catalogue position margin still counts).
