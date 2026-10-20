@@ -176,7 +176,7 @@ showed narrow margins. The standard standalone build now uses venue-crate
 steady CPU, at 810,579 bytes. The combined build retains its size profile. The
 failed checkpoint is retained, and no failed gate is reported as passed.
 
-## Final gates
+## Historical gate checkpoint (superseded by final refresh)
 
 All gates use normal egress comparison. The GRVT landing's symmetric
 before-verifier-setup baseline and async major-GC measurement are retained;
@@ -288,3 +288,28 @@ source attribution until those refreshes finish.
 Node, plus worker location resolution. Six URL mode/runtime cases and the
 routing suites pass: 276 focused tests, 44 typecheck tasks, 28 lint tasks and
 independent review. This changes host callback handling only.
+
+## Shared decoder and native server integration
+
+Merged landing `0063068241` in `32c1b7fd7a`, retaining the landing structure,
+shared host command decoder, native frame server, command tracking and book
+deltas. Spot's caller-symbol amendment and cancellation, account alias and
+feature-scoped parser now live in the shared decoder. The polling feature gates
+only its JSON parser; the public Event and Venue hook remain unconditional.
+Independent decoder/Paradex and native/Spot merge reviews both pass.
+
+A native loopback regression pins unsupported symbol-aware amendment with
+pending capacity one: one error uses the original caller ID, never enters the
+venue, releases capacity and permits reuse of the same ID for a successful
+account command. Payload-signer exports, headers and receiver-shutdown
+cancellation are preserved alongside FrameServer exports.
+
+The incoming live-smoke census discovers Spot automatically. Its endpoint
+profile and monetary sizing remain explicitly unreviewed, so every live mode
+refuses before credentials are read. The cutover matrix already discovers the
+committed Spot public fixture; its Spot metadata assertion now includes KuCoin.
+Full repository checks and six fresh standard artifact gates are in progress;
+earlier proofs above remain attributed to their historical sources.
+This integration checkpoint passes 44 typecheck tasks, 28 lint tasks and all
+540 harness tests. Independent review passes for the live-smoke refusal and
+Spot frame assertion; native/full repository tests and artifact refresh remain.

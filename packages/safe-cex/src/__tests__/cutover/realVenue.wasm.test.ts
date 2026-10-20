@@ -175,7 +175,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance'])
           expect(payload).not.toHaveProperty(key);
       }
-      if (name === 'bybitspot' || name === 'coinbasespot' || name === 'binancespot')
+      if (name === 'bybitspot' || name === 'coinbasespot' || name === 'binancespot' || name === 'kucoinspot')
         expect(lateStore.markets.every((row) => row.isSpot)).toBe(true);
       if (name === 'bitgetinverse' || name === 'bybitinverse' || name === 'binanceinverse')
         expect(lateStore.markets.every((row) => row.isInverse)).toBe(true);
