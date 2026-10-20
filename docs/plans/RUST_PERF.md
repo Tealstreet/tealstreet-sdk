@@ -733,3 +733,15 @@ reviewer recomputed allfour formulas and validated family registries, feature
 isolation, inverse alias/product, static browser imports, Node packages and CI.
 Optional probes build separately; actual profiles wait for private gates to
 finish, then public comparisons wait for all owned diagnostic jobs to finish.
+
+
+Corrected shared-clock checkpoint152d completes all18 private gates: regenerated
+identical tapes, exact final outputs/requests/signatures/subscriptions/writes.
+Raw report `/tmp/perf-fourteen-v2-private-gates.json` retains each command, tape
+hash and log; the earlier Lighter failure remains in the initial report. No
+fourteen-family public/profile data was collected: landing advanced22commits to
+f66bdc26f9 (Orderly family and default-loader lifecycle fixes) before sampling.
+Keep14control/build/protocol/manifests as a verified, unmeasured checkpoint;
+merge this landing and extend to15families before freezing new measurements.
+The original11 negative cohort remains unchanged. Current working tree is clean
+at24677c3766 before this integration; never stash or discard checkpoint evidence.
