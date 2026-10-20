@@ -1690,3 +1690,20 @@ Root quality COMPLETE:44typecheck/28lint/27test tasks PASS, SDK7349tests in
 realVenue44/44 rerun; host89 and native2473 PASS. Coinbase single-venue build
 PASS11.32s. Begin new final gate batch on frozen CoinbaseSpot ES256 failing
 tape first, then rebuilt public/private controls. Historical failures retained.
+
+Final adversarial candidate90712 review found two P2 defects; fix before push.
+Bitunix private UPDATE can regress cumulative filled2→1/remaining1→2, and a
+stale CANCELED CLOSE after FILLED CLOSE can regress Closed→Canceled and
+filled3→1. Plan: authoritative monotonic cumulative/timestamp/terminal fences
+before state/native-protection mutation, preserving late advancing terminal
+fills, per-execution emission and net PNL. Add deterministic fail-before
+regressions for reordered UPDATE/CLOSE plus legitimate advancing terminal fill;
+update documented TS correction, run venue fmt/clippy/tests, independent audit.
+
+Recorder lost its sticky sanitizer failure flag: EngineHost can catch a later
+sanitization exception as httpFailed while earlier readiness stays true, so
+record.mjs exits0 despite omitting rejected input. Restore fail-closed latch,
+safe diagnostics and a host-level post-readiness rejection regression. Run
+focused recorder/helpers, independent audit. Neither changed path participates
+in current Coinbase replays; finish these fixes before the batch reaches its
+future Bitunix build. Record each finding/resolution on PR1309 after pushing.
