@@ -245,7 +245,7 @@ export class RustEngineExchange extends BaseExchange {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name), this.name === 'bitgetinverse');
+    this.applier = new FrameApplier(store, ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name), this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });

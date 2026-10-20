@@ -4,7 +4,8 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC, BloFin and KuCoin futures,
+Rust frames keep quantities in published base units. For MEXC, BloFin, KuCoin futures,
+Coinbase and the OKX family,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic

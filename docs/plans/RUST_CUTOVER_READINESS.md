@@ -45,3 +45,23 @@ consumer adoption remain explicit blockers.
 - Fresh branch created; venue brief, engine spec and store/worker contracts
   read. Consumer plan audit and caller inventory delegated to independent
   sub-agents. Real venue fixture support is isolated to test helpers.
+- Phase 1: 38 real WASM startup/worker/snapshot cases pass. The independent
+  boundary corpus has 190 cases across all aliases plus ten focused metadata
+  cases. All 200 pass after implementation review. Package typecheck and
+  explicit lint pass; the combined WASM build, Rust bans, format and WASM
+  Clippy pass. Broader acceptance remains in progress.
+- Three SDK gaps repaired: explicit `engine: 'rust'` was ignored by the SDK
+  factory; OKX aliases lost native fill/position sizing metadata; main-frame
+  orders lost JS-derived chaser tags. The last fix uses a public order mutation
+  path, equality checks and a reentrancy guard so derived-only tag changes bump
+  update IDs while identical/ticker-only notices do not. Tests cover both
+  arrival orders, observer counters, native extras and disposal.
+- Phase-1 independent reviews found and corrected inverse-fixture flags,
+  terminal opt-in evidence, inactive algorithm singletons, optional metadata
+  coverage, and the first enrichment fix's missing update-ID bump. Final
+  reviewed focused tests pass; no additional actionable finding remains.
+- Phase 2: exhaustive caller inventory and phase-9 replacement/deletion plan
+  written. Independent source audit verified 49 registered names, 38 Rust
+  aliases and 11 absent names, and required six explicit consumer/product
+  blockers. Main plan and inventory pass the second documentation review.
+  No TS implementation has been deleted.
