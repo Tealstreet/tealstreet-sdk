@@ -61,8 +61,12 @@ instance has been selected. Keep native REST timers active as well as sockets:
 BreakoutProp has no stream and its tools depend on periodic reconciliation.
 A real native protocol regression requires changed quotes after its REST poll.
 The license generator includes the pinned engine's non-dev Cargo dependency
-closure and the existing adapted zkLink notice. Run it after building WASM so
-the offline Cargo source cache contains the crate license files. These notices
+closure and the existing adapted zkLink notice. Run it after building WASM.
+Its `cargo metadata --locked --filter-platform wasm32-unknown-unknown` command
+may fetch missing locked crate sources: workspace/dev manifests can be needed
+for metadata even when the WASM build never downloaded them. A fresh cache
+therefore needs Cargo registry access. Notice selection still excludes dev
+edges and uses the same license allowlist and pinned lockfile. These notices
 retain existing workspace dependencies; changing Rust dependency licensing
 still needs the repository's usual review.
 

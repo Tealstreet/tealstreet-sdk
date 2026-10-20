@@ -12,10 +12,12 @@ const textsIn = (directory) =>
 
 /** Retain notices from the existing pinned engine; this adds no Rust dependencies. */
 export const rustLicenseEntries = (repoRoot, fallbackText) => {
+  // Metadata may need locked workspace/dev crate manifests absent from the WASM
+  // build cache. Let Cargo fetch them; the notice closure below still excludes dev edges.
   const metadata = JSON.parse(
     execFileSync(
       'cargo',
-      ['metadata', '--locked', '--offline', '--format-version', '1', '--filter-platform', 'wasm32-unknown-unknown'],
+      ['metadata', '--locked', '--format-version', '1', '--filter-platform', 'wasm32-unknown-unknown'],
       { cwd: path.join(repoRoot, 'sdk-rs'), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
     ),
   );
