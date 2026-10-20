@@ -149,6 +149,10 @@ export const VENUES = {
     ...paradexProtocol,
     rust: 'paradex',
     ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
+    // Effective position leverage differs from configured cross-margin leverage.
+    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
+      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
+    })),
     tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
   },
   woo: {

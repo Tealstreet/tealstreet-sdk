@@ -60,7 +60,6 @@ fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
 }
 fn opts(id: &str) -> PlaceOrderOpts {
     PlaceOrderOpts {
-        max_slippage_pct: None,
         symbol: "BTCUSDT".into(),
         kind: OrderType::Limit,
         side: OrderSide::Buy,

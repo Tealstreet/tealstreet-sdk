@@ -418,7 +418,6 @@ impl Backpack {
                         return Err("Backpack cannot amend a terminal order".into());
                     }
                     let o = PlaceOrderOpts {
-                        max_slippage_pct: None,
                         symbol: old.symbol.clone(),
                         kind: old.kind,
                         side: old.side,

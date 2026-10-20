@@ -55,7 +55,6 @@ fn param(url: &str, name: &str) -> Option<String> {
 
 fn limit(amount: f64, price: f64) -> PlaceOrderOpts {
     PlaceOrderOpts {
-        max_slippage_pct: None,
         symbol: "BTCUSDT".into(),
         kind: OrderType::Limit,
         side: OrderSide::Buy,

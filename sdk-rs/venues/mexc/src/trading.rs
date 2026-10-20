@@ -638,7 +638,6 @@ impl MexcFutures {
                         return Err("MEXC only amends open orders".into());
                     }
                     let opts = PlaceOrderOpts {
-                        max_slippage_pct: None,
                         symbol: o.symbol.clone(),
                         kind: o.kind,
                         side: o.side,

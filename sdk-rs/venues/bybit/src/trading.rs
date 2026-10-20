@@ -896,7 +896,6 @@ impl BybitLinear {
         if order.kind == OrderType::TrailingStopLoss {
             let target = price.ok_or("A trailing stop moves by price")?;
             let opts = PlaceOrderOpts {
-                max_slippage_pct: None,
                 symbol: order.symbol.clone(),
                 kind: order.kind,
                 side: order.side,

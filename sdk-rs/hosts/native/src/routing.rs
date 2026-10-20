@@ -256,7 +256,9 @@ impl RoutingState {
     }
 
     pub fn binary_message(&self, key: &str) {
-        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) { attempts.message = true; }
+        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) {
+            attempts.message = true;
+        }
     }
 
     pub fn message(&self, key: &str, text: &str) {

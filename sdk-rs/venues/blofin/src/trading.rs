@@ -825,7 +825,6 @@ impl Blofin {
             .or_else(|| order.extra.as_ref().and_then(|e| e.remaining_native))
             .unwrap_or(order.remaining / m.contract_size.unwrap_or(1.0));
         let raw = PlaceOrderOpts {
-            max_slippage_pct: None,
             symbol: order.symbol.clone(),
             kind: order.kind,
             side: order.side,

@@ -114,3 +114,17 @@ test('shared-URL lifecycle records close and reopen the recorded public role whe
   assert.deepEqual(seen, ['public0:data', 'private0:data', 'public0:close', 'public1:data', 'private0:data']);
   assert.equal(privateSocket.closed, false);
 });
+
+test('Paradex account settings read the configured cache independently of effective position leverage', () => {
+  const store = { markets: [{ symbol: 'BTC-USD-PERP' }, { symbol: 'ETH-USD-PERP' }],
+    positions: [{ symbol: 'BTC-USD-PERP', leverage: 5, marginType: 'cross' }] };
+  const exchange = { leverageSettings: new Map([['BTC-USD-PERP', 10], ['ETH-USD-PERP', 20]]) };
+  assert.deepEqual(venue.tsSettings(exchange, store), [
+    { symbol: 'BTC-USD-PERP', marginType: 'cross', leverage: 10 },
+    { symbol: 'ETH-USD-PERP', marginType: 'cross', leverage: 20 },
+  ]);
+  exchange.leverageSettings.set('BTC-USD-PERP', 30);
+  assert.equal(venue.tsSettings(exchange, store)[0].leverage, 30);
+  exchange.leverageSettings.clear();
+  assert.equal(venue.tsSettings(exchange, store)[0].leverage, 10);
+});

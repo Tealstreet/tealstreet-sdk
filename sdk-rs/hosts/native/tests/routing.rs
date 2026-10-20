@@ -1234,10 +1234,15 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
     let server = tokio::spawn(async move {
         for _ in 0..4 {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_hdr_async(stream, |request: &Request, response: Response| {
-                assert_eq!(request.uri().path(), "/direct");
-                Ok(response)
-            }).await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), "/direct");
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
             ws.send(Message::binary(vec![0xff])).await.unwrap();
             ws.close(None).await.unwrap();
         }
@@ -1248,7 +1253,15 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
     let transport = NetworkTransport::with_routing(plan, tokens());
     for id in 0..4 {
         let (send, mut events) = mpsc::unbounded_channel();
-        let outgoing = transport.connect_encoding(true, SocketId(id), format!("{origin}/direct"), vec![], Some(safe_cex_engine::SocketChannel::Public), None, send);
+        let outgoing = transport.connect_encoding(
+            true,
+            SocketId(id),
+            format!("{origin}/direct"),
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Public),
+            None,
+            send,
+        );
         assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));
         assert!(matches!(next(&mut events).await, HostEvent::WsBinary(_, bytes) if bytes==[0xff]));
         assert!(matches!(next(&mut events).await, HostEvent::WsClosed(_, _)));

@@ -83,7 +83,6 @@ fn place(h: &mut Harness, command: u32, orders: Vec<PlaceOrderOpts>) {
 
 fn limit(symbol: &str, side: OrderSide, amount: f64, price: f64) -> PlaceOrderOpts {
     PlaceOrderOpts {
-        max_slippage_pct: None,
         symbol: symbol.into(),
         kind: OrderType::Limit,
         side,

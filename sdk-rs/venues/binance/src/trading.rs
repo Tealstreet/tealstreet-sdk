@@ -623,7 +623,6 @@ impl BinanceFutures {
             .cloned()
             .ok_or_else(|| format!("Order {id} not found"))?;
         let replacement = PlaceOrderOpts {
-            max_slippage_pct: None,
             symbol: order.symbol.clone(),
             kind: order.kind,
             side: order.side,
