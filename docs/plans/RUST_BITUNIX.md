@@ -903,3 +903,35 @@ capture remain verified. All313helpers and8production-replay controls PASS.
 Actual TS BingX private38frames/3commands PASS with zero unserved/unused/
 protocol errors. No economic aliases or source-venue changes. Independent
 final review and entirely green fresh CI remain required before merge.
+
+### WOO steady CPU follow-up
+
+At6b2d580332 Bitunix public/private and corrected BingX gates PASS.
+Independent adversarial family/capability audit passes all313helpers,
+including signed whole-constructor probes for WOO/Bitrue/Orderly; findings
+posted on PR1309. WOO public correctness/memory PASS but steady CPU fails
+18.7ms against TS18.6ms. Preserve that result, all samples and thresholds.
+Review WOO's native hot path for a bounded allocation/parsing optimization;
+an independent review checks harness selection and semantics. A borrowed-
+string regression exposes serde's Str alias bypassing Cow specialization,
+allocating every ticker symbol. Prefer explicit Cow on hot fields over the
+initial reusable-buffer proposal, retaining the original derived parser and
+its whole-frame validation. Assert borrowed plain/owned escaped strings.
+Verify native regressions/fmt/Clippy, then build WOO once and run the unchanged
+complete public/private gates. Review before committing and require fresh
+entirely green exact-head CI before landing. No rerun-to-green.
+
+Final WOO fix changes only three wire-field type spellings plus a borrowing
+regression/comment. Plain event/topic/symbol strings borrow source; escaped
+strings decode as owned equivalents. Original derive/Vec parser retained,
+including whole-message rejection and control-event precedence. All113WOO
+native tests, fmt/strict Clippy, bans and WASM Clippy PASS. First rebuilt
+public three-run gate PASS:77frames/222markets/2books, TS/Rust main75.4/56.1ms,
+steady34.1/25.9ms, retained2.0/1.3MB, sampledpeak14.6/4.8MB. Module835,362bytes
+below unchanged1,258,291cap. Private60frames/20commands PASS. At6b all other
+venue rows and both root CI jobs pass; final review/commit and fresh CI follow.
+
+Independent final WOO review PASS/no findings. Reviewer confirms serde_derive
+selects borrow_cow_str only for a syntactic Cow type, not its Str alias; the
+plain/escaped regression proves both paths. No custom parser or scratch field
+ships. Checkpoint before integrating newly landed KuCoin PR1312 at373cc09864.

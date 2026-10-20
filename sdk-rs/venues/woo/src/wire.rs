@@ -2,6 +2,7 @@
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
+// Hot fields spell out Cow: serde's borrowing specialization does not follow this alias.
 pub type Str<'a> = Cow<'a, str>;
 
 struct NumberVisitor;
@@ -108,9 +109,9 @@ pub struct Message<'a> {
 #[derive(Deserialize)]
 pub struct TickerMessage<'a> {
     #[serde(borrow, default)]
-    pub event: Str<'a>,
+    pub event: Cow<'a, str>,
     #[serde(borrow, default)]
-    pub topic: Str<'a>,
+    pub topic: Cow<'a, str>,
     #[serde(default, rename = "ts", deserialize_with = "number")]
     _ts: f64,
     #[serde(rename = "success")]
@@ -171,7 +172,7 @@ pub struct Funding<'a> {
 #[derive(Deserialize)]
 pub struct Tick<'a> {
     #[serde(borrow)]
-    pub symbol: Str<'a>,
+    pub symbol: Cow<'a, str>,
     #[serde(default, deserialize_with = "optional_number")]
     pub close: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
@@ -235,6 +236,28 @@ pub struct Kline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ticker_strings_borrow_plain_input_and_decode_escaped_input() {
+        let plain: TickerMessage<'_> = serde_json::from_str(
+            r#"{"topic":"tickers","event":"","data":[{"symbol":"PERP_BTC_USDT","close":5}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(plain.topic, Cow::Borrowed("tickers")));
+        assert!(matches!(plain.event, Cow::Borrowed("")));
+        assert!(matches!(
+            plain.data[0].symbol,
+            Cow::Borrowed("PERP_BTC_USDT")
+        ));
+        let escaped: TickerMessage<'_> = serde_json::from_str(
+            r#"{"data":[{"symbol":"PERP_BTC_\u0055SDT","close":"5"}],"topic":"ti\u0063kers","event":"\u0070ing"}"#,
+        ).unwrap();
+        assert!(matches!(&escaped.topic, Cow::Owned(value) if value == "tickers"));
+        assert!(matches!(&escaped.event, Cow::Owned(value) if value == "ping"));
+        assert!(matches!(&escaped.data[0].symbol, Cow::Owned(value) if value == "PERP_BTC_USDT"));
+        assert_eq!(escaped.data[0].close, plain.data[0].close);
+    }
+
     #[derive(Deserialize)]
     struct Row {
         #[serde(deserialize_with = "id")]
