@@ -560,7 +560,7 @@ impl Coinbase {
                         close: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+                        implied_volatility: None,
                         stp_mode: None,
                     };
                     let replacement = self.prepare_create(cx, &opts, Some(id.clone()))?;

@@ -1117,10 +1117,16 @@ The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
 
 ## Rust engine scope and verified corrections
 
-`engine: 'rust'` supports USDT/USDC linear SWAPs under all four OKX names.
+`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names;
+EU profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
+Signed EU discovery uses account-scoped instruments for both product types.
 Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
-while the existing book contract uses lotSz. EEA X-Perps and inverse products
-remain outside this engine lane.
+while the existing book contract uses lotSz. Inverse base quantities divide
+quote contract value by the native reference price, position notional remains
+quote value, and coin margin/PnL normalize to USD. Exact native filled/leaves
+and position counts survive both frame consumers. EU income walks both product
+types before global limiting; stalled/capped composite sources fail explicitly.
+Generic account-wide fills retain the inherited empty-result contract.
 
 The replay oracle also implements public trades (previously inherited an
 unimplemented method), and OHLCV request bounds use UTC calendar arithmetic

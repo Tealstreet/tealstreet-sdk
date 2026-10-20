@@ -804,7 +804,7 @@ impl WeexFutures {
                             max_slippage_pct: None,
                             bybit_bbo: None,
                             bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+                            implied_volatility: None,
                         };
                         // Replacement preflight runs before the destructive cancel.
                         let mut replacement = self.plan_orders(cx, vec![opts])?;

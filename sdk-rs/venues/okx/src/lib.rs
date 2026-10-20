@@ -423,6 +423,26 @@ impl Okx {
                 return;
             };
             let symbol = m.symbol.clone();
+            if channel == "tickers"
+                && [
+                    p.last,
+                    p.open24h,
+                    p.bid_px,
+                    p.ask_px,
+                    p.vol_ccy24h,
+                    p.vol24h,
+                ]
+                .iter()
+                .any(|value| {
+                    !value.is_empty()
+                        && value
+                            .parse::<f64>()
+                            .ok()
+                            .is_none_or(|value| !value.is_finite())
+                })
+            {
+                return;
+            }
             if channel == "mark-price" {
                 self.marks.insert(id.clone());
             }
@@ -433,8 +453,12 @@ impl Okx {
                 "tickers" => {
                     t.bid = num::parse(p.bid_px);
                     t.ask = num::parse(p.ask_px);
-                    t.last = num::parse(p.last);
-                    t.percentage = percentage(p.last, p.open24h);
+                    if !p.last.is_empty() {
+                        t.last = num::parse(p.last);
+                    }
+                    if !p.last.is_empty() && !p.open24h.is_empty() {
+                        t.percentage = percentage(p.last, p.open24h);
+                    }
                     t.volume = num::parse(p.vol_ccy24h);
                     t.quote_volume = num::parse(p.vol24h);
                 }
@@ -605,17 +629,31 @@ impl Venue for Okx {
                             return;
                         }
                         let contract_size = num::parse(m.ct_val);
-                        let max = [
+                        // Preopen instruments omit unavailable order-type caps.
+                        // Keep every supplied cap; an invalid one cannot widen sizing.
+                        let caps = [
                             m.max_iceberg_sz,
                             m.max_lmt_sz,
                             m.max_mkt_sz,
                             m.max_stop_sz,
                             m.max_trigger_sz,
                             m.max_twap_sz,
-                        ]
-                        .map(num::parse)
-                        .into_iter()
-                        .fold(f64::INFINITY, f64::min);
+                        ];
+                        if caps.iter().any(|cap| {
+                            !cap.is_empty()
+                                && cap
+                                    .parse::<f64>()
+                                    .ok()
+                                    .is_none_or(|value| !value.is_finite() || value <= 0.0)
+                        }) {
+                            *invalid = true;
+                            return;
+                        }
+                        let max = caps
+                            .into_iter()
+                            .filter(|cap| !cap.is_empty())
+                            .map(num::parse)
+                            .fold(f64::INFINITY, f64::min);
                         if max <= 0.0 || !max.is_finite() {
                             *invalid = true;
                             return;
@@ -678,17 +716,21 @@ impl Venue for Okx {
                 match serde_json::from_str::<wire::Prices<'_>>(item) {
                     Ok(p) => {
                         if let Some(m) = cx.store.market_by_id(p.inst_id) {
-                            if [
-                                p.last,
-                                p.open24h,
-                                p.bid_px,
-                                p.ask_px,
-                                p.vol_ccy24h,
-                                p.vol24h,
-                            ]
-                            .iter()
-                            .any(|n| n.parse::<f64>().ok().is_none_or(|v| !v.is_finite()))
-                            {
+                            // Untraded X-Perps publish an empty last/open price.
+                            if [p.last, p.open24h].iter().any(|value| {
+                                !value.is_empty()
+                                    && value
+                                        .parse::<f64>()
+                                        .ok()
+                                        .is_none_or(|value| !value.is_finite())
+                            }) || [p.bid_px, p.ask_px, p.vol_ccy24h, p.vol24h].iter().any(
+                                |value| {
+                                    value
+                                        .parse::<f64>()
+                                        .ok()
+                                        .is_none_or(|value| !value.is_finite())
+                                },
+                            ) {
                                 *invalid = true;
                                 return;
                             }

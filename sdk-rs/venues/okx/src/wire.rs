@@ -136,7 +136,6 @@ pub struct PositionRow<'a> {
     pub liq_px: &'a str,
     pub mgn_mode: &'a str,
     pub imr: &'a str,
-    pub mmr: &'a str,
 }
 
 #[derive(Deserialize, Default)]

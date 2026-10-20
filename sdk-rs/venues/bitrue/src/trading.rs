@@ -999,7 +999,7 @@ impl Bitrue {
                     max_slippage_pct: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+                    implied_volatility: None,
                 };
                 if protective {
                     if detail.trigger_type.map(|n| n.0)

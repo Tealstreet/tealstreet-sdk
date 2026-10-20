@@ -39,7 +39,6 @@ pub enum Request {
 #[derive(Clone, Copy, Default)]
 pub struct RiskValues {
     imr: f64,
-    mmr: f64,
     upl: f64,
 }
 struct Join {
@@ -847,8 +846,6 @@ impl Okx {
                 });
             }
             "positions" => {
-                let mut used = 0.0;
-                let mut upnl = 0.0;
                 let mut valid = false;
                 let _ = json::each::<PositionRow<'_>>(data.get(), |row| {
                     if let Some((p, risk)) = self.position(cx, &row) {
@@ -857,8 +854,6 @@ impl Okx {
                         self.account
                             .position_versions
                             .insert(p.id.clone(), self.account.revision);
-                        used += risk.mmr;
-                        upnl += p.unrealized_pnl;
                         Self::setting(cx, &p);
                         if p.contracts == 0.0 {
                             self.account.risk.remove(&p.id);
@@ -871,10 +866,7 @@ impl Okx {
                 if !valid {
                     return;
                 }
-                let mut balance = cx.store.balance().clone();
-                balance.used = usd(used);
-                balance.upnl = usd(upnl);
-                cx.store.set_balance(balance);
+                self.recalculate(cx);
             }
             "account" => {
                 let mut equity = 0.0;
@@ -892,10 +884,7 @@ impl Okx {
                     self.account.balance_version = self.account.revision;
                     self.account.equity = vec![("USD".into(), equity)];
                     self.account.equity_loaded = true;
-                    let mut b = cx.store.balance().clone();
-                    b.free = usd(equity - b.used);
-                    b.total = usd(equity - b.upnl);
-                    cx.store.set_balance(b);
+                    self.recalculate(cx);
                 }
             }
             _ => {}
@@ -996,7 +985,6 @@ impl Okx {
             },
             RiskValues {
                 imr: num::parse(p.imr) * margin_factor,
-                mmr: num::parse(p.mmr) * margin_factor,
                 upl: num::parse(p.upl) * margin_factor,
             },
         ))

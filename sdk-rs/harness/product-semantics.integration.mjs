@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
-import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
+import { BaseExchange } from '../../packages/safe-cex/src/exchanges/base.ts';
+import { RustEngineExchange } from '../../packages/safe-cex/src/exchanges/rust/rust.exchange.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 import { prepareCliOrder } from '../../packages/cli-core/src/order/prepareCliOrder.ts';
 import { classifyMarket } from '../../packages/safe-cex/src/instrument-class/resolve.ts';
@@ -50,10 +51,16 @@ test('native Bybit discovery survives transfer and the real CLI TradFi preflight
     const transferred = structuredClone(source, { transfer: [source] });
     assert.equal(source.byteLength, 0);
     const frame = new Frame(transferred);
+    assert.ok(frame.instrumentClassifications(), 'Native instrument classifications must be present');
     assert.equal(frame.instrumentClassifications().count, labels.length);
-    for (const worker of [true, false]) {
-      const store = new DefaultStore();
-      new FrameApplier(store).apply(frame, worker);
+    const options = { key: '', secret: '', publicDataOnly: true };
+    const worker = new RustEngineExchange('bybit', options, new DefaultStore());
+    const main = new BaseExchange('bybit', options, new DefaultStore());
+    worker.onFrame = (buffer) => main.applyWorkerFrame(structuredClone(buffer, { transfer: [buffer] }));
+    try {
+      worker.receiveFrame(transferred);
+      assert.equal(transferred.byteLength, 0);
+      for (const store of [worker.store, main.store]) {
       assert.equal(store.markets.length, labels.length);
       for (const [symbol, label, assetClass, ticker, region] of labels) {
         const market = store.marketsBySymbol[symbol];
@@ -67,6 +74,10 @@ test('native Bybit discovery survives transfer and the real CLI TradFi preflight
         if (assetClass && assetClass !== 'crypto') assert.throws(order, /may require an agreement/);
         else assert.equal(order().symbol, symbol);
       }
+      }
+    } finally {
+      worker.dispose();
+      main.dispose();
     }
   } finally {
     engine.free();

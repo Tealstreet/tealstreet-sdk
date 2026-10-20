@@ -17,24 +17,38 @@ afterEach(() => {
 });
 
 const setup = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
-  const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true, ...options }, new DefaultStore());
+  const exchange = new RustEngineExchange(
+    name,
+    { key: '', secret: '', publicDataOnly: true, ...options },
+    new DefaultStore(),
+  );
   exchanges.push(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   return exchange;
 };
 
-it.each([[false, false], [true, false], [false, true], [true, true]])(
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])(
   'forwards saved Bybit inverse=%s and options=%s flags to the real host constructor boundary',
   async (enableInverseMarkets, enableOptionMarkets) => {
     const constructor = vi.fn();
     class Engine {
-      constructor(venue: string, options: string) { constructor(venue, JSON.parse(options)); }
+      constructor(venue: string, options: string) {
+        constructor(venue, JSON.parse(options));
+      }
       free() {}
     }
-    setWasmEngineLoader(async () => ({ WasmEngine: Engine } as unknown as WasmEngineModule));
+    setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
     const exchange = setup('bybit', { enableInverseMarkets, enableOptionMarkets });
     await (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
-    expect(constructor).toHaveBeenCalledExactlyOnceWith('bybit', expect.objectContaining({ enableInverseMarkets, enableOptionMarkets }));
+    expect(constructor).toHaveBeenCalledExactlyOnceWith(
+      'bybit',
+      expect.objectContaining({ enableInverseMarkets, enableOptionMarkets }),
+    );
   },
 );
 
@@ -47,8 +61,16 @@ it.each(['binance', 'okx', 'grvt', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hy
     expect(() => exchange.fetchOptionChain({ underlying: 'BTC' })).toThrow(/Options are not enabled/);
     expect(() => exchange.fetchOptionExpiries('BTC')).toThrow(/Options are not enabled/);
     expect(() => exchange.fetchAccountGreeks()).toThrow(/Options are not enabled/);
-    const plain: PlaceOrderOpts = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 100, amount: 1 };
-    await expect(exchange.placeOrders([plain, { ...plain, impliedVolatility: 0.5 }])).rejects.toThrow(/Options are not enabled/);
+    const plain: PlaceOrderOpts = {
+      symbol: 'BTCUSDT',
+      side: OrderSide.Buy,
+      type: OrderType.Limit,
+      price: 100,
+      amount: 1,
+    };
+    await expect(exchange.placeOrders([plain, { ...plain, impliedVolatility: 0.5 }])).rejects.toThrow(
+      /Options are not enabled/,
+    );
     expect(command).not.toHaveBeenCalled();
   },
 );
@@ -56,17 +78,22 @@ it.each(['binance', 'okx', 'grvt', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hy
 it('keeps the TS shared-public eligibility restriction on combined inverse products', async () => {
   const constructor = vi.fn();
   class Engine {
-    constructor(venue: string, options: string) { constructor(venue, JSON.parse(options)); }
+    constructor(venue: string, options: string) {
+      constructor(venue, JSON.parse(options));
+    }
     free() {}
   }
-  setWasmEngineLoader(async () => ({ WasmEngine: Engine } as unknown as WasmEngineModule));
+  setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
   const exchange = setup('bybit', {
     enableInverseMarkets: true,
     enableOptionMarkets: true,
     externalPublicData: { type: 'websocket', url: 'wss://fixture.invalid', exchangeId: 'bybit' },
   });
   await (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
-  expect(constructor).toHaveBeenCalledExactlyOnceWith('bybit', expect.objectContaining({ enableInverseMarkets: false, enableOptionMarkets: true }));
+  expect(constructor).toHaveBeenCalledExactlyOnceWith(
+    'bybit',
+    expect.objectContaining({ enableInverseMarkets: false, enableOptionMarkets: true }),
+  );
 });
 
 it('rejects non-finite IV before JSON could erase it and forwards supported option query fields verbatim', async () => {
@@ -74,14 +101,28 @@ it('rejects non-finite IV before JSON could erase it and forwards supported opti
   const command = vi.fn().mockResolvedValue([]);
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
   for (const impliedVolatility of [NaN, Infinity, 0, -1]) {
-    await expect(exchange.placeOrder({ symbol: 'BTC-25DEC26-100000-C', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, impliedVolatility })).rejects.toThrow(/finite and positive/);
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTC-25DEC26-100000-C',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        amount: 1,
+        impliedVolatility,
+      }),
+    ).rejects.toThrow(/finite and positive/);
   }
   expect(command).not.toHaveBeenCalled();
   for (const field of ['expiry', 'strikeMin', 'strikeMax'] as const) {
     expect(() => exchange.fetchOptionChain({ underlying: 'BTC', [field]: NaN })).toThrow(/must be finite/);
   }
   expect(command).not.toHaveBeenCalled();
-  const query = { underlying: 'BTC', right: 'call' as const, expiry: 1_800_000_000_000, strikeMin: 90_000, strikeMax: 110_000 };
+  const query = {
+    underlying: 'BTC',
+    right: 'call' as const,
+    expiry: 1_800_000_000_000,
+    strikeMin: 90_000,
+    strikeMax: 110_000,
+  };
   await exchange.fetchOptionChain(query);
   expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchOptionChain', query });
 });

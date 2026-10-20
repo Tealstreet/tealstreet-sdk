@@ -460,7 +460,7 @@ impl Kraken {
                 stp_mode: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+                implied_volatility: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: Some(true),

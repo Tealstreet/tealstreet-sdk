@@ -905,7 +905,7 @@ impl Trading {
                 max_slippage_pct: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+                implied_volatility: None,
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {

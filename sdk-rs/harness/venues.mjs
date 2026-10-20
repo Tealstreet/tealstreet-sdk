@@ -52,6 +52,8 @@ const typedRequest = function (method, url, body, callerIds) {
 };
 
 const bybit = (name, className) => ({
+  compareInstrumentClassification: true,
+  compareOptionTerms: true,
   rust: name,
   subscriptionGenerations: true,
   ts: { module: `${root}/bybit/${name}.exchange.ts`, className, name },
@@ -477,6 +479,147 @@ const okx = (name) => ({
     name,
   },
   options: { testnet: name.endsWith('demo') },
+  validateRequest({ method, url, body, headers }) {
+    // Independent V5 HTTP proof before matching can erase clocks/aliases.
+    const parsed = new URL(url), h = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+      .map(([key, value]) => [key.toLowerCase(), String(value)]));
+    const host = name.startsWith('okxeu') ? 'eea.okx.com' : name.endsWith('demo') ? 'openapi.okx.com' : 'www.okx.com';
+    if (parsed.protocol !== 'https:' || parsed.hostname !== host) throw new Error('Invalid OKX native HTTP host');
+    const aliases = new Set(['c', 'clientOrderId', 'clientAlgoId', 'newClientOrderId', 'requestId', 'category', 'symbol']);
+    for (const key of parsed.searchParams.keys()) if (aliases.has(key)) throw new Error(`Foreign OKX query alias ${key}`);
+    if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+    const raw = body == null ? '' : typeof body === 'string' ? body : JSON.stringify(body);
+    if (raw) {
+      const rows = parseRequestJson(raw);
+      const visit = (value) => {
+        if (Array.isArray(value)) return value.forEach(visit);
+        if (!value || typeof value !== 'object') return;
+        for (const [key, child] of Object.entries(value)) {
+          if (aliases.has(key)) throw new Error(`Foreign OKX body alias ${key}`);
+          visit(child);
+        }
+      };
+      visit(rows);
+    }
+    if (name.endsWith('demo') ? h['x-simulated-trading'] !== '1' : h['x-simulated-trading'] !== undefined)
+      throw new Error('Invalid OKX simulated-trading header');
+    const privatePath = /^\/api\/v5\/(account|trade)\//.test(parsed.pathname);
+    if (!privatePath && !h['ok-access-sign']) return;
+    const timestamp = h['ok-access-timestamp'], time = Date.parse(timestamp);
+    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(timestamp ?? '') || !Number.isFinite(time)
+      || Math.abs(time - Date.now()) > 30_000 || new Date(time).toISOString() !== timestamp
+      || h['ok-access-key'] !== 'replay-key' || h['ok-access-passphrase'] !== 'replay-passphrase')
+      throw new Error('Invalid OKX signed HTTP credentials or timestamp');
+    const expected = createHmac('sha256', 'replay-secret').update(`${timestamp}${method.toUpperCase()}${parsed.pathname}${parsed.search}${raw}`).digest('base64');
+    if (h['ok-access-sign'] !== expected) throw new Error('Invalid OKX signed HTTP signature');
+  },
+  prepareTs(exchange) {
+    const fetchMarkets = exchange.fetchMarkets.bind(exchange);
+    exchange.fetchMarkets = async () => (await fetchMarkets()).map((market) => {
+      if (Number.isFinite(market.limits.amount.max)) return market;
+      // KNOWN_TS_FIXES: preopen instruments omit unavailable order-type caps;
+      // Math.min(parseFloat('')) made their maximum NaN in TS. Use only raw
+      // positive native caps; malformed supplied values remain an error/gap.
+      const caps = ['maxIcebergSz', 'maxLmtSz', 'maxMktSz', 'maxStopSz', 'maxTriggerSz', 'maxTwapSz']
+        .map((key) => market.info?.[key]).filter((value) => value !== undefined && value !== '');
+      if (!caps.length || caps.some((value) => typeof value !== 'string' || value.trim() !== value || !Number.isFinite(Number(value)) || Number(value) <= 0)) return market;
+      return { ...market, limits: { ...market.limits, amount: { ...market.limits.amount, max: Math.min(...caps.map(Number)) } } };
+    });
+    if (exchange.parseTickers) {
+      const parseTickers = exchange.parseTickers.bind(exchange);
+      exchange.parseTickers = (raw) => parseTickers(raw).map((ticker) => {
+        const row = raw.find((row) => row.instId === ticker.id);
+        if (!row || (row.last !== '' && row.open24h !== '')
+          || [row.last, row.open24h].some((value) => value !== '' && !Number.isFinite(Number(value)))) return ticker;
+        // KNOWN_TS_FIXES: an untraded X-Perp has no last/open quote yet.
+        const last = Number(row.last), open = Number(row.open24h);
+        return { ...ticker, ...(row.last === '' ? { last: 0, mark: 0, index: 0 } : {}),
+          percentage: open === 0 ? 0 : Math.round((last - open) / open * 10000) / 100 };
+      });
+    }
+    if (exchange.privateWebsocket) {
+      // KNOWN_TS_FIXES: pushes are partial position updates. Preserve full-account
+      // initial margin, coin valuation and live order reserve across push/tick paths.
+      const round = (value) => Math.round(value * 100) / 100;
+      const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+      let authoritativeEquity, cachedInfo;
+      const reserve = () => round(exchange.store.orders.filter((order) => order.info && order.status === 'open' && order.type === 'limit' && !order.reduceOnly)
+        .reduce((sum, order) => sum + order.remaining * order.price / Math.max(finite(order.info.lever || '1'), 1), 0) * 1.1);
+      const balanceFromRows = (equity) => {
+        let used = 0, upnl = 0;
+        for (const position of exchange.store.positions.filter((row) => row.contracts > 0 && row.info)) {
+          const raw = position.info, market = exchange.store.marketsById[raw.instId];
+          const ticker = exchange.store.tickersBySymbol[position.symbol];
+          const reference = finite(ticker?.mark) || finite(raw.markPx) || finite(raw.avgPx);
+          used += exchange.convertMarginValueToUsd(finite(raw.imr), raw.ccy || market?.info?.settleCcy, market, reference);
+          upnl += exchange.convertMarginValueToUsd(finite(raw.upl), raw.ccy || market?.info?.settleCcy, market, reference);
+        }
+        used = round(used); upnl = round(upnl);
+        return { used, upnl, free: round(equity - used - reserve()), total: round(equity - upnl) };
+      };
+      const positionTopic = exchange.privateWebsocket.handlePositionTopic.bind(exchange.privateWebsocket);
+      exchange.privateWebsocket.handlePositionTopic = (message) => {
+        const equity = authoritativeEquity ?? exchange.store.balance.total + exchange.store.balance.upnl;
+        positionTopic(message);
+        exchange.store.update({ balance: { ...exchange.store.balance, ...balanceFromRows(equity) } });
+      };
+      const accountTopic = exchange.privateWebsocket.handleAccountTopic.bind(exchange.privateWebsocket);
+      exchange.privateWebsocket.handleAccountTopic = (message) => {
+        accountTopic(message);
+        const values = (message.data ?? []).map((row) => Number.parseFloat(String(row.totalEq ?? ''))).filter(Number.isFinite);
+        if (!values.length) return;
+        authoritativeEquity = round(values.reduce((sum, value) => sum + value, 0));
+        cachedInfo = exchange.store.balance.info;
+        exchange.store.update({ balance: { ...exchange.store.balance, ...balanceFromRows(authoritativeEquity) } });
+      };
+      const formatter = exchange.formatBalanceUsedAvail.bind(exchange);
+      exchange.formatBalanceUsedAvail = async (...args) => {
+        const balance = await formatter(...args);
+        if (authoritativeEquity === undefined) return balance;
+        // Only the cached raw snapshot superseded by that push is stale. A new
+        // REST object has independent provenance; never freeze its fresh equity.
+        if (args[0] === cachedInfo) return { ...balance, ...balanceFromRows(authoritativeEquity) };
+        authoritativeEquity = round(balance.total + balance.upnl);
+        cachedInfo = args[0];
+        return balance;
+      };
+    }
+    // KNOWN_TS_FIXES: preserve production paging and mappers, route each native
+    // product explicitly instead of the generic histories' hardcoded SWAP.
+    let source;
+    const get = exchange.xhr.get.bind(exchange.xhr);
+    exchange.xhr.get = (url, config = {}) => {
+      if (/\/(orders-history|bills(?:-archive)?)$/.test(url)) {
+        const market = exchange.store.marketsById[config.params?.instId];
+        config = { ...config, params: { ...config.params,
+          instType: market ? exchange.getMarketInstrumentType(market) : source ?? 'SWAP',
+        } };
+      }
+      return get(url, config);
+    };
+    for (const method of ['fetchHistoricalOrders', 'fetchIncomeHistory']) {
+      const original = exchange[method].bind(exchange);
+      exchange[method] = async (options = {}) => {
+        if (!name.startsWith('okxeu') || options.symbol) return original(options);
+        const rows = [];
+        try {
+          for (source of ['SWAP', 'FUTURES']) rows.push(...await original(options));
+        } finally { source = undefined; }
+        const income = method === 'fetchIncomeHistory';
+        const unique = [...new Map(rows.map((row) => [income ? row.tranId : row.id, row])).values()]
+          .sort((a, b) => (income ? b.timestamp - a.timestamp : b.createdTime - a.createdTime));
+        if (!(options.limit > 0)) return unique;
+        if (!income) return unique.slice(0, options.limit);
+        // One native bill decomposes to fee/PnL siblings; limit whole bills.
+        const bills = new Set();
+        return unique.filter((row) => {
+          const bill = row.tranId.split(':')[0];
+          if (!bills.has(bill) && bills.size >= options.limit) return false;
+          bills.add(bill); return true;
+        });
+      };
+    }
+  },
 
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
@@ -589,9 +732,6 @@ export const VENUES = {
     const instruments = {
       BTC_USDT_Perp: { hash: '0x030501', decimals: 9 },
       ETH_USDT_Perp: { hash: '0x030502', decimals: 9 },
-      BTC_USDT_Fut_20Oct23: { hash: '0x030503', decimals: 3 },
-      BTC_USDT_Call_20Oct23_2800: { hash: '0x030504', decimals: 3 },
-      BTC_USDT_Put_20Oct23_2800: { hash: '0x030505', decimals: 3 },
     };
     // This schema is independent of the venue encoder and the GRVT SDK signer.
     const types = {
@@ -617,6 +757,7 @@ export const VENUES = {
       tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
       replayCredentials: { key: 'grvt-replay-key', secret },
+      marketFilter: (row) => row.symbol.endsWith('_PERP'),
       requestBodies: true,
       generatedId: () => false,
       compareClientIds: true,
@@ -630,19 +771,6 @@ export const VENUES = {
         // The production private stream requires a proxy-selected host. Supply
         // only that host boundary, using the recorded real upstream identity;
         // leave its first-frame auth, subscriptions and handlers untouched.
-        const cancelSymbolOrders = exchange.cancelSymbolOrders.bind(exchange);
-        exchange.cancelSymbolOrders = async (symbol) => {
-          const market = exchange.store.marketsBySymbol[symbol];
-          if (market?.isPerpetual !== false) return cancelSymbolOrders(symbol);
-          // KNOWN_TS_FIXES: PERPETUAL kind/base/quote cannot cancel an exact
-          // dated expiry/strike. Use the real fresh-order parser and cancel path.
-          const orders = await exchange.fetchOrders([symbol]);
-          if (!Array.isArray(orders)) throw new Error('Incomplete GRVT scoped open orders');
-          const selected = orders.filter((order) => order.symbol === symbol);
-          if (new Set(selected.map((order) => order.id)).size !== selected.length)
-            throw new Error('Duplicate GRVT scoped open order');
-          await exchange.cancelOrders(selected);
-        };
         exchange.options = { ...exchange.options, transport: {
           name: 'grvt-tape-routing',
           rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }),

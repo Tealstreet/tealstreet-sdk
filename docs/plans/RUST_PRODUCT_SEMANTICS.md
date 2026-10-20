@@ -77,6 +77,6 @@ Implementation, phase audits and gate results are appended at stable commits.
 The user moved item 4 (GRVT non-perpetual products) to
 `feat/rust-grvt-products`. All GRVT product changes, reference hooks, tapes,
 fixtures and product tests were removed from this branch. GRVT retains only
-mechanical absent-IV initializers required by the shared order type. Its
+mechanical absent-IV initializers and unsupported command arms required by the shared order boundary. Its
 non-perpetual readiness blocker remains assigned to the separate lane; this PR
 implements items 1–3 only and makes no GRVT retirement decision.

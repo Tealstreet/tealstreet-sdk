@@ -923,7 +923,7 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
-            implied_volatility: None,
+        implied_volatility: None,
     };
     e.handle(
         200.0,

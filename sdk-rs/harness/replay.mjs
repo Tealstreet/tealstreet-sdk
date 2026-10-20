@@ -170,6 +170,12 @@ const marketFields = (m) => ({
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
+  ...(venue.compareInstrumentClassification ? { classification: {
+    symbolType: m.info?.symbolType,
+    marketRegion: m.info?.marketRegion,
+    underlyingTicker: m.info?.underlyingTicker,
+  } } : {}),
+  ...(venue.compareOptionTerms ? { option: m.option ?? null } : {}),
 });
 
 async function runRust() {
@@ -190,6 +196,9 @@ async function runRust() {
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
+  let classifications;
+  let derivativeProducts;
+  let positionGreeks;
   const tickers = new TickerState();
   const books = new Map();
   let orders;
@@ -257,11 +266,20 @@ async function runRust() {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
       const frame = new Frame(received);
-      markets = frame.markets() ?? markets;
+      const marketUpdate = frame.markets();
+      if (marketUpdate) {
+        markets = marketUpdate;
+        classifications = frame.instrumentClassifications();
+        derivativeProducts = frame.derivativeProducts();
+      }
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
       orders = frame.orders() ?? orders;
-      positions = frame.positions() ?? positions;
+      const positionUpdate = frame.positions();
+      if (positionUpdate) {
+        positions = positionUpdate;
+        positionGreeks = frame.positionGreeks();
+      }
       balance = frame.balance() ?? balance;
       settings = frame.settings() ?? settings;
       status = frame.status() ?? status;
@@ -327,6 +345,25 @@ async function runRust() {
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
     });
   }
+  for (let i = 0; i < (classifications?.count ?? 0); i++) {
+    const row = marketRows[classifications.market[i]];
+    if (!row) throw new Error('Classification has no native market');
+    row.info = { symbolType: classifications.symbolType(i), marketRegion: classifications.marketRegion(i), underlyingTicker: classifications.underlyingTicker(i) };
+  }
+  for (let i = 0; i < (derivativeProducts?.count ?? 0); i++) {
+    if (derivativeProducts.kind[i] === 1) continue;
+    const row = marketRows[derivativeProducts.market[i]];
+    if (!row) throw new Error('Derivative terms have no native market');
+    const expiry = derivativeProducts.expiry[i];
+    const strike = derivativeProducts.strike[i];
+    const style = derivativeProducts.style(i);
+    const settlement = derivativeProducts.settlement(i);
+    const premiumAsset = derivativeProducts.premiumAsset(i);
+    const settleAsset = derivativeProducts.settleAsset(i);
+    if (Number.isFinite(expiry) && Number.isFinite(strike) && style === 'european' && settlement === 'cash' && premiumAsset && settleAsset) {
+      row.option = { underlying: derivativeProducts.underlying(i), expiry, strike, right: derivativeProducts.kind[i] === 2 ? 'call' : 'put', style, settlement, premiumAsset, settleAsset };
+    }
+  }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
     const row = {
@@ -344,7 +381,7 @@ async function runRust() {
     };
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
-  const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
+  const account = isPrivate ? rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) : undefined;
   return {
     frames,
     metrics,
@@ -427,13 +464,19 @@ async function tsCommand(exchange, store, record) {
       return exchange.fetchPublicTrades(args.symbol, args.limit);
     case 'fetchCandles':
       return exchange.fetchOHLCV(args);
+    case 'fetchOptionChain':
+      return exchange.fetchOptionChain(args.query);
+    case 'fetchOptionExpiries':
+      return exchange.fetchOptionExpiries(args.underlying);
+    case 'fetchAccountGreeks':
+      return exchange.fetchAccountGreeks();
     default:
       throw new Error(`unknown command ${op}`);
   }
 }
 
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
-function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
+function rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) {
   const symbol = (i) => markets.symbol(i);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
@@ -452,6 +495,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
+    if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
     if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
     if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
@@ -788,6 +833,7 @@ function normalizeAccount(account) {
     marginType: p.marginType ?? null,
     positionMode: p.positionMode ?? null,
     marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,
+    ...(venue.compareOptionTerms ? { option: p.option?.greeks ? { greeks: p.option.greeks } : null } : {}),
   });
   const bySymbol = (a, b) => a.symbol.localeCompare(b.symbol) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
   return {

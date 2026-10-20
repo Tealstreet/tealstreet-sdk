@@ -518,3 +518,235 @@ fn inverse_position_uses_native_mark_when_ticker_mark_is_unavailable() {
     assert_eq!(p.notional, 500.0);
     assert_eq!(e.store().balance().used, 500.0);
 }
+
+#[test]
+fn live_preopen_optional_caps_do_not_abort_the_native_catalog() {
+    // Recorded public instruments payload, 2026-10-20. The venue omits caps
+    // for unavailable iceberg/trigger/TWAP orders while publishing real limits.
+    let row = include_str!("fixtures/crml-preopen.json");
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(&format!("{INVERSE},{row}")),
+        1.0,
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 2);
+    let preopen = e.store().market("CRMLUSDT").unwrap();
+    assert!(!preopen.active);
+    assert_eq!(preopen.limits.amount.max, 20000.0);
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+    );
+}
+
+#[test]
+fn supplied_invalid_or_wholly_absent_caps_never_publish_a_partial_catalog() {
+    let native: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/crml-preopen.json")).unwrap();
+    for value in ["malformed", "-1", "NaN", "inf", "0"] {
+        let mut row = native.clone();
+        row["maxTriggerSz"] = value.into();
+        let mut e = Engine::new(Okx::new(Options::default()));
+        e.start(0.0);
+        let request = actions(&mut e).remove(0);
+        reply(
+            &mut e,
+            &request,
+            &envelope(&format!("{INVERSE},{row}")),
+            1.0,
+        );
+        assert!(!e.store().loaded().markets, "{value}");
+        assert!(e.store().markets().is_empty());
+    }
+    let mut row = native;
+    for key in [
+        "maxIcebergSz",
+        "maxLmtSz",
+        "maxMktSz",
+        "maxStopSz",
+        "maxTriggerSz",
+        "maxTwapSz",
+    ] {
+        row[key] = "".into();
+    }
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
+    assert!(!e.store().loaded().markets);
+}
+
+#[test]
+fn untraded_xperp_blank_last_is_unavailable_and_partial_stream_keeps_known_trade() {
+    // Actual EEA ticker TEST002-USD_UM_XPERP-310822 publishes last/open24h="".
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(&XPERP.replace("BTC-USD-UM", "TEST002-USD_UM_XPERP-310822")),
+        1.5,
+    );
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(TICKER), 2.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(
+            r#"{"instId":"TEST002-USD_UM_XPERP-310822","last":"","open24h":"","bidPx":"0","askPx":"0","volCcy24h":"0","vol24h":"0"}"#,
+        ),
+        2.5,
+    );
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 2);
+    let t = e.store().ticker("TEST002USD_UM_XPERP310822").unwrap();
+    assert_eq!(
+        (t.last, t.mark, t.index, t.percentage),
+        (0.0, 0.0, 0.0, 0.0)
+    );
+    let initial = actions(&mut e);
+    let public = socket(&initial, "/public");
+    e.handle(3.0, Event::WsOpened { socket: public });
+    actions(&mut e);
+    ws(
+        &mut e,
+        public,
+        r#"{"arg":{"channel":"tickers"},"data":[{"instId":"BTC-USDT-SWAP","last":"","open24h":"","bidPx":"39999","askPx":"40001"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
+    let known = e.store().ticker("BTCUSDT").unwrap().clone();
+    for last in ["bad", "NaN", "inf"] {
+        ws(
+            &mut e,
+            public,
+            &format!(
+                r#"{{"arg":{{"channel":"tickers"}},"data":[{{"instId":"BTC-USDT-SWAP","last":"{last}","open24h":"40000","bidPx":"1","askPx":"2"}}]}}"#
+            ),
+        );
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap(), &known);
+    }
+}
+
+#[test]
+fn nonempty_malformed_native_last_still_rejects_the_entire_ticker_snapshot() {
+    for last in ["garbage", "NaN", "inf"] {
+        let mut e = Engine::new(Okx::new(Options::default()));
+        e.start(0.0);
+        let request = actions(&mut e).remove(0);
+        reply(&mut e, &request, &envelope(MARKET), 1.0);
+        let request = actions(&mut e).remove(0);
+        reply(
+            &mut e,
+            &request,
+            &envelope(&TICKER.replace("\"last\":\"40000\"", &format!("\"last\":\"{last}\""))),
+            2.0,
+        );
+        assert!(!e.store().loaded().tickers);
+        assert!(e.store().tickers().is_empty());
+    }
+}
+
+#[test]
+fn partial_position_push_uses_all_native_initial_margin_and_remains_stable_at_next_tick() {
+    let (mut e, initial) = startup(false, true);
+    let config = initial
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
+    let pending = actions(&mut e);
+    let private = socket(&pending, "/private");
+    let positions = pending
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("/positions?")))
+        .unwrap();
+    let risk = pending
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("account-position-risk")))
+        .unwrap();
+    let tick = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2003.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        risk,
+        &envelope(r#"{"balData":[{"ccy":"USD","eq":"10000"}]}"#),
+        4.0,
+    );
+    reply(
+        &mut e,
+        positions,
+        &envelope(
+            r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","mgnMode":"cross","imr":"200","mmr":"20"},{"instId":"BTC-USD-SWAP","pos":"5","posSide":"net","avgPx":"39000","ccy":"BTC","lever":"10","upl":"0.001","mgnMode":"cross","imr":"0.01","mmr":"0.001"}"#,
+        ),
+        5.0,
+    );
+    let orders = pending
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending?")))
+        .unwrap();
+    reply(
+        &mut e,
+        orders,
+        &envelope(
+            r#"{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"10"}"#,
+        ),
+        6.0,
+    );
+    let mut reads = actions(&mut e);
+    while let Some(request) = reads.pop() {
+        if matches!(&request, Action::Http(_)) {
+            reply(&mut e, &request, &envelope(""), 6.5);
+            reads.extend(actions(&mut e));
+        }
+    }
+    e.handle(7.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USD-SWAP","pos":"5","posSide":"net","avgPx":"39000","ccy":"BTC","lever":"10","upl":"0.002","mgnMode":"cross","imr":"0.012","mmr":"0.0012"}]}"#,
+    );
+    let balance = e.store().balance().clone();
+    assert_eq!(
+        balance.used, 680.0,
+        "linear200 + inverse0.012BTC*40000, not MMR"
+    );
+    assert_eq!(balance.upnl, 130.0);
+    assert_eq!(balance.total, 9870.0);
+    assert_eq!(balance.free, 9276.0, "retain44USD order reserve");
+    assert_eq!(e.store().positions().len(), 2);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"12000"}]}"#,
+    );
+    let fresh = e.store().balance().clone();
+    assert_eq!(fresh.used, 680.0);
+    assert_eq!(
+        fresh.free, 11276.0,
+        "fresh equity retains the same44USD order reserve"
+    );
+    assert_eq!(fresh.total, 11870.0);
+    e.handle(2003.0, Event::TimerFired { timer: tick });
+    assert_eq!(e.store().balance(), &fresh);
+}

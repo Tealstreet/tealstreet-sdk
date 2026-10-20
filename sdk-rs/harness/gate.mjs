@@ -204,11 +204,8 @@ const KNOWN_TS_FIXES = {
   // The private server ping receives pong rather than being ignored.
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
-  // Dated discovery now retains Future/Call/Put; TS catalog already did.
-  // TS scoped cancellation hardcodes PERPETUAL; corrected reference uses real
-  // fresh fetchOrders and exact cancelOrders so sibling expiries/strikes survive.
-  // Generic TS histories remain inert; native Rust documented-query tests pin
-  // retained product filters without claiming independent replay parity.
+  // Dated discovery now retains Future/Call/Put; TS catalog already did but
+  // omitted their isExpiring flag. Corrected reference adds only that native flag.
   grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,
@@ -565,6 +562,9 @@ const KNOWN_TS_FIXES = {
     'standalone cancellation continues remaining batches after per-row failures',
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
+    // Position pushes carry a slice, not whole-account maintenance margin.
+    'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',
+    'untraded EEA X-Perp empty last/open quotes initialize shared ticker scalars to zero rather than NaN',
     // Phase-9: inverse contracts convert at native mark/execution reference;
     // EEA history scopes by native product rather than hardcoded SWAP.
     'EEA historical orders and income query retained FUTURES X-Perps as well as SWAP',
@@ -581,6 +581,11 @@ const KNOWN_TS_FIXES = {
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
   },
+  // Phase-9 native regressions additionally correct TS: account-wide history
+  // limits before joining newer inverse/options sources; ignored IV on ordinary
+  // derivatives; generic option tickers omitted and option books routed through
+  // the linear feed. Dedicated actual-TS/native API tests compare retained
+  // options terms/queries/signing, and assert native option depth25 separately.
   bybit: (ts, rust) => {
     if (!ts.account) return;
     const output = ts;
