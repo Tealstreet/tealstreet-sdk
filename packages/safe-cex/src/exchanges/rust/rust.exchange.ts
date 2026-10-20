@@ -53,6 +53,7 @@ import {
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
+import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -93,6 +94,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
   weex: 'weex',
+  phemex: 'phemex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -105,9 +107,13 @@ const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode'
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
+const mintBinanceClientOrderId = () => 'x-s3vFFRQp' + uuid();
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   coinbase: coinbaseClientOrderIdRule,
   coinbasespot: coinbaseClientOrderIdRule,
+  binance: patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: mintBinanceClientOrderId }),
+  binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, { mint: mintBinanceClientOrderId }),
+  phemex: patternClientOrderIdRule('Phemex', /^.{1,40}$/, { mint: () => `${PHEMEX_BROKER_ID}_${uuid()}` }),
   apexomni: patternClientOrderIdRule('ApeX Omni', /^\S+$/),
   'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,

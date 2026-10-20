@@ -436,3 +436,17 @@ SDK/host and harness code-correctness reviews are clear. Harness337, host57,
 targeted SDK270, SDK typecheck/lint, selected WASM Clippy and113 venue tests
 plus shared engine tests pass. Full integrated Clippy, rebuilt acceptance
 replays and exact-head CI are rerunning; their final evidence is posted on PR1325.
+
+### Phemex landing integration
+
+All31 CI checks passed at5cd4c97a09. Landing45d7a3fb98 then arrived during
+the merge preflight and created registration conflicts; GitHub rejected the merge.
+Integrated Phemex and its opt-in catalog parsing/UTF-8 byte-input host work,
+retaining Coinbase credentials, portfolio identity and text-channel behavior.
+Independent Rust review found a new host test double missing account_id; it now
+returns None. Native Coinbase113, engine65 and selected WASM host6 tests pass;
+strict selected/combined WASM Clippy, bans/formatting and harness359 pass.
+SDK82, host/socket/wire52 and mock Workers9 pass, with SDK typecheck/lint;
+independent SDK/host review is clear. The selected WASM is990638bytes.
+Rebuilt public/all8private replays, combined
+controls and exact-head CI rerun; final measurements/results are posted on PR1325.

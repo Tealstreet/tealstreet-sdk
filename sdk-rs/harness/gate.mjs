@@ -13,6 +13,7 @@ import { parseRequestJson } from './request-json.mjs';
 import {
   fixBlofinAccount,
   fixWeexConditionals,
+  fixPhemexAccount,
   fixLighterFills,
   fixLighterCommands,
   fixKrakenOutput,
@@ -162,6 +163,16 @@ const KNOWN_TS_FIXES = {
   // leave the real TS Store/worker serialization and measured CPU/memory intact.
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
+  phemex(ts) {
+    // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
+    if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
+    // Phemex zero-open ticker changes remain finite.
+    for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
+    // TS recovery reads missing/unknown affected sides and preserves nonzero
+    // full-snapshot rows while recovering the other hedged leg.
+    // Native tests also guard exact row versions/absence fences, confirmed
+    // cancellation finality, preserved trigger sources and exact split lots.
+  },
   // Paired production fixes, compared without rewriting either replay result:
   // preserve full-depth incremental books; verify subscription acknowledgements;
   // fence polled candles against newer trades and reject older trade buckets;
