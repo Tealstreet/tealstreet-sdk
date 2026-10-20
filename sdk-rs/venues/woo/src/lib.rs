@@ -610,6 +610,9 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }

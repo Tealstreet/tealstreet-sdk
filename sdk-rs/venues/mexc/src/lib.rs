@@ -500,6 +500,9 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn account_auth_outcome(
         &self,
         pending: &Self::Pending,

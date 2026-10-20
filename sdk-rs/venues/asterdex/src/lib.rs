@@ -648,6 +648,9 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

@@ -78,6 +78,9 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);

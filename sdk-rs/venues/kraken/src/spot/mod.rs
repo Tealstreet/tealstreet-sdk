@@ -325,6 +325,9 @@ impl KrakenSpot {
     }
 }
 impl Venue for KrakenSpot {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.options.public_data_only && self.signer.is_none() {

@@ -545,21 +545,35 @@ describe('Rust native current-account reads', () => {
     expect(r.exchange.isNuking).toBe(false);
   });
 
-  it('rejects a missing market before any close dispatch', async () => {
+  it('still closes valid positions when another one cannot be sized', async () => {
+    const r = fixture('mexc');
+    await r.start();
+    r.update({ positions: [
+      { ...position(), id: 'BTCUSDT-long' },
+      { ...position(), id: 'ETHUSDT-long', symbol: 'ETHUSDT', contracts: NaN },
+    ] });
+    await expect(r.exchange.nukePositions()).rejects.toThrow('Nuke could not close ETHUSDT: invalid close size');
+    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([[
+      { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true },
+    ]]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('reports a missing market without closing anything for it', async () => {
     const r = fixture();
     await r.start();
     r.store.update({ markets: [] });
     r.update({ positions: [position()] });
-    await expect(r.exchange.nukePositions()).rejects.toThrow('Market not found');
+    await expect(r.exchange.nukePositions()).rejects.toThrow('BTCUSDT: market not found');
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
     expect(r.exchange.isNuking).toBe(false);
   });
 
-  it('rejects nonfinite native sizing inputs before any close dispatch', async () => {
+  it('reports nonfinite native sizing inputs without dispatching that close', async () => {
     const r = fixture();
     await r.start();
     r.update({ positions: [{ ...position(), contracts: NaN }] });
-    await expect(r.exchange.nukePositions()).rejects.toThrow('Invalid close size');
+    await expect(r.exchange.nukePositions()).rejects.toThrow('BTCUSDT: invalid close size');
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
     expect(r.exchange.isNuking).toBe(false);
   });

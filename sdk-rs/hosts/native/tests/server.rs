@@ -60,6 +60,9 @@ struct TestVenue {
     poll_timer: Option<TimerId>,
 }
 impl Venue for TestVenue {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         self.started.set(self.started.get() + 1);

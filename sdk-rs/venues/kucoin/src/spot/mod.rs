@@ -675,6 +675,9 @@ fn candle(text: &str) -> Result<Candle, String> {
 }
 
 impl Venue for KucoinSpot {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn supports_amend_order_with_symbol(&self) -> bool {
         true

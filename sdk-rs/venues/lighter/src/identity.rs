@@ -126,7 +126,7 @@ impl Lighter {
         self.identity_next(
             cx,
             command,
-            self.lookup_candidates(),
+            self.identity_candidates(),
             "Lighter identity requires an account index or L1 address selector",
         );
     }

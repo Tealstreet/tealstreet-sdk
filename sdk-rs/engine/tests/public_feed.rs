@@ -37,6 +37,10 @@ impl Feeds {
     }
 }
 impl Venue for Feeds {
+    // Stands in for any private command the venue answers itself.
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         Self::connect(cx);

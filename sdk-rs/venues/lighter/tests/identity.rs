@@ -154,16 +154,9 @@ fn identity_fallback_order_and_same_row_referrer_survive_failed_candidates() {
         r.url
             .ends_with(&format!("account?by=l1_address&value={addr}"))
     );
+    // The API key index names a key slot, not this account, so a failed
+    // address read never falls back to it.
     let r = take(respond(&mut e, &r, 200, r#"{"success":false}"#));
-    assert!(r.url.ends_with("account?by=index&value=7"));
-    e.handle(
-        NOW,
-        Event::HttpFailed {
-            request: r.id,
-            error: "unavailable",
-        },
-    );
-    let r = take(e.drain_actions().collect());
     assert!(
         r.url
             .ends_with(&format!("accountsByL1Address?l1_address={addr}"))
@@ -191,19 +184,13 @@ fn identity_l1_fallback_accepts_nested_account_arrays_and_their_own_referrer() {
     }
 }
 #[test]
-fn identity_key_index_compatibility_selector_is_unsigned() {
+fn identity_never_resolves_from_the_api_key_index_alone() {
     let mut e = engine(Options {
         api_key_index: Some("7".into()),
         ..Default::default()
     });
-    let r = take(ask(&mut e));
-    assert!(r.url.ends_with("account?by=index&value=7"));
-    assert!(r.headers.is_empty());
-    result(
-        respond(&mut e, &r, 200, r#"{"code":200,"accounts":[{"index":7}]}"#),
-        false,
-    )
-    .unwrap();
+    // `result` itself rejects any HTTP action, so this also proves no lookup ran.
+    result(ask(&mut e), true).unwrap_err();
 }
 #[test]
 fn identity_missing_selector_fails_before_io_including_public_only() {

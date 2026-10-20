@@ -741,6 +741,9 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

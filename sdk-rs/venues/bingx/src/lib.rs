@@ -576,6 +576,9 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn account_auth_outcome(
         &self,
         pending: &Self::Pending,

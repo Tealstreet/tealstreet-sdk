@@ -1886,6 +1886,9 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
 
     fn supports_options(&self) -> bool {

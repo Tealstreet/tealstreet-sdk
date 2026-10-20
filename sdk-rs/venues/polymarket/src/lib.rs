@@ -596,6 +596,9 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, None, vec![], vec![]);

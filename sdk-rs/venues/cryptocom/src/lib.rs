@@ -371,6 +371,9 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
