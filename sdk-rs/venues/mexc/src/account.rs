@@ -1,6 +1,7 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -83,6 +84,7 @@ pub struct Account {
     pub full_failed: bool,
     pub needs_full: bool,
     pub mode_ready: bool,
+    pub auth_rejected: bool,
     pub fills: HashMap<String, f64>,
     pub paused_until: f64,
 }
@@ -934,8 +936,24 @@ impl MexcFutures {
         request: Request,
         response: Response<'_>,
     ) {
-        if response.status == 429 {
-            self.account.paused_until = cx.now + 10_000.0;
+        // A refused key can never pass the mode read, so startup fails instead of polling.
+        let read_key = self.options.read_credentials.is_some();
+        if matches!(request, Request::Mode)
+            && !self.account.mode_ready
+            && let Some(error) = auth_rejection(response.body, read_key)
+        {
+            self.account.auth_rejected = true;
+            if let Some(timer) = self.account.poll.take() {
+                cx.clear_timer(timer);
+            }
+            cx.log(LogLevel::Error, &error.message);
+            let refused = error.kind == Some(ErrorKind::AuthInvalid);
+            cx.startup_failed(error);
+            // As Bybit: a refused trading key also stops the private socket's login loop.
+            if refused && !read_key {
+                cx.deactivate();
+            }
+            return;
         }
         let result = if response.status == 200 {
             Envelope::checked(response.body)
@@ -1325,7 +1343,7 @@ impl MexcFutures {
             self.account.poll = None;
             if self.account.mode_ready {
                 self.refresh_account(cx, false);
-            } else if cx.now >= self.account.paused_until {
+            } else if cx.now >= self.account.paused_until && !self.account.auth_rejected {
                 self.signed(
                     cx,
                     Method::Get,
@@ -1390,4 +1408,30 @@ pub fn side(n: f64) -> OrderSide {
     } else {
         OrderSide::Buy
     }
+}
+
+/// MEXC's documented key refusals. Only a parsed venue code counts: a bare HTTP
+/// 401/403 may come from a CDN, WAF or proxy and is retried.
+fn auth_rejection(body: &str, read_key: bool) -> Option<VenueError> {
+    let envelope = serde_json::from_str::<Envelope<'_>>(body).ok()?;
+    let (kind, reason) = match envelope.code {
+        401.0 | 602.0 => (ErrorKind::AuthInvalid, "rejected"),
+        402.0 => (ErrorKind::AuthExpired, "expired"),
+        406.0 | 701.0 | 702.0 | 703.0 | 704.0 => (ErrorKind::AuthPermission, "permission denied"),
+        _ => return None,
+    };
+    let which = if read_key {
+        "read-only API key"
+    } else {
+        "API key"
+    };
+    let code = envelope.code.to_string();
+    let venue_message = envelope.message.into_owned();
+    let mut error = VenueError::new(format!("MEXC {which} {reason} ({code}): {venue_message}"))
+        .kind(kind)
+        .venue_code(code);
+    if !venue_message.is_empty() {
+        error = error.venue_message(venue_message);
+    }
+    Some(error)
 }

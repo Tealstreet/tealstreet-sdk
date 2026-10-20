@@ -144,9 +144,19 @@ fn done(actions: &[Action]) -> Result<String, String> {
         .iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
             _ => None,
         })
         .expect("completed command")
+}
+fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command")
 }
 fn batch_ack(r: &HttpRequest, first: u64) -> Value {
     let payload = body(r);
@@ -968,8 +978,8 @@ fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(writes(&actions).is_empty());
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-        if error == "first timeout")));
+        Action::Notice(Notice::CommandFailed { command: 1, error })
+        if error.message == "first timeout" && error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
     let actions = command(
         &mut e,
@@ -990,7 +1000,7 @@ fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(!actions.iter().any(|action| matches!(
         action,
-        Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+        Action::Http(_) | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
     )));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     let actions = response(&mut e, &second, json!([{"orderId":"1","success":true}]));
@@ -1742,4 +1752,78 @@ fn weex_unknown_or_rejected_targeted_mode_does_not_emit_other_symbol_writes() {
     assert!(done(&a).is_err());
     assert!(!e.store().hedged());
     assert!(writes(&a).is_empty());
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, outcome) in [
+        (
+            400,
+            r#"{"code":"40015","msg":"Insufficient balance"}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+        ),
+        (
+            429,
+            r#"{"code":"429","msg":"Too many requests"}"#,
+            Some(ErrorKind::RateLimited),
+            Outcome::Rejected,
+        ),
+        (502, "Bad Gateway", None, Outcome::Unknown),
+    ] {
+        let mut e = engine();
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 4,
+                orders: vec![opts("classified")],
+            },
+        );
+        let r = writes(&actions).pop().unwrap();
+        e.handle(
+            1001.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let error = failure(&actions);
+        assert_eq!(error.message, format!("HTTP {status}: {body}"));
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, Some(outcome)),
+            "{status}"
+        );
+    }
+}
+
+#[test]
+fn a_rejection_after_an_accepted_step_is_not_reported_as_rejected() {
+    let mut e = engine();
+    let orders: Vec<_> = (0..6).map(|i| opts(&format!("lot-{i}"))).collect();
+    let actions = command(&mut e, Command::PlaceOrders { command: 5, orders });
+    let first = writes(&actions).pop().unwrap();
+    let ack = batch_ack(&first, 100);
+    let actions = response(&mut e, &first, ack);
+    let second = writes(&actions).pop().expect("second lot");
+    e.handle(
+        1002.0,
+        Event::HttpResponse {
+            request: second.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"40015","msg":"Insufficient balance"}"#,
+            },
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let error = failure(&actions);
+    assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
 }
