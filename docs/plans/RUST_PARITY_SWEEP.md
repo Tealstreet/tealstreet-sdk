@@ -263,3 +263,19 @@ than treating the original port boundary as a waiver.
 - Harness387/387 PASS; independent fixture/source review PASS
   (`/tmp/parity-grvt-harness-review.md`). Actual mixed-product replay follows
   the native trading checkpoint and final merged build; it is not yet claimed.
+
+### GRVT paired TS trading checkpoint
+
+- Exact symbol cancellation reads/validates the raw complete subaccount snapshot
+  before staging individual native/client identities. It preserves sibling
+  expiries/strikes; global cancellation remains account-wide. Raw ACK checks
+  reject false/malformed/error/mismatched responses before later writes.
+- Independent review found and verified zero-client sentinel handling and
+  pre-await client-lifecycle evidence. The expanded ACK review then found an
+  internal authentication-resend race: client-only writes now disable that
+  hidden resend; native-ID retries recheck disposal/main/subaccount scope after
+  authentication. Ambiguous writes stay single-attempt; ACKs are not terminal.
+- Focused142/142, full SDK typecheck and lint PASS; independent final review
+  PASS (`/tmp/parity-grvt-ts-cancel-review.md`). Removing only the API retry
+  guard makes the real401/code1000 lifecycle regression fail; exact source was
+  restored and all checks pass. No test skips or timeout increases.

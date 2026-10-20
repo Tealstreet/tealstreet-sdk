@@ -320,7 +320,10 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
 
         // Check for authentication error (code 1000) and try to re-authenticate
         // Use == to handle both string "1000" and number 1000
-        if (errorCode == 1000 && !isReauthenticating && error.config && !error.config._retry) {
+        // A staged client-ID cancellation cannot be resent across an unguarded
+        // authentication await: that client ID may now belong to another order.
+        if (errorCode == 1000 && !isReauthenticating && error.config &&
+            !error.config._retry && !error.config.grvtDisableReauthRetry) {
           isReauthenticating = true;
           exchange.log?.('GRVT authentication error 1000; refreshing session', LogSeverity.Warning);
 
@@ -339,6 +342,11 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
             // Call the exchange's authenticate method
             if (typeof exchange.authenticate === 'function') {
               const authResult = await exchange.authenticate();
+              const scope = error.config.grvtCancellationScope;
+              if (scope && (exchange.isDisposed || exchange.grvtTradingAccountId !== scope.subAccountId ||
+                  !scope.accountId || exchange.apiExtras?.accountId !== scope.accountId)) {
+                throw new Error('GRVT exact cancellation disposed or account changed during authentication');
+              }
               if (authResult) {
                 exchange.log?.('GRVT session refresh succeeded; retrying request', LogSeverity.Debug);
                 if (exchange.privateWebsocket?.isConnected) exchange.privateWebsocket.reconnect();
