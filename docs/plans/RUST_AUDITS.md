@@ -334,7 +334,7 @@ against current code before fixing. Lifecycle differences alone are not defects.
   Polling is bounded to 1000–120000 ms with explicit pause; decompression is
   capped at 16 MiB. Credential options/signing diagnostics redact Debug;
   Polymarket credentials cannot Serialize. Internal owned options and stored
-  credentials scrub on drop, including KuCoin/Spot and Orderly. Paradex auth
+  credentials scrub on drop, including Kraken Spot, KuCoin/Spot and Orderly. Paradex auth
   expires in 300 seconds; shorter supported caller receive windows are honored
   while existing TS-compatible defaults remain. Lighter production Schnorr
   nonces hedge key/message/entropy; independent explicit-nonce vectors remain.

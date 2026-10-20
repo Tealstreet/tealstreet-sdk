@@ -466,3 +466,22 @@ live trading, weakened parity oracle, or performance threshold changes.
   credentials, and harness/TS/scanner behavior; post their findings on the PR,
   address findings and repeat. Public timing is exclusively delegated to CI
   by the overseer's shared-machine instruction. Merge only after green CI.
+
+### PR code-correctness review round 1
+
+- Posted independent [host](https://github.com/Tealstreet/tealstreet-sdk/pull/1351#issuecomment-6292577299),
+  [signer](https://github.com/Tealstreet/tealstreet-sdk/pull/1351#issuecomment-6292577786),
+  and [harness](https://github.com/Tealstreet/tealstreet-sdk/pull/1351#issuecomment-6292578411)
+  reviews. Harness/TS/scanner scope accepted. Two concrete findings retained:
+  Kraken Spot's original Options copy lacked a scrubbing owner, and native
+  direct-proxy/HOW HTTP token-provider errors could forward secret-bearing text.
+- Kraken Spot now wraps original options at constructor entry. A test-only
+  observing allocator verifies actual original key/secret/read-credential
+  allocations remain owned until engine drop, then contain zeros immediately
+  before System deallocation, covering valid/incomplete/public-only inputs.
+  Restoring the original owner fails on uncleared credential buffer0; fixed
+  full Kraken crate passes 138 tests and focused Clippy. Independent post-fix
+  correctness review accepted both ownership and regression memory safety.
+  Scope excludes caller copies, earlier reallocations, crypto scratch and abort.
+- Native token-provider fix/regressions are in progress; public/replay CI is
+  green on many initial-head jobs but remains a checkpoint until fixes land.

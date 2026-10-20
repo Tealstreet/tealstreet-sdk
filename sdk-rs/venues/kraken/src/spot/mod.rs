@@ -43,7 +43,7 @@ struct DepthState {
     subscribers: u32,
 }
 pub struct KrakenSpot {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     signer: Option<sign::Signer>,
     public: Connection,
     account: account::Account,
@@ -61,7 +61,8 @@ pub struct KrakenSpot {
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
-    pub fn new(mut options: Options) -> Self {
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         options.public_data_only |= options.key.as_ref().is_none_or(String::is_empty)
             || options.secret.as_ref().is_none_or(String::is_empty);
         let signer =
