@@ -1,5 +1,5 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../store/store.interface';
+import type { Store } from '../../../store/store.interface';
 
 import rateLimit from 'axios-rate-limit';
 import cloneDeep from 'lodash/cloneDeep';
@@ -27,16 +27,16 @@ import {
   PositionSide,
   Ticker,
   UpdateOrderOpts,
-} from '../../types';
-import { createPositionId } from '../../utils/createPositionId';
-import { v } from '../../utils/get-key';
-import { inverseObj } from '../../utils/inverseObj';
-import { loop } from '../../utils/loop';
-import { omitUndefined } from '../../utils/omitUndefined';
-import { adjust, subtract } from '../../utils/safe-math';
-import { virtualClock } from '../../utils/virtualClock';
-import { BaseExchange } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
+} from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { v } from '../../../utils/get-key';
+import { inverseObj } from '../../../utils/inverseObj';
+import { loop } from '../../../utils/loop';
+import { omitUndefined } from '../../../utils/omitUndefined';
+import { adjust, subtract } from '../../../utils/safe-math';
+import { virtualClock } from '../../../utils/virtualClock';
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
@@ -361,7 +361,8 @@ export class OrderlyExchange extends BaseExchange {
     const markets: Market[] = rows
       .filter((r) => r.symbol.startsWith('PERP_'))
       .map((r) => {
-        const [, baseAsset, quoteAsset] = r.symbol.split('_');
+        const [, baseAsset, quoteAsset, ...broker] = r.symbol.split('_');
+        const brokerSuffix = broker.length ? `_${broker.join('_')}` : '';
 
         const minLeverage = Number(v(r, 'min_leverage'));
         const baseInitialMarginRate = Number(v(r, 'base_imr'));
@@ -376,8 +377,8 @@ export class OrderlyExchange extends BaseExchange {
         };
 
         return {
-          id: `${baseAsset}/${quoteAsset}:USDC`,
-          symbol: `${baseAsset}${quoteAsset}`,
+          id: `${baseAsset}/${quoteAsset}:USDC${brokerSuffix}`,
+          symbol: `${baseAsset}${quoteAsset}${brokerSuffix}`,
           base: baseAsset,
           quote: quoteAsset,
           active: true,

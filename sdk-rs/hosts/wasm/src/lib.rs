@@ -6,6 +6,7 @@
 #[cfg(not(any(
     feature = "bitrue",
     feature = "binance",
+    feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -16,12 +17,12 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
     feature = "lighter",
-    feature = "okx",
-    feature = "kucoin"
+    feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kucoin, lighter, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -54,6 +55,8 @@ use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "orderly")]
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -105,6 +108,7 @@ struct KucoinExtra {
 
 #[cfg(any(
     feature = "binance",
+    feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -116,9 +120,9 @@ struct KucoinExtra {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
     feature = "lighter",
-    feature = "okx",
-    feature = "kucoin"
+    feature = "okx"
 ))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,15 +139,16 @@ struct EngineOptions {
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "binance",
+        feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "orderly",
         feature = "lighter",
         feature = "bitget",
-        feature = "okx",
-        feature = "kucoin"
+        feature = "okx"
     ))]
     #[serde(default)]
     testnet: bool,
@@ -157,15 +162,20 @@ struct EngineOptions {
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
+        feature = "kucoin",
         feature = "okx",
         feature = "weex",
         feature = "blofin",
-        feature = "bitget",
-        feature = "kucoin"
+        feature = "bitget"
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "woo"))]
+    #[cfg(any(
+        feature = "hyperliquid",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "woo"
+    ))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -183,6 +193,9 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "orderly")]
+    #[serde(default)]
+    tick_interval: Option<f64>,
 }
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
@@ -211,6 +224,7 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    Deactivate,
     WsConnect {
         socket: u32,
         url: &'a str,
@@ -317,6 +331,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -619,6 +634,7 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[cfg(any(
         feature = "binance",
+        feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -630,9 +646,9 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "orderly",
         feature = "lighter",
-        feature = "okx",
-        feature = "kucoin"
+        feature = "okx"
     ))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
@@ -645,6 +661,25 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "orderly")]
+            "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+                Box::new(Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })))
+            }
             #[cfg(feature = "lighter")]
             "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
                 testnet: options.testnet,
@@ -692,6 +727,15 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            #[cfg(feature = "kucoin")]
+            "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+            }))),
             #[cfg(feature = "bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
                 public_data_only: options.public_data_only,
@@ -720,15 +764,6 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
-            }))),
-            #[cfg(feature = "kucoin")]
-            "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
-                broker: options.extra.and_then(|e| e.kucoin_broker),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
             }))),
             #[cfg(feature = "bitget")]
             "bitget" | "bitgetusdc" | "bitgetinverse" => {

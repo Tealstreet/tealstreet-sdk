@@ -11,7 +11,10 @@ a base fill of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots.
 Position frames also restore `extra.contractsNative` for native-volume venues,
 which copier closes consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
-single representative leverage value when applying frames.
+single representative leverage value when applying frames. `POSITIONS` may append
+string references for venue-defined position IDs; preserve these when present
+so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
+frames still derive identity from symbol and position mode.
 
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths

@@ -8,9 +8,9 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
-import { venueOf } from './venues.mjs';
 import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -21,6 +21,7 @@ const { values } = parseArgs({
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
+const venue = venueOf(values.venue);
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
@@ -35,7 +36,7 @@ const recording = {
     const key = canonicalUrl(url);
     const socket = ordinals.get(key) ?? 0;
     ordinals.set(key, socket + 1);
-    return live.connect(url, {
+    const connection = live.connect(url, {
       headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, socket });
@@ -51,6 +52,19 @@ const recording = {
         handlers.onClose(code);
       },
     });
+    return {
+      send(text) {
+        let message;
+        try {
+          message = JSON.parse(text);
+        } catch {
+          /* Non-JSON heartbeat. */
+        }
+        if (message && venue.socketRequest?.(message)) write({ type: 'ws-send', url, socket, text });
+        connection.send(text);
+      },
+      close: () => connection.close(),
+    };
   },
   async request(request) {
     const response = await live.request(request);
@@ -83,14 +97,25 @@ const recording = {
   },
 };
 
-const { WasmEngine } = await loadEngine();
+const options = { ...venue.options, ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
+const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;
 const seenBooks = new Set();
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true, ...venueOf(values.venue).options, ...venueOf(values.venue).recordOptions })), recording, {
-  onFrame: (buffer) => { updates++; for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
-  onLog: (level, message) => console.error(`[${level}] ${message}`),
-});
+const host = new EngineHost(
+  new WasmEngine(
+    venue.rust,
+    JSON.stringify(options),
+  ),
+  recording,
+  {
+    onFrame: (buffer) => {
+      updates++;
+      for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+    },
+    onLog: (level, message) => console.error(`[${level}] ${message}`),
+  },
+);
 host.start();
 for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });

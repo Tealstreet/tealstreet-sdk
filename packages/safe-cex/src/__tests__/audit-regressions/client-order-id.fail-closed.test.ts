@@ -31,7 +31,7 @@ import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
 import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
 import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';

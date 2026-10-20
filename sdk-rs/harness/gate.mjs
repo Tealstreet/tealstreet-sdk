@@ -10,7 +10,8 @@ import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
 import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { venueOf } from './venues.mjs';
+import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 
@@ -123,25 +124,8 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
-  kucoin: [
-    'futures inherits empty fills/orders/income and unsupported public trades; query results use explicit documented tape oracles',
-    'stops classify with side and direction, retain trigger basis and closeOrder',
-    'match executions deduplicate trade IDs and require their execution price',
-    'failed and delayed REST snapshots preserve newer account state and terminal orders',
-    'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
-    'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
-    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
-    'open orders walk every numbered page; TS reads only its default first page',
-    'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
-    'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
-    'stop-to-normal migration remains visible across independent REST books',
-    'settings streams update flat symbols and fence delayed metadata reads',
-    'position mode uses its authoritative read rather than inferring it from positions',
-    'independent tape contracts require native query/cancel-proof/mode reads and single-page active-book aliases',
-    'partial order stream rows retain REST-known safety flags',
-    'immediate bracket replacement retains submitted protections before reconciliation',
-    'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
-  ],
+  // Independent documented-tape oracle; native request/protocol counters remain exact.
+  orderly: (ts) => fixOrderly(ts, tapeRecords),
   lighter: {
     fills: fixLighterFills,
     commands: fixLighterCommands,
@@ -444,7 +428,28 @@ const KNOWN_TS_FIXES = {
     // Native bracket clears and corrected sources win over delayed placement acks.
     // Repeated private execution IDs emit one fill within the replay window.
   },
+  kucoin: [
+    'futures inherits empty fills/orders/income and unsupported public trades; query results use explicit documented tape oracles',
+    'stops classify with side and direction, retain trigger basis and closeOrder',
+    'match executions deduplicate trade IDs and require their execution price',
+    'failed and delayed REST snapshots preserve newer account state and terminal orders',
+    'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
+    'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
+    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
+    'open orders walk every numbered page; TS reads only its default first page',
+    'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
+    'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
+    'stop-to-normal migration remains visible across independent REST books',
+    'settings streams update flat symbols and fence delayed metadata reads',
+    'position mode uses its authoritative read rather than inferring it from positions',
+    'independent tape contracts require native query/cancel-proof/mode reads and single-page active-book aliases',
+    'partial order stream rows retain REST-known safety flags',
+    'immediate bracket replacement retains submitted protections before reconciliation',
+    'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
+  ],
 };
+
+for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
 
 const normalizeBingxPublic = (ts) => {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
@@ -518,6 +523,7 @@ for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
   if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
+  if (venue.family === 'orderly') KNOWN_TS_FIXES[values.venue](ts);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -563,8 +569,8 @@ for (let run = 0; run < runs; run++) {
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }
@@ -631,6 +637,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

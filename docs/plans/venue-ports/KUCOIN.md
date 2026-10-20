@@ -679,3 +679,58 @@ audits and KuCoin slippage preflight remain intact.
 Publish this checkpoint with reviews/results on PR1312, require all final-commit
 CI checks green across15venue jobs (34replay gates plus4Bitget native-contract
 integrations), then merge into feat/rust-rewrite and create the follow-up branch.
+
+### Orderly family landing integration plan
+
+Landingf66bdc26f9 adds Orderly and six broker aliases (#1318) while the
+Lighter-integratedc59bbb77a9 replay matrix is fully green and root CI finishes.
+Resolve harness/host conflicts preserving generation-aware correlated request
+audits, signatures and protocol fallbacks. Retain original KuCoin headers in
+both response call signatures, seven independent GETs, typed token/topic identity
+and the R12 main/worker native lot bridge. Incoming explicit position IDs remain
+optional; KuCoin keeps its legacy frame identity. New Deactivate notices are
+handled by shared hosts; no KuCoin constructor/API adaptation is needed.
+
+Move only KuCoin entries among stable existing entries in CI/build/venue/host/
+known-fix lists and format the default feature union on separate lines. Keep
+all other entry order and behavior, thresholds and byte budget unchanged.
+Independent cross-review covers these relocations and both merge parents.
+
+Run workspace fmt/bans/native+Wasm clippy/tests, full harness/combined actual
+Wasm/host-wire, root typecheck/lint, KuCoin+Binance public/private and incoming
+Orderly public/mainnet private plus a broker testnet private representative.
+Preserve CI's complete fourteen Orderly broker/network private combinations.
+Commit results/reviews and require green final-commit CI:16venue jobs,49 public/
+private replay gates plus4Bitget integrations. Merge PR1312 into feat/rust-rewrite
+and cut the fresh follow-up branch.
+
+### Sixteen-venue Orderly integration checkpoint
+
+All seven selective gates pass: KuCoin/Binance public+private, Orderly public
+and mainnet private, Tealstreet DEX testnet private. Public three-run medians
+TS/Rust:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 1438.5 / 962.7 | 957.6 / 599.8 | 7.0 / 3.3 | 746,265 |
+| Binance | 184.7 / 80.7 | 102.3 / 28.5 | 4.2 / 2.2 | 753,005 |
+| Orderly | 194.9 / 132.8 | 148.1 / 92.8 | 2.0 / 1.2 | 783,885 |
+
+Every bundle is within the unchanged1,258,291-byte limit; exact output, request,
+mutation, signature and protocol checks remain enabled. KuCoin remains
+16,157publicframes/692markets/two books and32privateframes/17commands. Orderly
+public initially stopped at TS memory settling before comparison; an unchanged
+retry passes. Broker testnet33frames/14commands also pass.
+
+Workspace1,265 tests (98 KuCoin), fmt/bans/native+Wasm clippy, harness226,
+complete actualWasm53, host/wire42 and root typecheck44/lint28 pass. Independent
+harness/correlated-request/signing and host/SDK/default-loader/native/wire reviews
+pass, no outstanding P1/P2. KuCoin notes and registration relocations preserve
+contents; all other entry order remains unchanged. The feature union is16 and
+its default list is now multiline. Optional position IDs preserve the legacy
+KuCoin layout, original role/feed/token URLs and both R12 hydration predicates.
+
+The precedingc59bbb77a9 reached full green CI while this landing was integrated.
+Publish this reviewed checkpoint and require all final-commit checks green,
+including49 public/private replays and4Bitget native-contract integrations across
+16venue jobs, before merging PR1312 and cutting the follow-up branch.

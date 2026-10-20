@@ -110,6 +110,9 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: orderly
+            books: BTCUSDC,ETHUSDC
+            private_script: rust:private-tape-orderly
           - venue: bitget
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bitget
@@ -122,6 +125,9 @@ jobs:
           - venue: mexc
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-mexc
+          - venue: kucoin
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-kucoin
           - venue: bingx
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bingx
@@ -137,9 +143,6 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
-          - venue: kucoin
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-kucoin
           - venue: lighter
             books: ETH,BTC
             private_script: rust:private-tape-lighter
@@ -199,7 +202,7 @@ jobs:
       - name: Public data (correctness, CPU and memory)
         run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: Account and trading (correctness)
-        if: matrix.venue != 'okx'
+        if: matrix.venue != 'okx' && matrix.venue != 'orderly'
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
@@ -217,4 +220,16 @@ jobs:
           for venue in okx okxeu okxdemo okxeudemo; do
             yarn rust:private-tape-okx --venue "$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done
+      - name: Orderly broker and testnet variants (correctness)
+        if: matrix.venue == 'orderly'
+        run: |
+          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+            for network in mainnet testnet; do
+              extra=()
+              suffix=''
+              if [ "$network" = testnet ]; then extra+=(--testnet); suffix='-testnet'; fi
+              yarn rust:private-tape-orderly --venue "$venue" "${extra[@]}"
+              yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --runs 1 --books ''
+            done
           done
