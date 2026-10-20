@@ -137,13 +137,25 @@ impl Okx {
         private: bool,
         pending: Pending,
     ) {
-        cx.request(
+        let scope = auth_scope(&pending);
+        let id = cx.request(
             Method::Get,
             format!("{}{path}", self.rest()),
             self.headers(cx.now, Method::Get, path, "", private),
             None,
             pending,
         );
+        if private && let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if self.options.read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
+            );
+        }
     }
 
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {

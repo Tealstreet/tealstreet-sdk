@@ -583,6 +583,15 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let _ = now;
+        self.account_auth_observation(pending, response)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, None, vec![], vec![]);

@@ -443,6 +443,7 @@ impl Account {
             headers.push(("PARADEX-PARTNER", "TEALSTREET".into()));
         }
         let url = format!("{}{}", self.rest(), request.path);
+        let scope = auth_scope(&request.pending);
         let id = if let Some(at) = request.at {
             cx.request_streamed_body(
                 request.method,
@@ -455,6 +456,9 @@ impl Account {
         } else {
             cx.request(request.method, url, headers, request.body, request.pending)
         };
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
+        }
         if let Some((payload, target)) = signing
             && let Err(pending) = cx.sign_request(id, payload, target)
         {
@@ -490,6 +494,11 @@ impl Account {
             signature.headers(credentials.address()),
             None,
             Pending::Account(Request::Auth { started: cx.now }),
+        );
+        cx.tag_account_read(
+            id,
+            safe_cex_engine::CredentialSlot::Primary,
+            safe_cex_engine::AccountReadScope::Account,
         );
         cx.route_request(id, safe_cex_engine::RequestRoute::Direct);
         if let Some(payload) = payload
@@ -1966,5 +1975,99 @@ fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json:
         serde_json::from_str(text)
     } else {
         serde_json::from_str(text).map(|row| vec![row])
+    }
+}
+
+fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Pending::Account(r) = pending else {
+        return None;
+    };
+    match r {
+        Request::Config => None,
+        Request::Auth { .. } => Some(Account),
+        Request::Margins { .. } => Some(Settings),
+        Request::Positions { .. } => Some(Positions),
+        Request::Balance { .. } => Some(Balance),
+        Request::Orders { .. } => Some(Orders),
+    }
+}
+impl Account {
+    pub(crate) fn auth_observation(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        auth_scope(pending)?;
+        let Pending::Account(r) = pending else {
+            return None;
+        };
+        #[derive(Deserialize)]
+        struct Error<'a> {
+            error: Option<&'a str>,
+        }
+        let e: Error<'_> = serde_json::from_str(response.body).ok()?;
+        let rejected = if matches!(r, Request::Auth { .. }) {
+            matches!(
+                e.error,
+                Some(
+                    "INVALID_SUBKEY"
+                        | "SUBKEY_REVOKED"
+                        | "INVALID_STARKNET_SIGNATURE"
+                        | "STARKNET_SIGNATURE_VERIFICATION_FAILED"
+                        | "INVALID_ETHEREUM_SIGNATURE"
+                        | "UNAUTHORIZED_ERROR"
+                        | "IP_NOT_ALLOWED"
+                )
+            )
+        } else {
+            matches!(
+                e.error,
+                Some(
+                    "INVALID_TOKEN"
+                        | "INVALID_TOKEN_SCOPE"
+                        | "UNAUTHORIZED_ERROR"
+                        | "IP_NOT_ALLOWED"
+                )
+            )
+        };
+        if rejected {
+            return Some(Rejected);
+        }
+        if crate::success(*response).is_err() {
+            return None;
+        }
+        let valid = match r {
+            Request::Auth { started } => {
+                #[derive(Deserialize)]
+                struct Token {
+                    jwt_token: Option<String>,
+                    token: Option<String>,
+                }
+                now < started + 300_000.
+                    && serde_json::from_str::<Token>(response.body).is_ok_and(|t| {
+                        t.jwt_token
+                            .or(t.token)
+                            .is_some_and(|s| !s.trim().is_empty())
+                    })
+            }
+            Request::Margins { invalid, .. }
+            | Request::Positions { invalid, .. }
+            | Request::Orders { invalid, .. } => !invalid,
+            Request::Balance { .. } => {
+                serde_json::from_str::<BalanceRow>(response.body).is_ok_and(|b| {
+                    b.total_collateral
+                        .or(b.account_value)
+                        .or(b.equity)
+                        .or(b.margin_balance)
+                        .or(b.wallet_balance)
+                        .is_some()
+                })
+            }
+            Request::Config => false,
+        };
+        valid.then_some(Accepted)
     }
 }

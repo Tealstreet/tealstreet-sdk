@@ -2027,6 +2027,90 @@ impl Coinbase {
         }
     }
 }
+pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Pending::Account(r) = pending else {
+        return None;
+    };
+    match r {
+        Request::Portfolios | Request::Probe { .. } | Request::DetectCfm { .. } => Some(Account),
+        Request::Balance | Request::SpotBalance => Some(Balance),
+        Request::Positions { .. } => Some(Positions),
+        Request::Orders(_) => Some(Orders),
+        Request::OrderDetails { .. } => None,
+    }
+}
+impl Coinbase {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        auth_scope(pending)?;
+        let Pending::Account(r) = pending else {
+            return None;
+        };
+        if response.status == 401 {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) {
+            return None;
+        }
+        #[derive(serde::Deserialize)]
+        struct PositionsMeta {
+            positions: Vec<serde::de::IgnoredAny>,
+        }
+        #[derive(serde::Deserialize)]
+        struct OrdersMeta {
+            orders: Vec<serde::de::IgnoredAny>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Probe<'a> {
+            #[serde(borrow)]
+            breakdown: &'a serde_json::value::RawValue,
+        }
+        let valid = match r {
+            Request::Portfolios => serde_json::from_str::<wire::Portfolios>(response.body)
+                .is_ok_and(|p| {
+                    p.portfolios.len() <= 1000 && p.portfolios.iter().all(|p| safe_id(&p.uuid))
+                }),
+            Request::Probe { .. } => serde_json::from_str::<Probe<'_>>(response.body)
+                .is_ok_and(|p| p.breakdown.get().starts_with('{')),
+            Request::DetectCfm { .. } => {
+                serde_json::from_str::<wire::CfmBalance>(response.body).is_ok()
+            }
+            Request::Balance if self.account.kind == Some(ProductKind::Intx) => {
+                serde_json::from_str::<wire::IntxBalance>(response.body).is_ok()
+            }
+            Request::Balance => serde_json::from_str::<wire::CfmBalance>(response.body).is_ok(),
+            Request::SpotBalance => serde_json::from_str::<wire::Breakdown>(response.body)
+                .is_ok_and(|b| {
+                    b.breakdown.spot_positions.len() <= 1000
+                        && b.breakdown.spot_positions.iter().all(|b| {
+                            !b.asset.is_empty()
+                                && b.total_balance_crypto.0 >= 0.
+                                && b.available_to_trade_crypto.0 >= 0.
+                                && b.available_to_trade_crypto.0 <= b.total_balance_crypto.0
+                        })
+                }),
+            Request::Positions { invalid, .. } => {
+                !invalid
+                    && serde_json::from_str::<PositionsMeta>(response.body)
+                        .is_ok_and(|p| p.positions.is_empty())
+            }
+            Request::Orders(r) => {
+                !r.invalid
+                    && serde_json::from_str::<OrdersMeta>(response.body)
+                        .is_ok_and(|p| p.orders.is_empty())
+                    && serde_json::from_str::<wire::Page<'_>>(response.body).is_ok()
+            }
+            Request::OrderDetails { .. } => false,
+        };
+        valid.then_some(Accepted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

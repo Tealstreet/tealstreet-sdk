@@ -112,14 +112,15 @@ impl MexcFutures {
         } else {
             format!("{}{path}", crate::REST)
         };
-        if streamed {
+        let scope = auth_scope(&pending);
+        let id = if streamed {
             cx.request_streamed(
                 method,
                 url,
                 headers,
                 ArrayAt::EnvelopeField("data"),
                 pending,
-            );
+            )
         } else {
             cx.request(
                 method,
@@ -131,6 +132,17 @@ impl MexcFutures {
                     Some(payload)
                 },
                 pending,
+            )
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if read_credentials.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
             );
         }
     }
@@ -1322,5 +1334,45 @@ pub fn side(n: f64) -> OrderSide {
         OrderSide::Sell
     } else {
         OrderSide::Buy
+    }
+}
+
+fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match pending {
+        Pending::Account(Request::Mode) => Settings,
+        Pending::Account(Request::Snapshot(s)) => match s.scope {
+            Scope::Assets => Balance,
+            Scope::Positions => Positions,
+            Scope::Regular | Scope::Plan | Scope::Stop => Orders,
+        },
+        _ => return None,
+    })
+}
+impl MexcFutures {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        auth_scope(pending)?;
+        let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
+        if e.success != Some(true)
+            && matches!(e.code, 401.0 | 402.0 | 406.0 | 602.0 | 701.0 | 703.0)
+        {
+            return Some(Rejected);
+        }
+        if response.status != 200 || e.success != Some(true) || e.code != 0.0 {
+            return None;
+        }
+        let valid = match pending {
+            Pending::Account(Request::Mode) => e
+                .data
+                .is_some_and(|d| matches!(serde_json::from_str::<u8>(d.get()), Ok(1 | 2))),
+            Pending::Account(Request::Snapshot(s)) => !s.bad && e.data.is_some(),
+            _ => false,
+        };
+        valid.then_some(Accepted)
     }
 }

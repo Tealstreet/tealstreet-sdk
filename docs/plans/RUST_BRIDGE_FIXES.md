@@ -1024,3 +1024,31 @@ SDK types and strict scoped lint PASS. Independent correctness review PASS.
 See RUST_IDENTITY_ROUTING.md for exact alias inventory and receipts. This is
 real EngineHost/fake-ABI proof; combined native-WASM identity acceptance remains
 part of the final artifact gates.
+
+## User-requested wind-down checkpoint
+
+The overseer requested a stop at the next clean point, without starting queued
+follow-ups. No bridge PR exists, and the remaining resync/leverage/credential
+acceptance work is substantial. Preserve/push feat/rust-bridge-fixes rather than
+open a misleading ready PR. This checkpoint is explicit WIP, not a completed
+phase or a final all-gates claim.
+
+Slice A preserves BingX/MEXC/WEEX dispatch tags and typed observers with six new
+controls: 288 native cases across 22 nonempty suites plus three empty doctests
+PASS; strict Clippy/fmt/bans PASS. Independent classifier review and broader
+matrix are still needed. The remaining ten slice-A crates are unimplemented.
+See RUST_AUTH_RESULTS_SLICE_A.md for exact anchors and limits.
+
+Slice B preserves provisional observers/tags in eleven classified crates,
+including Kraken Spot; unsigned Hyperliquid/TxFlow remain inert. Cargo check and
+13-crate all-target/all-feature strict Clippy PASS; scoped formatting and diff
+checks PASS. No new auth venue tests, independent implementation review or
+combined-WASM proof exist. Documented acceptance tightening is required before
+shipping. See RUST_AUTH_RESULTS_SLICE_B.md; compile success is not correctness
+acceptance.
+
+SDK identity routing and earlier reviewed components remain committed. Explicit
+native network resync, MEXC/BingX/WEEX fresh leverage queries, rebuilt-artifact
+proof, final full gates, PR reviews, green CI, merge and fresh branch remain
+unfinished. Queued follow-ups c6nf4w-2/-3/-4 were not started. The requested full
+handoff is /Users/sam/cs/tealstreet-sdk/.aimux/plans/handoff-codex-c6nf4w.md.

@@ -68,6 +68,15 @@ impl Coinbase {
     }
 }
 impl Venue for Coinbase {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let _ = now;
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn account_id(&self) -> Option<&str> {
         self.account.portfolio_id.as_deref()

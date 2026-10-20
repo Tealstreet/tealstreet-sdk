@@ -775,6 +775,62 @@ impl WeexFutures {
     }
 }
 
+pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Task::Account(r) = task else {
+        return None;
+    };
+    Some(match r.kind {
+        Kind::Balance => Balance,
+        Kind::Positions => Positions,
+        Kind::Normal | Kind::Algo => Orders,
+        Kind::Config | Kind::Metadata => Settings,
+    })
+}
+impl WeexFutures {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Task::Account(r) = &pending.task else {
+            return None;
+        };
+        if r.cycle != self.account.cycle {
+            return None;
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Code {
+            Number(i64),
+            Text(String),
+        }
+        #[derive(Deserialize)]
+        struct Evidence {
+            code: Code,
+        }
+        if let Ok(e) = serde_json::from_str::<Evidence>(response.body) {
+            let code = match e.code {
+                Code::Number(n) => Some(n),
+                Code::Text(s) => s.parse().ok(),
+            };
+            if matches!(code, Some(40006 | 40009 | 40012 | 40014 | 40018)) {
+                return Some(Rejected);
+            }
+            return None;
+        }
+        if !(200..300).contains(&response.status) || pending.invalid {
+            return None;
+        }
+        let valid = match r.kind {
+            Kind::Metadata => serde_json::from_str::<AccountConfig>(response.body).is_ok(),
+            _ => serde_json::from_str::<Vec<&RawValue>>(response.body).is_ok(),
+        };
+        valid.then_some(Accepted)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

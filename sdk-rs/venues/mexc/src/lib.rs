@@ -386,6 +386,14 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

@@ -1976,3 +1976,56 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
         .map(str::to_owned);
     (cookie, account)
 }
+
+pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    match &pending.job {
+        Job::Account(Request::Login) => Some(Account),
+        Job::Account(Request::Summary) => Some(Balance),
+        Job::Account(Request::Positions { .. }) => Some(Positions),
+        Job::Account(Request::Orders { .. }) => Some(Orders),
+        Job::Account(Request::Leverage { command: None, .. }) => Some(Settings),
+        _ => None,
+    }
+}
+impl Grvt {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        auth_scope(pending)?;
+        if pending.auth_generation != self.account.generation {
+            return None;
+        }
+        let code = crate::wire::code(response);
+        if code == "1000"
+            && !pending.auth_resent
+            && !matches!(pending.job, Job::Account(Request::Login))
+        {
+            return None;
+        }
+        if matches!(code.as_str(), "1000" | "1001") {
+            return Some(Rejected);
+        }
+        if crate::wire::check(response).is_err() {
+            return None;
+        }
+        let Job::Account(r) = &pending.job else {
+            return None;
+        };
+        let valid = match r {
+            Request::Login => {
+                let (cookie, account) = session_headers(response);
+                cookie.is_some() && account.is_some()
+            }
+            Request::Summary => serde_json::from_str::<SummaryEnvelope<'_>>(response.body).is_ok(),
+            Request::Positions { failed, .. }
+            | Request::Orders { failed, .. }
+            | Request::Leverage { failed, .. } => !failed,
+            Request::Builders { .. } => false,
+        };
+        valid.then_some(Accepted)
+    }
+}

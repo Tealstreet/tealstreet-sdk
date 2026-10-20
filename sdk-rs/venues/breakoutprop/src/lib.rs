@@ -335,6 +335,12 @@ impl BreakoutProp {
         if method == Method::Delete {
             headers.push(("If-Match", "*".into()));
         }
+        let scope = match operation {
+            Operation::Login | Operation::Discover | Operation::Portfolio { .. } => {
+                Some(safe_cex_engine::AccountReadScope::Account)
+            }
+            _ => None,
+        };
         let stream = operation.stream();
         let path = path.trim_start_matches('/');
         let mut url = String::with_capacity(BASE_URL.len() + 1 + path.len());
@@ -345,6 +351,9 @@ impl BreakoutProp {
             request.report_progress(cx);
         }
         let id = cx.request(method, url, headers, body, pending);
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
+        }
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
@@ -733,6 +742,14 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response, now)
+    }
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1160,5 +1177,50 @@ impl Venue for BreakoutProp {
                 .iter()
                 .map(|(symbol, (_, book))| (symbol.as_str(), book)),
         )
+    }
+}
+
+impl BreakoutProp {
+    fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        if self.auth_failed || pending.generation != self.session.generation {
+            return None;
+        }
+        if !matches!(
+            pending.operation,
+            Operation::Login | Operation::Discover | Operation::Portfolio { .. }
+        ) {
+            return None;
+        }
+        if matches!(pending.operation, Operation::Login) && matches!(response.status, 401 | 403) {
+            return Some(Rejected);
+        }
+        if response.status == 401 {
+            return pending.auth_retried.then_some(Rejected);
+        }
+        if !(200..300).contains(&response.status) {
+            return None;
+        }
+        let mut session = session::Session::default();
+        let valid = match &pending.operation {
+            Operation::Login => session.accept(response.body, now).is_ok(),
+            Operation::Discover => session
+                .select_account(
+                    response.body,
+                    &self.options.key,
+                    self.options.subaccount.as_deref(),
+                )
+                .is_ok(),
+            Operation::Portfolio {
+                invalid, snapshot, ..
+            } => !invalid && snapshot.is_some(),
+            _ => false,
+        };
+        valid.then_some(Accepted)
     }
 }

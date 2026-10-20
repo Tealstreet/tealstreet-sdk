@@ -257,10 +257,14 @@ impl Grvt {
         };
         let url = format!("{base}{}", pending.path);
         let body = Some(pending.body.clone());
-        if let Some(at) = at {
-            cx.request_streamed_body(Method::Post, url, headers, body, at, pending);
+        let scope = account::auth_scope(&pending);
+        let id = if let Some(at) = at {
+            cx.request_streamed_body(Method::Post, url, headers, body, at, pending)
         } else {
-            cx.request(Method::Post, url, headers, body, pending);
+            cx.request(Method::Post, url, headers, body, pending)
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
         }
     }
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -633,6 +637,15 @@ impl Grvt {
     }
 }
 impl Venue for Grvt {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let _ = now;
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public quotes cannot make an unseeded account appear loaded.

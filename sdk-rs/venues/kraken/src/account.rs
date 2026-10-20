@@ -306,6 +306,7 @@ struct Accounts<'a> {
 }
 
 struct SignedParts {
+    credential: safe_cex_engine::CredentialSlot,
     url: String,
     headers: Vec<(&'static str, String)>,
     body: Option<String>,
@@ -319,8 +320,17 @@ impl Kraken {
         form: String,
         pending: Pending,
     ) -> Result<(), String> {
-        let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
-        cx.request(method, url, headers, body, pending);
+        let SignedParts {
+            credential,
+            url,
+            headers,
+            body,
+        } = self.signed_parts(cx, method, path, form)?;
+        let scope = auth_scope(&pending);
+        let id = cx.request(method, url, headers, body, pending);
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, credential, scope);
+        }
         Ok(())
     }
     pub(crate) fn signed_streamed(
@@ -332,8 +342,17 @@ impl Kraken {
         at: ArrayAt,
         pending: Pending,
     ) -> Result<(), String> {
-        let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
+        let SignedParts {
+            credential,
+            url,
+            headers,
+            body,
+        } = self.signed_parts(cx, method, path, form)?;
+        let scope = auth_scope(&pending);
         let id = cx.request_streamed_body(method, url, headers, body, at, pending);
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, credential, scope);
+        }
         if path.starts_with("/api/history/") {
             cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
@@ -388,6 +407,11 @@ impl Kraken {
             format!("{}{path}", self.host())
         };
         Ok(SignedParts {
+            credential: if read {
+                safe_cex_engine::CredentialSlot::Secondary
+            } else {
+                safe_cex_engine::CredentialSlot::Primary
+            },
             url,
             headers,
             body: if method == Method::Get {
@@ -1374,6 +1398,40 @@ fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
             .collect(),
     )
 }
+fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Pending::Account(r) = pending else {
+        return None;
+    };
+    Some(match r.scope {
+        Scope::Orders => Orders,
+        Scope::Positions => Positions,
+        Scope::Settings => Settings,
+        Scope::Balance => Balance,
+    })
+}
+impl Kraken {
+    pub(crate) fn account_auth_observation(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Pending::Account(r) = pending else {
+            return None;
+        };
+        let e: wire::Envelope<'_> = serde_json::from_str(response.body).ok()?;
+        if e.error == "authenticationError" || e.error == "unauthorized" {
+            return Some(Rejected);
+        }
+        let shape = match r.scope {
+            Scope::Balance => serde_json::from_str::<Accounts<'_>>(response.body).is_ok(),
+            Scope::Orders | Scope::Positions | Scope::Settings => r.valid,
+        };
+        (wire::success(*response) && shape).then_some(Accepted)
+    }
+}
+
 #[cfg(test)]
 mod cache_tests {
     use super::*;

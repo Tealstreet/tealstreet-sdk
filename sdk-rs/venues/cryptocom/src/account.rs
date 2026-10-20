@@ -739,7 +739,11 @@ impl Cryptocom {
         if matches!(e.code, 40101 | 40103) {
             return Some(Rejected);
         }
-        (e.code == 0 && (200..300).contains(&response.status) && !r.invalid && e.result.is_some())
-            .then_some(Accepted)
+        (e.code == 0
+            && (200..300).contains(&response.status)
+            && !r.invalid
+            && e.result.is_some()
+            && !matches!(r.rows, Rows::Balance(None)))
+        .then_some(Accepted)
     }
 }

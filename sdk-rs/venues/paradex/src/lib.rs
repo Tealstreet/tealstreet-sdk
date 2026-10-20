@@ -78,6 +78,14 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account.auth_observation(pending, response, now)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);

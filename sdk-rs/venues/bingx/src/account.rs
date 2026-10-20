@@ -229,15 +229,27 @@ impl Account {
         stream: bool,
     ) {
         let (url, headers, body) = params.into_request(method, path, Some(credentials), cx.now);
-        if stream {
+        let scope = auth_scope(&request);
+        let id = if stream {
             let at = if path == OPEN_ORDERS {
                 ArrayAt::EnvelopeFieldOrNested("data", "orders")
             } else {
                 ArrayAt::EnvelopeField("data")
             };
-            cx.request_streamed(method, url, headers, at, Pending::Account(request));
+            cx.request_streamed(method, url, headers, at, Pending::Account(request))
         } else {
-            cx.request(method, url, headers, body, Pending::Account(request));
+            cx.request(method, url, headers, body, Pending::Account(request))
+        };
+        if let Some(scope) = scope {
+            cx.tag_account_read(
+                id,
+                if method == Method::Get && credentials.read.is_some() {
+                    safe_cex_engine::CredentialSlot::Secondary
+                } else {
+                    safe_cex_engine::CredentialSlot::Primary
+                },
+                scope,
+            );
         }
     }
 
@@ -1250,6 +1262,51 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
+}
+
+fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    Some(match request {
+        Request::PositionMode { .. } => Settings,
+        Request::Balance { .. } => Balance,
+        Request::Positions { .. } => Positions,
+        Request::OpenOrders { .. } => Orders,
+        _ => return None,
+    })
+}
+impl crate::Bingx {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Pending::Account(request) = pending else {
+            return None;
+        };
+        auth_scope(request)?;
+        #[derive(serde::Deserialize)]
+        struct Evidence {
+            code: i64,
+        }
+        let evidence: Evidence = serde_json::from_str(response.body).ok()?;
+        if matches!(evidence.code, 100001 | 100004 | 100413 | 100419) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || evidence.code != 0 {
+            return None;
+        }
+        let valid = match request {
+            Request::PositionMode { .. } => {
+                serde_json::from_str::<ModeEnvelope>(response.body).is_ok()
+            }
+            Request::Balance { failed, .. }
+            | Request::Positions { failed, .. }
+            | Request::OpenOrders { failed, .. } => !failed,
+            _ => false,
+        };
+        valid.then_some(Accepted)
+    }
 }
 
 #[cfg(test)]

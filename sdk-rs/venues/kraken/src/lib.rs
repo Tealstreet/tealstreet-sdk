@@ -394,6 +394,15 @@ fn interval_spec(interval: &str) -> (&str, f64) {
     }
 }
 impl Venue for Kraken {
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        let _ = now;
+        self.account_auth_observation(pending, response)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

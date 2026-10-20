@@ -262,7 +262,16 @@ impl Polymarket {
             path.split('?').next().unwrap_or(path),
             body.as_deref().unwrap_or(""),
         )?;
-        Ok(cx.request(method, format!("{REST}{path}"), headers, body, pending))
+        let scope = match &pending {
+            Pending::Account(Request::Balance) => Some(safe_cex_engine::AccountReadScope::Balance),
+            Pending::Account(Request::Orders(_)) => Some(safe_cex_engine::AccountReadScope::Orders),
+            _ => None,
+        };
+        let id = cx.request(method, format!("{REST}{path}"), headers, body, pending);
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
+        }
+        Ok(id)
     }
     pub(crate) fn private_subscription(&self) -> Option<String> {
         #[derive(Serialize)]
@@ -660,7 +669,7 @@ impl Polymarket {
                 let Ok(signature) = sign::l1_signature(key, seconds.0 as u64, 0) else {
                     return;
                 };
-                cx.request(
+                let id = cx.request(
                     Method::Get,
                     format!("{REST}/auth/derive-api-key"),
                     vec![
@@ -671,6 +680,11 @@ impl Polymarket {
                     ],
                     None,
                     Pending::Account(Request::Derive),
+                );
+                cx.tag_account_read(
+                    id,
+                    safe_cex_engine::CredentialSlot::Primary,
+                    safe_cex_engine::AccountReadScope::Account,
                 );
                 return;
             }
@@ -1088,6 +1102,71 @@ impl Polymarket {
                 self.account_placed(cx, live);
             }
         }
+    }
+}
+
+impl Polymarket {
+    pub(crate) fn account_auth_observation(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Pending::Account(r) = pending else {
+            return None;
+        };
+        if matches!(r, Request::Time | Request::Positions(_)) {
+            return None;
+        }
+        #[derive(Deserialize)]
+        struct Error<'a> {
+            error: Option<&'a str>,
+        }
+        let e: Error<'_> = serde_json::from_str(response.body).ok()?;
+        if response.status == 401
+            && match r {
+                Request::Derive => {
+                    self.account.auth_attempts >= 3 && e.error == Some("Invalid L1 Request headers")
+                }
+                Request::Balance | Request::Orders(_) => {
+                    e.error == Some("Unauthorized/Invalid api key")
+                }
+                _ => false,
+            }
+        {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || e.error.is_some_and(|e| !e.is_empty()) {
+            return None;
+        }
+        let valid = match r {
+            Request::Derive => {
+                serde_json::from_str::<sign::Credentials>(response.body).is_ok_and(|c| {
+                    !c.api_key.is_empty()
+                        && !c.secret.is_empty()
+                        && !c.passphrase.is_empty()
+                        && sign::l2_headers(
+                            &c,
+                            self.address.as_deref().unwrap_or(""),
+                            0,
+                            Method::Get,
+                            "/data/orders",
+                            "",
+                        )
+                        .is_ok()
+                })
+            }
+            Request::Balance => {
+                #[derive(Deserialize)]
+                struct Balance {
+                    balance: Number,
+                }
+                serde_json::from_str::<Balance>(response.body).is_ok_and(|b| b.balance.0 >= 0.)
+            }
+            Request::Orders(r) => !r.invalid,
+            _ => false,
+        };
+        valid.then_some(Accepted)
     }
 }
 

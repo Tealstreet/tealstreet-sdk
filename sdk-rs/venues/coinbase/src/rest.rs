@@ -93,7 +93,11 @@ impl Coinbase {
         } else {
             format!("https://api.coinbase.com{}", request.path)
         };
+        let scope = crate::account::auth_scope(&request.pending);
         let id = cx.request(request.method, url, headers, request.body, request.pending);
+        if !public && let Some(scope) = scope {
+            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
+        }
         if let Some(at) = request.at {
             cx.stream_response(id, at);
         }

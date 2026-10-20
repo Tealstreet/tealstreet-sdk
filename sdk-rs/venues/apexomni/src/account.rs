@@ -1414,3 +1414,74 @@ impl ApexOmni {
         self.account.prune_progress();
     }
 }
+
+pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    match pending {
+        Pending::Account(Request::Positions { .. }) => Some(Positions),
+        Pending::Account(Request::Orders { .. }) => Some(Orders),
+        Pending::Account(Request::Balance) => Some(Balance),
+        _ => None,
+    }
+}
+impl ApexOmni {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Pending::SignedAuth {
+            pending, legacy, ..
+        } = pending
+        else {
+            return None;
+        };
+        auth_scope(pending)?;
+        let Pending::Account(r) = pending.as_ref() else {
+            return None;
+        };
+        let generation = match r {
+            Request::Positions { generation, .. } | Request::Orders { generation, .. } => {
+                *generation
+            }
+            _ => None,
+        };
+        if generation.is_some_and(|g| {
+            self.account
+                .snapshot
+                .as_ref()
+                .is_none_or(|s| s.generation != g)
+        }) {
+            return None;
+        }
+        let e: crate::Envelope<'_> = serde_json::from_str(response.body).ok()?;
+        let code = e.code.as_ref().and_then(crate::Code::number);
+        // Keep legacy retry admission (including its old message fallback) before observing.
+        if !legacy
+            && code.is_some_and(|c| c != 0)
+            && (matches!(code, Some(20016 | 401)) || e.msg.to_ascii_lowercase().contains("sign"))
+        {
+            return None;
+        }
+        if code == Some(10002) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || code != Some(0) {
+            return None;
+        }
+        let data = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+            .ok()?
+            .data;
+        let valid = match r {
+            Request::Positions { bad, .. } => {
+                !bad && serde_json::from_str::<wire::Metadata<'_>>(data.get())
+                    .is_ok_and(|m| !m.id.is_empty() && m.positions.get().starts_with('['))
+            }
+            Request::Orders { bad, .. } => !bad && data.get().starts_with('['),
+            Request::Balance => serde_json::from_str::<wire::BalanceRow>(data.get()).is_ok(),
+            Request::Identity { .. } => false,
+        };
+        valid.then_some(Accepted)
+    }
+}
