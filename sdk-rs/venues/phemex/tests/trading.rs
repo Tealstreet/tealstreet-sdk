@@ -1563,8 +1563,24 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
         e.store().setting("ETHUSDT").is_none(),
         "a mode ACK cannot invent leverage or margin"
     );
+    // Both currency reads must dispatch through the real shared budget before
+    // the later mode ACK makes their captured authority revision stale.
+    let a = e.wait_for(a, |actions| requests(actions).len() == 2);
     let stale = requests(&a);
     assert_eq!(stale.len(), 2);
+    for r in &stale {
+        assert_eq!(r.method, Method::Get);
+        assert!(r.url.contains("/g-accounts/accountPositions?"));
+    }
+    for currency in ["USDT", "USDC"] {
+        assert_eq!(
+            stale
+                .iter()
+                .filter(|r| p(r, "currency").as_deref() == Some(currency))
+                .count(),
+            1
+        );
+    }
     // A delayed untimed OneWay row must not erase the acknowledged Hedged mode.
     e.handle(1001., Event::WsMessage { socket, text: r#"{"type":"incremental","positions_p":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"8"},{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"-10","crossMargin":true}]}"# });
     e.drain_actions().for_each(drop);
@@ -1637,6 +1653,7 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
         .expect("the next authoritative account refresh is scheduled");
     e.handle(at, Event::TimerFired { timer });
     let fresh: Vec<_> = e.drain_actions().collect();
+    let fresh = e.wait_for(fresh, |actions| requests(actions).len() == 2);
     assert_eq!(requests(&fresh).len(), 2);
     for r in requests(&fresh) {
         let currency = if r.url.contains("USDC") {

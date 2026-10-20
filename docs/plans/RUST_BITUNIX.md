@@ -3217,3 +3217,39 @@ Resume the wire/nativeconsumer tail serially AFTER the native batch finishes;
 keep timeout120s and every wire assertion unchanged. Product checks alreadyPASS,
 454compiled SDK and110host proofs remain current. Source-last batch refreshes
 root44/28/27 after the PM test-only correction. No performance job is running.
+
+Source-last is fully green: 44typecheck/28lint/27test tasks, 7,885SDKsource
+cases in each runner. Native-fixed passes strictnativeClippy/bans/fmt and
+2,584tests across177groups beforePhemex; its sole failure is the incoming
+Phemex stale-read fixture assuming two requests dispatch immediately despite
+the retained real3RPS account budget. Test-only correction waits on actual
+emitted timers until both GETs dispatch, requires exactUSDT/USDC identities,
+and preserves all stale-response/mode/margin/leverage assertions. Independent
+review PASS; production pacing and settings/account authority unchanged.
+
+Root now runs consumer-serial first (framewire and nativefixture PASS), then
+the completePhemex crate and the remaining Polymarket/TxFlow/Weex/Woo/WASM
+packages, allworkspace docs and WASMClippy. No concurrentCargo consumers.
+Then run only the four mandatory Bitunix/Binance gates on current source;
+allother31rowmatrix proofs remain exact-head CI prerequisites. Wind-down
+instruction: finish thisPR, merge onlygreen, write finalhandoff, stop; noqueued
+follow-up work.
+
+Consumer-serial passes framewire, nativefixture, serveradapter, server/MCP/CLI/
+ReactNative loaders and packagedMCPbuild/smoke. Lifecycle has8PASS/1incomplete:
+TS backing-buffer baseline at replay.mjs:765 fails unchangedsettlement before
+constructor/cpuStart, so no measured replay result. Preserve originallog
+/tmp/bitunix-c44-consumers-serial-live-smoke.log. Plan one fresh unchanged
+lifecycle run only AFTERnative stops and existinghostqualification succeeds;
+use the existing capture-output variable to retain its private tape even if
+itfails. No completed performancefailure is retried; no sampler/deadline/
+quietwindow/cap/oracle changes. Independent review of this admission pending.
+
+Allremaining native checks PASS: 486cases across29groups plus2,584pre-Phemex
+cases gives3,070distinctnative cases/206groups, zeroignored. Allworkspace
+docs, globalfmt, strictPhemexalltargetClippy and strictWASMClippy PASS; earlier
+allworkspacenativeClippy/bans remain current (productionunchanged since).
+Consumer loader totals20 (server11/MCP5/CLI2/RN2), packagedMCP smoke PASS.
+Independent admission audit approves exactlyone qualifiedlifecycle attempt:
+originalstackpoints to baseline765 and emptyoutputdirectory, not a measured
+performance outcome. Native jobs are stopped beforequalification/replay.
