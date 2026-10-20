@@ -7,11 +7,14 @@ throttled postMessage.
 Rust frames keep the venue adapter's published SDK quantity units. COIN-M
 orders carry native contract counts while positions carry base quantity; the
 COIN-M applier preserves the USD contract multiplier in native sizing extras.
-For MEXC and BloFin,
+For MEXC, BloFin and KuCoin futures,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic
-retains its native-volume contract. `SETTINGS` optionally carries
+retains its native-volume contract. Use decimal-safe division here: a base fill
+of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position frames also
+restore `extra.contractsNative` for native-volume venues, which copier closes
+consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames. `POSITIONS` may append
 string references for venue-defined position IDs; preserve these when present

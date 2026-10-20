@@ -772,7 +772,7 @@ No KuCoin Futures sandbox contract is wired. Do not reintroduce Bitget's `SUSDT`
 17. **Ticker percentage from WS**: WS ticker `priceChangePercent` is multiplied by 100 to convert from decimal to percentage (`kucoin.ws-public.ts:174`).
 18. **No Bitget product artifacts**: KuCoin code uses KuCoin response shapes and contract ids only; the old `00000`, `_UMCBL`, `umcbl`/`sumcbl`, and commented leverage-port remnants were removed.
 19. **Order fetch is two books with preserve-on-failure**: `fetchOrders` = `/api/v1/orders` (normal) + `/api/v1/stopOrders` (TP/SL + trailing). A failed book preserves the existing store orders of that category so the tick's full-replace can't wipe TP/SL lines — see "Order Fetch — two books, partial-failure preservation". (The old duplicate `fetchTrailingStopOrders`, which re-hit `/api/v1/stopOrders`, was removed.)
-20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book.
+20. **Orderbook gap recovery**: Futures `/contractMarket/level2` deltas must line up with the previous sequence. If a higher non-contiguous sequence arrives, refetch the REST `/api/v1/level2/snapshot` snapshot instead of applying the delta to a stale local book. If a gap appears while replaying buffered updates, stop that replay and retain its entire remaining suffix for the next snapshot; continuing through the suffix replaces the buffer repeatedly and loses the bridge sequence.
 21. **Broker attribution**: `X-CHANNEL-API-CODE: '3zexp'` is still sent as a
     default REST header for legacy attribution. The current official KuCoin
     Broker docs additionally require signed partner headers
@@ -899,3 +899,35 @@ different value shapes, do not mix them:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Futures and spot send `clientOid`, rule `^[A-Za-z0-9_-]{1,40}$` (KuCoin: at most 40; letters, digits, `_`, `-`).
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/kucoin` for Classic linear futures.
+Spot remains on its separate HF adapter. Placement amounts stay native lots;
+order/position/fill quantities exposed by the store are base units, while book
+amounts keep the native lot convention of the TS adapter. A replacement converts
+base amounts back to lots once. `extra.kucoinBroker` reaches the Rust signer.
+
+Rust obtains a new public/private bullet token per reconnect, shards snapshot
+subscriptions below 400 topics, and watches every socket's ping deadline. Partial
+position notifications preserve absent risk fields and request REST recovery
+when a new position cannot be reconstructed. Failed reads retain good state;
+revision and timestamp fences prevent stale snapshots from reopening exposure or
+undoing settings changes. Zero positions populate settings without fake rows.
+
+Fills/order history use the Classic numbered-page APIs; income preserves native
+completed settlement ledger rows with exact offsets and excludes pending
+settlement markers. Explicit `FUNDING_FEE` queries use the symbol-required private
+funding endpoint rather than deriving funding from realized PnL. Public trades
+and candles return the shared engine JSON shapes. Conditional opening orders and
+brackets with incompatible trigger references reject before writes, since the
+current common command cannot express a safe native trigger direction/reference.
+
+The documented private tape and public capture replay live in `sdk-rs/harness`;
+`docs/plans/venue-ports/KUCOIN.md` records review findings and gate evidence.
+
+The Rust frame bridge reconstructs native remainder/fill extras with decimal-safe
+division by contractSize, preserving chaser placement units (0.3 / 0.1 = 3 lots).
+
+The bridge also restores position extra.contractsNative; cross-trade closes use
+that native lot count instead of the published base position quantity.
