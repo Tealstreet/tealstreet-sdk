@@ -722,3 +722,19 @@ numeric steps are already guarded natively. Verify and retain those fixes.
 Candle lastSide has no demonstrated repository consumer and native Bybit kline
 messages do not supply aggressor side; skip under the production-impact bar
 instead of inventing it from candle direction.
+
+## Phase 4d first identity-query batch plan
+
+Implement rare typed getAccount commands for Backpack, BingX, Phemex and WOO
+using existing private request/signing/continuation machinery and the selected
+read credentials. Preserve TS identity semantics: Backpack /api/v1/account
+accountId or userId; BingX USDT balance userId (fallback first row); Phemex
+USDT g-accounts/accountPositions account.userID; WOO /v3/accountinfo response
+applicationId and referrerID, not the configured WS application ID. User and
+affiliate identifiers remain decimal strings without f64 conversion, including
+values above 2^53. Required missing identity or public-only use fails visibly;
+failed reads never clear account Store domains. No identity derived from
+balances, positions or configured unrelated identifiers. Native command handlers
+and route/shape/secondary-credential/failure tests precede SDK dispatch wiring
+in the later consolidated identity batch. Existing working account commands
+and venues with no TS identity API remain unchanged.
