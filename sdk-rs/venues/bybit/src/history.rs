@@ -219,7 +219,7 @@ fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<
             .map(|(a, b)| (Some(a), Some(b)))
             .collect()
     })
-    // An inverted range keeps its single window for Bybit to reject.
+    // An inverted or too-large range keeps one window for Bybit to reject.
     .unwrap_or_else(|| VecDeque::from([(Some(from), Some(to))]))
 }
 
