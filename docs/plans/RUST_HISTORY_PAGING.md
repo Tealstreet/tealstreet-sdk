@@ -54,3 +54,5 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
     it has enough rows, and only an unbounded read that exhausts its page cap
     with a cursor pending fails as INCOMPLETE. A bounded read at its cap keeps
     what it found, as before (a lookup reports a non-definitive miss).
+    Because a bounded read no longer fetches pages after its limit, a
+    malformed later page can no longer fail it.

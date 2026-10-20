@@ -702,7 +702,8 @@ impl History {
             return;
         }
         // A bounded read stops once it keeps enough rows (filters run after the
-        // page arrives); only an unbounded read can exhaust its pages.
+        // page arrives): Paradex pages newest first, so those are the rows a
+        // full walk would keep. Only an unbounded read can exhaust its pages.
         let (enough, bounded) = match (&request.query, &request.rows) {
             (Query::Fills { limit, .. }, Rows::Fills(rows)) => (
                 rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize,
