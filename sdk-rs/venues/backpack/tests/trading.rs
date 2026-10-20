@@ -14,12 +14,10 @@ fn place(e: &mut Driver, id: u32, orders: &str) {
 }
 fn done(e: &mut Driver) -> Result<String, String> {
     e.drain_actions()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
+            _ => None,
         })
         .expect("command completed")
 }
@@ -128,9 +126,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
-            Action::Notice(Notice::CommandDone {
-                result: Err(error), ..
-            }) if error.contains("Bybit")
+            Action::Notice(Notice::CommandFailed { error, .. }) if error.message.contains("Bybit")
         )));
     }
 }
@@ -148,10 +144,11 @@ fn caller_uint32_is_numeric_on_wire_and_bad_batch_ids_reject_before_any_write() 
         );
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
     place(
         &mut e,
@@ -177,10 +174,11 @@ fn duplicate_client_ids_and_bracket_client_id_fail_closed() {
         place(&mut e, 1, orders);
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
     }
 }
 #[test]
@@ -303,10 +301,11 @@ fn no_write_retry_after_lost_response_and_leverage_is_global_patch() {
     );
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     e.handle(
         2000.0,
         Event::Command(Command::SetLeverage {
@@ -822,9 +821,59 @@ fn amend_does_not_replace_after_an_ambiguous_cancel_ack() {
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
         );
-        assert!(out.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(_), .. })
-        )));
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
+    }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome, Response};
+    let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;
+    for (status, body, kind, outcome) in [
+        (503, "unavailable", None, Some(Outcome::Unknown)),
+        (
+            400,
+            r#"{"code":"INVALID_ORDER","message":"bad"}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
+        ),
+        (
+            200,
+            r#"{"code":"INSUFFICIENT_MARGIN","message":"margin"}"#,
+            None,
+            None,
+        ),
+        (200, r#"{"id":""}"#, None, Some(Outcome::Unknown)),
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, 1, market);
+        let r = requests(&mut e).pop().unwrap();
+        e.handle(
+            2000.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let error = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{status} {body}"));
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, outcome),
+            "{status} {body}: {}",
+            error.message
+        );
     }
 }
