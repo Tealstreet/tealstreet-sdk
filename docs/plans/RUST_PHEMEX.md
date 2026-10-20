@@ -258,3 +258,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - All6/6freshlocalreplaysPASSon055ab85ce0:Phemex/Binance/Krakenpublic+private. PublicmedianCPUms/steadyms/retainedMBTS/Rust:Phemex448.6/139.8,313.9/62.1,20.0/3.0;Binance252.6/147.0,144.7/70.7,18.7/2.4;Kraken979.0/165.0,718.4/89.5,18.0/2.1. Bundles760,201/793,847/892,717bytesbelow1,258,291. Allsource/boundarychecksabovePASS;independentintegrationreviewsCLEAN.
 - Publishthissource/updatedproof,require64replays+7controls/allcurrentfullCIgreen,normalmergePR1310intofeat/rust-rewriteandcutfreshfollowupbranch. No productionmemory/scoringchange;unitGCcorrectionretainsstrictobservedgrowth/exactarithmeticchecks. Priorallgreen9cde01848a59gateproofpreserved,notclaimedfornewdelta.
+
+### Apex Omni integration plan
+
+- ApexOmniecb313026f landedwhile07c93f8459CIwasrunning. It addsonevenue/scopedwrapper+harnesspaths, no sharedengine/model/cryptoproductionchange. Preserve20feature/build/factoryregistration,exactPhemexcallerIDs/auth/bootstrap/oracle/memoryfixesandallpriorvenuehooks;independentboundedreviewsrequested. Expected66replays(24public42private)+7controls.
+- RequiredPhemex/BinancegatesalreadyPASSonunchangedvenuecode;verifynewaffectednative/SDK/harness/typecheck/lintandcommit/publishstablemerge promptly. Runcombined/localcontrolsinparallelwithfinal-headfullCIacceptance;all66replays+7controls/source/general/secretchecks mustgreenbeforemerge. ThisavoidsserializingunaffectedlocalrepeatsoverfullCI,withoutomittingfinalexact-headgates.
