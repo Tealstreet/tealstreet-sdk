@@ -279,3 +279,9 @@ Main Coinbase's spot tape now proves the real 403 futures-permission fallback;
 the saved spot alias has no futures probe. Four private variants passed before
 these corrections (both legacy INTX and both saved-spot algorithms); the full
 eight-profile rerun is in progress. No final gate claim yet.
+
+CFM startup now completes and its account/command replay matches. A final ticker
+correction keeps funding time zero for dated futures even when the shared API
+schema includes incidental perpetual metadata; INTX retains its original
+unknown-metadata sentinel. The strengthened CFM regression and all 86 venue tests
+pass; independent review and strict Clippy are clear. Both main spot tapes pass.

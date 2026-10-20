@@ -710,9 +710,12 @@ impl Coinbase {
                         percentage,
                         volume,
                         quote_volume: display_round(price * volume * contract),
-                        funding_time: p
-                            .and_then(|p| timestamp(&p.funding_time))
-                            .map_or(if p.is_none() { 0. } else { f64::NAN }, |n| n * 1000.),
+                        funding_time: if *kind == ProductKind::Intx {
+                            p.and_then(|p| timestamp(&p.funding_time))
+                                .map_or(f64::NAN, |n| n * 1000.)
+                        } else {
+                            0.
+                        },
                         open_interest: p.map_or(f64::NAN, |p| {
                             safe_cex_engine::num::parse(&p.open_interest) * contract
                         }),
