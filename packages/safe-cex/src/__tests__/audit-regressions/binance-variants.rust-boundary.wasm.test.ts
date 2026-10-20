@@ -294,7 +294,7 @@ it('rejects a partial COIN-M batch with the native accepted IDs through the SDK'
     ])).rejects.toMatchObject({ message: 'insufficient margin', partialOrderIds: ['321'] });
     expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/batchOrders?'))).toHaveLength(1);
     expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/order?'))).toHaveLength(0);
-    expect(t.errors).toContain('insufficient margin');
+    expect(t.errors).toContain('Exchange Error: insufficient margin');
   } finally {
     t.exchange.dispose();
   }

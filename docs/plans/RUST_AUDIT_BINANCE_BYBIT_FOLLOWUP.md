@@ -191,6 +191,18 @@ No new error architecture or unrelated engine helper migration belongs here.
   fixture explicitly expects both native identity fields. Full checks and all
   replay gates must now certify this integrated source, replacing earlier
   pre-integration performance evidence.
+- Integrated-source checks: 561 native tests passed (engine 102, Binance 181,
+  Bybit 179, AsterDEX 99); bans, scoped format, strict native all-target Clippy,
+  default WASM Clippy and Binance-only WASM Clippy passed. Root typecheck 44,
+  lint 28 and other-package tests 25 passed; SDK CI passed 7,844 tests/530 files.
+  The selected Binance artifact is 1,014,611 bytes. Actual compiled SDK proof
+  passed: six primary/secondary USD-M/PM HMAC cases, eight variant controls
+  including Spot/COIN-M HMAC and partial-error IDs, and two Spot worker/main
+  delivery cases (16 tests total). An initial broad multi-venue SDK selection
+  against the Binance-only artifact produced unsupported-venue failures and
+  is not a valid gate; selectors were corrected. The partial-error test also
+  now expects BaseExchange's existing 'Exchange Error:' event prefix. Combined
+  SDK/host suites and final replay gates remain to run with unchanged policy.
 
 ## Authorized next task after this PR merges
 
