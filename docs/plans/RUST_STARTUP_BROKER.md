@@ -84,8 +84,11 @@ private snapshots retain their stricter all-or-nothing safety contract.
   both BloFin cases pass (all 444 SDK cases now verified).
 - Replay checkpoint: all 11 affected public gates pass with three runs each,
   identical output and lower Rust main-thread CPU/retained memory. Ten of 11
-  private gates pass. Bitrue's remaining lookup mismatch is a missing TS WS
-  time-in-force field; it is under independent review, not normalized away.
+  private gates pass. The final Bitrue private gate now also passes: independent
+  review found a missing TS WS time-in-force field. The paired TS mapper fix
+  preserves explicit native/cached TIF and the documented GTC default; all 11
+  focused execution/lookup regressions pass, plus SDK typecheck and lint.
+  Rust metadata, tapes and generic command-result comparison are unchanged.
   The full root tests pass with package tasks serialized after concurrent
   imports timed out. Signing-clock setup now has a deterministic slow-import
   regression without weakening the signature window. No real account used.

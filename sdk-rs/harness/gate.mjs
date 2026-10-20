@@ -433,6 +433,8 @@ const KNOWN_TS_FIXES = {
   // Fill history no longer borrows counterparty IDs or invents an order ID;
   // filtered full pages fail INCOMPLETE and rejected reads propagate errors.
   // Conditional REST children retain exact IDs/parents and trigger references.
+  // Fresh TS private rows now retain native/cached TIF and default to GTC,
+  // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
   bitrue() {},
   bitget: {
