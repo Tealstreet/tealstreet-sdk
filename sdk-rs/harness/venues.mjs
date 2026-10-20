@@ -1,6 +1,7 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys, requestKey } from './requests.mjs';
 
@@ -144,6 +145,20 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  woo: {
+    rust: 'woo',
+    wooProtocol: true,
+    subscriptionGenerations: true,
+    ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
+    privateSocket: '/v2/ws/private/',
+    matchRequestBody: true,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+    respondToPing: true,
+    createSocketAudit: createWooSocketAudit,
+    validateRequest: validateWooRequest,
+    compareFillPrices: true,
+  },
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,

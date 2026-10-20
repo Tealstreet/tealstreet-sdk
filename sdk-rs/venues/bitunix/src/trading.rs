@@ -871,6 +871,7 @@ impl BitunixFutures {
             amount: parent.remaining,
             price: Some(parent.price),
             trigger_price: None,
+            max_slippage_pct: None,
             stop_loss: n.sl,
             take_profit: n.tp,
             reduce_only: Some(parent.reduce_only),

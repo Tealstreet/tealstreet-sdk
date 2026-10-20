@@ -691,3 +691,27 @@ tail/coin strings, with failed-before/pass-after reservation regression. Engine
 61tests andBitget147tests PASS; BitunixO1indexes, railsettings, startupreservation,
 emptybooks and streamingdecoder contracts are retained. Full workspace/root
 verification, new aggregate build and exact-head CI continue before merge.
+
+### WOO landing integration plan
+
+Merge6945ee83b4 after the previous head passed Bitunix/Binance and every
+replay lane except BingX steady CPU. Keep nested workspace, Bitunix socket
+identities and all strict replay controls. Review harness, host/SDK and engine
+compatibility independently; preserve the optional market-slippage field while
+Bitunix retains its existing semantics. Re-run native/workspace/WASM/root gates,
+Bitunix and Binance public/private, and native Bitget parity. WOO adds the14th
+public lane and18th private variant.
+
+BingX's previous CI steady CPU was TS41.5/Rust48.1ms. WIP8e526c20b4 changes
+its venue profile from size optimization to throughput optimization. Verify the
+unchanged1,258,291-byte cap and all correctness/CPU/memory thresholds before
+retaining it. Exact merged-head green CI remains the merge condition.
+
+Merge review fixed Bitunix's sole cancel/replace PlaceOrderOpts literal for the
+new optional field, explicitly None as in the other existing venues. WOO's
+new URL-keyed audit reset could erase parallel socket state; use actual socket
+metadata and a production-path regression. All239helpers PASS. Independent
+host/SDK review passes27wrapper/frame,36host/socket/wire and4adapter checks.
+WOO TS public77frames/222markets/2books and private60frames/20commands have
+zero unserved/unused/signature/protocol/socket errors. Local lint28tasks PASS;
+full root/native/WASM verification and exact-head CI remain pending.

@@ -125,3 +125,31 @@ test('production Bitrue audit isolates replacement and parallel socket subscript
   }
   assert.deepEqual(depthTape.audit.errors(), [], 'split subscriptions remain visible after final local teardown');
 });
+
+test('production WOO audit keeps parallel subscriptions and heartbeat replies on their socket', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('  send(socket, text) {');
+  const end = source.indexOf('\n  verifySignature(', start);
+  const venue = venueOf('woo');
+  const ProductionTape = new Function('Tape', 'values', 'venue', 'subscriptionKeys', 'canonicalObject',
+    `return class extends Tape { ${source.slice(start, end)} }`)(Tape, { venue: 'woo' }, venue, subscriptionKeys, stable);
+  const tape = new ProductionTape([], venue);
+  const url = 'wss://wss.woox.io/ws/stream/undefined';
+  const first = tape.connect(url, () => {}, () => {});
+  tape.send(first, '{"event":"ping"}');
+  const subscribe = '{"event":"subscribe","topic":"tickers"}';
+  tape.send(first, subscribe);
+  const second = tape.connect(url, () => {}, () => {});
+  tape.send(second, '{"event":"ping"}');
+  first.onMessage('{"topic":"tickers","data":[]}');
+  assert.deepEqual(tape.audit.errors(), [], 'opening a sibling must not reset the first socket');
+  second.onMessage('{"topic":"tickers","data":[]}');
+  assert.deepEqual(tape.audit.errors(), ['WOO frame arrived without subscription tickers']);
+  tape.send(second, subscribe);
+  const canonical = subscriptionKeys(url, subscribe, new Set(), { ...venue, fullSocketIdentity: true })[0];
+  assert(tape.fullSubscriptions.has(`1 ${canonical}`));
+  assert(tape.fullSubscriptions.has(`2 ${canonical}`));
+  first.onMessage('{"event":"ping"}');
+  tape.send(second, '{"event":"pong"}');
+  assert(tape.audit.errors().some((error) => error.includes('server ping was not answered')));
+});

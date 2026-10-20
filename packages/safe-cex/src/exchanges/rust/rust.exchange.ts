@@ -1,3 +1,4 @@
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -46,6 +47,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   blofin: 'blofin',
   bitrue: 'bitrue',
   mexc: 'mexc',
+  woo: 'woo',
   bingx: 'bingx',
   bitunix: 'bitunix',
   bybit: 'bybit',
@@ -65,6 +67,12 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  woo: {
+    label: 'WOO',
+    mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
+    requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
+    isValid: (id) => /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)),
+  },
   backpack: {
     label: 'Backpack',
     requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
@@ -149,6 +157,20 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'woo') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+      this.fetchHistoricalPositions = async (opts) => {
+        const to = opts.to ?? Date.now();
+        const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+        const orders = await this.fetchHistoricalOrders({ from, to });
+        return wooOrdersToPositionRecords(orders, {
+          account: opts.account, from,
+          resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+        });
+      };
+    }
   }
 
   get isPublicDataOnly(): boolean {
@@ -218,7 +240,7 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (this.name !== 'mexc' || this.isPublicDataOnly) return;
+    if (!['mexc', 'woo'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
   };
@@ -352,14 +374,15 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
-    const milliseconds = (value?: number) =>
-      value === undefined || !Number.isFinite(value)
-        ? undefined
-        : Math.floor(value > 1_000_000_000_000 ? value : value * 1000);
+    const milliseconds = (value?: number) => {
+      if (value === undefined || !Number.isFinite(value) || (this.name === 'woo' && value < 0)) return undefined;
+      const alreadyMilliseconds = this.name === 'woo' ? value >= 1_000_000_000_000 : value > 1_000_000_000_000;
+      return Math.floor(alreadyMilliseconds ? value : value * 1000);
+    };
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });

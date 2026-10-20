@@ -36,7 +36,8 @@
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:replay": "node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
-    "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs"
+    "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

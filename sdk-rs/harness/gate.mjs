@@ -303,6 +303,12 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
 // execution prices, terminal state, cancellation identities and heartbeat echoes.
 // Native regressions additionally pin split conservation, conditional identity,
 // protection provenance and failed/incomplete history; no oracle values change.
+// WOO repairs are paired in the TS reference itself, without oracle rewriting:
+// exact integer IDs, cumulative/terminal order state, nested algo executions,
+// per-execution deduplication, atomic failed-page snapshots, protection provenance,
+// tick splitting, cancellation families, hedge mode and signed V1 income fees.
+// Rust additionally walks V3 fill time windows; TS still reads one page.
+KNOWN_TS_FIXES.woo = [];
 KNOWN_TS_FIXES.bitrue = [];
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal

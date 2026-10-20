@@ -579,6 +579,7 @@ export class Tape {
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
     const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
+    this.audit?.connected?.(rawUrl, socket);
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
     // A recorded open may already be waiting for this socket to be constructed.
@@ -615,7 +616,7 @@ export class Tape {
       catch (error) { this.invalidSignatures++; throw error; }
     }
     for (const key of subscriptionKeys(socket.rawUrl ?? socket.url, text, this.callerIds, { ...this.venue, fullSocketIdentity: true })) {
-      this.fullSubscriptions.add(key);
+      this.fullSubscriptions.add(this.venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
       if (this.startupSubscriptions.get(key) === false) { this.startupSubscriptions.set(key, true); this.pendingStartupSubscriptions--; }
     }
     this.sent(socket.url, text);

@@ -9,6 +9,7 @@
     feature = "bitunix",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -19,7 +20,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bitunix, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bitunix, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -52,6 +53,8 @@ use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+#[cfg(feature = "woo")]
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -94,6 +97,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bitunix",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -112,6 +116,7 @@ struct EngineOptions {
         feature = "bitunix",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "bitget",
@@ -136,7 +141,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(feature = "hyperliquid")]
+    #[cfg(any(feature = "hyperliquid", feature = "woo"))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -574,6 +579,7 @@ impl WasmEngine {
         feature = "bitunix",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "bingx",
         feature = "mexc",
@@ -658,6 +664,14 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
+            }))),
+            #[cfg(feature = "woo")]
+            "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
             }))),
             #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
