@@ -6,6 +6,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json::ArrayAt};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -68,10 +69,8 @@ pub struct Account {
     key: Option<String>,
     socket: Option<SocketId>,
     open: bool,
-    received_at: f64,
-    recovery: Option<TimerId>,
+    supervisor: Supervisor,
     keepalive: Option<TimerId>,
-    heartbeat: Option<TimerId>,
     poll: Option<TimerId>,
     repair: Option<TimerId>,
     orders_revision: u64,
@@ -188,14 +187,8 @@ impl Account {
         self.socket == Some(socket)
     }
     pub fn handles_timer(&self, timer: TimerId) -> bool {
-        [
-            self.recovery,
-            self.keepalive,
-            self.heartbeat,
-            self.poll,
-            self.repair,
-        ]
-        .contains(&Some(timer))
+        self.supervisor.owns_timer(timer)
+            || [self.keepalive, self.poll, self.repair].contains(&Some(timer))
     }
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
@@ -211,6 +204,11 @@ impl Account {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
+        self.supervisor = Supervisor::new(Config {
+            idle_timeout_ms: SILENCE_MS,
+            ping_interval_ms: Some(PING_MS),
+            ..Config::default()
+        });
         self.fetch_key(cx, credentials);
         self.fetch_mode(cx, credentials);
         self.fetch_balance(cx, credentials);
@@ -246,6 +244,7 @@ impl Account {
             return;
         }
         self.key_in_flight = true;
+        self.supervisor.connecting(cx);
         Self::request(
             cx,
             credentials,
@@ -342,10 +341,9 @@ impl Account {
     }
 
     fn clear_private_timers(&mut self, cx: &mut Cx<'_, Pending>) {
-        for timer in [&mut self.recovery, &mut self.keepalive, &mut self.heartbeat] {
-            if let Some(timer) = timer.take() {
-                cx.clear_timer(timer);
-            }
+        self.supervisor.cancel(cx);
+        if let Some(timer) = self.keepalive.take() {
+            cx.clear_timer(timer);
         }
     }
     fn invalidate_private(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -360,18 +358,14 @@ impl Account {
         self.bump_orders();
         self.bump_positions();
     }
-    fn fresh_key(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+    fn fresh_key(&mut self, cx: &mut Cx<'_, Pending>, _credentials: &Credentials) {
         self.invalidate_private(cx);
-        self.fetch_key(cx, credentials);
+        self.supervisor.retry(cx);
     }
 
     pub fn on_open(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
         self.open = true;
-        self.received_at = cx.now;
-        if let Some(timer) = self.heartbeat.take() {
-            cx.clear_timer(timer);
-        }
-        self.heartbeat = Some(cx.set_timer(PING_MS));
+        self.supervisor.opened(cx);
         if let Some(timer) = self.keepalive.take() {
             cx.clear_timer(timer);
         }
@@ -389,7 +383,7 @@ impl Account {
         // invalidate its replacement or install a second recovery timer.
         self.socket = None;
         self.invalidate_private(cx);
-        self.recovery = Some(cx.set_timer(1_000.0));
+        self.supervisor.retry(cx);
     }
 
     pub fn on_timer(
@@ -398,10 +392,27 @@ impl Account {
         timer: TimerId,
         credentials: &Credentials,
     ) {
-        if self.recovery == Some(timer) {
-            self.recovery = None;
-            self.fetch_key(cx, credentials);
-        } else if self.keepalive == Some(timer) {
+        match self.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => {
+                self.fetch_key(cx, credentials);
+                return;
+            }
+            Tick::TimedOut(_) => {
+                self.fresh_key(cx, credentials);
+                return;
+            }
+            Tick::Ping => {
+                if self.open
+                    && let Some(socket) = self.socket
+                {
+                    cx.send(socket, "Ping");
+                }
+                return;
+            }
+            Tick::Handled => return,
+            Tick::Unhandled => {}
+        }
+        if self.keepalive == Some(timer) {
             self.keepalive = None;
             if let Some(key) = self.key.as_deref() {
                 Self::request(
@@ -415,22 +426,6 @@ impl Account {
                 );
             } else {
                 self.fresh_key(cx, credentials);
-            }
-        } else if self.heartbeat == Some(timer) {
-            self.heartbeat = None;
-            if cx.now - self.received_at >= SILENCE_MS {
-                cx.log(
-                    LogLevel::Warning,
-                    "BingX private stream timed out; refreshing listen key",
-                );
-                self.fresh_key(cx, credentials);
-            } else {
-                if self.open
-                    && let Some(socket) = self.socket
-                {
-                    cx.send(socket, "Ping");
-                }
-                self.heartbeat = Some(cx.set_timer(PING_MS));
             }
         } else if self.repair == Some(timer) {
             self.repair = None;
@@ -634,8 +629,6 @@ impl Account {
                     format!("{}?listenKey={key}", crate::paths::PRIVATE_WS),
                     safe_cex_engine::SocketChannel::Private,
                 ));
-                self.received_at = cx.now;
-                self.heartbeat = Some(cx.set_timer(PING_MS));
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {
@@ -752,11 +745,8 @@ impl Account {
         );
         match request {
             Request::ListenKey { .. } => {
-                self.key_in_flight = false;
-                if let Some(timer) = self.recovery.take() {
-                    cx.clear_timer(timer);
-                }
-                self.recovery = Some(cx.set_timer(RETRY_MS));
+                self.invalidate_private(cx);
+                self.supervisor.retry_after(cx, RETRY_MS);
             }
             Request::Keepalive { .. } => {
                 if let Some(timer) = self.keepalive.take() {
@@ -772,7 +762,7 @@ impl Account {
     }
 
     pub fn on_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str, credentials: &Credentials) {
-        self.received_at = cx.now;
+        self.supervisor.received(cx.now);
         if text == "Ping" {
             if let Some(socket) = self.socket {
                 cx.send(socket, "Pong");

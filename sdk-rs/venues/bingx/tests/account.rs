@@ -119,8 +119,25 @@ impl Harness {
             .iter()
             .position(|(_, t)| *t == at)
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
-        let (timer, time) = self.timers.remove(i);
-        self.now = time;
+        let (timer, _) = self.timers.remove(i);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+    fn fire_latest_due(&mut self, at: f64) {
+        let i = self
+            .timers
+            .iter()
+            .rposition(|(_, time)| *time <= at)
+            .expect("due private watchdog");
+        let (timer, _) = self.timers.remove(i);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+    fn fire_recovery(&mut self) {
+        let (timer, at) = *self.timers.last().expect("recovery timer");
+        assert!(at > self.now);
+        self.timers.pop();
+        self.now = at;
         self.event(Event::TimerFired { timer });
     }
     fn poll_late(&mut self, now: f64) {
@@ -258,6 +275,7 @@ fn expired_key_closes_stale_socket_and_recovery_is_single_owner() {
     let old = h.private();
     h.message(r#"{"e":"listenKeyExpired"}"#);
     assert_eq!(h.closed, [old]);
+    h.fire_recovery();
     let key = h.take(KEY);
     h.event(Event::WsClosed {
         socket: old,
@@ -295,6 +313,12 @@ fn transient_key_failure_retries_and_keepalive_expiry_rebuilds() {
         r#"{"code":100001,"msg":"listen key does not exist"}"#,
     );
     assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains(KEY))
+    );
+    h.fire_recovery();
+    assert!(
         h.requests
             .iter()
             .any(|r| r.method == Method::Post && r.url.contains(KEY))
@@ -307,6 +331,7 @@ fn stale_keepalive_response_cannot_install_timer_for_replaced_key() {
     h.fire_at(1_801_000.0);
     let put = h.take(KEY);
     h.message(r#"{"e":"listenKeyExpired"}"#);
+    h.fire_recovery();
     let key = h.take(KEY);
     h.reply(put.id, 200, r#"{"code":0}"#);
     assert!(!h.timers.iter().any(|(_, at)| *at == h.now + 1_800_000.0));
@@ -325,11 +350,12 @@ fn private_watchdog_recovers_a_silent_connection_and_replies_to_ping() {
     let mut h = Harness::ready();
     h.message("Ping");
     assert!(h.sent.iter().any(|(_, s)| s == "Pong"));
-    h.fire_at(16000.0);
-    h.fire_at(31000.0);
-    h.fire_at(46000.0); // Last receive was at 1001.
+    h.fire_latest_due(16000.0);
+    h.fire_latest_due(31000.0);
+    h.fire_latest_due(46000.0); // Last receive was at 1001.
     assert!(h.requests.iter().all(|r| !r.url.contains(KEY)));
-    h.fire_at(61000.0);
+    h.fire_latest_due(61000.0);
+    h.fire_recovery();
     assert!(h.requests.iter().any(|r| r.url.contains(KEY)));
     assert_eq!(h.closed.len(), 1);
 }
@@ -433,7 +459,7 @@ fn reconnect_snapshot_does_not_replay_historical_gap_at_new_execution_price() {
         socket: h.private(),
         code: 1006,
     });
-    h.fire_at(2000.0);
+    h.fire_recovery();
     h.respond(KEY, 200, r#"{"listenKey":"reconnected"}"#);
     h.event(Event::WsOpened {
         socket: h.private(),
@@ -639,4 +665,24 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert!(h.fills().is_empty());
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
+}
+
+#[test]
+fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
+    let mut h = Harness::new();
+    let old = h.take(KEY);
+    let (timer, _) = *h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == h.now + 5000.0)
+        .unwrap();
+    h.now += 10_000.0;
+    h.event(Event::TimerFired { timer });
+    let sockets = h.sockets.len();
+    h.reply(old.id, 200, r#"{"listenKey":"late-retired"}"#);
+    assert_eq!(h.sockets.len(), sockets);
+    assert!(!h.requests.iter().any(|r| r.url.contains(KEY)));
+    h.fire_recovery();
+    assert_eq!(h.take(KEY).method, Method::Post);
 }
