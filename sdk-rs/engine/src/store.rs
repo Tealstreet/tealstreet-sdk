@@ -645,7 +645,7 @@ impl Store {
                 0
             };
             let ticker_bytes = if changes.tickers_replaced {
-                92 * self.tickers.len()
+                108 * self.tickers.len()
             } else {
                 0
             };

@@ -309,6 +309,98 @@ mod tests {
     }
 
     #[test]
+    fn revised_ticker_startup_reserves_numeric_columns_and_identity_tails() {
+        let mut store = Store::default();
+        store.set_markets(
+            (0..128)
+                .map(|index| Market {
+                    id: format!("native-{index}"),
+                    symbol: format!("asset-{index}/USDC"),
+                    pretty_symbol: None,
+                    base: format!("asset-{index}"),
+                    quote: "USDC".into(),
+                    active: true,
+                    precision: Precision {
+                        amount: 1.,
+                        price: 0.01,
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: 1.,
+                            max: 1000.,
+                        },
+                        leverage: MinMax { min: 1., max: 1. },
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: Some(true),
+                    is_perpetual: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                })
+                .collect(),
+        );
+        store.set_tickers(
+            (0..128)
+                .map(|index| Ticker {
+                    id: format!("native-{index}"),
+                    symbol: format!("asset-{index}/USDC"),
+                    last: index as f64 + 1.,
+                    mid_price: Some(index as f64 + 0.5),
+                    ..Ticker::default()
+                })
+                .collect(),
+        );
+        let pending = store.take_pending();
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        store.write(&pending, &mut writer);
+        let frame = writer.finish();
+        // Shared quote strings leave conservative slack, far below a doubled buffer.
+        assert!(
+            frame.capacity() <= frame.len() + 2048,
+            "startup reservation grew geometrically: capacity={}, length={}",
+            frame.capacity(),
+            frame.len(),
+        );
+        let rows = sections(&frame)
+            .find(|(kind, _)| *kind == section::TICKERS)
+            .unwrap()
+            .1;
+        assert_eq!(u32_at(rows, 0), 128);
+        let strings = sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let string_data = 4 + (u32_at(strings, 0) as usize + 1) * 4;
+        let text = |reference: u32| {
+            let at = 4 + reference as usize * 4;
+            let start = string_data + u32_at(strings, at) as usize;
+            let end = string_data + u32_at(strings, at + 4) as usize;
+            std::str::from_utf8(&strings[start..end]).unwrap()
+        };
+        let data = 520;
+        for index in 0..128 {
+            assert_eq!(u32_at(rows, 4 + index * 4), index as u32);
+            let midpoint = data + 128 * 88 + index * 8;
+            assert_eq!(
+                f64::from_le_bytes(rows[midpoint..midpoint + 8].try_into().unwrap()),
+                index as f64 + 0.5,
+            );
+            assert_eq!(
+                text(u32_at(rows, data + 128 * 96 + index * 4)),
+                format!("asset-{index}/USDC")
+            );
+            assert_eq!(
+                text(u32_at(rows, data + 128 * 100 + index * 4)),
+                format!("native-{index}")
+            );
+        }
+    }
+
+    #[test]
     fn frames_are_aligned_and_self_describing() {
         let mut store = Store::default();
         store.set_markets(vec![Market {
