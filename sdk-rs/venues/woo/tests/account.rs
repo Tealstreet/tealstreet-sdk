@@ -419,7 +419,7 @@ fn auth_rejection_does_not_subscribe() {
     );
 }
 #[test]
-fn malformed_known_order_cannot_turn_successful_snapshot_into_empty() {
+fn malformed_known_order_keeps_its_stored_copy_while_the_rest_commits() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
@@ -434,7 +434,8 @@ fn malformed_known_order_cannot_turn_successful_snapshot_into_empty() {
     );
     let algo = take(&mut reads, "/v3/algo/orders?");
     response(&mut e, &algo, 90.0, &algos(""));
-    assert_eq!(e.store().orders().len(), 3);
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(e.store().order("9007199254740993").unwrap().amount, 0.02);
 }
 #[test]
 fn account_equity_always_excludes_current_unrealized_pnl() {
@@ -621,7 +622,7 @@ fn execution_id_only_increment_updates_order_cumulative_once() {
     assert_eq!(count_fills(&mut e), 1);
 }
 #[test]
-fn malformed_executable_algo_leaf_never_clears_known_orders() {
+fn malformed_executable_algo_leaf_keeps_its_stored_copy_while_siblings_commit() {
     for malformed in [
         ALGO.replace("\"triggerPrice\":58000,", ""),
         ALGO.replace("\"triggerPrice\":58000", "\"triggerPrice\":0"),
@@ -634,8 +635,15 @@ fn malformed_executable_algo_leaf_never_clears_known_orders() {
         let r = take(&mut reads, "/v1/orders?");
         response(&mut e, &r, 80.0, &page(""));
         let r = take(&mut reads, "/v3/algo/orders?");
-        response(&mut e, &r, 90.0, &algos(&malformed));
-        assert_eq!(e.store().orders().len(), 3);
+        response(
+            &mut e,
+            &r,
+            90.0,
+            &algos(&malformed.replace("65000", "65500")),
+        );
+        assert_eq!(e.store().orders().len(), 2);
+        assert_eq!(e.store().order("43").unwrap().price, 58000.0);
+        assert_eq!(e.store().order("44").unwrap().price, 65500.0);
     }
 }
 #[test]
@@ -844,4 +852,160 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
             "failed_second_page={failed_second_page}"
         );
     }
+}
+const SPARSE_CHILDREN: &str = r#"{"symbol":"PERP_BTC_USDT","algoOrderId":60,"rootAlgoOrderId":60,"algoType":"POSITIONAL_TP_SL","algoStatus":"NEW","side":"SELL","reduceOnly":true,"childOrders":[{"algoOrderId":61,"algoType":"STOP_LOSS","quantity":0.01,"triggerPrice":58000,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0},{"algoOrderId":62,"algoType":"TAKE_PROFIT","quantity":0.01,"triggerPrice":65000,"triggerPriceType":"MARKET_PRICE","totalExecutedQuantity":0}]}"#;
+#[test]
+fn snapshot_children_inherit_parent_side_status_and_reduce_only() {
+    let (mut e, _, mut reads, _) = start();
+    let regular = take(&mut reads, "/v1/orders?");
+    response(&mut e, &regular, 30.0, &page(""));
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 40.0, &algos(SPARSE_CHILDREN));
+    for id in ["61", "62"] {
+        let o = e.store().order(id).unwrap();
+        assert_eq!(o.side, safe_cex_engine::model::OrderSide::Sell);
+        assert_eq!(o.status, OrderStatus::Open);
+        assert!(o.reduce_only);
+        assert_eq!(o.parent_id.as_deref(), Some("60"));
+    }
+}
+#[test]
+fn stream_child_fill_without_own_side_or_status_is_not_lost() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(90.0);
+    let data = SPARSE_CHILDREN
+        .replace(r#""algoStatus":"NEW""#, r#""algoStatus":"FILLED""#)
+        .replace(
+            r#""totalExecutedQuantity":0}]"#,
+            r#""totalExecutedQuantity":0.01,"averageExecutedPrice":65010}]"#,
+        );
+    ws(
+        &mut e,
+        socket,
+        95.0,
+        &format!(r#"{{"topic":"algoexecutionreportv2","data":[{data}]}}"#),
+    );
+    assert_eq!(fill_amounts(&mut e), vec![0.01]);
+    let o = e.store().order("62").unwrap();
+    assert_eq!(o.status, OrderStatus::Closed);
+    assert_eq!(o.side, safe_cex_engine::model::OrderSide::Sell);
+    assert!(o.reduce_only);
+    assert_eq!(e.store().order("61").unwrap().status, OrderStatus::Canceled);
+}
+#[test]
+fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        80.0,
+        &POS.replace("\"holding\":0.01", "\"holding\":0.02").replace(
+            "]}}",
+            r#",{"symbol":"PERP_ETH_USDT","holding":"bad"},{"holding":1}]}}"#,
+        ),
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].contracts, 0.02);
+    assert!(e.drain_actions().any(|a| matches!(a,
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+            if message.contains("WOO positions: skipped 1")
+    )));
+}
+#[test]
+fn invalid_known_position_row_keeps_its_stored_copy() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        80.0,
+        &POS.replace("\"holding\":0.01", "\"holding\":0.05")
+            .replace("\"leverage\":10", "\"leverage\":0"),
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+    assert!(e.drain_actions().any(|a| matches!(a,
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Warning, message })
+            if message.contains("BTCUSDT")
+    )));
+}
+#[test]
+fn hedge_skip_keeps_only_the_unreadable_leg_and_drops_a_closed_sibling() {
+    let (mut e, _, mut reads, timer) = start();
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, &INFO.replace("ONE_WAY", "HEDGE_MODE"));
+    reads.extend(requests(&mut e));
+    let p = take(&mut reads, "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        40.0,
+        r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.01,"averageOpenPrice":60000,"leverage":10,"marginMode":"CROSS"},{"symbol":"PERP_BTC_USDT","holding":-0.02,"averageOpenPrice":61000,"leverage":15,"marginMode":"CROSS"}]}}"#,
+    );
+    assert_eq!(e.store().positions().len(), 2);
+    e.drain_actions().for_each(drop);
+    e.handle(2020.0, Event::TimerFired { timer });
+    let p = take(&mut requests(&mut e), "/v3/positions");
+    response(
+        &mut e,
+        &p,
+        2030.0,
+        r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_USDT","holding":0.03,"averageOpenPrice":60000,"leverage":0,"marginMode":"CROSS"}]}}"#,
+    );
+    let ids: Vec<_> = e.store().positions().iter().map(|p| p.id.clone()).collect();
+    assert_eq!(ids, vec!["BTCUSDT:long"]);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+}
+#[test]
+fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
+    let (mut e, _, mut reads, timer) = start();
+    load(&mut e, &mut reads);
+    let mut timer = timer;
+    let body = POS.replace("\"leverage\":10", "\"leverage\":0").replace(
+        "]}}",
+        r#",{"symbol":"PERP_ETH_USDT","holding":1,"averageOpenPrice":3000,"leverage":5,"marginMode":"CROSS"}]}}"#,
+    );
+    let mut skipped = 0;
+    let mut hidden = 0;
+    for tick in 1..=3 {
+        e.drain_actions().for_each(drop);
+        let at = 2020.0 * f64::from(tick);
+        e.handle(at, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        let mut http: Vec<_> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        let p = take(&mut http, "/v3/positions");
+        response(&mut e, &p, at + 5.0, &body);
+        let actions: Vec<_> = e.drain_actions().collect();
+        for a in &actions {
+            if let Action::Notice(Notice::Log { message, .. }) = a {
+                skipped += usize::from(message.contains("WOO positions: skipped"));
+                hidden += usize::from(message.contains("PERP_ETH_USDT cannot be shown"));
+            }
+        }
+    }
+    assert_eq!((skipped, hidden), (1, 1));
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
 }
