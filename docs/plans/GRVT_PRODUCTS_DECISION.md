@@ -147,3 +147,36 @@ current upstream enum is likewise outside the existing TS discovery scope.
   No runtime/crypto implementation change or TS bug fix was needed.
 - Independent fixture/gate phase review accepted. PR code-correctness reviews
   and exact-head green-CI landing follow.
+
+### PR and landing integration checkpoint
+
+[PR #1337](https://github.com/Tealstreet/tealstreet-sdk/pull/1337) targets
+`feat/rust-rewrite`. Three independent code-correctness reviews accepted the
+product/source evidence, private/trading/query boundaries and capture/gate
+integrity; findings and accepted re-reviews are posted on the PR.
+
+Merged server-adapter landing `c10f7e190a` cleanly; its cross-language native
+integration passes and root quality task graphs pass. First hosted head
+`0bb7367d65` passed root CI twice and native/Wasm/other venue controls, but had
+two performance misses: GRVT main CPU 129.7/136.7 ms (TS/Rust), with steady
+83.5/77.4 and memory 26.0/1.8 passing; unchanged Hyro steady 3.2/3.3 ms, with
+main 21.7/16.5 and memory passing. Correctness passed. Independent read-only
+audits justified one unchanged failed-job rerun; original misses remain on PR.
+
+Landing then advanced to GRVT audit-index optimization `0a0b3453e9` (PR #1335).
+Clean merge `b8f83c2472` preserves its exact subscription Set, prefix count and
+lazy URL-cache semantics. Independent integration reviews accepted equivalence,
+generation/ACK/auth/heartbeat guards and differential tests; no oracle or
+threshold was weakened. Our product decision, tests and fixture are unchanged.
+The current **555 harness tests PASS**. Repeated gates after that integration:
+
+| Public gate (three-run median) | Main CPU TS / Rust | Steady CPU TS / Rust | Retained memory TS / Rust |
+| --- | --- | --- | --- |
+| GRVT isolated, same 4,570-frame capture | 125.2 / 101.2 ms | 74.8 / 54.0 ms | 26.4 / 1.8 MB |
+| GRVT combined | 127.9 / 106.9 ms | 75.4 / 58.3 ms | 26.4 / 2.6 MB |
+| Binance combined | 183.2 / 88.7 ms | 99.2 / 34.5 ms | 17.9 / 4.8 MB |
+
+GRVT isolated/combined private **18 frames PASS**, Binance private **14 PASS**.
+Rust/build sources remain unchanged; isolated size stays **955,627 bytes**.
+Combined bindings restored. New exact-head CI is required after pushing this
+integration; final results will be posted on the PR before green-CI-only merge.
