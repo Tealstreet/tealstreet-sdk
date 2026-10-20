@@ -36,6 +36,36 @@ configured signer slots, not inferred account identities. The same slot means
 the same construction-time signer within an engine generation; generation
 replacement must fence late evidence.
 
+## Implementation refinement before the foundation
+
+Keep the selected signer and read scope on the engine's existing in-flight
+request entry. `Cx::tag_account_read(request, credential, scope)` is called at
+dispatch, after signer selection; no credential/header inference or retained
+result ledger. The optional pure venue hook is
+`account_auth_outcome(&self, pending, response) -> Option<AuthOutcome>`.
+Core emits the captured context plus verdict once before the existing callback,
+with Accepted suppressed for a missing expected streamed list. Transport and
+signature failures remove the same entry without credential evidence.
+
+Scopes are Account, Balance, Orders, Positions and Settings. Track bounded
+streaks per credential AND scope in the SDK, and reflect their maximum through
+a protected Base streak setter. A successful balance read must not clear an
+orders-permission rejection on the same key. A successful login clears only
+Account; unrelated successful public/unsigned/other-credential reads never
+reset failed scopes. Legacy manual Base auth calls retain Primary/Account
+meaning. This is still a small fixed set of counters, not a permission system.
+
+Foundation names: `CredentialSlot::{Primary,Secondary}`, `AccountReadScope`,
+`AuthOutcome::{Accepted,Rejected}`, `Notice::AccountAuth {credential,scope,
+outcome}` and WASM action `accountAuth`. Native server notices preserve the same
+account-scoped context. JS host validates and calls `onAccountAuth`; the SDK
+updates resolved polling policy without inventing user errors or interpreting
+REST bodies. Existing terminal startup behavior is a separate queued review.
+
+The original audit below describes the evidence and pitfalls; where it proposes
+pending-field capture or a combined result hook, this refinement is the chosen
+implementation seam. Venue classifiers/tags follow the core/host foundation.
+
 ## Additive native and host contract
 
 Proposed names, subject to the core implementation's final naming:

@@ -850,3 +850,33 @@ derived filledSize; these fixtures were corrected without changing production
 math. The independent frame fixture also now encodes generic triggerType.
 Actual producer-to-SDK acceptance remains part of final combined private gates;
 the component evidence is explicitly separate from the 48 public account tests.
+
+## Phase 4d final identity-query batch plan
+
+Lighter/Robinhood resolves an unsigned lookup selector independently of signer,
+secret and API-key-index initialization, including public-only use. Preserve
+account index zero/large decimal IDs and referrer from the same selected row;
+never invoke identity_ready or mutate signer/nonces/financial Store state.
+MEXC validates signed GET /api/v1/private/account/assets (valid empty array
+allowed), then returns mexc: plus the first 24 lowercase hex SHA256 characters
+of the raw PRIMARY options key. WEEX validates signed GET
+/capi/v3/account/accountConfig and canTrade:true, then uses the analogous weex:
+primary-key hash. Selected read credentials validate the GET; they never replace
+the primary identity source. Capture the raw primary fingerprint/public-only
+admission before native constructors consume/trim options. Explicit public-only
+and invalid selected credentials reject before private validation. Test exact
+signing/routing, hash vectors, read-vs-primary attribution, Lighter fallback and
+same-row referrals, errors/duplicates and unchanged account snapshots.
+
+## Phase 6b auth foundation plan
+
+Use the refined in-flight context, pure typed outcome hook and scope-isolated
+counters in RUST_AUTH_RESULTS.md. Core owns one complete response observation
+point across buffered, streamed and missing-list error delivery. Typed host and
+native-server notices carry no secret or body. JS validates context and updates
+the exact resolved Base interval after per-slot/per-scope evidence. No generic
+log/body regex, public-success reset or intermediate retry rejection. Tests
+prove all completion/error paths, no context reuse after duplicate/failure,
+mixed credentials and partial permissions, callback/dead/dispose fences and
+initial/changed/Infinity/server-multiplier policy. The foundation does not claim
+all venue classifiers exist; those must be tagged and verified by native slice.
