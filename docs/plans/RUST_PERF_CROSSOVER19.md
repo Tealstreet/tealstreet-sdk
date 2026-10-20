@@ -75,3 +75,11 @@ post-cutoff GC and lazy post-GC WASM byte accounting on both sides. The newly
 landed book-identity and ticker-storage optimizations belong to the original
 control too. Settled-memory diagnostics now include sample/transition/count
 metadata; only that exact collector error shape is a quality exclusion.
+
+Before any public/profile sample, private Kodiak validation rejected a
+consistent TS net release (-1984568 bytes). Preserve the failed private report
+and input manifest19 as unmeasured checkpoints. Private runs now allow a
+negative net total while retaining finite absolute counters and exact signed
+arithmetic; public default validation and thresholds are unchanged. Refresh
+both roots to this helper checkpoint in a new manifest19b, then rerun all36
+private variants before sampling. Original production binaries stay pinned.

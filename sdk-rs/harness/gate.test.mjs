@@ -103,6 +103,9 @@ const gate = (venue, isPrivate = false, defect) => {
         output.writeCount = 1;
       }
       if (rust && defect === 'memory-arithmetic') output.metrics.heapBeforeBytes--;
+      if (rust && defect === 'memory-consistent-negative') Object.assign(output.metrics, {
+        heapUsedBytes: 90, heapRetainedBytes: -10, retainedBytes: -10,
+      });
       // A later private run must reject invalid counters or inconsistent signed components
       // even though its aggregate and informational performance otherwise pass.
       if (rust && defect?.startsWith('memory:') && out.endsWith('rust-1.json'))
@@ -157,7 +160,7 @@ test('gate CLI validates every memory component on later private runs', () => {
   for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
     const result = gate('bybitinverse', true, `memory:${field}`);
     assert.equal(result.status, 1, result.stderr);
-    assert.ok(result.stdout.includes(`rust: ${['heapRetainedBytes', 'bufferRetainedBytes'].includes(field) ? 'inconsistent' : 'invalid'} ${field} (-1`), result.stdout);
+    assert.ok(result.stdout.includes(`rust: ${['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes'].includes(field) ? 'inconsistent' : 'invalid'} ${field} (-1`), result.stdout);
   }
 });
 
@@ -184,4 +187,13 @@ test('gate CLI validates retained deltas against absolute memory samples', () =>
   const result = gate('bybitinverse', true, 'memory-arithmetic');
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /inconsistent heapRetainedBytes/);
+});
+
+
+test('gate CLI permits consistent private net release and still rejects it for public performance baselines', () => {
+  const privateRun = gate('bybitinverse', true, 'memory-consistent-negative');
+  assert.equal(privateRun.status, 0, privateRun.stderr + privateRun.stdout);
+  const publicRun = gate('bybitinverse', false, 'memory-consistent-negative');
+  assert.equal(publicRun.status, 1, publicRun.stderr + publicRun.stdout);
+  assert.match(publicRun.stdout, /rust: invalid retainedBytes \(-10\); baseline is invalid/);
 });

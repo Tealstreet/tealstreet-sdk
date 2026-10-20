@@ -10,7 +10,8 @@ test('retained frame backing buffers are included', () => {
   const frame = new ArrayBuffer(16 * 1024 * 1024);
   liveBuffers.push(frame);
   const after = process.memoryUsage();
-  assert(retainedMemory(before, after) >= frame.byteLength);
+  assert(after.arrayBuffers >= frame.byteLength);
+  assert.equal(retainedMemory(before, after) - (after.heapUsed - before.heapUsed), after.arrayBuffers - before.arrayBuffers);
 });
 test('linear wasm memory is counted exactly once', () => {
   const before = process.memoryUsage();
@@ -179,4 +180,16 @@ test('elapsed quiescence also requires two equal comparisons after the first sam
     sample: () => ({ arrayBuffers: 44, heapUsed: 1000 }),
   });
   assert.equal(time, 330);
+});
+
+
+test('private net releases remain informational while absolute counters and arithmetic stay checked', () => {
+  const released = metricsFor({ heapUsed: 3000, arrayBuffers: 1000 }, { heapUsed: 1000, arrayBuffers: 1000 });
+  assert.equal(released.retainedBytes, -2000);
+  assert(memoryMetricErrors(released).some((error) => error.startsWith('invalid retainedBytes (-2000)')));
+  assert.deepEqual(memoryMetricErrors(released, { allowNegativeRetained: true }), []);
+  assert(memoryMetricErrors({ ...released, heapUsedBytes: -1 }, { allowNegativeRetained: true })
+    .some((error) => error.startsWith('invalid heapUsedBytes (-1)')));
+  assert(memoryMetricErrors({ ...released, retainedBytes: -1999 }, { allowNegativeRetained: true })
+    .some((error) => error.startsWith('inconsistent retainedBytes (-1999')));
 });

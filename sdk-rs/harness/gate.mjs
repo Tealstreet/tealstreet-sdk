@@ -597,7 +597,7 @@ for (let run = 0; run < runs; run++) {
     if (Boolean(output.account) !== isPrivate)
       differences.push(impl + ': account presence differs from tape classification');
     // Validate finite counters and arithmetic on every run, including private metrics.
-    for (const error of memoryMetricErrors(output.metrics)) differences.push(`${impl}: ${error}; baseline is invalid`);
+    for (const error of memoryMetricErrors(output.metrics, { allowNegativeRetained: isPrivate })) differences.push(`${impl}: ${error}; baseline is invalid`);
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {

@@ -7,7 +7,7 @@ export const retainedMemory = (before, after, wasmBytes = 0) =>
 
 // Net growth from loaded code permits signed releases of setup storage.
 // Validate absolute counters, the aggregate and exact component arithmetic.
-export const memoryMetricErrors = (metrics) => {
+export const memoryMetricErrors = (metrics, { allowNegativeRetained = false } = {}) => {
   const errors = [];
   for (const field of [
     'heapBeforeBytes',
@@ -18,7 +18,8 @@ export const memoryMetricErrors = (metrics) => {
     'retainedBytes',
   ]) {
     const value = metrics?.[field];
-    if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
+    if (!Number.isFinite(value) || (value < 0 && !(field === 'retainedBytes' && allowNegativeRetained)))
+      errors.push(`invalid ${field} (${value})`);
   }
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
     const value = metrics?.[field];

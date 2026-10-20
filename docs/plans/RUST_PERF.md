@@ -6,7 +6,21 @@ Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,
 public/private replay gates, PR to feat/rust-rewrite, adversarial reviews,
 green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
-## Nine-family checkpoint (eleven-family integration follows)
+## Current verification checkpoint
+
+Production source is `ecca589fb3`, integrated through landing `922b5fdc89`.
+There are 15 isolated WASM families and 19 public fixture profiles. Release,
+all size budgets, 1,295 Rust tests, native/wasm and isolated-feature Clippy,
+271 harness tests, 100 host tests, 78 SDK WASM tests and repository checks pass.
+The 36 private gates are running. The final public comparison and diagnostic
+profiles have not started; performance widening remains unproven. Earlier
+negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
+
+The final predeclared protocol is `RUST_PERF_CROSSOVER19.md`. Earlier 14- and
+15-family build/control checkpoints were never sampled because venue merges
+arrived before measurement. They do not supply performance results.
+
+## Historical nine-family checkpoint
 
 These checkpoint results precede the Bitget/host-dispatch and Hyperliquid integrations.
 All nine then-current public gates and all twelve private variants pass. The table
@@ -821,3 +835,17 @@ stayfixed; allbinaries andcaps<1MiB. EveryBybitalias shares onefamilymodule,
 whileconstructor retains actualvariant and validatedHyroendpoints. Bitget
 classic/UTA parity4checks pass. All36privatecorrectness gates and fullRust
 workspace checks are running; optionaltimings and19publiccohort stillpending.
+
+
+Private validator correction before public sampling: 22private variants passed;
+Kodiakmainnet's23rd gate compared identical output but rejected TS netretention
+-1984568bytes. These private metrics are informational. Add private-only
+allowNegativeRetained without changing public defaults, clamping releases or
+skipping any finite-counter/arithmetic checks. Independent audit runs actual
+retained failuremetrics RED(default)/GREEN(private option) and mutates every
+absolutecounter/delta/total: invalid samples stillreject. Focused22checks pass.
+Keep failedreport /tmp/perf-bybitvariants-private-gates.json and manifest19
+SHAe1fc65867cbc97c996f2c08c070a47ad6690276796c9cbe18e96b858bdbee008.
+No19public/profile samples exist. Refreshsharedhelper provenance to19b and
+repeatall36privategates withnewlogs; noRust/binary rebuild is needed. Fix the
+real-buffer unit assertion to permit independentheap releases duringGC.
