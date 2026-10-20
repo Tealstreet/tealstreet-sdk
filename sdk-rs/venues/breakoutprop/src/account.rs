@@ -66,6 +66,8 @@ struct RawOrder<'a> {
     final_status: bool,
     #[serde(borrow)]
     transaction_time: Cow<'a, str>,
+    limit_price: Option<f64>,
+    stop_price: Option<f64>,
     #[serde(borrow)]
     legs: Vec<Leg<'a>>,
 }
@@ -78,7 +80,7 @@ struct Leg<'a> {
     side: Cow<'a, str>,
     #[serde(borrow)]
     position_effect: Cow<'a, str>,
-    price: f64,
+    price: Option<f64>,
     quantity: f64,
     filled_quantity: f64,
     remaining_quantity: f64,
@@ -234,12 +236,7 @@ pub(crate) fn parse_portfolio(
         {
             return Err("Portfolio order leg instrument mismatch".into());
         }
-        for value in [
-            leg.price,
-            leg.quantity,
-            leg.filled_quantity,
-            leg.remaining_quantity,
-        ] {
+        for value in [leg.quantity, leg.filled_quantity, leg.remaining_quantity] {
             finite(value)?;
         }
         let tolerance = (leg.quantity.abs() * 1e-10).max(1e-12);
@@ -253,16 +250,21 @@ pub(crate) fn parse_portfolio(
                     || leg.remaining_quantity != 0.0))
             || leg.filled_quantity < 0.0
             || leg.remaining_quantity < 0.0
-            || leg.price < 0.0
         {
             return Err("Invalid DXtrade order quantities".into());
         }
-        let kind = match order.kind.as_ref() {
-            "LIMIT" => OrderType::Limit,
-            "MARKET" => OrderType::Market,
-            "STOP" => OrderType::StopLoss,
+        // DXtrade documents prices on Order; the legacy host also sends leg.price.
+        let (kind, price) = match order.kind.as_ref() {
+            "LIMIT" => (OrderType::Limit, order.limit_price.or(leg.price)),
+            "MARKET" => (OrderType::Market, Some(leg.price.unwrap_or(0.0))),
+            "STOP" => (OrderType::StopLoss, order.stop_price.or(leg.price)),
             _ => return Err("Unsupported DXtrade order type".into()),
         };
+        let price = price.ok_or("Missing DXtrade order price")?;
+        finite(price)?;
+        if price < 0.0 || (kind != OrderType::Market && price == 0.0) {
+            return Err("Invalid DXtrade order price".into());
+        }
         let side = match leg.side.as_ref() {
             "BUY" => OrderSide::Buy,
             "SELL" => OrderSide::Sell,
@@ -280,7 +282,7 @@ pub(crate) fn parse_portfolio(
             symbol: order.instrument.into_owned(),
             kind,
             side,
-            price: leg.price,
+            price,
             amount: leg.quantity,
             filled: leg.filled_quantity,
             remaining: leg.remaining_quantity,

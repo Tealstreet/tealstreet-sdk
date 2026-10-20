@@ -11,7 +11,7 @@ import { loadEngine } from './engine.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
 import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
-import { createRecordingPolicy, recordingReady } from './polling.mjs';
+import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
 import { replayStoreReady } from './tape.mjs';
 
 const { values } = parseArgs({
@@ -41,9 +41,11 @@ const policy = createRecordingPolicy(venue, options, Boolean(values['options-env
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
+const timeline = createRecordingTimeline(venue);
 let recordingFailed = false;
+let loaded = false;
 const write = (record) => {
-  try { return tape.write(`${JSON.stringify(policy.sanitize({ t: Date.now() - started, ...record }))}\n`); }
+  try { return tape.write(`${JSON.stringify(timeline(policy.sanitize({ t: Date.now() - started, ...record }), loaded))}\n`); }
   catch { recordingFailed = true; throw new Error('Recording refused a protocol record that was not replay-safe'); }
 };
 write({ type: 'meta', epoch: started, private: false, source: 'live' });
@@ -131,7 +133,6 @@ const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let httpResponses = 0;
 let updates = 0;
-let loaded = false;
 const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(

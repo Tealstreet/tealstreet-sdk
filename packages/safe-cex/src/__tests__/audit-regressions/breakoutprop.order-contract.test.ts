@@ -417,3 +417,27 @@ describe('Breakout Prop official DX REST session contract', () => {
     expect(exchange.sessionToken).toBe('fresh');
   });
 });
+
+describe('Breakout Prop documented order prices', () => {
+  it.each([
+    ['LIMIT', { limitPrice: 3529.47 }, undefined, 3529.47],
+    ['STOP', { stopPrice: 3500 }, undefined, 3500],
+    ['STOP', { stopPrice: 3500 }, 0, 3500],
+    ['STOP', {}, 3500, 3500],
+    ['MARKET', {}, undefined, 0],
+  ] as const)('reads %s prices with documented and legacy payloads', (type, prices, legacy, expected) => {
+    const exchange = new BreakoutpropExchange('breakoutprop', { key: 'user', secret: 'password' } as ExchangeOptions, new DefaultStore());
+    try {
+      const orders = exchange.formatOrders({ portfolios: [{ orders: [{
+        orderCode: 'native:1', instrument: 'ETHUSD', type, status: 'WORKING', ...prices,
+        transactionTime: '2026-07-15T10:00:00Z',
+        legs: [{ side: 'SELL', positionEffect: 'CLOSE', quantity: 0, filledQuantity: 0, remainingQuantity: 0,
+          ...(legacy === undefined ? {} : { price: legacy }) }],
+      }] }] } as any);
+      expect(orders).toHaveLength(1);
+      expect(orders[0].price).toBe(expected);
+    } finally {
+      exchange.dispose();
+    }
+  });
+});

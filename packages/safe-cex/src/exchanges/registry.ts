@@ -112,15 +112,9 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   bybitspot: () =>
     import(/* webpackChunkName: "exchange-bybitspot" */ './bybit/bybitspot.exchange').then((m) => m.BybitSpotExchange),
 
-  // Coinbase
-  coinbase: () =>
-    import(/* webpackChunkName: "exchange-coinbase" */ './coinbase/coinbase.exchange').then((m) => m.CoinbaseExchange),
-
-  // Coinbase Spot
-  coinbasespot: () =>
-    import(/* webpackChunkName: "exchange-coinbasespot" */ './coinbase/coinbasespot.exchange').then(
-      (m) => m.CoinbaseSpotExchange,
-    ),
+  // Coinbase Advanced Trade and saved spot-only accounts
+  coinbase: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
+  coinbasespot: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // Crypto.com
   cryptocom: () =>

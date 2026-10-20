@@ -10,8 +10,8 @@ export const symbols = ['BTCUSD', 'ETHUSD', 'AAVEUSD', 'ACTUSD', 'ADAUSD'];
 const zeroCloseOrder = {
   account: BREAKOUT_ACCOUNT, version: 86, orderId: 76515504, orderCode: '4471153:55640',
   clientOrderId: '55640', instrument: 'ETHUSD', type: 'STOP', status: 'WORKING', finalStatus: false,
-  transactionTime: '2026-07-15T09:55:49.900Z',
-  legs: [{ instrument: 'ETHUSD', side: 'SELL', positionEffect: 'CLOSE', price: 3500,
+  transactionTime: '2026-07-15T09:55:49.900Z', stopPrice: 3500,
+  legs: [{ instrument: 'ETHUSD', side: 'SELL', positionEffect: 'CLOSE',
     quantity: 0, filledQuantity: 0, remainingQuantity: 0 }],
 };
 const quotes = (shift = 0) => symbols.map((symbol, i) => ({ symbol, type: 'Quote', bid: [98117.9, 3656.01, 269.09, 0.4806, 1.001][i] + shift, ask: [98118, 3656.02, 269.13, 0.4808, 1.0011][i] + shift, time: new Date(BREAKOUT_EPOCH + shift * 1000).toISOString() }));
@@ -33,7 +33,8 @@ export const buildBreakoutTape = ({ publicOnly = false } = {}) => {
   http('POST', 'marketdata', { events: quotes() }, { requestBody: quoteBody, availableAfter: 0 });
   if (!publicOnly) http('GET', `accounts/${encodeURIComponent(BREAKOUT_ACCOUNT)}/portfolio`, breakoutPortfolio([
     zeroCloseOrder,
-    { ...zeroCloseOrder, orderId: 76515505, orderCode: '4471153:55641', clientOrderId: '' },
+    { ...zeroCloseOrder, orderId: 76515505, orderCode: '4471153:55641', clientOrderId: '',
+      stopPrice: undefined, legs: [{ ...zeroCloseOrder.legs[0], price: 3500 }] },
   ]), { availableAfter: 0 });
   for (let t = 2000; t <= 20000; t += 2000) http('POST', 'marketdata', { events: quotes(t / 20000) }, { t, availableAfter: t, requestBody: quoteBody });
   if (!publicOnly) {

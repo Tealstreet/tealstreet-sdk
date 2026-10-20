@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRecordingPolicy, deterministicReplay, recordingReady, replayTransportReady } from './polling.mjs';
+import { createRecordingPolicy, createRecordingTimeline, deterministicReplay, recordingReady, replayTransportReady } from './polling.mjs';
+import { breakoutprop, BREAKOUT_REPLAY_TOKEN } from './breakoutprop-requests.mjs';
 import { ReplayClock, Tape } from './tape.mjs';
 
 const playPolling = (tape, clock, start) => {
@@ -30,6 +31,129 @@ test('polling recorder requires HTTP activity, loaded markets/tickers and reques
     assert.equal(recordingReady({ polling: true }, { ...state, ...patch }), false);
   assert.equal(recordingReady({}, { ...state, frames: 1 }), true);
   assert.equal(recordingReady({}, { ...state, frames: 1, books: 1 }), false);
+});
+
+test('live polling recorder stamps post-ready reads and preserves startup, mutations and other venues', () => {
+  const timeline = createRecordingTimeline({ polling: true, isWrite: (method, url) => method === 'POST' && url.endsWith('/orders') });
+  const read = { type: 'http', t: 325, method: 'POST', url: 'https://example.test/marketdata?b=2&a=1', requestBody: '{"symbols":["ETHUSD"],"type":"Quote"}', status: 200, body: 'seed' };
+  assert.equal(timeline(read), read);
+  assert.equal(timeline({ ...read, t: 2325, url: 'https://example.test/marketdata?a=1&b=2', requestBody: '{"type":"Quote","symbols":["ETHUSD"]}' }, true).availableAfter, 2325);
+  assert.equal(timeline({ ...read, requestBody: '{"symbols":["BTCUSD"],"type":"Quote"}' }, true).availableAfter, 325);
+  assert.equal(timeline({ ...read, method: 'GET' }, true).availableAfter, 325);
+  assert.equal(timeline({ ...read, url: 'https://example.test/other' }, true).availableAfter, 325);
+  const mutation = { ...read, url: 'https://example.test/orders' };
+  assert.equal(timeline(mutation, true), mutation);
+  const meta = { type: 'meta', t: 0 };
+  assert.equal(timeline(meta, true), meta);
+  assert.equal(createRecordingTimeline({})(read, true), read);
+  assert.equal(createRecordingTimeline({ polling: true })(mutation, true), mutation);
+});
+
+test('timed POST reads keep distinct request bodies and never expose a future first-seen query early', () => {
+  const venue = { polling: true, isWrite: () => false };
+  const timeline = createRecordingTimeline(venue);
+  const base = { type: 'http', method: 'POST', url: 'https://example.test/marketdata', status: 200 };
+  const ethBody = '{"symbols":["ETHUSD"],"type":"Quote"}';
+  const btcBody = '{"symbols":["BTCUSD"],"type":"Quote"}';
+  const tape = new Tape([
+    timeline({ ...base, t: 325, requestBody: ethBody, body: 'ETH seed' }),
+    timeline({ ...base, t: 2325, requestBody: btcBody, body: 'BTC future' }, true),
+  ], venue);
+  assert.equal(tape.respond('POST', base.url, ethBody).body, 'ETH seed');
+  assert.equal(tape.respond('POST', base.url, btcBody).status, 599);
+  tape.time = 2325;
+  assert.equal(tape.respond('POST', base.url, btcBody).body, 'BTC future');
+  assert.equal(tape.respond('POST', base.url, '{"type":"Quote","symbols":["ETHUSD"]}').body, 'ETH seed');
+});
+
+test('startup HTTP failures and retries stay ordered before virtual time starts', () => {
+  const venue = { polling: true, isWrite: () => false };
+  const timeline = createRecordingTimeline(venue);
+  const base = { type: 'http', method: 'POST', url: 'https://example.test/marketdata', requestBody: '{"symbols":["ETHUSD"]}' };
+  const records = [
+    timeline({ ...base, t: 325, status: 500, body: 'temporary failure' }),
+    timeline({ ...base, t: 2325, status: 200, body: 'startup recovered' }),
+    timeline({ ...base, t: 4325, status: 200, body: 'future poll' }, true),
+  ];
+  const tape = new Tape(records, venue);
+  assert.equal(tape.respond('POST', base.url, base.requestBody).status, 500);
+  assert.equal(tape.respond('POST', base.url, base.requestBody).body, 'startup recovered');
+  assert.equal(tape.respond('POST', base.url, base.requestBody).body, 'startup recovered');
+  assert.equal(tape.time, 0);
+  assert.equal(tape.unserved, 0);
+});
+
+test('sanitized login seeds survive a startup transport delay and retain definitive HTTP rejection', () => {
+  for (const status of [200, 401]) {
+    const options = { key: 'actual-login', secret: 'actual-password' };
+    const policy = createRecordingPolicy(breakoutprop, options);
+    const timeline = createRecordingTimeline(breakoutprop);
+    // A transport timeout emits no HTTP record; its later retry can first return
+    // at this offset while replay still needs the login at startup time zero.
+    const login = timeline(policy.sanitize({
+      type: 'http', t: 6500, method: 'POST', url: 'https://example.test/dxsca-web/login', status,
+      requestBody: JSON.stringify({ domain: 'default', username: options.key, password: options.secret }),
+      body: JSON.stringify(status === 200 ? { sessionToken: 'actual-session', timeout: '00:30:00' } : { message: 'Invalid credentials' }),
+    }));
+    assert.equal(login.t, 6500);
+    assert.equal(login.availableAfter, undefined);
+    assert.ok(!JSON.stringify(login).includes('actual-'));
+    const tape = new Tape([login], breakoutprop);
+    const response = tape.respond('POST', login.url, JSON.stringify({ domain: 'default', username: 'replay-key', password: 'replay-secret' }));
+    assert.equal(response.status, status);
+    assert.deepEqual(JSON.parse(response.body), status === 200
+      ? { sessionToken: BREAKOUT_REPLAY_TOKEN, timeout: '00:30:00' }
+      : { message: 'Invalid credentials' });
+    assert.equal(tape.unserved, 0);
+  }
+});
+
+const livePollingRecords = () => {
+  const venue = { polling: true, isWrite: () => false };
+  const timeline = createRecordingTimeline(venue);
+  const url = 'https://example.test/marketdata';
+  const requestBody = '{"symbols":["ETHUSD"]}';
+  const records = [325, 2325, 4325].map((t, index) => timeline({
+    type: 'http', t, method: 'POST', url, requestBody, status: 200, body: `sample-${index}`,
+  }, index > 0));
+  return { venue, records, url, requestBody };
+};
+
+test('live recorder-shaped polling tape preserves startup seeds and waits for a natural final poll', async () => {
+  const { venue, records, url, requestBody } = livePollingRecords();
+  const tape = new Tape(records, venue);
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  const seen = [];
+  let timer;
+  const poll = () => {
+    seen.push({ t: Date.now() - clock.epoch, body: tape.respond('POST', url, requestBody).body });
+    timer = setTimeout(poll, 2000);
+  };
+  try {
+    assert.equal(tape.respond('POST', url, requestBody).body, 'sample-0');
+    assert.equal(tape.respond('POST', url, requestBody).body, 'sample-0');
+    await tape.play(undefined, undefined, undefined, clock, () => { timer = setTimeout(poll, 2000); });
+    assert.deepEqual(seen.map((row) => row.body), ['sample-0', 'sample-1', 'sample-2']);
+    assert.ok(seen[0].t < 2325);
+    assert.ok(seen[1].t >= 2325 && seen[1].t < 4325);
+    assert.ok(seen[2].t >= 4325);
+    assert.ok(clock.time - clock.epoch > records.at(-1).t);
+    assert.equal(tape.unserved, 0);
+  } finally { clearTimeout(timer); clock.restore(); }
+});
+
+test('live recorder-shaped polling tape rejects a missing poller within the idle budget', { timeout: 2000 }, async () => {
+  const { venue, records, url, requestBody } = livePollingRecords();
+  const tape = new Tape(records, venue);
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  try {
+    assert.equal(tape.respond('POST', url, requestBody).body, 'sample-0');
+    await assert.rejects(tape.play(undefined, undefined, undefined, clock), /polling final HTTP anchors.*idle step budget exceeded/);
+    assert.deepEqual([...tape.selectedPollingResponses].map((row) => row.body), ['sample-0']);
+    assert.equal(clock.time - clock.epoch, 4325);
+  } finally { clock.restore(); }
 });
 
 test('HTTP-only polling timeline advances timers and changes snapshots without sockets', async () => {

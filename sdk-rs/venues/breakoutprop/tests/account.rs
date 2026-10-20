@@ -203,3 +203,122 @@ fn empty_and_missing_client_ids_keep_distinct_native_order_identities() {
     assert_eq!(orders[1].id, "4471153:55641");
     assert!(orders.iter().all(|order| order.client_order_id.is_none()));
 }
+
+// DX REST 9.5 prices belong to Order; legacy hosts additionally expose leg.price.
+#[test]
+fn documented_order_prices_publish_the_complete_selected_portfolio() {
+    for (kind, field, price) in [
+        ("LIMIT", Some("limitPrice"), 3529.47),
+        ("STOP", Some("stopPrice"), 3500.0),
+        ("MARKET", None, 0.0),
+    ] {
+        let mut rig = rig();
+        let mut row: serde_json::Value = serde_json::from_str(ZERO_CLOSE).unwrap();
+        row["type"] = kind.into();
+        row["legs"][0].as_object_mut().unwrap().remove("price");
+        if let Some(field) = field {
+            row[field] = price.into();
+        }
+        let request = rig.next_request();
+        rig.reply(
+            &request,
+            200,
+            &PORTFOLIO
+                .replace("4999.96", "5100")
+                .replace("\"orders\":[]", &format!("\"orders\":[{row}]")),
+        );
+        let store = rig.engine.store();
+        assert_eq!(store.orders().len(), 1, "{kind}");
+        assert_eq!(store.orders()[0].price, price);
+        assert_eq!(store.positions().len(), 2);
+        assert!((store.balance().total - (5100.0 + store.balance().upnl)).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn missing_or_invalid_documented_price_cannot_replace_any_account_section() {
+    for (field, value) in [
+        ("stopPrice", None),
+        ("stopPrice", Some(0.0)),
+        ("stopPrice", Some(-1.0)),
+        ("limitPrice", None),
+        ("limitPrice", Some(0.0)),
+        ("limitPrice", Some(-1.0)),
+    ] {
+        let mut rig = rig();
+        let before = rig.engine.store().balance().clone();
+        let mut row: serde_json::Value = serde_json::from_str(ZERO_CLOSE).unwrap();
+        row["type"] = if field == "stopPrice" {
+            "STOP"
+        } else {
+            "LIMIT"
+        }
+        .into();
+        // An explicitly invalid documented price must not hide behind a legacy value.
+        if let Some(value) = value {
+            row[field] = value.into();
+        } else {
+            row["legs"][0].as_object_mut().unwrap().remove("price");
+        }
+        let request = rig.next_request();
+        rig.reply(
+            &request,
+            200,
+            &PORTFOLIO
+                .replace("4999.96", "100")
+                .replace("\"orders\":[]", &format!("\"orders\":[{row}]")),
+        );
+        assert_eq!(*rig.engine.store().balance(), before, "{field} {value:?}");
+        assert_eq!(rig.engine.store().positions().len(), 2);
+        assert!(rig.engine.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn amount_only_stop_amendment_uses_documented_trigger_after_reconciliation() {
+    for legacy_price in [None, Some(0.0)] {
+        let mut rig = rig();
+        let mut row: serde_json::Value = serde_json::from_str(ZERO_CLOSE).unwrap();
+        row["stopPrice"] = 3500.0.into();
+        if let Some(price) = legacy_price {
+            row["legs"][0]["price"] = price.into();
+        } else {
+            row["legs"][0].as_object_mut().unwrap().remove("price");
+        }
+        let portfolio = rig.next_request();
+        rig.reply(
+            &portfolio,
+            200,
+            &PORTFOLIO.replace("\"orders\":[]", &format!("\"orders\":[{row}]")),
+        );
+        let quote = rig.next_request();
+        rig.reply(&quote, 200, QUOTES);
+        rig.command(safe_cex_engine::Command::AmendOrder {
+            command: 90,
+            id: "4471153:55640".into(),
+            price: None,
+            amount: Some(0.02),
+        });
+        let cancel = rig.next_request();
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        rig.reply(&cancel, 200, r#"{"orderId":76515504}"#);
+        let proof = rig.next_request();
+        assert!(
+            proof
+                .url
+                .ends_with("/orders/history?with-order-id=76515504&limit=2")
+        );
+        row["status"] = "CANCELED".into();
+        row["finalStatus"] = true.into();
+        rig.reply(&proof, 200, &format!("{{\"orders\":[{row}]}}"));
+        let replacement = rig.next_request();
+        assert_eq!(replacement.method, safe_cex_engine::Method::Post);
+        let body: serde_json::Value =
+            serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["stopPrice"], 3500.0);
+        assert_eq!(body["quantity"], 0.02);
+        assert_eq!(body["positionEffect"], "CLOSE");
+        rig.reply(&replacement, 200, r#"{"orderId":42}"#);
+        assert_eq!(rig.result(90), &Ok("[\"42\"]".into()));
+    }
+}

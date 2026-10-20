@@ -537,7 +537,7 @@ export class Tape {
         socket.requestIds.add(request.id);
         this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
       }
-      if (message.event) {
+      if (message.event || this.venue.family === 'coinbase') {
         const subscription = subscriptionMessage(message);
         for (const topic of subscription?.topics ?? []) {
           if (typeof topic !== 'string' || !topic) throw new Error('invalid websocket subscription topic');

@@ -243,3 +243,25 @@ provably unused crypto helpers were found by the independent caller audit.
 - Fresh independent code-correctness reviews cover auth/account reconciliation,
   trading/query safety, and shared host/routing/polling/recording boundaries.
   Findings will be posted on the PR and fixed before a green-CI merge.
+- Posted three fresh code-correctness reviews on PR #1328. Auth and trading
+  independently found the documented top-level order-price schema mismatch;
+  the boundary review reproduced unstamped live polling responses bypassing
+  final-state completion. Both findings are fixed with native/recorder-shaped
+  regressions. Existing bulk-cancel failure semantics remain unchanged.
+- The order parser and TS oracle now accept documented limitPrice/stopPrice
+  plus legacy leg.price fallback. Three new native integration tests cover
+  atomic account publication, invalid-price preservation, and amount-only
+  STOP amendment through native cancellation proof with absent/zero leg.price.
+  The private tape includes documented and legacy STOP representations.
+- Live recording leaves pre-ready HTTP retries in their ordered sequence and
+  stamps every post-ready polling read with its recorded eligibility time.
+  Missing final pollers fail bounded; future responses remain unavailable.
+  Removing the stamp prove-failed both new completion regressions; restoring
+  it returned the focused 32 tests to passing.
+- Integrated Coinbase landing `5c0e437faf` while retaining Breakout and all
+  incoming routing/identity/binary contracts. Native golden matrix now has 56
+  distinct cases. Merge verification: 217 TS routing tests, 10 native routing
+  tests, 28 loopback tests and paired-feature WASM cargo check pass.
+- Current fix verification: 103 Breakout native tests, 30 targeted TS tests,
+  391 harness tests, workspace strict all-target clippy and format pass.
+  Independent fix re-reviews and refreshed final artifacts/gates are running.

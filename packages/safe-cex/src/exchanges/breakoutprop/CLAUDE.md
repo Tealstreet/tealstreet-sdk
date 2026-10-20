@@ -108,6 +108,8 @@ come from the same `PORTFOLIO` response. `fetchOrders` delegates to
 `formatOrders(await fetchPortfolioRaw())`, so a failed portfolio read preserves
 the current store instead of wiping orders.
 
+Native LIMIT/STOP prices come from documented top-level `limitPrice`/`stopPrice`,
+with legacy `legs[0].price` retained as a fallback. MARKET rows may omit price.
 Order `lastUpdate` comes from RFC 3339 `transactionTime`, and a first-leg
 `positionEffect: "CLOSE"` maps to `reduceOnly: true`.
 

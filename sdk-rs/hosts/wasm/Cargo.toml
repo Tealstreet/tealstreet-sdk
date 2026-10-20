@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
+coinbase = ["dep:safe-cex-venue-coinbase"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni"]
 kraken = ["dep:safe-cex-venue-kraken"]
@@ -25,6 +26,7 @@ weex = ["dep:safe-cex-venue-weex"]
 phemex = ["dep:safe-cex-venue-phemex"]
 default = [
     "breakoutprop",
+    "coinbase",
     "paradex",
     "apexomni",
     "kraken",
@@ -57,6 +59,7 @@ orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
 safe-cex-venue-breakoutprop = { path = "../../venues/breakoutprop", optional = true }
+safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }

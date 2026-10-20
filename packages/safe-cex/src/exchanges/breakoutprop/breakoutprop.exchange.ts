@@ -510,7 +510,7 @@ export class BreakoutpropExchange extends BaseExchange {
         symbol: order.instrument,
         type: ORDER_TYPE[order.type],
         side: ORDER_SIDE[order.legs[0].side],
-        price: order.legs[0].price,
+        price: (order.type === 'STOP' ? order.stopPrice : order.type === 'LIMIT' ? order.limitPrice : undefined) ?? order.legs[0].price ?? 0,
         amount: order.legs[0].quantity,
         filled: order.legs[0].filledQuantity,
         remaining: order.legs[0].remainingQuantity,
