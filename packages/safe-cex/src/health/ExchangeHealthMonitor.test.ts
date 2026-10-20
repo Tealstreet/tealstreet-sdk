@@ -361,3 +361,13 @@ describe('ExchangeHealthMonitor', () => {
     });
   });
 });
+
+describe('typed classification', () => {
+  it('uses the error kind instead of matching text', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    expect(monitor.processMessage('something new happened', true, { kind: 'authInvalid' })).toBe('auth_invalid');
+    expect(monitor.processMessage('invalid api key', true, { outcome: 'unknown' })).toBe('auth_invalid');
+    expect(monitor.processMessage('unmatched', true, { kind: 'rateLimited' })).toBe('rate_limit');
+  });
+});
+

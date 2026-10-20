@@ -362,6 +362,12 @@ documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
 
+The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
+for typed engine errors (`classifiedError`), and
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` uses that
+kind's category before any text pattern. Pass it through; text matching stays
+the fallback for unclassified errors.
+
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
 pause automatic account reloads after terminal credential/permission failures.

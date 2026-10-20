@@ -170,3 +170,17 @@ export const exchangeErrorCategory = (value: unknown): ErrorCategory | undefined
   const { kind } = value as { kind?: unknown };
   return typeof kind === 'string' && KINDS.includes(kind) ? CATEGORIES[kind as ExchangeErrorKind] : undefined;
 };
+
+/** The classified fields of an engine error, for the `'error'` event payload. */
+export type ClassifiedError = { kind?: ExchangeErrorKind; outcome?: CommandOutcome; venueCode?: string };
+
+/** Only the closed-set classification of `value`; undefined when it carries none. */
+export const classifiedError = (value: unknown): ClassifiedError | undefined => {
+  if (value === null || typeof value !== 'object') return undefined;
+  const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
+  const result: ClassifiedError = {};
+  if (typeof kind === 'string' && KINDS.includes(kind)) result.kind = kind as ExchangeErrorKind;
+  if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) result.outcome = outcome as CommandOutcome;
+  if (typeof venueCode === 'string' && venueCode) result.venueCode = venueCode;
+  return Object.keys(result).length ? result : undefined;
+};

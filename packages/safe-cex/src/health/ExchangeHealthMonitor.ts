@@ -11,6 +11,9 @@
  * - Monitor ongoing health in CLI recorders and web app
  */
 
+import type { ClassifiedError } from '../commandOutcome';
+
+import { exchangeErrorCategory } from '../commandOutcome';
 import {
   DEFAULT_ERROR_PATTERNS,
   EXCHANGE_SPECIFIC_PATTERNS,
@@ -78,11 +81,19 @@ export class ExchangeHealthMonitor {
    * Process an error or log message and update health state
    * @param message - The message to analyze
    * @param isError - Whether this came from an 'error' event (vs 'log')
+   * @param classified - The 'error' event's typed classification; its kind wins over text
    * @returns The detected category, or null if no pattern matched
    */
-  processMessage(message: string, isError: boolean = false): ErrorCategory | null {
+  processMessage(message: string, isError: boolean = false, classified?: ClassifiedError): ErrorCategory | null {
     if (!message || typeof message !== 'string') {
       return null;
+    }
+
+    const typed = exchangeErrorCategory(classified);
+    if (typed) {
+      const severity = this.patterns.find((pattern) => pattern.category === typed)?.severity ?? 'warning';
+      this.recordError(typed, message, severity);
+      return typed;
     }
 
     const lowerMessage = message.toLowerCase();
