@@ -489,6 +489,12 @@ impl MexcFutures {
 
 impl Venue for MexcFutures {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()

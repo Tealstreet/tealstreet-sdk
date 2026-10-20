@@ -4,7 +4,7 @@ import { EngineDeadError, EngineHost } from './host.mjs';
 
 const settle = () => new Promise(setImmediate);
 const socketAction = { op: 'wsConnect', socket: 7, url: 'wss://example.test' };
-const methods = ['start', 'command', 'takeFrame', 'snapshotFrame', 'accountId', 'wsOpen', 'wsMessage',
+const methods = ['start', 'command', 'takeFrame', 'snapshotFrame', 'capabilities', 'wsOpen', 'wsMessage',
   'wsMessageActions', 'wsMessageBytes', 'wsBinary', 'wsClose', 'timer', 'httpStart', 'httpChunk',
   'httpEnd', 'httpFailed', 'payloadSigned', 'payloadSignFailed'];
 
@@ -16,7 +16,7 @@ function rig(overrides = {}, transportOverrides = {}, handlers = {}) {
   const engine = Object.fromEntries(methods.map((name) => [name, function () {
     assert.equal(this, engine);
     calls.push(name);
-    return name === 'snapshotFrame' ? new Uint8Array(8) : name === 'takeFrame' ? undefined : '';
+    return name === 'snapshotFrame' ? new Uint8Array(8) : name === 'takeFrame' ? undefined : name === 'capabilities' ? '{}' : '';
   }]));
   Object.assign(engine, overrides);
   let nextTimer = 0;
@@ -53,7 +53,7 @@ for (const method of methods) {
     else if (method === 'command') await assert.rejects(r.host.command({ op: 'getAccount' }), EngineDeadError);
     else if (method === 'takeFrame') r.host.flush();
     else if (method === 'snapshotFrame') assert.throws(() => r.host.snapshot(), EngineDeadError);
-    else if (method === 'accountId') assert.throws(() => r.host.accountId(), EngineDeadError);
+    else if (method === 'capabilities') assert.throws(() => r.host.capabilities(), EngineDeadError);
     else if (method === 'wsOpen') callbacks.onOpen();
     else if (method.startsWith('wsMessage')) callbacks.onMessage('payload');
     else if (method === 'wsBinary') callbacks.onBinary(new Uint8Array([1]));
@@ -80,7 +80,6 @@ for (const method of methods) {
     await r.host.receive(2, { status: 200, body: new Uint8Array([2]) });
     await assert.rejects(r.host.command({ op: 'placeOrders', orders: [] }), EngineDeadError);
     assert.throws(() => r.host.snapshot(), EngineDeadError);
-    assert.throws(() => r.host.accountId(), EngineDeadError);
     assert.equal(r.calls.length, count);
     assert.equal(entries, 1);
     assert.equal(r.deaths.length, 1);

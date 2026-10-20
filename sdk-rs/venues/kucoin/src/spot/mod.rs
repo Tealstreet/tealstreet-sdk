@@ -676,8 +676,18 @@ fn candle(text: &str) -> Result<Candle, String> {
 
 impl Venue for KucoinSpot {
     type Pending = Pending;
-    fn supports_amend_order_with_symbol(&self) -> bool {
-        true
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            client_order_lookup: true,
+            order_history: false,
+            income_history: false,
+            cancel_all: true,
+            account_margin_type: true,
+            cancel_with_symbols: true,
+            amend_with_symbol: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

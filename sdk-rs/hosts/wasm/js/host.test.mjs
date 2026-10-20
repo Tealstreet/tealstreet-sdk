@@ -5,15 +5,16 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
 
-test('account identity is read from the live engine and unavailable after disposal', () => {
-  let account;
-  const host = new EngineHost({ accountId: () => account }, {});
-  assert.equal(host.accountId(), undefined);
-  account = 'selected-portfolio';
-  assert.equal(host.accountId(), 'selected-portfolio');
+test('capabilities are read from the engine once and outlive disposal', () => {
+  let reads = 0;
+  const host = new EngineHost({ capabilities: () => (reads++, '{"cancelAll":true}') }, {});
+  assert.deepEqual(host.capabilities(), { cancelAll: true });
   host.dispose();
-  assert.throws(() => host.accountId(), /disposed/);
-  assert.equal(new EngineHost({}, {}).accountId(), undefined);
+  assert.deepEqual(host.capabilities(), { cancelAll: true });
+  assert.equal(reads, 1);
+  const disposed = new EngineHost({ capabilities: () => '{}' }, {});
+  disposed.dispose();
+  assert.throws(() => disposed.capabilities(), /disposed/);
 });
 
 for (const entry of ['legacy', 'actions', 'bytes']) {

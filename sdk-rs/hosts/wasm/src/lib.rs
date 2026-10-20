@@ -104,8 +104,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
-    #[cfg(feature = "coinbase")]
-    fn account_id(&self) -> Option<String>;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities;
     fn set_public_feed_policy(
         &mut self,
         policy: safe_cex_engine::PublicFeedPolicy,
@@ -123,9 +122,8 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
-    #[cfg(feature = "coinbase")]
-    fn account_id(&self) -> Option<String> {
-        Engine::account_id(self).map(str::to_owned)
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        Engine::capabilities(self)
     }
     fn set_public_feed_policy(
         &mut self,
@@ -1239,12 +1237,9 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
-    // Only Coinbase exposes its selected portfolio through the SDK account API.
-    // Keep the optional ABI out of single-venue artifacts that cannot use it.
-    #[cfg(feature = "coinbase")]
-    #[wasm_bindgen(js_name = accountId)]
-    pub fn account_id(&self) -> Option<String> {
-        self.inner.account_id()
+    /// The venue's capability record as JSON; fixed for the engine's lifetime.
+    pub fn capabilities(&self) -> Result<String, JsError> {
+        Ok(serde_json::to_string(&self.inner.capabilities())?)
     }
 
     /// Everything that changed since the previous call as one flush frame
@@ -1285,6 +1280,198 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    /// Each venue's record equals the name lists `rust.exchange.ts` used before
+    /// the engine reported it.
+    #[cfg(all(
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "backpack",
+        feature = "binance",
+        feature = "bingx",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "blofin",
+        feature = "breakoutprop",
+        feature = "bybit",
+        feature = "coinbase",
+        feature = "cryptocom",
+        feature = "grvt",
+        feature = "hyperliquid",
+        feature = "kraken",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "lighter",
+        feature = "mexc",
+        feature = "okx",
+        feature = "orderly",
+        feature = "paradex",
+        feature = "phemex",
+        feature = "polymarket",
+        feature = "txflow",
+        feature = "weex",
+        feature = "woo"
+    ))]
+    #[test]
+    fn capabilities_match_the_former_bridge_name_lists() {
+        use safe_cex_engine::{AccountLookup, Capabilities, LeverageQuery, MaxLeverage};
+        const ORDERLY: [&str; 6] = [
+            "tealstreet-dex",
+            "kodiakfi",
+            "mode",
+            "salsadex",
+            "what",
+            "woofi",
+        ];
+        const OKX: [&str; 4] = ["okx", "okxeu", "okxdemo", "okxeudemo"];
+        let venues = [
+            "coinbase",
+            "coinbasespot",
+            "apexomni",
+            "asterdex",
+            "breakoutprop",
+            "binance",
+            "binancespot",
+            "binanceinverse",
+            "backpack",
+            "binancepm",
+            "bitget",
+            "bitgetusdc",
+            "bitgetinverse",
+            "blofin",
+            "bitrue",
+            "grvt",
+            "mexc",
+            "woo",
+            "bingx",
+            "bybit",
+            "bybitinverse",
+            "bybitspot",
+            "bybitdemo",
+            "hyrotrader",
+            "cryptocom",
+            "kucoin",
+            "kucoinspot",
+            "polymarket",
+            "hyperliquid",
+            "hyperliquidspot",
+            "paradex",
+            "txflow",
+            "kraken",
+            "krakenspot",
+            "lighter",
+            "lighter-robinhood",
+            "weex",
+            "phemex",
+        ]
+        .into_iter()
+        .chain(ORDERLY)
+        .chain(OKX);
+        let any = |names: &[&str], venue: &str| names.contains(&venue);
+        let engine_options = |venue: &str, extra: &str| {
+            let endpoints = if venue == "txflow" {
+                r#","testnet":true"#
+            } else if venue == "hyrotrader" {
+                r#","endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#
+            } else {
+                ""
+            };
+            format!(r#"{{"publicDataOnly":true{endpoints}{extra}}}"#)
+        };
+        for venue in venues {
+            let no_history = any(&["breakoutprop", "hyperliquidspot", "krakenspot"], venue);
+            let no_orders_or_income =
+                no_history || any(&["apexomni", "bitrue", "kucoinspot"], venue);
+            let expected = Capabilities {
+                account: if any(&["apexomni", "kucoinspot", "asterdex", "polymarket"], venue) {
+                    AccountLookup::Query
+                } else if any(&["coinbase", "coinbasespot"], venue) || any(&ORDERLY, venue) {
+                    AccountLookup::AfterLoad
+                } else {
+                    AccountLookup::Unsupported
+                },
+                client_order_lookup: any(
+                    &[
+                        "hyperliquid",
+                        "grvt",
+                        "paradex",
+                        "bitrue",
+                        "kucoinspot",
+                        "phemex",
+                        "binance",
+                        "binancepm",
+                    ],
+                    venue,
+                ) || any(&OKX, venue),
+                fill_history: !no_history,
+                order_history: !no_orders_or_income,
+                income_history: !no_orders_or_income,
+                fills_by_order_id: venue == "grvt",
+                cancel_all: any(
+                    &[
+                        "polymarket",
+                        "breakoutprop",
+                        "woo",
+                        "grvt",
+                        "kucoin",
+                        "kucoinspot",
+                    ],
+                    venue,
+                ),
+                leverage_query: if any(
+                    &[
+                        "asterdex",
+                        "blofin",
+                        "bitrue",
+                        "grvt",
+                        "paradex",
+                        "txflow",
+                        "coinbase",
+                        "coinbasespot",
+                        "polymarket",
+                    ],
+                    venue,
+                ) || any(&OKX, venue)
+                    || any(&ORDERLY, venue)
+                {
+                    LeverageQuery::OnRead
+                } else if any(&["mexc", "woo", "kraken"], venue) {
+                    LeverageQuery::OnMetadata
+                } else {
+                    LeverageQuery::Settings
+                },
+                max_leverage: match venue {
+                    "bitrue" => MaxLeverage::Query,
+                    "polymarket" => MaxLeverage::Rails,
+                    "breakoutprop" => MaxLeverage::Unsupported,
+                    _ => MaxLeverage::Market,
+                },
+                account_leverage: any(&ORDERLY, venue),
+                account_margin_type: any(&["blofin", "kucoinspot"], venue),
+                cancel_with_symbols: any(&["asterdex", "kucoinspot"], venue),
+                amend_with_symbol: venue == "kucoinspot",
+                order_book_query: any(&["asterdex", "polymarket"], venue),
+                options: false,
+            };
+            let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
+                panic!("{venue} engine constructs");
+            };
+            assert_eq!(engine.inner.capabilities(), expected, "{venue}");
+        }
+        for (venue, options) in [
+            ("bybit", true),
+            ("bybitinverse", false),
+            ("hyrotrader", false),
+        ] {
+            let Ok(engine) = super::WasmEngine::new(
+                venue,
+                &engine_options(venue, r#","enableOptionMarkets":true"#),
+            ) else {
+                panic!("{venue} engine constructs");
+            };
+            assert_eq!(engine.inner.capabilities().options, options, "{venue}");
+        }
+    }
+
     #[test]
     fn command_progress_serializes_native_identity_namespaces_in_action_order() {
         use safe_cex_engine::{Action, Notice, OrderIdentityKind, OrderIdentityReceipt};
@@ -1346,9 +1533,8 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
-            #[cfg(feature = "coinbase")]
-            fn account_id(&self) -> Option<String> {
-                None
+            fn capabilities(&self) -> safe_cex_engine::Capabilities {
+                safe_cex_engine::Capabilities::BASE
             }
             fn set_public_feed_policy(
                 &mut self,
@@ -1557,9 +1743,8 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
-        #[cfg(feature = "coinbase")]
-        fn account_id(&self) -> Option<String> {
-            None
+        fn capabilities(&self) -> safe_cex_engine::Capabilities {
+            safe_cex_engine::Capabilities::BASE
         }
 
         fn set_public_feed_policy(

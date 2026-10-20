@@ -230,7 +230,7 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   assert.equal(r.host.dead, false);
   await assert.rejects(r.host.command({ op: 'placeOrders' }), (error) => error.code === 'ENGINE_DISPOSED' && error.outcome === undefined);
   assert.throws(() => r.host.snapshot(), EngineDisposedError);
-  assert.throws(() => r.host.accountId(), EngineDisposedError);
+  assert.throws(() => r.host.capabilities(), EngineDisposedError);
   assert.equal(r.calls.length, 2);
   r.host.dispose();
   assert.equal(disposed, 1);

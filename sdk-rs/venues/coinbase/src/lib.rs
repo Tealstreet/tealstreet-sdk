@@ -10,7 +10,7 @@ mod wire;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 #[derive(Default, Deserialize)]
@@ -67,10 +67,31 @@ impl Coinbase {
         })
     }
 }
+impl Coinbase {
+    /// The private portfolio discovered at startup is the account's identity.
+    fn account_identity(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Identity<'a> {
+            user_id: &'a str,
+        }
+        match self.account.portfolio_id.as_deref() {
+            Some(id) if !self.options.public_data_only => {
+                serde_json::to_string(&Identity { user_id: id }).map_err(|error| error.to_string())
+            }
+            _ => Err("Coinbase private portfolio ID is unavailable".into()),
+        }
+    }
+}
+
 impl Venue for Coinbase {
     type Pending = Pending;
-    fn account_id(&self) -> Option<&str> {
-        self.account.portfolio_id.as_deref()
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::AfterLoad,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_some() {
@@ -124,6 +145,10 @@ impl Venue for Coinbase {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            cx.done(command, self.account_identity());
+            return;
+        }
         if let Some(Command::Query { command, query }) = self
             .public_command(cx, command)
             .and_then(|command| self.trading_command(cx, command))

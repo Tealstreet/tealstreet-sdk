@@ -234,6 +234,14 @@ impl ApexOmni {
 
 impl Venue for ApexOmni {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            order_history: false,
+            income_history: false,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.start_public(cx);
     }

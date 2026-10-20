@@ -176,9 +176,29 @@ export interface CommandOptions {
   timeoutMs?: number;
 }
 
+/** What a venue answers beyond the common commands (`safe_cex_engine::Capabilities`). */
+export interface EngineCapabilities {
+  account: 'unsupported' | 'query' | 'afterLoad';
+  clientOrderLookup: boolean;
+  fillHistory: boolean;
+  orderHistory: boolean;
+  incomeHistory: boolean;
+  fillsByOrderId: boolean;
+  cancelAll: boolean;
+  leverageQuery: 'settings' | 'onRead' | 'onMetadata';
+  maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
+  accountLeverage: boolean;
+  accountMarginType: boolean;
+  cancelWithSymbols: boolean;
+  amendWithSymbol: boolean;
+  orderBookQuery: boolean;
+  options: boolean;
+}
+
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
-  accountId?(): string | undefined;
+  /** JSON of the venue's capability record. */
+  capabilities(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
@@ -204,7 +224,8 @@ export interface WasmEngineLike {
 export class EngineHost {
   readonly dead: boolean;
   readonly deadError?: EngineDeadError;
-  accountId(): string | undefined;
+  /** The venue's capability record, read once from the engine. */
+  capabilities(): EngineCapabilities;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
   /** Resolves with the command's result for commands that report one. */

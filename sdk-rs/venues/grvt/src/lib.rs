@@ -633,6 +633,15 @@ impl Grvt {
 }
 impl Venue for Grvt {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            client_order_lookup: true,
+            fills_by_order_id: true,
+            cancel_all: true,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public quotes cannot make an unseeded account appear loaded.
         if cx.store.loaded().balance && cx.store.loaded().positions {

@@ -1151,6 +1151,15 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 
 impl Venue for BinanceFutures {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            client_order_lookup: matches!(
+                self.options.variant,
+                Variant::UsdM | Variant::PortfolioMargin
+            ),
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

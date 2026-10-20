@@ -277,11 +277,13 @@ export class EngineHost {
     return frame.buffer;
   }
 
-  accountId() {
+  /** The venue's capability record; fixed for the engine's lifetime, so read once. */
+  capabilities() {
+    if (this.capabilityRecord) return this.capabilityRecord;
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
-    const id = this.engine.accountId ? this.invoke(this.engine.accountId) : undefined;
+    const json = this.invoke(this.engine.capabilities);
     if (this.deadError) throw this.deadError;
-    return id;
+    return (this.capabilityRecord = JSON.parse(json));
   }
 
   dispose() {

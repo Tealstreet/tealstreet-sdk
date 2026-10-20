@@ -694,6 +694,16 @@ fn spot_rows(
 
 impl Venue for Hyperliquid {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        if self.spot {
+            safe_cex_engine::Capabilities::NO_HISTORY
+        } else {
+            safe_cex_engine::Capabilities {
+                client_order_lookup: true,
+                ..safe_cex_engine::Capabilities::BASE
+            }
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
             let matches_wallet = self

@@ -324,6 +324,9 @@ impl KrakenSpot {
 }
 impl Venue for KrakenSpot {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities::NO_HISTORY
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.options.public_data_only && self.signer.is_none() {
             self.reject_auth(cx, "Kraken Spot invalid secret: expected nonempty base64");

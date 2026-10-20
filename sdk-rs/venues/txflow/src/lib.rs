@@ -567,6 +567,12 @@ impl TxFlow {
 }
 impl Venue for TxFlow {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
             cx.log(LogLevel::Error, error);

@@ -137,6 +137,26 @@ impl Orderly {
             "https://api-evm.orderly.org"
         }
     }
+    /// The broker application is the account's identity and affiliate.
+    fn account_identity(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Identity<'a> {
+            user_id: &'a str,
+            affiliate_id: &'a str,
+        }
+        match self.options.application_id.as_deref() {
+            Some(id) if !id.is_empty() && !self.options.public_data_only => {
+                serde_json::to_string(&Identity {
+                    user_id: id,
+                    affiliate_id: id,
+                })
+                .map_err(|error| error.to_string())
+            }
+            _ => Err("Orderly private account ID is required".into()),
+        }
+    }
+
     fn public_url(&self) -> String {
         let host = if self.options.testnet {
             "testnet-ws-evm.orderly.org"
@@ -547,6 +567,14 @@ fn interval_valid(i: &str) -> bool {
 
 impl Venue for Orderly {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::AfterLoad,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            account_leverage: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.initialize_account(cx);
     }
@@ -1043,6 +1071,7 @@ impl Venue for Orderly {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),
+            Command::FetchAccount { command } => cx.done(command, self.account_identity()),
             trade => self.trade_command(cx, trade),
         }
     }

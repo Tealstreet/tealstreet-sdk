@@ -597,6 +597,16 @@ fn valid_level(price: f64, size: f64) -> bool {
 }
 impl Venue for Polymarket {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            cancel_all: true,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            max_leverage: safe_cex_engine::MaxLeverage::Rails,
+            order_book_query: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, None, vec![], vec![]);
     }
