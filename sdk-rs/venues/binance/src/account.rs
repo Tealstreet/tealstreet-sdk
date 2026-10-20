@@ -29,6 +29,7 @@ const ORDERS_REFRESH_DEBOUNCE_MS: f64 = 10_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
 /// Retain execution identities across reconnects without an unbounded event log.
 const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
+const SPOT_EXECUTION_WINDOW: usize = 16_384;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
 
 pub enum Request {
@@ -89,6 +90,12 @@ struct PmOrderOwner {
 }
 
 #[derive(Default)]
+struct SpotDelivery {
+    bootstrap_floor: f64,
+    delivered_cumulative: f64,
+}
+
+#[derive(Default)]
 pub struct AccountState {
     started: bool,
     listen_key_retry_ms: f64,
@@ -112,6 +119,9 @@ pub struct AccountState {
     pm_order_owners: HashMap<String, PmOrderOwner>,
     unquantified_cancels: HashSet<(String, u64)>,
     spot_client_native: HashMap<(String, String), u64>,
+    spot_delivery: HashMap<(String, u64), SpotDelivery>,
+    spot_trades: HashSet<(String, u64, i64)>,
+    spot_trade_order: VecDeque<(String, u64, i64)>,
     spot_subscribe_id: Option<String>,
     spot_subscribe_at: Option<f64>,
     spot_subscription: Option<u64>,
@@ -806,10 +816,10 @@ impl BinanceFutures {
                 let mut malformed = false;
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
-                        malformed |= self.options.portfolio_margin;
+                        malformed |= self.options.portfolio_margin || self.is_spot();
                         return;
                     };
-                    if self.options.portfolio_margin
+                    if (self.options.portfolio_margin || self.is_spot())
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
                                 .iter()
@@ -1175,6 +1185,17 @@ impl BinanceFutures {
         let mut orders = join.regular.unwrap_or_default();
         orders.extend(join.algo.unwrap_or_default());
         for (symbol, client, native, filled) in join.native_orders {
+            if self.is_spot() {
+                // Only the first accepted REST observation establishes history.
+                // Live events create a zero floor; ACKs never touch delivery.
+                self.account
+                    .spot_delivery
+                    .entry((symbol.clone(), native))
+                    .or_insert(SpotDelivery {
+                        bootstrap_floor: filled,
+                        delivered_cumulative: filled,
+                    });
+            }
             let entry = self
                 .account
                 .native_executed
@@ -1856,6 +1877,8 @@ struct SpotEvent<'a> {
     balances: Vec<SpotEventBalance<'a>>,
     #[serde(default)]
     i: Option<u64>,
+    #[serde(default)]
+    t: Option<i64>,
     #[serde(borrow, default)]
     c: Cow<'a, str>,
     #[serde(rename = "C", borrow, default)]
@@ -2161,6 +2184,40 @@ impl BinanceFutures {
         cx.store.set_currency_balances(currencies);
         cx.store.set_balance(balance);
     }
+    fn fresh_spot_execution(
+        &mut self,
+        key: &(String, u64),
+        filled: f64,
+        trade: Option<i64>,
+    ) -> bool {
+        let cursor = self.account.spot_delivery.entry(key.clone()).or_default();
+        if filled <= cursor.bootstrap_floor {
+            return false;
+        }
+        let fresh = match trade {
+            Some(id) if id >= 0 => {
+                let execution = (key.0.clone(), key.1, id);
+                let fresh = self.account.spot_trades.insert(execution.clone());
+                if fresh {
+                    self.account.spot_trade_order.push_back(execution);
+                    if self.account.spot_trade_order.len() > SPOT_EXECUTION_WINDOW
+                        && let Some(oldest) = self.account.spot_trade_order.pop_front()
+                    {
+                        self.account.spot_trades.remove(&oldest);
+                    }
+                }
+                fresh
+            }
+            Some(_) => false,
+            // Legacy idless packets only support cumulative progress dedupe.
+            None => filled > cursor.delivered_cumulative,
+        };
+        if fresh {
+            cursor.delivered_cumulative = cursor.delivered_cumulative.max(filled);
+        }
+        fresh
+    }
+
     fn on_spot_order(&mut self, cx: &mut Cx<'_, Pending>, event: SpotEvent<'_>) {
         if event.c.is_empty() || event.s.is_empty() {
             return;
@@ -2169,6 +2226,41 @@ impl BinanceFutures {
         let Some(native) = event.i else {
             return;
         };
+        let kind = order_type(&event.o);
+        if !matches!(event.side.as_ref(), "BUY" | "SELL")
+            || !nonnegative_number(&event.q)
+            || !nonnegative_number(&event.z)
+            || (event.status == "NEW"
+                && (kind.is_none()
+                    || !nonnegative_number(&event.p)
+                    || (!event.stop_price.is_empty() && !nonnegative_number(&event.stop_price))))
+        {
+            return;
+        }
+        let amount = num::parse(&event.q);
+        let filled = num::parse(&event.z);
+        if filled > amount {
+            return;
+        }
+        let is_trade = event.x == "TRADE";
+        let last_quantity = event
+            .l
+            .parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite() && *n > 0.0);
+        let last_price = event
+            .last_price
+            .parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite() && *n > 0.0);
+        if is_trade
+            && (last_quantity.is_none()
+                || last_price.is_none()
+                || last_quantity.is_some_and(|last| last > filled)
+                || event.t.is_some_and(|t| t < 0))
+        {
+            return;
+        }
         let id = if !event.original_client.is_empty()
             && matches!(
                 event.status.as_ref(),
@@ -2180,85 +2272,57 @@ impl BinanceFutures {
         };
         let key = (event.s.to_string(), native);
         let client_key = (event.s.to_string(), id.clone());
-        if self
+        // A valid stream observation is live even when its lifecycle total
+        // already includes executions whose TRADE reports have not arrived.
+        self.account.spot_delivery.entry(key.clone()).or_default();
+        if is_trade && self.fresh_spot_execution(&key, filled, event.t) {
+            cx.fill(Fill {
+                order_id: id.clone(),
+                symbol: event.s.to_string(),
+                side: order_side(&event.side),
+                price: last_price.expect("validated execution price"),
+                amount: last_quantity.expect("validated execution quantity"),
+            });
+        }
+        let (previous, was_terminal) = self
+            .account
+            .native_executed
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let terminal = was_terminal
+            || matches!(
+                event.status.as_ref(),
+                "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+            );
+        let current_filled = previous.max(filled);
+        self.account
+            .native_executed
+            .insert(key.clone(), (current_filled, terminal));
+        if event.status == "FILLED" {
+            self.account.unquantified_cancels.remove(&key);
+        }
+        let historical = self
             .account
             .spot_client_native
             .get(&client_key)
             .is_some_and(|current| *current > native)
             || (self.client_order_row_is_foreign(cx, &event.s, &id)
                 && (event.status != "NEW"
-                    || self.account.spot_client_native.get(&client_key) == Some(&native)))
-        {
-            // An unquantified cancel-all can precede the old order's final fill,
-            // even after its caller ID has been reused for another native order.
-            let (previous, terminal) = self
-                .account
-                .native_executed
-                .get(&key)
-                .copied()
-                .unwrap_or_default();
-            let filled = num::parse(&event.z);
-            let terminal = terminal
-                || matches!(
-                    event.status.as_ref(),
-                    "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
-                );
-            if event.x == "TRADE" && filled > previous && num::parse(&event.l) > 0.0 {
-                cx.fill(Fill {
-                    order_id: id,
-                    symbol: event.s.to_string(),
-                    side: order_side(&event.side),
-                    price: num::parse(&event.last_price),
-                    amount: num::parse(&event.l),
-                });
-                self.account
-                    .native_executed
-                    .insert(key.clone(), (filled.max(previous), terminal));
-                if event.status == "FILLED" {
-                    self.account.unquantified_cancels.remove(&key);
-                }
-            }
-            // Lifecycle totals do not prove that their trades were delivered.
-            self.account
-                .native_executed
-                .entry(key)
-                .and_modify(|seen| seen.1 |= terminal)
-                .or_insert((previous, terminal));
+                    || self.account.spot_client_native.get(&client_key) == Some(&native)));
+        // Native executions remain observable independently of lifecycle and
+        // canonical client-ID ownership; old rows never steal a newer binding.
+        if historical || filled < previous || (was_terminal && !is_trade) {
             return;
         }
-        let amount = num::parse(&event.q);
-        let filled = num::parse(&event.z);
-        let (previous, terminal) = self
-            .account
-            .native_executed
-            .get(&key)
-            .copied()
-            .unwrap_or_default();
-        let unquantified = self.account.unquantified_cancels.contains(&key);
-        if (terminal
-            && !(unquantified
-                && event.x == "TRADE"
-                && filled > previous
-                && num::parse(&event.l) > 0.0))
-            || filled < previous
+        let new_incarnation = !was_terminal
+            && self.account.spot_client_native.insert(client_key, native) != Some(native);
+        if !was_terminal
+            && (event.status == "NEW"
+                || ((new_incarnation || cx.store.order(&id).is_none())
+                    && matches!(event.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")))
         {
-            return;
-        }
-        let terminal = terminal
-            || matches!(
-                event.status.as_ref(),
-                "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
-            );
-        self.account.native_executed.insert(key, (filled, terminal));
-        let new_incarnation =
-            self.account.spot_client_native.insert(client_key, native) != Some(native);
-        if event.status == "NEW"
-            || ((new_incarnation || cx.store.order(&id).is_none())
-                && matches!(event.status.as_ref(), "PARTIALLY_FILLED" | "FILLED"))
-        {
-            let Some(kind) = order_type(&event.o) else {
-                return;
-            };
+            let Some(kind) = kind else { return };
             let price = num::parse(&event.p);
             cx.store.upsert_order(Order {
                 id: id.clone(),
@@ -2273,8 +2337,8 @@ impl BinanceFutures {
                     num::parse(&event.stop_price)
                 },
                 amount,
-                filled,
-                remaining: (amount - filled).max(0.0),
+                filled: current_filled,
+                remaining: (amount - current_filled).max(0.0),
                 reduce_only: false,
                 close: Some(false),
                 client_order_id: Some(id.clone()),
@@ -2290,37 +2354,17 @@ impl BinanceFutures {
                 extra: None,
             });
         }
-        if event.x == "TRADE" && filled > previous && num::parse(&event.l) > 0.0 {
-            // `p` is the limit price, which is zero on market orders; `L` is execution price.
-            cx.fill(Fill {
-                order_id: id.clone(),
-                symbol: event.s.to_string(),
-                side: order_side(&event.side),
-                price: num::parse(&event.last_price),
-                amount: num::parse(&event.l),
-            });
-        }
         let now = cx.now;
         cx.store.update_order(&id, |order| {
-            order.filled = filled;
-            order.remaining = (amount - filled).max(0.0);
+            order.filled = order.filled.max(current_filled);
+            order.remaining = (amount - order.filled).max(0.0);
             order.last_update = now;
+            if event.status == "FILLED" {
+                order.status = OrderStatus::Closed;
+            } else if terminal && order.status != OrderStatus::Closed {
+                order.status = OrderStatus::Canceled;
+            }
         });
-        if unquantified && event.status != "FILLED" {
-            cx.store.set_order_status(&id, OrderStatus::Canceled);
-        }
-        if event.status == "FILLED" {
-            cx.store.set_order_status(&id, OrderStatus::Closed);
-            self.account
-                .unquantified_cancels
-                .remove(&(event.s.to_string(), native));
-        }
-        if matches!(
-            event.status.as_ref(),
-            "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
-        ) {
-            cx.store.set_order_status(&id, OrderStatus::Canceled);
-        }
     }
 }
 

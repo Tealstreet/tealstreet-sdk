@@ -164,6 +164,27 @@ No new error architecture or unrelated engine helper migration belongs here.
   Clippy/typecheck/ESLint passed. Eight actual selected-WASM HMAC scenarios are
   prepared but await the root's serialized build. An earlier wrong-selected-
   package 'unsupported venue' attempt is explicitly not regression evidence.
+- First pre-integration Bybit gate attempt: selected artifact 1,195,457 bytes,
+  SHA256 57f1c7141f387a96cfa2954b84743d28c0c42a6b50addea69604b707a38b3473.
+  Nine replay gates passed; Hyro public failed steady CPU (TS 4.8 ms / Rust
+  5.2 ms, main 23.3 / 22.8 ms). The chain stopped before the fresh capture gate.
+  This is not final passing evidence. Landing PR #1345 then arrived with shared
+  engine/wire/frame changes; merge it and rerun the final source gates with
+  unchanged thresholds. Do not disguise the miss as a passing run.
+- Private Spot checkpoint: authoritative execution totals remain separate from
+  delivery. Quantified ACKs size replacements without consuming later TRADEs;
+  native trade IDs dedupe in a bounded 16,384-entry window independently of
+  terminal state/client reuse. Only the first fully accepted REST observation
+  seeds an immutable history floor; later reads and ACKs never raise it, and
+  stream-first orders retain zero floor. Sixteen new native cases plus 20
+  lifecycle controls pass, including bootstrap/rejected joins, malformed retry,
+  reordered IDs, current/historical/symbol reuse, reconnect, bounded eviction
+  and flat/nested OCO ACK races. Core/strengthened historical regressions and a
+  malformed-execution regression failed before their fixes. Independent source
+  review and final 16-case rerun passed. The new two-case real SDK fixture was
+  source-reviewed; compiled proof and full native/Clippy remain pending after
+  the incoming wire merge. No claim of unbounded or mixed-idless exactly-once
+  delivery, historical backfill or funded private verification is made.
 
 ## Authorized next task after this PR merges
 

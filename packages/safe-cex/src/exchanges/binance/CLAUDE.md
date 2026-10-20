@@ -58,6 +58,15 @@ SDK methods expose the matching branded Base fallbacks so history ingestion
 can distinguish unsupported from a successful empty result. USD-M/PM histories
 remain implemented, including EXPIRED_IN_MATCH as canceled.
 
+Spot cancellation totals update sizing without consuming TRADE delivery. Its
+latest 16,384 native trade IDs dedupe across reconnects; terminal/reused client
+rows cannot suppress a genuine old execution or change a newer row. Only the
+first accepted REST observation seeds historical filled quantity; stream-first
+orders keep a zero floor, and later reads/ACKs never advance delivery. Idless
+packets use cumulative progress; evicted or mixed idless/identified packets have
+no lifetime exactly-once guarantee. Historical fills are not fabricated from
+ACKs or REST quantity.
+
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
 `Canceled`, including fills received while cancellation was in flight. Accepted
 nonterminal rows, including local Creating/Updating/Canceling states, become
