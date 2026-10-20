@@ -949,7 +949,7 @@ Mostly matches TS.
     frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
     reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
     admitted with a warning instead of reconnecting, in initial recovery too, and the
-    next tick reconciles again.
+    next tick reconciles again. Admission uses `engine::fence::StaleGuard`.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
