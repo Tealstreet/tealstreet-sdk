@@ -71,6 +71,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bybitdemo: 'bybitdemo',
   hyrotrader: 'hyrotrader',
   cryptocom: 'cryptocom',
+  kucoin: 'kucoin',
   hyperliquid: 'hyperliquid',
   lighter: 'lighter',
   okx: 'okx',
@@ -130,6 +131,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   },
   bitunix: patternClientOrderIdRule('Bitunix', /^\S+$/),
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
+  kucoin: patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   bybit: bybitClientOrderIdRule,
   bybitinverse: bybitClientOrderIdRule,
@@ -211,7 +213,7 @@ export class RustEngineExchange extends BaseExchange {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin', this.name === 'bitgetinverse');
+    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin' || this.name === 'kucoin', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
@@ -304,6 +306,7 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
+        extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,

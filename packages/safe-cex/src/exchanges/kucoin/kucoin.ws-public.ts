@@ -375,7 +375,7 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     let lastSequence = 0;
     let bufferedUpdates: Data[] = [];
 
-    const orderBook: OrderBook = { bids: [], asks: [] };
+    let orderBook: OrderBook = { bids: [], asks: [] };
     const apiSymbol = this.parent.toApiSymbol(symbol);
     const topic = `orderBook_${symbol}`;
     const recoverFromGap = (message: Data) => {
@@ -389,16 +389,20 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     };
 
     const applySnapshot = (snapshot: Record<string, any>) => {
-      orderBook.bids = (snapshot.bids || []).map(([price, amount]: [string | number, string | number]) => ({
-        price: parseFloat(`${price}`),
-        amount: parseFloat(`${amount}`),
-        total: 0,
-      }));
-      orderBook.asks = (snapshot.asks || []).map(([price, amount]: [string | number, string | number]) => ({
-        price: parseFloat(`${price}`),
-        amount: parseFloat(`${amount}`),
-        total: 0,
-      }));
+      // Recovery may still fail to bridge buffered deltas. Keep this candidate
+      // separate from the last book retained by consumers and trailing throttles.
+      orderBook = {
+        bids: (snapshot.bids || []).map(([price, amount]: [string | number, string | number]) => ({
+          price: parseFloat(`${price}`),
+          amount: parseFloat(`${amount}`),
+          total: 0,
+        })),
+        asks: (snapshot.asks || []).map(([price, amount]: [string | number, string | number]) => ({
+          price: parseFloat(`${price}`),
+          amount: parseFloat(`${amount}`),
+          total: 0,
+        })),
+      };
       lastSequence = parseInt(snapshot.sequence || snapshot.sn || '0', 10) || lastSequence;
     };
 
@@ -461,7 +465,14 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
           return !sequence || !lastSequence || sequence > lastSequence;
         });
         bufferedUpdates = [];
-        for (const update of replay) applyIncrement(update);
+        for (let i = 0; i < replay.length; i++) {
+          if (!snapshotLoaded) {
+            // A gap retains its first delta; keep the rest for the newer snapshot.
+            bufferedUpdates = bufferedUpdates.concat(replay.slice(i));
+            break;
+          }
+          applyIncrement(replay[i]);
+        }
 
         if (snapshotLoaded) emitOrderBook();
       } catch (err: any) {

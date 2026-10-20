@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 
-const numbers = (values: Record<string, number>) => Object.fromEntries(
-  Object.entries(values).map(([key, value]) => [key, Float64Array.of(value)]),
-);
+const numbers = <Key extends string>(values: Record<Key, number>) => Object.fromEntries(
+  Object.entries<number>(values).map(([key, value]) => [key, Float64Array.of(value)]),
+) as Record<Key, Float64Array>;
 
 // Frame readers expose typed columns; quantities here are published base units.
 const frame = () => ({
@@ -45,6 +45,28 @@ describe('native placement quantity bridge', () => {
     const store = new DefaultStore();
     new FrameApplier(store, true).apply(value);
     expect(store.orders[0].extra?.remainingNative).toBe(1);
+  });
+
+  it.each([false, true])('restores exact decimal lot fills and position sizes (native tail=%s)', (nativeTail) => {
+    const value = frame();
+    const market = value.markets()!;
+    value.markets = () => ({ ...market, contractSize: Float64Array.of(0.1) });
+    const order = value.orders()!;
+    value.orders = () => ({
+      ...order,
+      amount: Float64Array.of(0.7), filled: Float64Array.of(0.3), remaining: Float64Array.of(0.4),
+      ...(nativeTail && { remainingNative: Float64Array.of(5) }),
+    });
+    value.positions = () => ({
+      count: 1, market: Uint32Array.of(0), enums: Uint32Array.of(0), id: () => undefined,
+      ...numbers({ entryPrice: 100, notional: 30, leverage: 10, unrealizedPnl: 0.2, realizedPnl: 0,
+        contracts: 0.3, liquidationPrice: 50, marginSize: 3, lastUpdate: 1 }),
+    });
+    const store = new DefaultStore();
+    new FrameApplier(store, true).apply(value);
+    expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4,
+      extra: { remainingNative: nativeTail ? 5 : 4, filledInPlacementUnits: 3 } });
+    expect(store.positions[0]).toMatchObject({ contracts: 0.3, extra: { contractsNative: 3 } });
   });
 
   it('keeps base placement units for other venues', () => {

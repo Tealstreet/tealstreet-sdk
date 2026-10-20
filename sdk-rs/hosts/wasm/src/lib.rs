@@ -8,6 +8,7 @@
     feature = "bitrue",
     feature = "binance",
     feature = "bitunix",
+    feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -23,7 +24,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bitunix, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bitunix, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -52,6 +53,8 @@ use safe_cex_venue_bybit::{
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "kucoin")]
+use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 #[cfg(feature = "lighter")]
 use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "mexc")]
@@ -101,9 +104,18 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+#[cfg(feature = "kucoin")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KucoinExtra {
+    #[serde(default)]
+    kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+}
+
 #[cfg(any(
     feature = "binance",
     feature = "bitunix",
+    feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -135,6 +147,7 @@ struct EngineOptions {
     #[cfg(any(
         feature = "binance",
         feature = "bitunix",
+        feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -157,6 +170,7 @@ struct EngineOptions {
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
+        feature = "kucoin",
         feature = "okx",
         feature = "weex",
         feature = "blofin",
@@ -181,6 +195,9 @@ struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
+    #[cfg(feature = "kucoin")]
+    #[serde(default)]
+    extra: Option<KucoinExtra>,
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
@@ -638,6 +655,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "binance",
         feature = "bitunix",
+        feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -743,6 +761,15 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "kucoin")]
+            "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             #[cfg(feature = "bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {

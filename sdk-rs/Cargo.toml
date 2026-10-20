@@ -35,6 +35,7 @@ safe-cex-venue-bitunix = { path = "venues/bitunix" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
 safe-cex-venue-cryptocom = { path = "venues/cryptocom" }
 safe-cex-venue-okx = { path = "venues/okx" }
+safe-cex-venue-kucoin = { path = "venues/kucoin" }
 safe-cex-venue-weex = { path = "venues/weex" }
 safe-cex-venue-woo = { path = "venues/woo" }
 safe-cex-native = { path = "hosts/native" }

@@ -175,6 +175,15 @@ test('Crypto authenticated POST reads reuse snapshots while writes remain single
   assert.equal(responses.unusedWrites(), 0);
 });
 
+test('response time visibility and header authentication remain independent', () => {
+  const url = 'https://venue.test/private';
+  const records = [{ type: 'http', method: 'GET', url, availableAfter: 100, status: 200, body: '{}' }];
+  const responses = new Responses(records, () => 'read', (_method, _url, _body, headers) => headers?.auth === 'fixture', () => false);
+  assert.equal(responses.respond('GET', url, undefined, 0, 99, { auth: 'fixture' }).status, 599);
+  assert.equal(responses.respond('GET', url, undefined, 0, 100, {}).status, 599);
+  assert.equal(responses.respond('GET', url, undefined, 0, 100, { auth: 'fixture' }).status, 200);
+});
+
 test('implementation-specific responses preserve exact matching and selected write consumption', () => {
   const make = (requestBody, impl) => ({
     type: 'http',
@@ -275,3 +284,25 @@ test('WEEX acknowledgements echo the actual generated ID and still consume exact
   assert.equal(responses.respond(write.method, write.url, '{"clientAlgoId":"another"}').status, 599);
 });
 }
+
+test('header-aware response overloads validate stages and auth before callbacks or consumption', () => {
+  for (const legacy of [false, true]) {
+    const url = 'https://venue.test/orders';
+    const responses = new Responses([{ type: 'http', method: 'POST', url,
+      requestBody: '{"size":2}', status: 200, body: '{}', afterCommand: 2, availableAfter: 100 }],
+    (_method, _url, body) => body, (_method, _url, _body, headers) => headers?.auth === 'fixture');
+    let matches = 0;
+    const respond = (time, headers, callback = () => { matches++; }) => legacy
+      ? responses.respond('POST', url, '{"size":2}', 2, callback, time, headers)
+      : responses.respond('POST', url, '{"size":2}', 2, time, callback, headers);
+    assert.equal(respond(99, { auth: 'fixture' }).status, 599);
+    assert.equal(respond(100, {}).status, 599);
+    assert.equal(matches, 0);
+    assert.throws(() => respond(100, { auth: 'fixture' }, () => { throw new Error('invalid generated ID'); }), /invalid generated/);
+    assert.equal(responses.unusedWrites(), 1);
+    assert.equal(respond(100, { auth: 'fixture' }).status, 200);
+    assert.equal(matches, 1);
+    assert.equal(responses.unusedWrites(), 0);
+    assert.equal(respond(100, { auth: 'fixture' }).status, 599);
+  }
+});

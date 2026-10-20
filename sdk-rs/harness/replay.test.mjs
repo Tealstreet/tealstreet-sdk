@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 import { Tape, stable } from './tape.mjs';
 import { subscriptionKeys } from './requests.mjs';
@@ -243,4 +244,57 @@ test('production constructor keeps typed signed HTTP matching separate from subs
   assert.deepEqual([...tape.fullSubscriptions], [
     ...expected.map((key) => `1 ${key}`), ...expected.map((key) => `2 ${key}`),
   ]);
+});
+
+test('production KuCoin constructor preserves signed REST query fields independently of socket IDs', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const keyStart = source.indexOf('const VOLATILE =');
+  const classStart = source.indexOf('class Tape extends SharedTape {');
+  const classEnd = source.indexOf('\nconst settle =', classStart);
+  const venue = venueOf('kucoin');
+  const url = 'https://api-futures.kucoin.com/api/v1/orders';
+  const body = '{"symbol":"XBTUSDTM","size":"2","clientOid":"generated-valid"}';
+  const records = [{ type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{}' }];
+  const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
+    'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
+    `${source.slice(keyStart, classStart)}\nreturn (${source.slice(classStart, classEnd)});`)(
+    Tape, { venue: 'kucoin' }, venue, records, [], new Set(), requestKey,
+    Responses, undefined, parseRequestJson, () => false, true,
+  );
+  const tape = new ProductionTape('ts');
+  const signed = (route) => {
+    const timestamp = String(Date.now());
+    const hmac = (text) => createHmac('sha256', 'replay-secret').update(text).digest('base64');
+    return { 'KC-API-KEY': 'replay-key', 'KC-API-KEY-VERSION': '2', 'KC-API-TIMESTAMP': timestamp,
+      'KC-API-PASSPHRASE': hmac('replay-passphrase'), 'KC-API-SIGN': hmac(timestamp + 'POST' + route + body) };
+  };
+  const extra = '/api/v1/orders?connectId=unknown-economic-parameter';
+  assert.equal(tape.respond('POST', new URL(extra, url).href, body, signed(extra)).status, 599);
+  assert.equal(tape.missingWrites, 1);
+  assert.equal(tape.respond('POST', url, body, signed('/api/v1/orders')).status, 200);
+  assert.equal(tape.missingWrites, 0);
+  assert.equal(tape.respond('POST', url, body, signed('/api/v1/orders')).status, 599);
+});
+
+test('production KuCoin startup requires every requested REST book and accepts initialized empty snapshots', async () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('    async (accountReady = true) => {', source.indexOf('async function runTs()'));
+  const end = source.indexOf('\n    (record) => runTsCommand', start);
+  const venue = venueOf('kucoin');
+  assert.equal(venue.initialBookSnapshots, true);
+  const books = { BTCUSDT: { bids: [], asks: [] }, WRONG: { bids: [], asks: [] } };
+  const exchange = { publicWebsocket: { messageHandlers: { orderBook_BTCUSDT: [], orderBook_ETHUSDT: [] } } };
+  const ready = new Function('prepared', 'subscribed', 'venue', 'exchange', 'bookSymbols', 'realTimeout',
+    'replayBooksReady', 'finalBooks', 'store', 'isPrivate',
+    `return (${source.slice(start, end).trim().replace(/,$/, '')});`)(
+    Promise.resolve(), Promise.resolve(), venue, exchange, ['BTCUSDT', 'ETHUSDT'], setTimeout,
+    (required, available) => required.every((symbol) => available.includes(symbol)), books, { loaded: {} }, false,
+  );
+  let done = false;
+  const pending = ready(true).then(() => { done = true; });
+  await new Promise(setImmediate);
+  assert.equal(done, false, 'a queued second snapshot must finish before public playback');
+  books.ETHUSDT = { bids: [], asks: [] };
+  await pending;
+  assert.equal(done, true);
 });

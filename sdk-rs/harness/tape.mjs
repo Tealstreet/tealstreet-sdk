@@ -36,7 +36,7 @@ export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => {
   }
 
   const query = [...parsed.searchParams]
-    .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+    .filter(([name, value]) => (!VOLATILE.has(name) && !venue.volatileQueryFields?.includes(name)) || callerIds.has(value))
     .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value, callerIds, venue) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
@@ -375,7 +375,7 @@ export class Tape {
       Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
     );
     this.pendingStartupSubscriptions = this.startupSubscriptions.size;
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records) });
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records), records });
     this.callerIds = new Set();
     const collectCallerIds = (value) => {
       if (!value || typeof value !== 'object') return;
@@ -451,6 +451,7 @@ export class Tape {
         if (!lifecycle.pastInitial) lifecycle.initial.add(frame.connection ?? lifecycle.initial.size);
       } else if (!lifecycle.pastInitial && frame.connection !== undefined) lifecycle.initial.add(frame.connection);
     }
+    this.startupDelivered = new Set();
     this.sockets = [];
     this.open = new Map();
     this.connectionCounts = new Map();
@@ -544,7 +545,7 @@ export class Tape {
       if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
     };
     if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex, this.responseTime,
-      this.venue.validateMatchedRequest ? validateMatch : undefined);
+      this.venue.validateMatchedRequest ? validateMatch : undefined, headers);
     const now = this.responseTime;
     if (this.responseStore) {
       if (this.venue.compareWriteOrder && this.isWrite(method, url)) {
@@ -556,7 +557,7 @@ export class Tape {
         }
       }
       const response = this.responseStore.respond(method, url, body, this.commandIndex, now,
-        this.contract || this.venue.validateMatchedRequest || this.venue.compareWriteOrder ? validateMatch : undefined);
+        this.contract || this.venue.validateMatchedRequest || this.venue.compareWriteOrder ? validateMatch : undefined, headers);
       this._unserved = this.responseStore.unserved;
       return response;
     }
@@ -638,6 +639,15 @@ export class Tape {
     socket.opened = true;
     this.open.set(`${socket.url}:${socket.connection}`, socket);
     socket.onOpen();
+    if (!socket.closed && !this.playing && this.venue.startupMessage) {
+      const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command'
+        && !this.startupDelivered.has(record) && record.url === socket.url
+        && (record.connection === undefined || record.connection === socket.connection));
+      if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
+        this.startupDelivered.add(frame);
+        socket.onMessage(frame.text);
+      }
+    }
     for (const waiter of [...this.waiters]) waiter();
   }
 
@@ -698,6 +708,12 @@ export class Tape {
       }
     }
     this.audit?.sent(socket.rawUrl ?? socket.url, text, socket);
+    if (this.venue.respondToJsonPing && parsed?.type === 'ping') {
+      setImmediate(() => {
+        if (!socket.closed) socket.onMessage(JSON.stringify({ type: 'pong', id: parsed.id }));
+      });
+      return;
+    }
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage('pong');
@@ -963,6 +979,7 @@ export class Tape {
       ensureReady().catch(() => {}); // The same promise is awaited below.
     }
     begin();
+    this.playing = true;
     this.replayClock = clock;
     if (!inlineStartup) clock?.start();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
@@ -988,7 +1005,7 @@ export class Tape {
           if (String(error?.message).startsWith('replay timeout:')) throw error;
           return { error: String(error?.message ?? error) };
         }));
-      } else {
+      } else if (!this.startupDelivered.has(frame)) {
         await this.deliver(frame, true);
       }
       delivered++;

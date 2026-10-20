@@ -74,7 +74,7 @@ const gate = (venue, isPrivate = false, defect) => {
         books: { BTCUSDT: { bids: [[99, 1]], asks: [[101, 1]] } },
         // Orderly's strict oracle requires exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
-        commands: isOrderly ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
+        commands: isOrderly || venue === 'kucoin' ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
           balance: { used: 0, free: 100, total: 100, upnl: 0 },

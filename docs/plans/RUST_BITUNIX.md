@@ -935,3 +935,71 @@ Independent final WOO review PASS/no findings. Reviewer confirms serde_derive
 selects borrow_cow_str only for a syntactic Cow type, not its Str alias; the
 plain/escaped regression proves both paths. No custom parser or scratch field
 ships. Checkpoint before integrating newly landed KuCoin PR1312 at373cc09864.
+
+### KuCoin landing integration plan
+
+KuCoin PR1312 lands at373cc09864 before the WOO follow-up can enter CI.
+Commit reviewed WOO fix as c3a2d1a102, fetch/read the unchanged venue brief,
+then merge the new landing. Preserve nested17-venue structure, Bitunix
+net-realizedPNL/base-size semantics, WOO borrowed hot fields, throughput
+profiles and every existing strict replay control. Independent scopes own
+harness/workflow, SDK/hosts, and native compatibility. Resolve all conflicts
+without stash/rebase, audit KuCoin signed request headers and pending-read
+settlement against both matcher call shapes, keep explicit Bybit family
+selection and signed-component net memory/peak tests. Validate helpers,
+focused SDK/host behavior and all native checks, then fresh exact-head CI
+covering21public fixtures/38private variants plus4Bitget parity cases.
+Post adversarial findings and require all27registered checks green before
+merging into feat/rust-rewrite; cut a fresh branch from the landed result.
+
+KuCoin integration native checks PASS:1,447workspace tests, including
+engine69/Bitunix59/WOO113/KuCoin99; no native compatibility fixes needed.
+SDK103 and host/socket/wire46 checks PASS. A new decimal-lot test mock
+initially fails typecheck; preserve its column-key types instead of unsafe
+PositionTable casting, then typecheck/focused6 PASS. Root lint28 PASS.
+
+Independent adversarial review finds KuCoin generatedBodyId aliases any
+string, allowing correctly signed malformed clientOid values to consume a
+valid generated-ID ACK. Enforce existing /^[A-Za-z0-9_-]{1,40}$/ only on
+create endpoints before normalization, with signed invalid/valid/one-shot
+transport probes. Preserve exact caller/cancel identities. Finish helper
+aggregate, actual TS private replay and independent re-review before final
+WASM/public/private gates, checkpoint and exact-head CI.
+
+First integrated KuCoin native/TS private gate PASS:32frames/17commands.
+Public16,157frames/692markets/2books passes all CPU/memory metrics but all
+three runs fail strict intermediate book flush counts (TS141/142 vsRust150).
+Preserve the failure and every hash/time check. TS ETH startup snapshot can
+remain behind its3RPS limiter when the replay clock starts; evaluate the
+existing symmetric per-symbol snapshot barrier, then independently inspect
+cached/stale recovery response timing. No native bug proved yet. Module
+745,472bytes is below the unchanged cap. Roottypecheck44/lint28 PASS.
+
+Adversarial checks also reproduce two further KuCoin harness gaps: sharedURL
+replacement/parallel sockets borrow welcome/subscription state, and WebSocket
+connectId volatility hides an extra signed HTTP parameter. Bind protocol
+state to actual socket instances and keep volatile connectId normalization
+on WebSocket URLs only. Validate failed-before/after signed writes and
+connection-isolation probes before final aggregate/replay/CI.
+
+KuCoin per-symbol startup snapshot barrier aligns all150flush timestamps.
+Remaining early hash mismatches prove a production TS recovery publication
+bug: BTC1208 equals the stale REST snapshot at1205(seq0949); ETH1461/1712
+equals the stale snapshot at1232(seq0450), despite unresolved gaps and no
+callback. applySnapshot mutates a previously emitted object by reference.
+Native correctly retains the last valid book until contiguous recovery.
+Fix TS transactionality with a failed-before/pass-after publication regression,
+preserve queued gap deltas/suffix, document KNOWN_TS_FIXES with no hash waiver,
+then require all intermediate timestamps/hashes to match on the unchanged gate.
+
+Reviewed KuCoin merge checkpoint: all3harness guard fixes independently
+pass actual production-constructor signed/one-shot/socket-isolation probes.
+All340helpers PASS; transactional TS recovery publication regression fails
+before (published amount2 silently becomes90 without callback) and passes
+after, with14focused book/worker checks and package typecheck/lint PASS.
+Snapshot candidates are fresh objects; contiguous live delta reuse remains.
+The initial seed barrier yields150/150matching timestamps. All hashes match
+except ETH1712/1968, where TS3RPS read dispatch delays recovery. Preserve
+these two failures, checkpoint source before investigating causal replay
+limiter epoch/request completion and native read pacing. No public gate PASS
+claim, push or merge until the unchanged strict comparison passes.

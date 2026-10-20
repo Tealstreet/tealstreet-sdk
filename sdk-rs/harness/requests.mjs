@@ -45,7 +45,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   const query = [...parsed.searchParams]
     .filter(
       ([name, value]) =>
-        stable(callerIds, options)([name, value]) &&
+        stable(callerIds, options)([name, value]) && !options.volatileQueryFields?.includes(name) &&
         !(value === '' && options.cacheBustPaths?.includes(parsed.pathname)),
     )
     .map(([name, value]) => {
@@ -203,8 +203,8 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   return value;
 };
 
-const canonicalParams = (params, callerIds) => new URLSearchParams([...params]
-  .filter(([key]) => !IDENTITY_URL_VOLATILE.has(key))
+const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
+  .filter(([key]) => !IDENTITY_URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
   .filter(([key, value]) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value))
   .map(([key, value]) => {
     if (IDENTITY_CLIENT_IDS.has(key)) return [key, value];
@@ -214,9 +214,9 @@ const canonicalParams = (params, callerIds) => new URLSearchParams([...params]
   })
   .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv))).toString();
 
-export const canonicalUrl = (url, callerIds = new Set()) => {
+export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
-  return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds)}`;
+  return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds, options)}`;
 };
 
 
@@ -236,7 +236,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
-  catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
+  catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (options.bitrueProtocol) {
@@ -253,6 +253,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    if (options.rust === 'kucoin') delete message.response;
     if (options.orderlyProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }
@@ -284,7 +285,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
       message.args = [...message.args].sort();
     }
   }
-  return `WS ${canonicalUrl(url, callerIds)} ${JSON.stringify(normalize(message, callerIds))}`;
+  return `WS ${canonicalUrl(url, callerIds, options)} ${JSON.stringify(normalize(message, callerIds))}`;
 };
 
 // Subscription batches and one-topic sends have the same required feed set.
@@ -297,6 +298,11 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
   }
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
+    if (options.rust === 'kucoin' && typeof message.topic === 'string') {
+      const colon = message.topic.indexOf(':');
+      if (colon >= 0) return message.topic.slice(colon + 1).split(',').map((symbol) =>
+        subscriptionKey(url, { ...message, topic: `${message.topic.slice(0, colon)}:${symbol}` }, callerIds, options));
+    }
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,
         { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));

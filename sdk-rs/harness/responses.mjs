@@ -27,8 +27,12 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body, commandIndex = 0, time = 0, onMatch) {
-    const queue = this.check?.(method, url, body) === false ? undefined :
+  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, matchOrHeaders, signedHeaders) {
+    const legacyMatch = typeof timeOrMatch === 'function';
+    const onMatch = legacyMatch ? timeOrMatch : typeof matchOrHeaders === 'function' ? matchOrHeaders : undefined;
+    const time = legacyMatch ? (matchOrHeaders ?? 0) : timeOrMatch;
+    const headers = legacyMatch || onMatch ? signedHeaders : matchOrHeaders ?? signedHeaders;
+    const queue = this.check?.(method, url, body, headers) === false ? undefined :
       this.queues.get(this.key(method, url, body)) ??
       (this.fallbackKey && this.queues.get(this.fallbackKey(method, url, body)));
     if (!queue?.length) {

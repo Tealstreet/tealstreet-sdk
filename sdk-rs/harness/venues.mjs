@@ -2,6 +2,7 @@
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { kucoin } from './kucoin.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys, requestKey } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
@@ -513,6 +514,10 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  kucoin: {
+    ...kucoin,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
+  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',
