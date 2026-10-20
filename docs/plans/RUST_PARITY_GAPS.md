@@ -170,3 +170,12 @@ auth-path/array cases were added; full rerun is required for the final head.
   omit optional text byte/batch exports from the standalone Paradex build:
   its hot path is SBE binary, and the host already supports ordinary text
   fallback for control messages. Combined builds retain those optional APIs.
+- Optional text ingress saved 985 bytes but left Paradex 2,606 bytes over the
+  unchanged budget. The next trim replaces only the WASM signer-header JSON
+  ingress with validated header lines; the callback and native APIs stay typed.
+  Peer review passes for byte preservation and rejection of CR/LF injection.
+- Full workspace Clippy exposed Bybit's exhaustive test action match after the
+  shared signing action was added. Its harness now explicitly rejects delegated
+  signing, preserving the local signer assumption; independent review passes.
+- Landing advanced to Coinbase `5c0e437faf`; merge it before final artifact
+  builds. Coinbase capabilities and the roster-wide sweep remain outside scope.
