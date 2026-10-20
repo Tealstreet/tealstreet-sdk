@@ -97,7 +97,7 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
         const topics = channel === 'account' ? [{ channel }]
           : record.url.endsWith('/public') ? rows.map((row) => ({ channel, instId: row.instId }))
           : (name.startsWith('okxeu') ? ['SWAP', 'FUTURES'] : ['SWAP']).map((instType) => ({ channel, instType }));
-        const socket = { url: record.url, topics: new Map(topics.map((topic, index) => [index, topic])) };
+        const socket = { url: record.url, subscriptionArgs: new Map(topics.map((topic, index) => [index, topic])) };
         assert.doesNotThrow(() => tape.assertSubscribed(socket, message), 'native channel/product must match every pushed row');
         if (message.arg.instType === 'FUTURES') {
           assert(message.data.every((row) => row.instType === 'FUTURES'));

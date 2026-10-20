@@ -494,7 +494,11 @@ const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
 };
 
 const okx = (name) => ({
+  family: 'okx',
   rust: name,
+  requestKey: typedRequest,
+  preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+  preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
   ts: {
     module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
     className: name.startsWith('okxeu') ? 'OKXEUExchange' : 'OKXExchange',
@@ -503,10 +507,10 @@ const okx = (name) => ({
   options: { testnet: name.endsWith('demo') },
   validateRequest({ method, url, body, headers }) {
     // Independent V5 HTTP proof before matching can erase clocks/aliases.
-    const parsed = new URL(url), h = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
-      .map(([key, value]) => [key.toLowerCase(), String(value)]));
+    const parsed = new URL(url), h = uniqueRequestHeaders(headers);
     const host = name.startsWith('okxeu') ? 'eea.okx.com' : name.endsWith('demo') ? 'openapi.okx.com' : 'www.okx.com';
-    if (parsed.protocol !== 'https:' || parsed.hostname !== host) throw new Error('Invalid OKX native HTTP host');
+    if (parsed.origin !== `https://${host}` || parsed.username || parsed.password || parsed.href.includes('#'))
+      throw new Error('Invalid OKX native HTTP origin');
     const aliases = new Set(['c', 'clientOrderId', 'clientAlgoId', 'newClientOrderId', 'requestId', 'category', 'symbol']);
     for (const key of parsed.searchParams.keys()) if (aliases.has(key)) throw new Error(`Foreign OKX query alias ${key}`);
     if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
@@ -526,7 +530,12 @@ const okx = (name) => ({
     if (name.endsWith('demo') ? h['x-simulated-trading'] !== '1' : h['x-simulated-trading'] !== undefined)
       throw new Error('Invalid OKX simulated-trading header');
     const privatePath = /^\/api\/v5\/(account|trade)\//.test(parsed.pathname);
-    if (!privatePath && !h['ok-access-sign']) return;
+    const authHeaders = ['ok-access-key', 'ok-access-sign', 'ok-access-timestamp', 'ok-access-passphrase'];
+    if (Object.hasOwn(h, 'authorization') || Object.keys(h).some((key) => key.startsWith('ok-access-') && !authHeaders.includes(key)))
+      throw new Error('Invalid OKX HTTP authentication header');
+    // TS leaves /public unsigned; private accounts fully sign /market reads.
+    // A partial credential set is never an unsigned public request.
+    if (!privatePath && !authHeaders.some((key) => Object.hasOwn(h, key))) return;
     const timestamp = h['ok-access-timestamp'], time = Date.parse(timestamp);
     if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(timestamp ?? '') || !Number.isFinite(time)
       || Math.abs(time - Date.now()) > 30_000 || new Date(time).toISOString() !== timestamp
@@ -690,8 +699,12 @@ const okx = (name) => ({
   matchRequestBody: true,
   isWrite: (method) => method !== 'GET',
   // Caller IDs remain exact, even when the caller chooses a broker-prefixed ID.
-  generatedBodyId: (key, value) =>
-    ['clOrdId', 'algoClOrdId'].includes(key) && typeof value === 'string' && value.startsWith('e847386590ce4dBC'),
+  requestOptions: (method, url) => ({
+    generatedBodyId: (key, value) => method === 'POST' &&
+      (key === 'clOrdId' && /^\/api\/v5\/trade\/(order|batch-orders)$/.test(url.pathname) ||
+       key === 'algoClOrdId' && url.pathname === '/api/v5/trade/order-algo') &&
+      typeof value === 'string' && /^e847386590ce4dBC[A-Za-z0-9]{0,16}$/.test(value),
+  }),
   respondToPing: true,
   validateLogin: true,
   compareFillPrices: true,

@@ -480,3 +480,58 @@ fn failed_or_timed_out_identity_resolution_still_starts_public_catalog_and_ignor
         }));
     }
 }
+
+#[test]
+fn actual_cancel_batch_weight_changes_at_forty_without_response_refunds() {
+    for count in [39, 40] {
+        let mut d = Driver::new(true);
+        let socket = d.bootstrap();
+        let rows = (1..=count).map(|id| format!(r#"{{"order":{{"coin":"BTC","oid":{id},"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}},"status":"open"}}"#)).collect::<Vec<_>>().join(",");
+        let frame = format!(r#"{{"channel":"orderUpdates","data":[{rows}]}}"#);
+        d.event(
+            d.now + 1.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        d.event(
+            d.now + 1.,
+            Event::Command(Command::CancelOrders {
+                command: 30,
+                ids: (1..=count).map(|id| id.to_string()).collect(),
+            }),
+        );
+        let cancel = d.request(|r| r.url.ends_with("/exchange"));
+        let sent_at = d.now;
+        let payload: serde_json::Value =
+            serde_json::from_str(cancel.body.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            payload["action"]["cancels"].as_array().unwrap().len(),
+            count
+        );
+        let statuses = vec!["\"success\""; count].join(",");
+        let ack = format!(
+            r#"{{"status":"ok","response":{{"type":"cancel","data":{{"statuses":[{statuses}]}}}}}}"#
+        );
+        d.reply(&cancel, 200, &ack);
+        let order: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#,
+        )
+        .unwrap();
+        d.event(
+            d.now + 1.,
+            Event::Command(Command::PlaceOrders {
+                command: 31,
+                orders: vec![order],
+            }),
+        );
+        assert!(
+            !d.pending
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        let _next = d.request(|r| r.url.ends_with("/exchange"));
+        assert_eq!(d.now, sent_at + if count == 39 { 50. } else { 100. });
+    }
+}

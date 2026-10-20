@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { test } from 'node:test';
 import { Tape, stable } from './tape.mjs';
 import { subscriptionKeys } from './requests.mjs';
@@ -354,12 +354,109 @@ const productionTapeFor = (name, records, venue = venueOf(name)) => {
   const end = source.indexOf('\nconst settle =', classStart);
   const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
     'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
+    'subscriptionKeys', 'createHmac', 'timingSafeEqual', 'KEY', 'PASSPHRASE', 'SECRET',
     `${source.slice(start, classStart)}\nreturn (${source.slice(classStart, end)});`)(
     Tape, { venue: name }, venue, records, [], new Set(), requestKey, Responses, undefined,
     parseRequestJson, (method) => method === 'GET', true,
+    subscriptionKeys, createHmac, timingSafeEqual, 'replay-key', 'replay-passphrase', 'replay-secret',
   );
   return new ProductionTape('ts');
 };
+
+for (const name of ['okx', 'okxdemo', 'okxeu', 'okxeudemo']) {
+  const host = name.startsWith('okxeu') ? 'eea.okx.com' : name.endsWith('demo') ? 'openapi.okx.com' : 'www.okx.com';
+  const headers = (method, url, body = '') => {
+    const timestamp = new Date().toISOString(), parsed = new URL(url);
+    return { 'OK-ACCESS-KEY': 'replay-key', 'OK-ACCESS-PASSPHRASE': 'replay-passphrase',
+      'OK-ACCESS-TIMESTAMP': timestamp,
+      'OK-ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(timestamp + method + parsed.pathname + parsed.search + body).digest('base64'),
+      ...(name.endsWith('demo') ? { 'x-simulated-trading': '1' } : {}) };
+  };
+  test(`production ${name} constructor authenticates raw bytes before typed caller, economic and unknown-field matching`, () => {
+    const url = `https://${host}/api/v5/trade/order`, caller = 'e847386590ce4dBCcallerChosen';
+    const body = { instId: 'BTC-USD-UM', tdMode: 'cross', side: 'buy', ordType: 'limit', sz: '1', px: '90000', clOrdId: caller };
+    const raw = JSON.stringify(body), records = [{ type: 'command', op: 'placeOrders', orders: [{ clientOrderId: caller }] },
+      { type: 'http', method: 'POST', url, requestBody: raw, status: 200, body: '{}' }];
+    const tape = productionTapeFor(name, records);
+    assert(tape.responseStore, 'the actual constructor must use SharedTape typed responses');
+    for (const invalidUrl of [url.replace('https://', 'https://user:pass@'), `${url}#unknown`, `${url}#`, url.replace(host, `${host}:8443`)]) {
+      assert.throws(() => tape.respond('POST', invalidUrl, raw, headers('POST', invalidUrl, raw)), /HTTP (host|origin)/);
+      assert.equal(tape.missingWrites, 1, 'raw URL rejection precedes response matching');
+    }
+    assert.throws(() => tape.respond('POST', url, raw, { ...headers('POST', url, raw), 'OK-ACCESS-SIGN': 'bad' }), /signature/);
+    assert.throws(() => tape.respond('POST', url, raw, [...Object.entries(headers('POST', url, raw)), ['ok-access-key', 'replay-key']]), /Duplicate/);
+    for (const changed of [{ ...body, sz: 1 }, { ...body, px: '90001' }, { ...body, clOrdId: 'e847386590ce4dBCotherChosen' },
+      ...['timestamp', 'recvWindow', 'signature', 'unknownNativeField'].map((field) => ({ ...body, [field]: 'extra' }))]) {
+      const value = JSON.stringify(changed);
+      assert.equal(tape.respond('POST', url, value, headers('POST', url, value)).status, 599);
+      assert.equal(tape.missingWrites, 1, 'rejected requests cannot consume the recorded write');
+    }
+    assert.equal(tape.respond('POST', url, raw, headers('POST', url, raw)).status, 200);
+    assert.equal(tape.missingWrites, 0);
+    assert.equal(tape.respond('POST', url, raw, headers('POST', url, raw)).status, 599);
+
+    const generated = { ...body, clOrdId: 'e847386590ce4dBCgeneratedA' };
+    const generatedTape = productionTapeFor(name, [{ type: 'http', method: 'POST', url, requestBody: generated, status: 200, body: '{}' }]);
+    for (const id of ['e847386590ce4dBCbad\n', 'e847386590ce4dBC' + 'a'.repeat(17)]) {
+      const value = JSON.stringify({ ...generated, clOrdId: id });
+      assert.equal(generatedTape.respond('POST', url, value, headers('POST', url, value)).status, 599);
+    }
+    const fresh = JSON.stringify({ ...generated, clOrdId: 'e847386590ce4dBCgeneratedB' });
+    assert.equal(generatedTape.respond('POST', url, fresh, headers('POST', url, fresh)).status, 200);
+
+    for (const [method, path, field] of [['POST', 'cancel-order', 'clOrdId'], ['POST', 'amend-order', 'clOrdId'], ['GET', 'order', 'clOrdId'], ['POST', 'cancel-algos', 'algoClOrdId']]) {
+      const endpoint = `https://${host}/api/v5/trade/${path}`, target = { instId: body.instId, [field]: generated.clOrdId, ordId: '5' };
+      const expectedUrl = method === 'GET' ? `${endpoint}?${new URLSearchParams(target)}` : endpoint;
+      const expectedBody = method === 'GET' ? undefined : JSON.stringify(target);
+      const targetTape = productionTapeFor(name, [{ type: 'http', method, url: expectedUrl, requestBody: expectedBody, status: 200, body: '{}' }]);
+      for (const change of [{ [field]: 'e847386590ce4dBCgeneratedB' }, { ordId: '6' },
+        ...(method === 'GET' ? ['timestamp', 'recvWindow', 'signature'].map((key) => ({ [key]: 'extra' })) : [])]) {
+        const changed = { ...target, ...change }, changedUrl = method === 'GET' ? `${endpoint}?${new URLSearchParams(changed)}` : endpoint;
+        const changedBody = method === 'GET' ? '' : JSON.stringify(changed);
+        assert.equal(targetTape.respond(method, changedUrl, changedBody, headers(method, changedUrl, changedBody)).status, 599, `${path} target identity stays exact`);
+      }
+      assert.equal(targetTape.respond(method, expectedUrl, expectedBody, headers(method, expectedUrl, expectedBody)).status, 200);
+    }
+    for (const path of ['/api/v5/public/instruments?instType=SWAP', '/api/v5/market/tickers?instType=SWAP']) {
+      const publicUrl = `https://${host}${path}`, unsignedHeaders = name.endsWith('demo') ? { 'x-simulated-trading': '1' } : {};
+      const publicTape = productionTapeFor(name, ['first', 'second'].map((body) => ({ type: 'http', method: 'GET', url: publicUrl, status: 200, body })));
+      for (const contamination of [{ 'OK-ACCESS-KEY': 'leaked-key' }, { 'OK-ACCESS-KEY': 'replay-key' },
+        { 'OK-ACCESS-PASSPHRASE': 'replay-passphrase' }, { 'OK-ACCESS-SIGN': '' },
+        { Authorization: 'Bearer leaked-token' }, { 'OK-ACCESS-UNKNOWN': 'extra' }]) {
+        assert.throws(() => publicTape.respond('GET', publicUrl, undefined, { ...unsignedHeaders, ...contamination }), /credentials|timestamp|authentication/);
+        assert.equal(publicTape.requests.size, 0, 'credential rejection never reaches the response matcher');
+        assert.equal([...publicTape.responseStore.queues.values()][0].length, 2);
+      }
+      assert.equal(publicTape.respond('GET', publicUrl, undefined, unsignedHeaders).body, 'first');
+      assert.equal(publicTape.respond('GET', publicUrl, undefined, headers('GET', publicUrl)).body, 'second', 'honest private clients may sign public market reads');
+    }
+  });
+
+  test(`production ${name} socket path records full subscriptions and isolates product intents per actual socket`, async () => {
+    const tape = productionTapeFor(name, []), regional = name.startsWith('okxeu') ? name.endsWith('demo') ? 'wseeapap' : 'wseea' : name.endsWith('demo') ? 'wspap' : 'ws';
+    const url = `wss://${regional}.okx.com:8443/ws/v5/business`, socket = tape.connect(url, () => {}, () => {});
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const arg = { apiKey: 'replay-key', passphrase: 'replay-passphrase', timestamp,
+      sign: createHmac('sha256', 'replay-secret').update(`${timestamp}GET/users/self/verify`).digest('base64') };
+    assert.throws(() => tape.send(socket, JSON.stringify({ op: 'login', args: [{ ...arg, sign: 'bad' }] })), /signature/);
+    const login = JSON.stringify({ op: 'login', args: [arg] });
+    tape.send(socket, login);
+    assert.equal(socket.loginVerified, true);
+    const subscribe = JSON.stringify({ op: 'subscribe', args: [{ channel: 'orders-algo', instType: 'FUTURES' }] });
+    tape.send(socket, subscribe);
+    assert.deepEqual([...tape.fullSubscriptions], [login, subscribe].flatMap((text) =>
+      subscriptionKeys(url, text, new Set(), { ...venueOf(name), fullSocketIdentity: true })));
+    const message = { arg: { channel: 'orders-algo', instType: 'FUTURES' }, data: [{ instType: 'FUTURES', instId: 'BTC-USD-UM' }] };
+    assert.doesNotThrow(() => tape.assertSubscribed(socket, message));
+    assert.throws(() => tape.assertSubscribed(socket, { ...message, data: [{ instType: 'SWAP', instId: 'BTC-USDT-SWAP' }] }), /Unsubscribed/);
+    const second = tape.connect(url, () => {}, () => {});
+    assert.throws(() => tape.assertSubscribed(second, message), /Unsubscribed/);
+    tape.send(socket, JSON.stringify({ op: 'unsubscribe', args: [{ channel: 'orders-algo', instType: 'FUTURES' }] }));
+    assert.throws(() => tape.assertSubscribed(socket, message), /Unsubscribed/);
+    await new Promise(setImmediate);
+    tape.close(socket); tape.close(second);
+  });
+}
 
 test('production Kraken constructor validates raw form HMAC before typed generated create matching', async () => {
   const venue = venueOf('kraken');
