@@ -1560,3 +1560,48 @@ fn transitional_trigger_and_pending_cancel_do_not_tombstone_native_id() {
         );
     }
 }
+
+#[test]
+fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
+    for (case, unknown) in [
+        ("transport", true),
+        ("502", true),
+        ("retCode 10016", true),
+        ("missing order id", true),
+        ("retCode 170131", false),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 2, vec![order("BTCUSDT", 0.1)]);
+        let request = h.take("/v5/order/create");
+        match case {
+            "transport" => h.event(Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            }),
+            "502" => h.reply(request.id, 502, "<html>Bad Gateway</html>"),
+            "retCode 10016" => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":10016,"retMsg":"Internal system error","result":{}}"#,
+            ),
+            "missing order id" => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+            ),
+            _ => h.reply(
+                request.id,
+                200,
+                r#"{"retCode":170131,"retMsg":"Insufficient balance.","result":{}}"#,
+            ),
+        }
+        assert!(
+            h.done
+                .iter()
+                .any(|(command, result)| *command == 2 && result.is_err()),
+            "{case}: {:?}",
+            h.done
+        );
+        assert_eq!(h.unknown == [2], unknown, "{case}");
+    }
+}
