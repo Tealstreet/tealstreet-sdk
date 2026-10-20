@@ -246,3 +246,31 @@ test('Orderly negative subscription acknowledgements invalidate sent-topic cover
   audit.received(publicUrl, '{"event":"subscribe","success":false}', 2);
   assert.equal(audit.ready(), false, 'a rejection without a topic cannot prove any sent feed was accepted');
 });
+
+test('generated Orderly private frames select their primary socket among funding siblings', async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { spawnSync } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'orderly-socket-provenance-'));
+  try {
+    const path = join(dir, 'private.jsonl');
+    const generated = spawnSync(process.execPath, [fileURLToPath(new URL('./private-tape-orderly.mjs', import.meta.url)), '--out', path], { encoding: 'utf8' });
+    assert.equal(generated.status, 0, generated.stderr);
+    const records = readFileSync(path, 'utf8').trim().split('\n').map(JSON.parse);
+    const frames = records.filter((record) => record.type === 'ws');
+    assert(frames.every((record) => record.socket === 0), 'each synthetic frame names its intended primary connection');
+    const ping = frames.find((record) => !record.url.includes('/private/') && JSON.parse(record.text).event === 'ping');
+    assert(ping);
+    const tape = new Tape([ping], { ...venue, legacyLatest: false }, false, 20);
+    const seen = [];
+    const primary = tape.connect(ping.url, () => {}, () => seen.push('primary'));
+    const funding = tape.connect(ping.url, () => {}, () => seen.push('funding'));
+    await new Promise(setImmediate);
+    assert(primary.opened && funding.opened);
+    await tape.deliver(tape.frames[0], true);
+    assert.deepEqual(seen, ['primary']);
+    await assert.rejects(tape.socketFor({ ...tape.frames[0], connection: 99 }), /timeout/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

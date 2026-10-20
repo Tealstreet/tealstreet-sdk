@@ -817,3 +817,23 @@ Strict timing/hash/memory/signature/write controls and Lighter arithmetic stay
 intact. Final CI covers16public venues,33private variants (14Orderly broker/
 network variants) and4Bitget native cases. Independent final review and full
 workspace/merged-head CI continue before merge.
+
+### Orderly private replay corrections
+
+On1f8b2fed91 all15other venues pass and Orderly public passes. Its first
+private TS run exposes ambiguous untagged synthetic heartbeats after three
+public sockets share one URL. Tag fixture frames with their intended primary
+socket; preserve strict routing instead of latest-socket/broadcast fallback.
+Actual replay then exposes ordered writes comparing original native records
+while matching uses declared TS body alternatives. Feed both queues the same
+exact adjusted records. Finally equate only raw zero-byte HTTP bodies and
+absent bodies, preserving distinct encoded JSON values and original signed
+bytes. No venue behavior, timeouts, metric thresholds or audits weakened.
+
+All289helpers PASS with failed-before regressions for socket provenance,
+caller/type/order/single-consumption guardrails and body identity. Actual TS
+Orderly mainnet private PASS:33frames,14commands,12writes,9subscriptions;
+zero unserved/unused/signature/protocol/socket errors. Independent final guard
+review and all14broker/network native private gates follow this checkpoint.
+Full workspace bans/fmt/Clippy/tests/WASM Clippy on the integrated Rust source
+PASS; exact-head CI must pass before merge.

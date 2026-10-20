@@ -457,3 +457,13 @@ test('WOO native topics and auth identity remain exact while fresh clocks vary',
   assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
   assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
 });
+
+test('zero-byte request bodies share absent identity while encoded JSON values stay typed', () => {
+  const url = 'https://example.test/order?order_id=100';
+  const key = (body) => requestKey('DELETE', url, body);
+  assert.equal(key(''), key(undefined));
+  assert.equal(key(new Uint8Array()), key(undefined));
+  for (const body of ['""', '"100"', '100', '{"order_id":"100"}', '{"order_id":100}'])
+    assert.notEqual(key(body), key(undefined));
+  assert.notEqual(key('{"order_id":"100"}'), key('{"order_id":100}'));
+});

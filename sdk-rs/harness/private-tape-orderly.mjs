@@ -48,7 +48,8 @@ const openOrders = (data, afterCommand = 0, algo = false) => {
   for (const query of ['status=INCOMPLETE', 'status=INCOMPLETE&page=1&size=500'])
     stage(`${path}?${query}`, data, afterCommand);
 };
-const ws = (url, data) => records.push({ t: clock += 100, type: 'ws', url, text: JSON.stringify(data) });
+// These synthetic frames target the primary connection; funding shards share its public URL.
+const ws = (url, data) => records.push({ t: clock += 100, type: 'ws', url, socket: 0, text: JSON.stringify(data) });
 const push = (topic, data) => ws(PRIVATE, { topic, ts: EPOCH + clock, data });
 const command = (data) => {
   records.push({ t: clock += 100, type: 'command', ...data });

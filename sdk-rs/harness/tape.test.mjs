@@ -2388,3 +2388,25 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
+
+test('ordered typed writes match the declared TS fixture body without weakening native identity', () => {
+  const url = 'https://example.test/order';
+  const records = [1, 2].map((amount) => ({ type: 'http', method: 'POST', url, status: 200, body: '{}',
+    requestBody: { client_order_id: 'caller', order_type: 'POST_ONLY', amount },
+    tsRequestBody: { client_order_id: 'caller', order_type: 'LIMIT', amount } }));
+  const options = { requestBodies: true, compareWriteOrder: true };
+  const ts = new Tape(records, options, false, 30000, 'ts');
+  for (const changed of [{ ...records[0].tsRequestBody, amount: '1' }, { ...records[0].tsRequestBody, client_order_id: 'other' }, records[1].tsRequestBody]) {
+    assert.equal(ts.respond('POST', url, changed).status, 599);
+    assert.equal(ts.missingWrites, 2);
+  }
+  const first = ts.respond('POST', url, records[0].tsRequestBody);
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.comparisonRequestBody, records[0].requestBody);
+  assert.equal(ts.respond('POST', url, records[1].tsRequestBody).status, 200);
+  assert.equal(ts.missingWrites, 0);
+  const rust = new Tape(records, options, false, 30000, 'rust');
+  assert.equal(rust.respond('POST', url, records[0].tsRequestBody).status, 599);
+  assert.equal(rust.missingWrites, 2);
+  assert.equal(rust.respond('POST', url, records[0].requestBody).status, 200);
+});

@@ -409,12 +409,15 @@ export class Tape {
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
       };
+      const responseRecords = records.map((record) =>
+        impl === 'ts' && record.tsRequestBody !== undefined
+          ? { ...record, requestBody: record.tsRequestBody, comparisonRequestBody: record.requestBody }
+          : record,
+      );
+      // Ordering and matching must inspect the same exact fixture alternative.
+      this.writeOrder = responseRecords.filter((record) => record.type === 'http' && this.isWrite(record.method, record.url));
       this.responseStore = new Responses(
-        records.map((record) =>
-          impl === 'ts' && record.tsRequestBody !== undefined
-            ? { ...record, requestBody: record.tsRequestBody, comparisonRequestBody: record.requestBody }
-            : record,
-        ),
+        responseRecords,
         responseKey,
         venue.checkRequest,
         this.isWrite.bind(this),

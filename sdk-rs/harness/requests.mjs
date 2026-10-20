@@ -67,7 +67,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
       return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} FORM ${new URLSearchParams(entries)}`;
     body = Object.fromEntries(form);
   }
-  let payload = typeof body === 'string' && body ? parseRequestJson(body) : (body ?? {});
+  let payload = typeof body === 'string' && body ? parseRequestJson(body) : (body === '' ? {} : (body ?? {}));
   if (options.requestBody) payload = options.requestBody(payload, { method, url, callerIds });
   const hyperliquid = /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname);
   if (hyperliquid && payload?.action) {
