@@ -357,7 +357,8 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
+    // Account-wide cancel reaches orders the store has not reconciled yet.
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };

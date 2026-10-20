@@ -541,9 +541,9 @@ TxFlow loses nothing (master TS was a placeholder).
 - High (Orderly, all six brokers): standalone SL/TP rejected because the app
   always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS
   ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.
-- Medium: cancel-all only loops symbols in the store instead of the unscoped
+- Medium: ~~cancel-all only loops symbols in the store instead of the unscoped
   DELETE (`rust.exchange.ts` has no Orderly override; engine supports
-  `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on
+  `symbol: ''`)~~ (all six brokers send the unscoped cancel); SL/TP blocked when a trailing stop or quantity TP_SL exists on
   that side (`trading.rs:254`).
 - Low: one bad market row or unknown order row fails closed (startup lane);
   trailing-stop display price; cancels skipped for unknown/finished ids;
