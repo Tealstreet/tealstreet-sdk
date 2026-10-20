@@ -357,17 +357,21 @@ export class Tape {
     this.requests.add(key);
     if (this.responses.isWrite(method, url)) this.writes.push(key);
     if (this.responses.isWrite(method, url) && this.venue.compareWriteOrder && this.expectedWrites[0] !== key) {
+      if (process.env.RUST_REQUEST_TRACE) console.error('unexpected write', key, 'expected', this.expectedWrites[0]);
       this.responses.unserved++;
       return { status: 599, body: '' };
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
-    const response = this.bitget
+    const response = this.bitget || this.venue.validateMatchedRequest
       ? this.responses.respond(
           method,
           url,
           body,
           this.commandIndex,
-          (record) => this.validateBitgetMatch(record, method, url, body),
+          (record) => {
+            this.validateBitgetMatch(record, method, url, body);
+            this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+          },
           elapsed,
         )
       : this.responses.respond(method, url, body, this.commandIndex, elapsed);

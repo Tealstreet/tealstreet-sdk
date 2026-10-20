@@ -680,3 +680,31 @@ CI jobs, with the same 1,258,291-byte per-venue budget; Bybit aliases and endpoi
 remain feature-gated. The twelve-venue previous full native run passed 987 cases;
 that historical result is not a current thirteen-venue full test claim. Current
 combined build and targeted boundary checks precede pushing for complete CI.
+
+### Fourteen-venue landing integration
+
+The thirteen-venue head `1b8b1f128d` completed all 38 replay gates in CI
+(17 public/21 private), all 1,099 native tests and the remaining Rust checks.
+Its two root CI jobs were still running when Lighter #1319 advanced the landing
+branch to `31ec401f60`; those results are historical, not final-source evidence.
+The local required replay was interrupted for the merge after Hyro/inverse/spot
+public gates passed. No settling window, memory metric or performance threshold
+was relaxed.
+
+Resolve the Lighter conflicts as a union: retain the five Bybit profiles,
+configured Hyro origins, strict request consumption, subscription generation and
+category checks, generic known-fix dispatch and symmetric pre-import metrics.
+Add Lighter form-signature identity verification and protocol initialization;
+omit incoming stale duplicate known-fix calls. All 194 harness tests and helper
+lint pass. Auto-merged feature/schema/build/CI audit passes with fourteen venue
+features and the unchanged individual bundle budget.
+
+The TS wrapper retains all finite/control preflight while always checking
+caller IDs, including venues such as Lighter with no supported caller-ID rule.
+Focused Lighter/WOO/Hyperliquid wrapper47 tests, safe-cex typecheck and lint pass.
+Lighter must reject Bybit-only BBO and TickSize controls across the entire batch
+before reads/writes/store mutation: both new mixed-batch tests were proved red
+and green, including nonfinite ticks, unchanged snapshots and no dirty frame.
+All 87 Lighter native tests pass. Independent TS/native guard audit passes;
+final independent harness audit passes. Final-source build/artifact checks and
+CI remain required before merge.
