@@ -121,6 +121,18 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options))}`;
 };
 
+export const subscriptionMessage = (message) => {
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
+  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const topics =
+    message.params?.channels ??
+    message.params ??
+    message.args ??
+    (typeof message.topic === 'string' ? [message.topic] : message.dataType ? [message.dataType] : []);
+  return Array.isArray(topics) ? { op, topics } : undefined;
+};
+
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
@@ -147,6 +159,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // Keep the API kind/key exact while comparing fresh connection signatures.
     if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4) {
       message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
+    }
+    if (options.orderlyProtocol && method === 'auth' && message.params) {
+      message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }
     // Crypto.com's audit validates auth and heartbeat identity before capture.
     if (options.cryptoProtocol) {

@@ -1,11 +1,11 @@
 import type { OrderlyExchange } from './orderly.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { OrderStatus } from '../../types';
-import { v } from '../../utils/get-key';
-import { virtualClock } from '../../utils/virtualClock';
-import { BaseWebSocket } from '../base.ws';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { OrderStatus } from '../../../types';
+import { v } from '../../../utils/get-key';
+import { virtualClock } from '../../../utils/virtualClock';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { orderlySign } from './orderly.encryption';
 import { BASE_WS_URL, ORDER_SIDE } from './orderly.types';
 import { normalizeSymbol } from './orderly.utils';

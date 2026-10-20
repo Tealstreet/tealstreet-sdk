@@ -103,6 +103,9 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-phemex]
 opt-level = "z"
 
+[profile.release.package.safe-cex-venue-orderly]
+opt-level = "z"
+
 [profile.release.package.safe-cex-venue-bitrue]
 opt-level = "z"
 # Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized

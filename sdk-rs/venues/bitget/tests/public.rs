@@ -473,7 +473,7 @@ fn shared_public_socket_urls_keep_independent_feed_identities() {
         .socket_contexts
         .iter()
         .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
-        .map(|(_, _, context)| context.as_ref().expect("feed context").feed)
+        .map(|(_, _, context)| context.as_ref().expect("feed context").feed.as_str())
         .collect();
     assert_eq!(
         feeds,
