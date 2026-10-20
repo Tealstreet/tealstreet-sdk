@@ -88,6 +88,8 @@ pub struct Account {
     initial_orders: HashSet<String>,
     progress: HashMap<String, OrderProgress>,
     quotes: HashMap<String, (f64, f64)>,
+    execution_fills: HashMap<String, f64>,
+    execution_quotes: HashMap<String, (f64, f64)>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
@@ -328,6 +330,8 @@ impl Account {
             if let Some(old) = self.progress_queue.pop_front() {
                 self.progress.remove(&old);
                 self.quotes.remove(&old);
+                self.execution_fills.remove(&old);
+                self.execution_quotes.remove(&old);
             }
         }
     }
@@ -677,42 +681,53 @@ impl Bitrue {
             .max(existing.as_ref().map_or(0.0, |o| o.amount))
             .max(watermark.amount)
             .max(filled);
-        let prior_quote = self
+        // REST progress describes order state, not executions already delivered to the caller.
+        let reported = self
             .account
-            .quotes
+            .execution_fills
             .get(&id)
-            .filter(|(qty, _)| *qty == previous)
+            .copied()
+            .unwrap_or(0.0);
+        // Beyond a blind REST interval, only the new suffix has an execution-price proof.
+        let execution_previous = if filled > previous {
+            reported.max(previous)
+        } else {
+            reported
+        };
+        let execution_quotes = if execution_previous > reported {
+            &self.account.quotes
+        } else {
+            &self.account.execution_quotes
+        };
+        let prior_quote = execution_quotes
+            .get(&id)
+            .filter(|(qty, _)| *qty == execution_previous)
             .map(|(_, value)| *value);
         let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0).or_else(|| {
             (row.execution_price.0 > 0.0
-                && filled > previous
-                && (previous == 0.0 || prior_quote.is_some()))
-            .then_some(prior_quote.unwrap_or(0.0) + (filled - previous) * row.execution_price.0)
+                && filled > execution_previous
+                && (execution_previous == 0.0 || prior_quote.is_some()))
+            .then_some(
+                prior_quote.unwrap_or(0.0) + (filled - execution_previous) * row.execution_price.0,
+            )
         });
         let execution_price = if row.execution_price.0 > 0.0 {
             row.execution_price.0
-        } else if filled > previous
-            && (previous == 0.0
-                || self
-                    .account
-                    .quotes
+        } else if filled > execution_previous
+            && (execution_previous == 0.0
+                || execution_quotes
                     .get(&id)
-                    .is_some_and(|(qty, _)| *qty == previous))
+                    .is_some_and(|(qty, _)| *qty == execution_previous))
         {
             quote.map_or(0.0, |value| {
-                (value
-                    - self
-                        .account
-                        .quotes
-                        .get(&id)
-                        .map_or(0.0, |(_, value)| *value))
-                    / (filled - previous)
+                (value - execution_quotes.get(&id).map_or(0.0, |(_, value)| *value))
+                    / (filled - execution_previous)
             })
         } else {
             0.0
         };
         if row.x == "TRADE"
-            && filled > previous
+            && filled > execution_previous
             && execution_price.is_finite()
             && execution_price > 0.0
         {
@@ -721,11 +736,25 @@ impl Bitrue {
                 symbol: market.symbol.clone(),
                 side,
                 price: decimal(execution_price),
-                amount: decimal(filled - previous),
+                amount: decimal(filled - execution_previous),
             });
         }
-        if filled >= previous
+        if row.x == "TRADE"
+            && execution_price > 0.0
+            && filled >= execution_previous
             && let Some(quote) = quote.filter(|v| v.is_finite())
+        {
+            self.account
+                .execution_quotes
+                .insert(id.clone(), (filled, quote));
+        }
+        if row.x == "TRADE" && execution_price > 0.0 {
+            self.account
+                .execution_fills
+                .insert(id.clone(), filled.max(execution_previous));
+        }
+        if filled >= previous
+            && let Some(quote) = quote
         {
             self.account.quotes.insert(id.clone(), (filled, quote));
         }
@@ -1286,6 +1315,18 @@ impl Bitrue {
                                 retained.push(old.clone());
                             }
                             continue;
+                        }
+                        if self.account.initial_orders.contains(&symbol) {
+                            self.account
+                                .execution_fills
+                                .entry(row.id.clone())
+                                .or_insert(row.filled);
+                            if let Some(value) = quotes.get(&row.id) {
+                                self.account
+                                    .execution_quotes
+                                    .entry(row.id.clone())
+                                    .or_insert((row.filled, *value));
+                            }
                         }
                         self.account
                             .progress(&row.id, row.filled, row.amount, row.last_update);

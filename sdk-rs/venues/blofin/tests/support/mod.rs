@@ -11,13 +11,16 @@ pub struct Harness {
 }
 impl Harness {
     pub fn new() -> Self {
+        Self::new_at(0.0)
+    }
+    pub fn new_at(now: f64) -> Self {
         let mut e = Engine::new(Blofin::new(Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),
             ..Options::default()
         }));
-        e.start(0.0);
+        e.start(now);
         let mut h = Self {
             e,
             pending: vec![],
@@ -26,7 +29,19 @@ impl Harness {
             tick: TimerId(0),
         };
         h.collect();
-        h.reply("instruments", INSTRUMENT);
+        let instruments = h.take("instruments");
+        h.e.handle(
+            now,
+            Event::HttpResponse {
+                request: instruments.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: INSTRUMENT,
+                },
+            },
+        );
+        h.collect();
         h.reply("tickers",r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#);
         h.private = h
             .actions
@@ -40,7 +55,7 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == 10_000.0 => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == now + 10_000.0 => Some(*timer),
                 _ => None,
             })
             .unwrap();

@@ -17,3 +17,7 @@ Scope is the requested trading medium/low items in `RUST_AUDITS.md`. Binance and
 - Read origin audit and port process before editing; fresh branch created cleanly.
 - Initial re-verification delegated by disjoint account/public/trading scopes. Shared order admission and cancel-all gaps remain with primary agent.
 - Every phase requires a sub-agent correctness review; workers must not revert other scopes.
+
+### Private reconciliation checkpoint
+
+Reverified and repaired REST/stream execution baseline races for Bitrue, BingX, Aster and WOO fallback; BloFin pre-session executions now seed baselines without emission; Lighter processes late delivered executions once. Seven deterministic interleaving regressions added. Focused six-venue account suites passed (136 before the extra WOO gap regression). Independent review found and repaired WOO blind-gap pricing/quantity inference; reciprocal public review also passed. Full crate quality and final-source gates remain outstanding. No TS venue was deleted.

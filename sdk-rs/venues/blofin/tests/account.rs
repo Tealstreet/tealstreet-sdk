@@ -362,3 +362,24 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     h.ws(&order_event("123", "2", "partially_filled"));
     assert!(h.e.store().orders().is_empty());
 }
+
+#[test]
+fn pre_session_order_replay_seeds_execution_baseline_without_emitting_history() {
+    let mut h = Harness::new_at(1000.0);
+    h.seed();
+    let event = |quantity, time| {
+        order_event("123", quantity, "partially_filled").replace(
+            "\"state\":",
+            &format!("\"updateTime\":\"{time}\",\"state\":"),
+        )
+    };
+    h.ws(&event("4", 900));
+    assert!(executions(h.e.take_frame(1001.0).unwrap()).is_empty());
+    h.ws(&event("6", 1001));
+    h.ws(&event("6", 1001));
+    assert_eq!(
+        executions(h.e.take_frame(1002.0).unwrap()),
+        [(100.0, 0.002)]
+    );
+    assert_eq!(h.e.store().order("123").unwrap().filled, 0.006);
+}

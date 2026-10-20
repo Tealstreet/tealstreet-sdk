@@ -640,3 +640,21 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
 }
+
+#[test]
+fn polling_ahead_of_stream_preserves_each_delayed_execution_once() {
+    let mut h = Harness::ready();
+    h.fire_at(3000.0);
+    h.fire_at(5000.0);
+    h.respond(
+        ORDERS,
+        200,
+        &OPEN.replace("\"executedQty\":\"0\"", "\"executedQty\":\"0.05\""),
+    );
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.05);
+    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","z":"0.05","l":"0.05","L":"59002","t":"late-1"}}"#;
+    h.message(event);
+    h.message(event);
+    assert_eq!(h.fills(), [(59002.0, 0.05)]);
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.05);
+}

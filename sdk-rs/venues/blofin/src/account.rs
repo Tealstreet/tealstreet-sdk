@@ -2,6 +2,7 @@
 use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::model::*;
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Default)]
@@ -32,6 +33,7 @@ pub(crate) struct Account {
     pub settings_revision: u64,
     orders_busy: bool,
     startup_started: bool,
+    session_started: f64,
     account_busy: bool,
     pub sources: HashMap<String, Source>,
     fills: HashMap<String, (f64, f64)>,
@@ -234,6 +236,7 @@ impl Blofin {
             cx.log(LogLevel::Error, "BloFin requires a passphrase");
             return;
         }
+        self.account.session_started = cx.now;
         self.private_connect(cx);
         self.account.tick = Some(cx.set_timer(10_000.0));
         self.private_read(
@@ -1139,17 +1142,24 @@ impl Blofin {
         }
         match message.arg.channel.as_ref() {
             "orders" | "orders-algo" => {
+                #[derive(Deserialize)]
+                struct StreamOrder<'a> {
+                    #[serde(flatten, borrow)]
+                    row: OrderRow<'a>,
+                    #[serde(rename = "updateTime", default)]
+                    updated: Number,
+                }
                 if let Ok(Data { data: rows }) =
-                    serde_json::from_str::<Data<Vec<OrderRow<'_>>>>(text)
+                    serde_json::from_str::<Data<Vec<StreamOrder<'_>>>>(text)
                 {
                     self.account.orders_revision += 1;
-                    for row in rows {
+                    for StreamOrder { row, updated } in rows {
                         let orders = self.map_orders(cx, &row);
                         if matches!(row.state.as_ref(), "partially_filled" | "filled")
                             && row.average_price.0 > 0.0
                             && !orders.is_empty()
                         {
-                            self.execution(cx, &row, &orders[0]);
+                            self.execution(cx, &row, &orders[0], updated.0);
                         }
                         let source = Self::source(&row);
                         for order in orders {
@@ -1222,7 +1232,13 @@ impl Blofin {
             _ => {}
         }
     }
-    fn execution(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>, order: &Order) {
+    fn execution(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        row: &OrderRow<'_>,
+        order: &Order,
+        updated: f64,
+    ) {
         let id = if row.order_id.is_empty() {
             &row.ord_id
         } else {
@@ -1248,6 +1264,9 @@ impl Blofin {
             if let Some(id) = self.account.fill_order.pop_front() {
                 self.account.fills.remove(&id);
             }
+        }
+        if updated > 0.0 && updated < self.account.session_started {
+            return;
         }
         let contract = cx
             .store

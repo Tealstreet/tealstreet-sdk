@@ -843,3 +843,54 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
         );
     }
 }
+
+#[test]
+fn rest_ahead_of_no_id_execution_emits_once_without_moving_position_twice() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(60.0);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    response(
+        &mut e,
+        &regular,
+        80.0,
+        &page(&ORDER.replace("0.005", "0.006")),
+    );
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 90.0, &algos(ALGO));
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#;
+    ws(&mut e, socket, 100.0, frame);
+    ws(&mut e, socket, 101.0, frame);
+    let fills = fill_amounts(&mut e);
+    assert_eq!(fills.len(), 1);
+    assert!((fills[0] - 0.001).abs() < 1e-12);
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.006);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+}
+
+#[test]
+fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(60.0);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    response(
+        &mut e,
+        &regular,
+        80.0,
+        &page(&ORDER.replace("0.005", "0.010")),
+    );
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 90.0, &algos(ALGO));
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.011,"executedPrice":59000}}"#;
+    ws(&mut e, socket, 100.0, frame);
+    ws(&mut e, socket, 101.0, frame);
+    let fills = fill_amounts(&mut e);
+    assert_eq!(fills.len(), 1);
+    assert!((fills[0] - 0.001).abs() < 1e-12);
+    assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
+}

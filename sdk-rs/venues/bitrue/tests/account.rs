@@ -404,3 +404,20 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
+
+#[test]
+fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
+    let mut h = Harness::new();
+    h.seed();
+    h.order(1, "PART_FILLED", "LIMIT", 110);
+    assert_eq!(h.fills(), [(110.0, 10.0)]);
+    h.reply(
+        "/openOrders",
+        &ORDER.replace("\"executedQty\":0", "\"executedQty\":20"),
+    );
+    assert_eq!(h.e.store().orders()[0].filled, 20.0);
+    h.order(2, "PART_FILLED", "LIMIT", 112);
+    h.order(2, "PART_FILLED", "LIMIT", 112);
+    assert_eq!(h.fills(), [(112.0, 10.0)]);
+    assert_eq!(h.e.store().orders()[0].filled, 20.0);
+}
