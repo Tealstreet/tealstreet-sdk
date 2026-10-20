@@ -845,7 +845,7 @@ mod tests {
         assert_eq!(state.http(&request).unwrap().prefix, "read-public");
         request
             .headers
-            .push(("x-mbx-apikey".into(), "read-key".into()));
+            .push(("x-mbx-apikey", "read-key".into()));
         assert_eq!(state.http(&request).unwrap().prefix, "read-private");
         request.route = Some(safe_cex_engine::RequestRoute::Primary);
         assert_eq!(state.http(&request).unwrap().prefix, "primary-private");
