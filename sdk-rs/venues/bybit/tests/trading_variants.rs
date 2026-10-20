@@ -1567,6 +1567,7 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
         ("transport", true),
         ("502", true),
         ("retCode 10016", true),
+        ("504 with envelope", true),
         ("missing order id", true),
         ("retCode 170131", false),
     ] {
@@ -1583,6 +1584,11 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
                 request.id,
                 200,
                 r#"{"retCode":10016,"retMsg":"Internal system error","result":{}}"#,
+            ),
+            "504 with envelope" => h.reply(
+                request.id,
+                504,
+                r#"{"retCode":10002,"retMsg":"request expired","result":{}}"#,
             ),
             "missing order id" => h.reply(
                 request.id,

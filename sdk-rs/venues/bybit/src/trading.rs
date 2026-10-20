@@ -872,6 +872,10 @@ impl BybitLinear {
                     .and_then(|s| s.ret_code)
                     .is_some_and(|code| code == 10001)
         });
+        // A gateway failure is unproven whatever body it carries.
+        let http_unknown = response
+            .as_ref()
+            .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let outcome = match &response {
             Ok(response) => match venue_error(response) {
                 None => Ok(response.body),
@@ -1088,7 +1092,10 @@ impl BybitLinear {
                     (outcome, _) if !reasons.is_empty() || outcome.is_ok() => {
                         errors.push(reasons.join(", "));
                     }
-                    (Err(error), _) => errors.push(describe(error)),
+                    (Err(error), _) => {
+                        unknown |= outcome_unknown(error.0);
+                        errors.push(describe(error));
+                    }
                     (Ok(_), _) => {}
                 }
             }
@@ -1107,6 +1114,7 @@ impl BybitLinear {
             }
             (_, Ok(_)) => {}
         }
+        unknown |= http_unknown && !errors.is_empty();
         for message in &errors {
             cx.log(LogLevel::Error, message.clone());
         }
