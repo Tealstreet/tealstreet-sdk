@@ -1,6 +1,7 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::model::*;
+use safe_cex_engine::url;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
@@ -492,7 +493,7 @@ impl Lighter {
                 format!(
                     "tx_type={}&tx_info={}",
                     signed[0].tx_type,
-                    encode(&signed[0].tx_info)
+                    url::encode_form(&signed[0].tx_info)
                 ),
             )
         } else {
@@ -505,8 +506,8 @@ impl Lighter {
                 "sendTxBatch",
                 format!(
                     "tx_types={}&tx_infos={}",
-                    encode(&serde_json::to_string(&types).unwrap()),
-                    encode(&serde_json::to_string(&infos).unwrap())
+                    url::encode_form(&serde_json::to_string(&types).unwrap()),
+                    url::encode_form(&serde_json::to_string(&infos).unwrap())
                 ),
             )
         };
@@ -1194,18 +1195,4 @@ fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType
     } else {
         OrderType::Limit
     }
-}
-fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'*' | b'-' | b'.' | b'_') {
-            out.push(char::from(b));
-        } else if b == b' ' {
-            out.push('+');
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{b:02X}").unwrap();
-        }
-    }
-    out
 }
