@@ -479,3 +479,21 @@ runs before async memory settling in both paths. Independent integration review
 found no conflicting state or transport behavior. Harness 405/405 passes. The
 new measurement lifecycle requires fresh public/private and Binance regression
 measurements; prior measurements above predate this integration.
+
+### CI follow-up correctness findings
+
+The integrated public gate missed its unchanged steady-CPU threshold (TS/Rust
+11.6/12.2 ms). Independently inspecting the actual public recording also found
+68 gateway subscription-rate errors: the unpaced startup burst left most ticker
+subscriptions inactive. Paired native/reference pacing and recovery, direct
+native decimal decoding, fresh live recording and new release gates are underway.
+The public-only harness no longer loads an unused private signature verifier;
+private signature verification and all public request/socket validation remain.
+
+Phemex CI repeated the 1300/1280 balance mismatch before the capture boundary.
+Its TS polling and terminal reads could overwrite newer private pushes. Paired
+revision checks now also fence disconnect/reopen and overlapping REST commits;
+revision advances before any accepted REST store update. Independent review
+found and closed those two additional authority gaps. Twelve deferred-read and
+lifecycle regressions, the complete 63-test Phemex suite, typecheck and lint pass.
+No fixture changes, balance normalization or performance threshold changes.

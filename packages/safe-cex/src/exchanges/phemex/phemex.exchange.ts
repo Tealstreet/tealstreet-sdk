@@ -212,19 +212,12 @@ export class PhemexExchange extends BaseExchange {
 
   tick = async () => {
     if (!this.isDisposed) {
+      const revision = this.privateWebsocket.accountStateRevision;
       try {
         const { balance, positions } = await this.fetchPositionsAndBalance();
         if (this.isDisposed) return;
-        this.store.addOrUpdatePositionsFull(positions);
-
-        this.store.update({
-          balance,
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-            positions: true,
-          },
-        });
+        // A private push received while polling owns the newer account state.
+        this.privateWebsocket.commitAccountSnapshot(revision, balance, positions);
       } catch (err: any) {
         this.emitAndLogError(err?.message);
       }

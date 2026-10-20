@@ -22,8 +22,38 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
   private positionsAndBalanceSyncTimeout?: NodeJS.Timeout;
   private readonly positionsAndBalanceSyncSymbols = new Map<string, Set<PositionSyncSide>>();
   private readonly positionsAndBalanceSyncDebounceMs = 1_000;
+  private accountRevision = 0;
+
+  constructor(parent: PhemexExchange) {
+    super(parent);
+    // Base lifecycle handlers are instance fields; retain the real handler so
+    // fencing old reads also preserves the shared cleanup/reconnect loop.
+    const baseOnClose = this.onClose;
+    this.onClose = (event) => {
+      this.accountRevision++;
+      baseOnClose(event);
+    };
+  }
+
+  get accountStateRevision(): number {
+    return this.accountRevision;
+  }
+
+  commitAccountSnapshot(revision: number, balance: Balance, positions: Position[]): boolean {
+    if (this.isDisposed || revision !== this.accountRevision) return false;
+    // A successful REST read owns the state too: fence other outstanding reads
+    // from replacing it even if no private push arrived between the requests.
+    this.accountRevision++;
+    this.store.addOrUpdatePositionsFull(positions);
+    this.store.update({
+      balance,
+      loaded: { ...this.store.loaded, balance: true, positions: true },
+    });
+    return true;
+  }
 
   dispose() {
+    this.accountRevision++;
     if (this.positionsAndBalanceSyncTimeout) {
       clearTimeout(this.positionsAndBalanceSyncTimeout);
       this.positionsAndBalanceSyncTimeout = undefined;
@@ -37,10 +67,11 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
     const symbols = [...this.positionsAndBalanceSyncSymbols];
     this.positionsAndBalanceSyncSymbols.clear();
     if (this.isDisposed) return;
+    const revision = this.accountRevision;
 
     try {
       const { balance, positions } = await this.parent.fetchPositionsAndBalance();
-      if (this.isDisposed) return;
+      if (this.isDisposed || revision !== this.accountRevision) return;
 
       // Recover missing affected legs, while retaining nonzero full-snapshot rows
       // if a scoped response lags behind them.
@@ -73,15 +104,9 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
         'id',
       );
 
-      this.store.addOrUpdatePositionsFull(mergedPositions);
-      this.store.update({
-        balance,
-        loaded: {
-          ...this.store.loaded,
-          balance: true,
-          positions: true,
-        },
-      });
+      // The full read and optional scoped recovery can both cross a newer
+      // account/position push. Never replace that push with an older snapshot.
+      this.commitAccountSnapshot(revision, balance, mergedPositions);
     } catch {
       // Silent fallback: periodic tick loop continues reconciliation.
     }
@@ -105,6 +130,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
+      this.accountRevision++;
       const key = this.parent.options.testnet ? 'testnet' : 'livenet';
       const base = BASE_WS_URL.private[key];
       this.ws = this.createWebsocket(base);
@@ -116,6 +142,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.accountRevision++;
       this.auth();
       this.ping();
     }
@@ -198,6 +225,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
       }
 
       if (json?.accounts_p || json?.orders_p || json?.positions_p) {
+        if (Array.isArray(json.accounts_p) || Array.isArray(json.positions_p)) this.accountRevision++;
         if (json?.orders_p) {
           // Order status includes New, PartiallyFilled, Filled, Canceled, Rejected, Triggered, Untriggered;
           // Open order status includes New, PartiallyFilled, Untriggered;
