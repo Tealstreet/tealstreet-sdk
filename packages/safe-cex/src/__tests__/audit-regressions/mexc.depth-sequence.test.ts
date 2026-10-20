@@ -245,13 +245,15 @@ describe('MEXC incremental futures depth', () => {
     expect(books).toHaveLength(1);
     depth(12, [[100, 12]]);
     depth(13, [[99, 20]]);
-    expect(books).toHaveLength(1);
+    // The lost sequence clears the visible book once; no partial book is published.
+    expect(books).toHaveLength(2);
+    expect(books[1]).toEqual({ bids: [], asks: [] });
     await vi.advanceTimersByTimeAsync(500);
     expect(fetch).toHaveBeenCalledTimes(2);
     retry.resolve(snapshot('11'));
     await settle();
-    expect(books).toHaveLength(2);
-    expect(books[1].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 12 * 0.0001], [99, 0.002]]);
+    expect(books).toHaveLength(3);
+    expect(books[2].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 12 * 0.0001], [99, 0.002]]);
   });
 
   it('invalidates in-flight snapshots on close and resubscribes before the reconnect snapshot', async () => {
@@ -317,8 +319,9 @@ describe('MEXC incremental futures depth', () => {
       ws.listenOrderBook('BTCUSDT', listener);
       await settle();
       depth(11, [[100, volume, 1]]);
-      expect(books).toHaveLength(1);
+      expect(books).toHaveLength(2);
       expect(books[0].bids[0].amount).toBe(0.001);
+      expect(books[1]).toEqual({ bids: [], asks: [] });
       await vi.advanceTimersByTimeAsync(500);
       expect(fetch).toHaveBeenCalledTimes(2);
     },

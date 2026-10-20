@@ -166,10 +166,8 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
       },
     };
 
-    const handler = () => {
-      const orderbook = this.orderbooks[symbol];
-      if (orderbook) callback(orderbook);
-    };
+    // Routed on publication and on loss; a lost book reaches listeners empty.
+    const handler = () => callback(this.orderbooks[symbol] ?? { bids: [], asks: [] });
 
     this.addHandler(handlerKey, handler);
     if (!this.depthStates.has(symbol)) {
@@ -177,7 +175,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
       this.depthStates.set(symbol, state);
       this.subscribe(subscription);
       this.fetchDepth(symbol, state);
-    } else {
+    } else if (this.orderbooks[symbol]) {
       handler();
     }
 
@@ -382,10 +380,13 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   };
 
   private retryDepth = (symbol: string, state: DepthState, retain = false) => {
+    const lost = this.orderbooks[symbol] !== undefined;
     state.request = undefined;
     state.version = undefined;
     if (!retain) state.buffer = undefined;
     delete this.orderbooks[symbol];
+    // A lost sequence makes the visible book unusable immediately.
+    if (lost) this.handleRoutedMessage(`depth.${symbol}`, {});
     if (state.retry) return;
     state.failures++;
     state.retry = setTimeout(

@@ -477,7 +477,12 @@ async function runRust() {
         derivativeProducts = frame.derivativeProducts();
       }
       tickers.apply(frame);
-      for (const book of frame.books()) books.set(book.market, book);
+      // An empty BOOK is the engine's lost-sequence signal: the consumer book is
+      // unusable until a new anchor, the state TS models by deleting its book.
+      for (const book of frame.books()) {
+        if (book.bids.length || book.asks.length) books.set(book.market, book);
+        else books.delete(book.market);
+      }
       orders = frame.orders() ?? orders;
       const positionUpdate = frame.positions();
       if (positionUpdate) {
@@ -819,7 +824,9 @@ async function runTs() {
         book.bids.sort((a, b) => b.price - a.price);
         book.asks.sort((a, b) => a.price - b.price);
       }
-      finalBooks[symbol] = book;
+      // An empty book is a lost sequence; match the Rust side's absent book.
+      if (book.bids.length || book.asks.length) finalBooks[symbol] = book;
+      else delete finalBooks[symbol];
     });
     subscribedDone = true;
     subscribedResolve();

@@ -296,6 +296,10 @@ impl MexcFutures {
         let Some(state) = self.books.get_mut(symbol) else {
             return;
         };
+        // A lost sequence makes the visible book unusable immediately.
+        if state.version.is_some() {
+            cx.book_changed(symbol);
+        }
         state.version = None;
         state.fetching = false;
         if !retain {

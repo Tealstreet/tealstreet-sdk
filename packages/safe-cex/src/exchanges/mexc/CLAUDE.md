@@ -74,6 +74,8 @@ exposed a gap. A new REST request owns its own response token or generation;
 starting it must not discard that retained stream. Validate the entire candidate
 sequence before applying any levels or publishing a book. A real missing version
 still blocks publication and retries with the existing exponential backoff.
+A lost sequence clears a visible book immediately: listeners receive an empty
+book (Rust emits an empty BOOK section) rather than a stale one.
 
 Socket closure or replacement, the final unsubscribe, disposal, malformed depth
 and buffer overflow discard the retained chain and invalidate pending reads.

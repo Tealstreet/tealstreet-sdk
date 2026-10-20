@@ -780,6 +780,15 @@ fn has_depth_frame(e: &mut TestEngine, at: f64) -> bool {
     })
 }
 
+/// The engine's lost-sequence signal: a BOOK section with no levels.
+fn cleared_depth_frame(e: &mut TestEngine, at: f64) -> bool {
+    e.take_frame(at).is_some_and(|frame| {
+        safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+            kind == safe_cex_engine::wire::section::BOOK && payload.len() == 16
+        })
+    })
+}
+
 #[test]
 fn lagging_rest_anchor_replays_same_socket_updates_received_during_retry_backoff() {
     let (mut e, socket) = started();
@@ -792,6 +801,8 @@ fn lagging_rest_anchor_replays_same_socket_updates_received_during_retry_backoff
         }),
     );
     let first = requests(&mut e).remove(0);
+    // Subscription itself may emit a book reset (book-deltas); drain it.
+    let _ = e.take_frame(150.);
     for version in 40..=45 {
         recovery_depth(
             &mut e,
@@ -840,6 +851,8 @@ fn retained_recovery_buffer_never_publishes_a_contiguous_prefix_before_a_gap() {
         }),
     );
     let first = requests(&mut e).remove(0);
+    // Subscription itself may emit a book reset (book-deltas); drain it.
+    let _ = e.take_frame(150.);
     recovery_depth(&mut e, socket, 160., 11, "[[60000,999]]");
     recovery_depth(&mut e, socket, 161., 13, "[[60000,13]]");
     recovery_snapshot(&mut e, &first, 170., 10, "[[60000,10]]");
@@ -874,12 +887,17 @@ fn live_gap_update_survives_until_its_immediate_predecessor_rest_anchor() {
         }),
     );
     let first = requests(&mut e).remove(0);
+    // Subscription itself may emit a book reset (book-deltas); drain it.
+    let _ = e.take_frame(150.);
     recovery_snapshot(&mut e, &first, 160., 10, "[[60000,10]]");
     assert!(has_depth_frame(&mut e, 160.));
     recovery_depth(&mut e, socket, 170., 12, "[[60000,12]]");
     recovery_depth(&mut e, socket, 180., 13, "[[59999,20]]");
     assert!(e.book("BTCUSDT").is_none());
-    assert!(!has_depth_frame(&mut e, 180.));
+    assert!(
+        cleared_depth_frame(&mut e, 180.),
+        "a lost sequence clears the visible book"
+    );
     let retry = recovery_retry(&mut e, 670.);
     recovery_snapshot(&mut e, &retry, 680., 11, "[[60000,11]]");
     assert_eq!(
@@ -901,6 +919,8 @@ fn recovery_buffer_overflow_invalidates_the_old_request_and_retained_chain() {
         }),
     );
     let old = requests(&mut e).remove(0);
+    // Subscription itself may emit a book reset (book-deltas); drain it.
+    let _ = e.take_frame(150.);
     for version in 1..=2001 {
         recovery_depth(&mut e, socket, 160., version, "[[60000,999]]");
     }
@@ -925,6 +945,8 @@ fn recovery_buffer_overflow_during_backoff_keeps_the_pending_retry_deadline() {
         }),
     );
     let first = requests(&mut e).remove(0);
+    // Subscription itself may emit a book reset (book-deltas); drain it.
+    let _ = e.take_frame(150.);
     recovery_depth(&mut e, socket, 160., 40, "[[60000,40]]");
     recovery_snapshot(&mut e, &first, 170., 10, "[[60000,10]]");
     let retry: Vec<_> = e
