@@ -5,8 +5,10 @@ use crate::routing::{
 };
 use crate::{Events, HostEvent};
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{HttpRequest, Method, SocketId};
+use safe_cex_engine::{HttpRequest, Method, PayloadSignRequest, RequestId, SocketId};
+use std::future::Future;
 use std::io::Read;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -16,7 +18,28 @@ use tokio_tungstenite::tungstenite::{
     http::{HeaderName, HeaderValue},
 };
 
+#[derive(Debug)]
+pub struct PayloadSignerResult {
+    pub signature: String,
+    pub headers: Vec<(String, String)>,
+}
+pub type PayloadSignerFuture =
+    Pin<Box<dyn Future<Output = Result<PayloadSignerResult, String>> + Send>>;
+pub type PayloadSigner = Arc<dyn Fn(PayloadSignRequest) -> PayloadSignerFuture + Send + Sync>;
+
 pub trait Transport {
+    fn sign_payload(
+        &self,
+        request: RequestId,
+        _payload: PayloadSignRequest,
+        _timeout_ms: u32,
+        events: Events,
+    ) {
+        let _ = events.send(HostEvent::PayloadSignFailed(
+            request,
+            "Payload signing is not configured".into(),
+        ));
+    }
     /// Open a socket; report it on `events` and return where to send text.
     /// Dropping the returned sender closes the socket.
     fn connect(
@@ -92,6 +115,7 @@ pub trait Transport {
 pub struct NetworkTransport {
     http: reqwest::Client,
     routing: Option<Arc<RoutingState>>,
+    signer: Option<PayloadSigner>,
 }
 
 impl NetworkTransport {
@@ -103,6 +127,7 @@ impl NetworkTransport {
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
+            signer: None,
         }
     }
 
@@ -112,6 +137,10 @@ impl NetworkTransport {
             routing: Some(Arc::new(RoutingState::new(plan, tokens))),
             ..Self::new()
         }
+    }
+    pub fn with_payload_signer(mut self, signer: PayloadSigner) -> Self {
+        self.signer = Some(signer);
+        self
     }
 }
 
@@ -141,6 +170,33 @@ async fn open_socket(
 }
 
 impl Transport for NetworkTransport {
+    fn sign_payload(
+        &self,
+        request: RequestId,
+        payload: PayloadSignRequest,
+        timeout_ms: u32,
+        events: Events,
+    ) {
+        let signer = self.signer.clone();
+        tokio::spawn(async move {
+            let operation = async {
+                let signer =
+                    signer.ok_or_else(|| "Payload signing is not configured".to_owned())?;
+                signer(payload).await
+            };
+            let result = tokio::select! {
+                biased;
+                _ = events.closed() => return,
+                result = tokio::time::timeout(Duration::from_millis(u64::from(timeout_ms.max(1))), operation) => result,
+            };
+            let event = match result {
+                Ok(Ok(result)) => HostEvent::PayloadSigned(request, result),
+                Ok(Err(error)) => HostEvent::PayloadSignFailed(request, error),
+                Err(_) => HostEvent::PayloadSignFailed(request, "Payload signing timed out".into()),
+            };
+            let _ = events.send(event);
+        });
+    }
     fn connect(
         &self,
         socket: SocketId,
@@ -322,6 +378,7 @@ impl Transport for NetworkTransport {
                     .headers
                     .iter()
                     .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                    .chain(request.signer_headers.iter().cloned())
                     .collect();
                 if let Some(route) = &route {
                     if !route.prefix.is_empty() {
