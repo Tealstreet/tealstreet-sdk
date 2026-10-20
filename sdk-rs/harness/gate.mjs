@@ -135,6 +135,8 @@ const KNOWN_TS_FIXES = {
       'One-way mode is an accepted no-op; TS inherits an unimplemented setter.',
       'Use valid authenticated feeds and REST balance instead of invalid account_balances.',
       'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
+      'Map native post/ioc/fok orders as limits and reject unsupported opening conditional shapes before a write.',
+      'Keep initialized event-driven private feeds alive while bounding retained execution and terminal identities.',
     ],
   },
   // Independent documented-tape oracle; native request/protocol counters remain exact.
