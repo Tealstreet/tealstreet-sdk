@@ -95,6 +95,8 @@ pub struct Woo {
     skipped_markets: std::collections::HashSet<String>,
     /// Set by the first committed catalogue; later reads only refresh markets.
     catalogue_committed: bool,
+    malformed_rows: usize,
+    reread_stalls: u8,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -220,6 +222,8 @@ impl Woo {
             seed_backoff: Default::default(),
             skipped_markets: Default::default(),
             catalogue_committed: false,
+            malformed_rows: 0,
+            reread_stalls: 0,
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -936,15 +940,39 @@ impl Venue for Woo {
                     );
                     return;
                 }
-                self.price_ranges = ranges;
-                self.skipped_markets = skipped.ids().iter().cloned().collect();
                 let refresh = std::mem::replace(&mut self.catalogue_committed, true);
-                cx.store.set_markets(rows);
-                // A partial catalogue commits so private reads start, and is re-read.
-                if skipped.ids().is_empty() && !skipped.anonymous() {
-                    self.seed_backoff.succeeded(cx, &false);
+                let rows = if refresh {
+                    let mut ranges = ranges;
+                    for (symbol, range) in std::mem::take(&mut self.price_ranges) {
+                        ranges.entry(symbol).or_insert(range);
+                    }
+                    self.price_ranges = ranges;
+                    keep_listed(cx.store.markets(), rows)
                 } else {
+                    self.price_ranges = ranges;
+                    rows
+                };
+                cx.store.set_markets(rows);
+                self.skipped_markets = skipped
+                    .ids()
+                    .iter()
+                    .filter(|id| cx.store.market(&compact(id)).is_none())
+                    .cloned()
+                    .collect();
+                // An unnamed malformed row counts once toward the re-read bound.
+                let before = self.malformed_rows;
+                self.malformed_rows = self.skipped_markets.len() + usize::from(skipped.anonymous());
+                // A partial catalogue commits so private reads start, and is re-read.
+                if reread_partial(
+                    cx,
+                    &mut self.reread_stalls,
+                    refresh,
+                    before,
+                    self.malformed_rows,
+                ) {
                     self.seed_backoff.failed(cx, false);
+                } else {
+                    self.seed_backoff.succeeded(cx, &false);
                 }
                 if refresh {
                     return;
@@ -1213,6 +1241,58 @@ impl Venue for Woo {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("WOO stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

@@ -185,6 +185,7 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: safe_cex_engine::startup::Backoff<List>,
+    reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
     // Markets the live stream has priced; a late funding retry never overwrites them.
@@ -228,6 +229,7 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: 0,
             retries: Default::default(),
+            reread_stalls: 0,
             tickers_committed: false,
             live_priced: Vec::new(),
             staged_tickers: Vec::new(),
@@ -874,7 +876,7 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets { mut rows, skipped } => {
+            Pending::Markets { rows, skipped } => {
                 log_skipped(cx, "market", &skipped);
                 if rows.is_empty() {
                     self.retry_list(cx, List::Markets);
@@ -890,13 +892,18 @@ impl Venue for Bingx {
                 } else {
                     Vec::new()
                 };
+                let mut rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
-                let malformed = skipped.iter().any(|id| !id.is_empty());
-                self.account
+                let (before, after) = self
+                    .account
                     .set_skipped_markets(cx.store, skipped.iter().map(|id| id.replace('-', "")));
                 // A partial catalogue commits so private reads start, then re-reads.
-                if malformed {
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
                     self.retry_list(cx, List::Markets);
                 } else {
                     self.retries.succeeded(cx, &List::Markets);
@@ -1221,6 +1228,58 @@ impl Venue for Bingx {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("BingX stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

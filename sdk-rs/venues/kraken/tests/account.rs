@@ -1060,3 +1060,60 @@ fn stream_row_without_max_fixed_leverage_keeps_proven_isolation() {
     );
     assert_eq!(p.leverage, 10.0);
 }
+
+#[test]
+fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
+    let (mut e, s, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
+    snapshot(&mut e, s);
+    message(&mut e, s, NOW, POSITION);
+    let listed = e.store().market("PF_XBTUSD").cloned().unwrap();
+    let (timer, at) = *timers
+        .iter()
+        .find(|(_, at)| *at == NOW + 1000.0)
+        .expect("partial catalogue schedules a re-read");
+    e.handle(at, Event::TimerFired { timer });
+    let reread = requests(&mut e);
+    // PF_XBTUSD is now untradeable, which the catalogue filters out.
+    let untradeable = with_row(BAD_ROW).replacen(r#""tradeable":true"#, r#""tradeable":false"#, 1);
+    reply(&mut e, &reread[0], 200, &untradeable);
+    assert_eq!(e.store().market("PF_XBTUSD"), Some(&listed));
+    snapshot(&mut e, s);
+    message(
+        &mut e,
+        s,
+        NOW,
+        &POSITION.replace("open_positions", "open_positions_snapshot"),
+    );
+    assert!(e.store().loaded().orders && e.store().loaded().positions);
+    assert!(e.store().order("order-1").is_some());
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "PF_XBTUSD");
+}
+
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let (mut e, _, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
+    let mut retry = timers.iter().find(|(_, at)| *at == NOW + 1000.0).copied();
+    let (mut rereads, mut warned) = (0, false);
+    while let Some((timer, at)) = retry.take() {
+        e.handle(at, Event::TimerFired { timer });
+        let reread = requests(&mut e);
+        assert!(reread[0].url.ends_with("/derivatives/api/v3/instruments"));
+        reply(&mut e, &reread[0], 200, &with_row(BAD_ROW));
+        rereads += 1;
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+                    if message.contains("stops re-reading") =>
+                {
+                    warned = true
+                }
+                _ => {}
+            }
+        }
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(warned);
+}

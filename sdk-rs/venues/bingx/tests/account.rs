@@ -1129,3 +1129,48 @@ fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
     h.fire_recovery();
     assert_eq!(h.take(KEY).method, Method::Post);
 }
+
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(POSITIONS, 200, POSITION);
+    h.respond(BALANCE, 200, BALANCES);
+    h.respond(ORDERS, 200, OPEN);
+    let listed = h.engine.store().market("BTCUSDT").cloned().unwrap();
+    h.fire_at(2000.0);
+    // BTC-USDT drops out of the list while ETH-USDT stays malformed.
+    h.respond(
+        "/quote/contracts",
+        200,
+        r#"{"code":0,"data":[{"symbol":"SOL-USDT","asset":"SOL","currency":"USDT","status":1,"quantityPrecision":0,"pricePrecision":2,"tradeMinLimit":"1","maxLongLeverage":50},{"symbol":"ETH-USDT","asset":"ETH"}]}"#,
+    );
+    assert_eq!(h.engine.store().market("BTCUSDT"), Some(&listed));
+    assert!(h.engine.store().market("SOLUSDT").is_some());
+    h.fire_at(3000.0);
+    h.respond(POSITIONS, 200, POSITION);
+    if h.requests.iter().any(|r| r.url.contains(ORDERS)) {
+        h.respond(ORDERS, 200, OPEN);
+    }
+    let store = h.engine.store();
+    assert!(store.loaded().positions && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert!(store.order(ORDER_ID).is_some());
+}
+
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = with_markets(PARTIAL_MARKETS);
+    let (mut at, mut delay) = (2000.0, 1000.0);
+    for _ in 0..5 {
+        h.fire_at(at);
+        h.respond("/quote/contracts", 200, PARTIAL_MARKETS);
+        delay *= 2.0;
+        at += delay;
+    }
+    assert!(!h.timers.iter().any(|(_, t)| *t == at), "no sixth re-read");
+    assert!(h.logs.iter().any(|log| log.contains("stops re-reading")));
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+}

@@ -388,14 +388,18 @@ impl KrakenSpot {
         };
         let mut total = 0.0;
         let mut missing = false;
-        let mut unquoted = false;
+        let mut estimated = false;
+        let mut zeroed = false;
         let mut unsupported = false;
         let mut wanted = Vec::new();
+        // A route a catalogue re-read just added waits for its ticker re-seed.
+        let seeded = cx.store.loaded().tickers && !self.ticker_reseed;
         for holding in currencies {
             let rate = if matches!(holding.currency.as_str(), "USD" | "USDT" | "USDC") {
                 Some(1.0)
             } else {
                 let mut supported = false;
+                let mut midpoint = None;
                 let rate = cx
                     .store
                     .markets()
@@ -407,24 +411,35 @@ impl KrakenSpot {
                             return None;
                         }
                         supported = true;
-                        cx.store
-                            .ticker(&market.symbol)
-                            .map(|ticker| ticker.last)
-                            .filter(|last| last.is_finite() && *last > 0.0)
+                        let ticker = cx.store.ticker(&market.symbol)?;
+                        if midpoint.is_none() && ticker.bid > 0.0 && ticker.ask > 0.0 {
+                            midpoint = Some((ticker.bid + ticker.ask) / 2.0)
+                                .filter(|mid: &f64| mid.is_finite());
+                        }
+                        Some(ticker.last).filter(|last| last.is_finite() && *last > 0.0)
                     })
                     .next();
-                if rate.is_none() {
-                    if supported {
-                        // Wait for the first ticker seed; after it, an unquoted
-                        // route counts as zero until a live quote arrives.
-                        missing |= !cx.store.loaded().tickers;
-                        unquoted = true;
-                        wanted.push(holding.currency.clone());
+                if rate.is_some() {
+                    rate
+                } else if self.rejected_routes.contains(&holding.currency) {
+                    // The malformed USD pair awaits its re-read; zero is not proof.
+                    missing = true;
+                    None
+                } else if supported {
+                    wanted.push(holding.currency.clone());
+                    if !seeded {
+                        missing = true;
+                        None
                     } else {
-                        unsupported = true;
+                        // After the seed, BBO or zero stands in until a last arrives.
+                        estimated = true;
+                        zeroed |= midpoint.is_none();
+                        midpoint
                     }
+                } else {
+                    unsupported = true;
+                    None
                 }
-                rate
             };
             if let Some(rate) = rate {
                 total += holding.balance.total * rate;
@@ -451,16 +466,16 @@ impl KrakenSpot {
             return;
         }
         self.account.wallet_valuation_warnings &= !1;
-        if !unquoted {
+        if !zeroed {
             self.account.wallet_valuation_warnings &= !4;
         } else if self.account.wallet_valuation_warnings & 4 == 0 {
             self.account.wallet_valuation_warnings |= 4;
             cx.log(LogLevel::Warning,
                 "Kraken Spot USD wallet values a currency without a quote at zero until one arrives");
         }
-        // An unquoted route keeps revaluing on live quotes; a complete valuation
+        // An estimated route keeps revaluing on live quotes; a complete valuation
         // waits for the next private poll.
-        self.account.wallet_valuation_pending = unquoted;
+        self.account.wallet_valuation_pending = estimated;
         cx.store.set_balance(Balance {
             total,
             free: total,

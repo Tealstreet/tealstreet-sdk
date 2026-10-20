@@ -446,8 +446,9 @@ impl Backpack {
             } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
                     if cx.store.market(&r.symbol).is_none() {
+                        // Only a working order on a malformed market holds the snapshot.
                         if self.report_skipped_market(cx, &r.symbol) {
-                            *invalid = true;
+                            *invalid |= status(&r.status) == OrderStatus::Open;
                         } else {
                             self.report_unlisted_market(cx, &r.symbol);
                         }

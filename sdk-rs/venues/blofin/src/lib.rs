@@ -70,6 +70,7 @@ pub struct Blofin {
     startup: safe_cex_engine::startup::Backoff<bool>,
     // Instrument ids rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
+    reread_stalls: u8,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     public_supervisor: Supervisor,
     books: HashMap<String, DepthState>,
@@ -132,6 +133,7 @@ impl Blofin {
             public: Connection::default(),
             startup: Default::default(),
             malformed_markets: HashSet::new(),
+            reread_stalls: 0,
             live_tickers: Default::default(),
             public_supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 20_000.0,
@@ -698,15 +700,22 @@ impl Venue for Blofin {
         match pending {
             Pending::Markets { rows, malformed } if !rows.is_empty() => {
                 let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
                 cx.store.set_markets(rows);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
                 self.malformed_markets
                     .retain(|id| cx.store.market_by_id(id).is_none());
+                let after = self.malformed_markets.len();
                 // A partial catalogue commits so private reads start, then re-reads.
-                if malformed.is_empty() {
-                    self.startup.succeeded(cx, &true);
-                } else {
-                    self.malformed_markets.extend(malformed);
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
                     self.startup.failed(cx, true);
+                } else {
+                    self.startup.succeeded(cx, &true);
                 }
                 if refresh {
                     return;
@@ -914,6 +923,58 @@ impl Venue for Blofin {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// A refresh keeps every listed market the new catalogue omits or filters out, unchanged.
+fn keep_listed(
+    listed: &[safe_cex_engine::model::Market],
+    rows: Vec<safe_cex_engine::model::Market>,
+) -> Vec<safe_cex_engine::model::Market> {
+    let mut fresh: Vec<_> = rows.into_iter().map(Some).collect();
+    let mut index = std::collections::HashMap::new();
+    for (i, market) in fresh.iter().enumerate() {
+        if let Some(market) = market {
+            index.entry(market.symbol.clone()).or_insert(i);
+        }
+    }
+    let mut merged: Vec<_> = listed
+        .iter()
+        .map(|old| {
+            index
+                .get(&old.symbol)
+                .and_then(|&i| fresh[i].take())
+                .unwrap_or_else(|| old.clone())
+        })
+        .collect();
+    merged.extend(fresh.into_iter().flatten());
+    merged
+}
+
+/// Whether a partial catalogue re-reads; five refreshes in a row that leave its
+/// malformed set no smaller end the retry.
+fn reread_partial<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    stalls: &mut u8,
+    refresh: bool,
+    before: usize,
+    after: usize,
+) -> bool {
+    if after == 0 {
+        *stalls = 0;
+        return false;
+    }
+    *stalls = if refresh && after >= before {
+        stalls.saturating_add(1)
+    } else {
+        0
+    };
+    if *stalls == 5 {
+        cx.log(
+            safe_cex_engine::LogLevel::Warning,
+            format!("BloFin stops re-reading a catalogue with {after} malformed markets"),
+        );
+    }
+    *stalls < 5
 }
 
 #[cfg(test)]

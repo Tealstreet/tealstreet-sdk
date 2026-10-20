@@ -251,18 +251,21 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
-    /// Keeps earlier malformed markets the new catalogue still lacks.
+    /// Keeps earlier malformed markets the new catalogue still lacks; returns the
+    /// malformed count before and after.
     pub fn set_skipped_markets(
         &mut self,
         store: &safe_cex_engine::store::Store,
         symbols: impl Iterator<Item = String>,
-    ) {
+    ) -> (usize, usize) {
+        let before = self.skipped_markets.len();
+        self.skipped_markets
+            .extend(symbols.filter(|s| !s.is_empty()));
         self.skipped_markets
             .retain(|symbol| store.market(symbol).is_none());
         self.reported_markets
             .retain(|symbol| store.market(symbol).is_none());
-        self.skipped_markets
-            .extend(symbols.filter(|s| !s.is_empty()));
+        (before, self.skipped_markets.len())
     }
     /// Whether a row's market is unknown; a market dropped at startup is an error once.
     fn untracked_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {

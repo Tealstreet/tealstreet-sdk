@@ -429,3 +429,94 @@ fn every_positions_404_preserves_the_last_successful_snapshot() {
         assert_eq!(e.store().positions()[0].contracts, 5.0);
     }
 }
+#[test]
+fn malformed_spot_or_unnamed_rows_do_not_reread_the_catalogue() {
+    let markets = MARKETS.replace(
+        "]",
+        r#",{"symbol":"SOL_USDC","marketType":"SPOT","quantityIncrement":"bogus"},{"quantityIncrement":"bogus"}]"#,
+    );
+    let (e, _, logs, timers) = ready_catalogue(&markets, POSITIONS, "[]");
+    assert!(
+        logs.iter()
+            .any(|l| l.starts_with("Skipped 2 malformed Backpack market rows")),
+        "{logs:?}"
+    );
+    assert!(
+        !timers.iter().any(|(_, at)| *at == 2000.0),
+        "no catalogue re-read: {timers:?}"
+    );
+    assert!(e.store().loaded().positions);
+}
+#[test]
+fn only_a_working_order_on_a_malformed_market_holds_the_orders() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    for (status, held) in [("New", true), ("Filled", false), ("Cancelled", false)] {
+        let order = ORDER
+            .replace("SOL_USDC_PERP", "BTC_USDC_PERP")
+            .replace("\"123\"", "\"456\"")
+            .replace("New", status);
+        let (e, _, _, _) = ready_catalogue(&markets, POSITIONS, &format!("[{order},{ORDER}]"));
+        assert_eq!(e.store().loaded().orders, !held, "{status}");
+        if !held {
+            assert_eq!(e.store().orders().len(), 1);
+            assert_eq!(e.store().orders()[0].id, "123");
+        }
+    }
+}
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    let (mut e, socket, _, timers) = ready_catalogue(&markets, POSITIONS, &format!("[{ORDER}]"));
+    assert_eq!(e.store().positions().len(), 1);
+    assert!(e.store().order("123").is_some());
+    let listed = e.store().market(SYMBOL).cloned().unwrap();
+    let (timer, at) = *timers
+        .iter()
+        .find(|(_, at)| *at == 2000.0)
+        .expect("partial catalogue schedules a re-read");
+    e.handle(at, Event::TimerFired { timer });
+    let reread = requests(&mut e);
+    // SOL_USDC_PERP drops out of the list while BTC_USDC_PERP stays malformed.
+    reply(
+        &mut e,
+        &reread[0],
+        200,
+        &markets.replace(SYMBOL, "ETH_USDC_PERP"),
+    );
+    assert_eq!(e.store().market(SYMBOL), Some(&listed));
+    assert!(e.store().market("ETH_USDC_PERP").is_some());
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, SYMBOL);
+    assert!(e.store().order("123").is_some());
+    e.handle(at, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    ws(&mut e, socket, "account.positionUpdate", LONG);
+    assert_eq!(e.store().positions()[0].symbol, SYMBOL);
+}
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    let (mut e, _, _, timers) = ready_catalogue(&markets, POSITIONS, "[]");
+    let mut retry = timers.iter().find(|(_, at)| *at == 2000.0).copied();
+    let (mut rereads, mut warned) = (0, false);
+    while let Some((timer, at)) = retry.take() {
+        e.handle(at, Event::TimerFired { timer });
+        let reread = requests(&mut e);
+        reply(&mut e, &reread[0], 200, &markets);
+        rereads += 1;
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, at_ms } => retry = Some((timer, at_ms)),
+                Action::Notice(Notice::Log { message, .. })
+                    if message.contains("stops re-reading") =>
+                {
+                    warned = true
+                }
+                _ => {}
+            }
+        }
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(warned);
+}

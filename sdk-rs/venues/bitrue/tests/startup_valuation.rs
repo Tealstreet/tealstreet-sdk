@@ -234,3 +234,63 @@ fn empty_groups_for_uncatalogued_contracts_do_not_block_the_snapshot() {
         assert_eq!(h.engine.store().balance().total, 1000.0);
     }
 }
+const ORDER: &str = r#"{"code":"0","data":[{"orderId":2334151155877155281,"clientOrderId":"caller","type":"LIMIT","side":"BUY","status":"NEW","action":"OPEN","price":100,"origQty":100,"executedQty":0,"transactTime":1}]}"#;
+fn take_timer(h: &mut Harness, at: f64) -> TimerId {
+    let i = h
+        .timers
+        .iter()
+        .position(|(_, t)| *t == at)
+        .unwrap_or_else(|| panic!("no timer at {at}: {:?}", h.timers));
+    h.timers.remove(i).0
+}
+#[test]
+fn refresh_that_omits_a_held_contract_keeps_it_with_its_position_and_order() {
+    let mut h = Harness::with_markets(PARTIAL_MARKETS);
+    let retry = take_timer(&mut h, 1000.0);
+    h.engine
+        .store_mut()
+        .update_ticker("E-BTC-USDT", |t| t.last = 110.0);
+    h.reply("/account", &account("BUY", 2.0));
+    h.reply("/openOrders", ORDER);
+    assert!(h.engine.store().order("2334151155877155281").is_some());
+    let listed = h.engine.store().market("E-BTC-USDT").cloned().unwrap();
+    h.now = 1000.0;
+    h.engine.handle(1000.0, Event::TimerFired { timer: retry });
+    h.collect();
+    // E-BTC-USDT drops out of the list while E-BAD-USDT stays malformed.
+    h.reply(
+        "/contracts",
+        &PARTIAL_MARKETS.replace("E-BTC-USDT", "E-ETH-USDT"),
+    );
+    assert_eq!(h.engine.store().market("E-BTC-USDT"), Some(&listed));
+    assert!(h.engine.store().market("E-ETH-USDT").is_some());
+    let timer = take_timer(&mut h, 2000.0);
+    h.now = 2000.0;
+    h.engine.handle(2000.0, Event::TimerFired { timer });
+    h.collect();
+    h.reply("/account", &account("BUY", 2.0));
+    let store = h.engine.store();
+    assert!(store.loaded().positions && store.loaded().balance && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "E-BTC-USDT");
+    assert!(store.order("2334151155877155281").is_some());
+}
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = Harness::with_markets(PARTIAL_MARKETS);
+    let mut retry = Some((take_timer(&mut h, 1000.0), 1000.0));
+    let mut rereads = 0;
+    while let Some((timer, at)) = retry.take() {
+        h.now = at;
+        h.engine.handle(at, Event::TimerFired { timer });
+        h.collect();
+        let before = h.timers.len();
+        h.reply("/contracts", PARTIAL_MARKETS);
+        rereads += 1;
+        retry = h.timers.get(before).copied();
+        h.timers.truncate(before);
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(h.logs.iter().any(|s| s.contains("stops re-reading")));
+}

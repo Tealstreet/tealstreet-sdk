@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::error::ErrorKind;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
@@ -1131,4 +1131,63 @@ fn transient_mode_failures_keep_retrying_without_failing_startup() {
         assert!(startup_failure(&actions).is_none(), "{status} {body}");
         assert!(mode_retried(&mut e, actions, 30_000.0), "{status} {body}");
     }
+}
+
+#[test]
+fn refresh_that_filters_a_held_market_keeps_it_with_its_position_and_order() {
+    let (mut e, socket, reads, _, retry) = private_started_with_retry(&catalogue_with("0"));
+    answer_snapshot(&mut e, reads, POSITION);
+    assert_eq!(e.store().positions().len(), 1);
+    let listed = e.store().market("BTCUSDT").cloned().unwrap();
+    e.handle(
+        1100.0,
+        Event::TimerFired {
+            timer: retry.expect("partial catalogue retry"),
+        },
+    );
+    let reread = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("contract/detail"))
+        .expect("catalogue re-read");
+    // BTC_USDT is now paused (state 1), which the catalogue filters out.
+    let paused = catalogue_with("0").replacen(r#""state":0"#, r#""state":1"#, 1);
+    response(&mut e, &reread, &paused);
+    assert_eq!(e.store().market("BTCUSDT"), Some(&listed));
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    answer_snapshot(&mut e, reads, POSITION);
+    let loaded = e.store().loaded();
+    assert!(loaded.balance && loaded.positions && loaded.orders);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "BTCUSDT");
+    assert!(e.store().order("739113577038255617").is_some());
+}
+
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let (mut e, _, _, _, mut retry) = private_started_with_retry(&catalogue_with("0"));
+    let (mut rereads, mut warned) = (0, false);
+    while let Some(timer) = retry.take() {
+        e.handle(1100.0, Event::TimerFired { timer });
+        let reread = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("contract/detail"))
+            .expect("catalogue re-read");
+        response(&mut e, &reread, &catalogue_with("0"));
+        rereads += 1;
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, .. } => retry = Some(timer),
+                Action::Notice(Notice::Log {
+                    level: LogLevel::Warning,
+                    message,
+                }) if message.contains("stops re-reading") => warned = true,
+                _ => {}
+            }
+        }
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(warned);
+    assert!(e.store().market("BTCUSDT").is_some());
 }

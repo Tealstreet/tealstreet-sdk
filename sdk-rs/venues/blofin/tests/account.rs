@@ -1546,3 +1546,69 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
         Action::Notice(safe_cex_engine::Notice::Log { message, .. })
             if message.contains("Malformed BloFin order row"))));
 }
+fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
+    actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+        _ => None,
+    })
+}
+#[test]
+fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let (retry, at) = new_timer(&h.actions)
+        .filter(|(_, at)| *at == 1000.0)
+        .expect("partial catalogue retry");
+    h.seed();
+    h.ws(&format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{WORKING}]}}"#
+    ));
+    assert!(h.e.store().order("working").is_some());
+    let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
+    h.e.handle(at, Event::TimerFired { timer: retry });
+    h.collect();
+    // BTC-USDT drops out of the list while BAD-USDT stays malformed.
+    h.reply(
+        "instruments",
+        &PARTIAL_INSTRUMENTS.replacen("BTC-USDT", "SOL-USDT", 1),
+    );
+    assert_eq!(h.e.store().market_by_id("BTC-USDT"), Some(&listed));
+    assert!(h.e.store().market_by_id("SOL-USDT").is_some());
+    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply(
+        "account/positions",
+        &format!(r#"{{"code":"0","data":[{POSITION}]}}"#),
+    );
+    h.reply("balances", BALANCES);
+    h.reply(
+        "orders-pending",
+        &format!(r#"{{"code":"0","data":[{WORKING}]}}"#),
+    );
+    while h.pending.iter().any(|r| r.url.contains("orders-pending")) {
+        h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    }
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    let store = h.e.store();
+    assert!(store.loaded().positions && store.loaded().balance && store.loaded().orders);
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.positions()[0].symbol, "BTCUSDT");
+    assert!(store.order("working").is_some());
+}
+#[test]
+fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    let mut retry = new_timer(&h.actions).filter(|(_, at)| *at == 1000.0);
+    let mut rereads = 0;
+    while let Some((timer, at)) = retry.take() {
+        h.e.handle(at, Event::TimerFired { timer });
+        h.collect();
+        h.actions.clear();
+        h.reply("instruments", PARTIAL_INSTRUMENTS);
+        rereads += 1;
+        retry = new_timer(&h.actions);
+        assert!(rereads <= 5, "re-read is bounded");
+    }
+    assert_eq!(rereads, 5);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("stops re-reading"))));
+}

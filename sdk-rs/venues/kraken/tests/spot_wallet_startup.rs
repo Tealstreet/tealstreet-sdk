@@ -259,8 +259,9 @@ fn shared_feed_quote_completes_pending_native_wallet_without_private_poll() {
                 .unwrap(),
         )
         .unwrap();
-    // The first shared frame completes the seed; BBO alone values BTC at zero.
-    assert_eq!(engine.store().balance().total, 0.);
+    // The first shared frame completes the seed; BBO values BTC at its midpoint.
+    assert!(engine.store().loaded().balance);
+    assert_eq!(engine.store().balance().total, 200.);
     engine
         .apply_public_feed(
             NOW,
@@ -289,7 +290,7 @@ fn a_catalogued_usdc_quote_is_a_supported_conversion_not_an_unpriced_exclusion()
 }
 
 #[test]
-fn rejected_pair_counts_its_funded_currency_as_zero_and_the_reread_restores_it() {
+fn rejected_pair_holds_its_funded_currency_until_the_reread_repairs_it() {
     let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
     partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
     for prior in [
@@ -305,10 +306,20 @@ fn rejected_pair_counts_its_funded_currency_as_zero_and_the_reread_restores_it()
         if let Some(prior) = &prior {
             wallet.engine.store_mut().set_balance(prior.clone());
         }
+        wallet.tickers(TICKERS);
         wallet.native(r#"{"error":[],"result":{"XXBT":"2"}}"#);
-        // No USD route is listed, so BTC counts as zero and the balance publishes.
-        assert!(wallet.engine.store().loaded().balance);
-        assert_eq!(wallet.engine.store().balance().total, 0.);
+        // XXBTZUSD is pending re-read, so BTC is never published at zero.
+        assert_eq!(wallet.engine.store().loaded().balance, prior.is_some());
+        assert_eq!(
+            wallet.engine.store().balance().total,
+            prior.as_ref().map_or(0., |p| p.total)
+        );
+        assert!(
+            !wallet
+                .warnings
+                .iter()
+                .any(|w| w.contains("without a supported USD market"))
+        );
         let recovered = wallet.recover_metadata(META);
         assert!(
             recovered.iter().any(|action| match action {
@@ -317,7 +328,9 @@ fn rejected_pair_counts_its_funded_currency_as_zero_and_the_reread_restores_it()
             }),
             "newly recovered ticker subscribes on existing public socket"
         );
+        assert_eq!(wallet.engine.store().loaded().balance, prior.is_some());
         wallet.live(r#"[{"symbol":"BTC/USD","last":110}]"#);
+        assert!(wallet.engine.store().loaded().balance);
         assert_eq!(wallet.engine.store().balance().total, 220.);
         assert_eq!(
             wallet.engine.store().currency_balances().unwrap()[0]
@@ -333,7 +346,7 @@ fn funded_currency_without_any_usd_route_never_waits_on_a_partial_catalogue() {
     let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
     partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
     let mut wallet = Wallet::with_meta(&partial.to_string());
-    wallet.native(r#"{"error":[],"result":{"ATOM":"4","ZUSD":"10"}}"#);
+    wallet.native(r#"{"error":[],"result":{"ATOM":"4","ZCAD":"7","KFEE":"100","ZUSD":"10"}}"#);
     assert!(wallet.engine.store().loaded().balance);
     assert_eq!(wallet.engine.store().balance().total, 10.);
     assert!(
@@ -360,6 +373,17 @@ fn funded_currency_without_any_usd_route_never_waits_on_a_partial_catalogue() {
 }
 
 #[test]
+fn seeded_route_without_a_last_is_valued_at_its_bid_ask_midpoint() {
+    let mut wallet = Wallet::pending();
+    wallet.tickers(&TICKERS.replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#));
+    wallet.native(BALANCE);
+    assert!(wallet.engine.store().loaded().balance);
+    assert_eq!(wallet.engine.store().balance().total, 1355.);
+    wallet.live(r#"[{"symbol":"ETH/USD","last":60}]"#);
+    assert_eq!(wallet.engine.store().balance().total, 1385.);
+}
+
+#[test]
 fn persistent_rejected_pair_rereads_only_the_catalogue() {
     let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
     partial["result"]["XXBTZUSD"]["pair_decimals"] = serde_json::json!("bad");
@@ -378,17 +402,16 @@ fn persistent_rejected_pair_rereads_only_the_catalogue() {
 }
 
 #[test]
-fn malformed_native_pair_counts_its_funded_currency_as_zero_until_recovered() {
+fn malformed_native_pair_holds_its_funded_currency_until_recovered() {
     for wsname in ["/USD", " /USD", "BTC/", "BTC/ USD", "BTC/USD ", "BTC//USD"] {
         let mut partial: serde_json::Value = serde_json::from_str(META).unwrap();
         partial["result"]["XXBTZUSD"]["wsname"] = serde_json::json!(wsname);
         let mut wallet = Wallet::with_meta(&partial.to_string());
         wallet.native(r#"{"error":[],"result":{"XXBT":"2"}}"#);
         assert!(
-            wallet.engine.store().loaded().balance,
+            !wallet.engine.store().loaded().balance,
             "invalid native pair {wsname:?}"
         );
-        assert_eq!(wallet.engine.store().balance().total, 0.);
         assert_eq!(
             wallet.engine.store().markets().len(),
             1,
@@ -404,7 +427,11 @@ fn malformed_native_pair_counts_its_funded_currency_as_zero_until_recovered() {
 #[test]
 fn unquoted_wallet_publishes_after_the_seed_and_warns_once_across_balance_polls() {
     let mut wallet = Wallet::pending();
-    wallet.tickers(&TICKERS.replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#));
+    wallet.tickers(
+        &TICKERS
+            .replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#)
+            .replace(r#""a":["51","1","1"]"#, r#""a":["0","1","1"]"#),
+    );
     wallet.native(BALANCE);
     let (timer, at_ms) = wallet.poll;
     wallet.engine.handle(at_ms, Event::TimerFired { timer });
