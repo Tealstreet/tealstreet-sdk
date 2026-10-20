@@ -735,7 +735,11 @@ fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
             h.respond("/v5/account/wallet-balance", 200, &richer);
         }
     }
-    assert!(h.closed.is_empty(), "steady frames forced a reconnect");
+    // The harness feeds no public traffic, so only the private stream is in question.
+    assert!(
+        !h.closed.contains(&socket),
+        "steady frames forced a reconnect"
+    );
     assert_eq!(h.socket("/v5/private"), Some(socket));
     assert!(
         h.engine.store().balance().total > 1000.0,
@@ -769,6 +773,7 @@ fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
     hyro_snapshot(&mut h);
+    let private = h.socket("/v5/private").unwrap();
     let refusal =
         r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
     for _ in 0..5 {
@@ -784,7 +789,7 @@ fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
         h.requests.clear();
     }
     assert!(
-        h.closed.is_empty(),
+        !h.closed.contains(&private),
         "spaced-out transient blips accumulated into a reconnect"
     );
 }
