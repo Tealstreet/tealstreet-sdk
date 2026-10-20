@@ -2870,3 +2870,80 @@ othersevenOKXcontrols, Paradex andBitrue; stop onanyfailure. Commit this built,
 reviewed compiler candidate as a checkpoint, with gate phase explicitly open.
 Use the wait for read-only prepublication adversarial review across private,
 public/hosts and sharedharness; verify actual PR head again after publication.
+
+
+Prepublication adversarial reviews find two bounded P2s before push: raw
+Bitunix auth accepts a correctly re-signed nonnumeric timestamp, and sparse
+cumulative order events emit a defaultSell/zero-price fill despite preserving
+known parent metadata in store. Public/hosts and remaining sharedharness scopes
+pass. Fix both with production-path regression proofs; realizedPNL remains net
+of fees/funding verbatim. Timestamp validation accepts decimal safe integer
+milliseconds as actual numericTS/stringRust values, without inventing nonce
+formats or freshness windows. Invalid HTTP must stop before ACK consumption;
+invalid WS/cardinality cannot set authenticated and failures stay sticky.
+Private fill fix resolves omitted side/price from authoritative parent, retains
+explicit price/cumulative average semantics, and defers unresolved fill/watermark
+rather than inventing metadata; sparse unknownCREATE must not fabricate side.
+New3auth/fivefill regression controls need fail-before, affected native/helper
+checks, independent review and fresh Bitunix gates before publication.
+
+Optimized OKXEU public first3run gate PASS: TS/Rust main662.0/546.4ms,
+steady441.7/350.6, retained8.7/6.1MB, peak24.9/14.8. All four private controls
+alsoPASS on opt3module861,613bytes. Then basepublic stops before its TS
+constructor at the unchanged baseline settlement guard (replay.mjs:757).
+Preserve /tmp/bitunix-fc809-okx3-okx-public.log and stopped batch; no output or
+performance result from this incomplete attempt is accepted. No inverse/xperp/
+Paradex/Bitrue steps ran. Original completedEU CPUfailure remains preserved.
+
+All performance/build jobs are now stopped while auth/fill corrections run.
+After these are verified, strengthen external qualification to TWO below500
+readings15sapart BEFORE EACH remaining profile, not just after each module's
+build; long multi-profile batches can outlive a quiet host interval. This is a
+runner-state change outside replay; no sampler/clock/deadline/threshold/warmup
+change. One fresh basepublic attempt follows qualification; stop/diagnose any
+new failure. Already completed opt3EU/private passes are retained, not rerun.
+
+
+Both new findings now have fail-before evidence. All three production auth
+controls fail on prior replay source and pass after validation; full851helpers
+PASS. Independent auth implementation audit PASS: actual integer numeric/string
+clocks stay valid, malformed re-signed values and login cardinality fail before
+ACK/requests/writes/outbound/authentication, errors remain in finalizer. No
+nonce/freshness policy or valid request normalization changes.
+
+All five sparse-fill controls fail on prior native source (13oldaccountcontrols
+stillpass): wrongSell/zero-price metadata, wrongcumulativecost, lostunknown
+watermark and fabricatedCREATEside are reproduced. The temporary prior-source
+probe restores final account.rs byte-for-byte in finally; restoration verified.
+Fresh globalnative/bans/fmt/strictClippy/WASM and rebuilt452compiledSDK controls
+are now running on the fixed source. Other production TS/host packages remain
+unchanged from their passing source/consumer checkpoints. Preserve
+/tmp/bitunix-final-auth-{fail-before,after,helpers}.log and
+/tmp/bitunix-final-sparse-fail-before.log. Independent finalfillaudit is pending.
+
+
+Auth correction phase COMPLETE and independently reviewed:3productioncontrols
+fail before/pass after;851fullhelpers PASS. Commit only that bounded harness
+correction while private recovery review continues.
+
+Eight private regressions now pass with all76Bitunixnativecontrols. Three
+follow-up controls fail on the first five-control candidate (18oldcontrols
+pass): knownsame-cumulativeUPDATE recovery, olderCLOSE recovery and knownsparse
+CREATE identity/quantity preservation. Source restoration verified. Independent
+review confirms those admission fixes but identifies a further real nonterminal
+reconciliation overlap: after an unresolved sparseUPDATE, a newly dispatched
+Orders read can advance the REST baseline before complete WS metadata arrives.
+The corresponding terminalCLOSEcase is already fenced by terminal IDs and
+read generations. Add explicit bounded unresolved-execution handling and an
+actual debounce/request/response recovery regression, preserving ordinary
+startup/REST baseline behavior. No active build/performance jobs during edits.
+
+Initial globalfmt failed on first unformatted candidate and stopped its batch;
+no nativeClippy/tests result was claimed from it. The worker accidentally
+reused /tmp/bitunix-review-final-fmt.log for successful rustfmt and overwrote
+that initial diff. Its observed failure remains in tool output; the saved
+original source reproduces nonzero rustfmt in the distinct
+/tmp/bitunix-initial-fmt-reproduction.log. Do not accept the empty overwritten
+file as a globalfmt pass. Future full checks use new publication-prefixed logs.
+Fresh combined452compiledSDKcases passed the first private candidate; final
+recovery changes still require rebuilt compiled validation before publication.

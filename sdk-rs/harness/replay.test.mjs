@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { test } from 'node:test';
 import { Tape, stable } from './tape.mjs';
 import { subscriptionKeys } from './requests.mjs';
@@ -354,11 +354,11 @@ const productionTapeFor = (name, records, venue = venueOf(name)) => {
   const end = source.indexOf('\nconst settle =', classStart);
   const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
     'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
-    'subscriptionKeys', 'createHmac', 'timingSafeEqual', 'KEY', 'PASSPHRASE', 'SECRET',
+    'subscriptionKeys', 'createHash', 'createHmac', 'timingSafeEqual', 'KEY', 'PASSPHRASE', 'SECRET',
     `${source.slice(start, classStart)}\nreturn (${source.slice(classStart, end)});`)(
     Tape, { venue: name }, venue, records, [], new Set(), requestKey, Responses, undefined,
     parseRequestJson, (method) => method === 'GET', true,
-    subscriptionKeys, createHmac, timingSafeEqual, 'replay-key', 'replay-passphrase', 'replay-secret',
+    subscriptionKeys, createHash, createHmac, timingSafeEqual, 'replay-key', 'replay-passphrase', 'replay-secret',
   );
   return new ProductionTape('ts');
 };
@@ -1045,5 +1045,90 @@ test('production Hyperliquid Spot accepts only documented book acknowledgement d
     tape.send(socket,JSON.stringify({method:'subscribe',subscription:topic}));
     socket.onMessage(JSON.stringify({channel:'subscriptionResponse',data:{method:'subscribe',subscription:{...topic,mantissa:null,fast:false,nSigFigs:null,...change}}}));
     assert.equal(tape.audit.errors().length===0,valid,JSON.stringify(change));
+  }
+});
+
+
+// These values are re-signed, so rejection must validate the clock contract,
+// rather than merely detect a digest mismatch after changing a signed field.
+const malformedBitunixTimestamps = [
+  'not-a-time', '', ' ', ' 1700000000000 ', '1700000000000.5', '1.7e12',
+  '9007199254740992', -1, 1700000000000.5, Number.MAX_SAFE_INTEGER + 1,
+  undefined, null, true, {},
+];
+const bitunixDigest = (timestamp, nonce, query = '', body = '') => {
+  const hash = (text) => createHash('sha256').update(text).digest('hex');
+  return hash(hash(`${nonce}${timestamp}replay-key${query}${body}`) + 'replay-secret');
+};
+const bitunixLoginArg = (timestamp) => {
+  // Sign exactly the value that the JSON socket frame will carry.
+  const arg = JSON.parse(JSON.stringify({ apiKey: 'replay-key', nonce: 'honest-replay-nonce', timestamp }));
+  return { ...arg, sign: bitunixDigest(arg.timestamp, arg.nonce) };
+};
+
+test('production Bitunix HTTP rejects re-signed malformed clocks before consuming the honest ACK', () => {
+  const url = 'https://fapi.bitunix.com/api/v1/futures/trade/place_order';
+  const body = JSON.stringify({ symbol: 'BTCUSDT', qty: '0.002', price: '90500', side: 'BUY', orderType: 'LIMIT' });
+  const records = [{ type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{"code":0,"data":{"orderId":"1003"}}' }];
+  const headers = (timestamp) => ({ 'api-key': 'replay-key', nonce: 'honest-replay-nonce',
+    ...(timestamp === undefined ? {} : { timestamp }), sign: bitunixDigest(timestamp, 'honest-replay-nonce', '', body) });
+  for (const timestamp of malformedBitunixTimestamps) {
+    const tape = productionTapeFor('bitunix', records);
+    assert.throws(() => tape.respond('POST', url, body, headers(timestamp)), /signature|timestamp/i);
+    assert.equal(tape.signatureErrors.length, 1, 'authentication rejection remains sticky');
+    assert.equal(tape.missingWrites, 1, 'malformed signed time cannot consume the honest ACK');
+    assert.equal(tape.requests.size, 0);
+    assert.deepEqual(tape.writes, []);
+    assert.deepEqual(tape.outbound, []);
+    assert.equal(tape.respond('POST', url, body, headers(String(Date.now()))).status, 200);
+    assert.equal(tape.missingWrites, 0);
+    assert.equal(tape.signatureErrors.length, 1, 'a later valid request cannot clear the failure');
+    assert.equal(tape.respond('POST', url, body, headers(String(Date.now()))).status, 599);
+  }
+  for (const timestamp of [Date.now(), String(Date.now())]) {
+    const tape = productionTapeFor('bitunix', records);
+    assert.equal(tape.respond('POST', url, body, headers(timestamp)).status, 200, 'numeric TS and decimal-string Rust clocks both remain valid');
+    assert.deepEqual(tape.signatureErrors, []);
+    assert.equal(tape.respond('POST', url, body, headers(timestamp)).status, 599);
+  }
+});
+
+test('production Bitunix socket authenticates only after its re-signed timestamp validates', () => {
+  const url = 'wss://fapi.bitunix.com/private/';
+  for (const timestamp of malformedBitunixTimestamps) {
+    const tape = productionTapeFor('bitunix', []);
+    const socket = tape.connect(url, () => {}, () => {});
+    tape.openSocket(socket);
+    assert.throws(() => tape.send(socket, JSON.stringify({ op: 'login', args: [bitunixLoginArg(timestamp)] })), /signature|timestamp/i);
+    assert.equal(Boolean(socket.authenticated), false);
+    assert.equal(tape.signatureErrors.length, 1);
+    tape.send(socket, JSON.stringify({ op: 'login', args: [bitunixLoginArg(String(Date.now()))] }));
+    assert.equal(socket.authenticated, true);
+    assert.equal(tape.signatureErrors.length, 1, 'valid retry preserves the original authentication failure');
+    tape.close(socket);
+  }
+  for (const timestamp of [Date.now(), String(Date.now())]) {
+    const tape = productionTapeFor('bitunix', []);
+    const socket = tape.connect(url, () => {}, () => {});
+    tape.openSocket(socket);
+    tape.send(socket, JSON.stringify({ op: 'login', args: [bitunixLoginArg(timestamp)] }));
+    assert.equal(socket.authenticated, true);
+    assert.deepEqual(tape.signatureErrors, []);
+    tape.close(socket);
+  }
+});
+
+test('production Bitunix login requires exactly one independently verified argument', () => {
+  for (const args of [undefined, [], [bitunixLoginArg(Date.now()), bitunixLoginArg(Date.now())]]) {
+    const tape = productionTapeFor('bitunix', []);
+    const socket = tape.connect('wss://fapi.bitunix.com/private/', () => {}, () => {});
+    tape.openSocket(socket);
+    assert.throws(() => tape.send(socket, JSON.stringify({ op: 'login', ...(args === undefined ? {} : { args }) })), /signature|timestamp|login/i);
+    assert.equal(Boolean(socket.authenticated), false);
+    assert.equal(tape.signatureErrors.length, 1);
+    tape.send(socket, JSON.stringify({ op: 'login', args: [bitunixLoginArg(Date.now())] }));
+    assert.equal(socket.authenticated, true);
+    assert.equal(tape.signatureErrors.length, 1);
+    tape.close(socket);
   }
 });

@@ -207,8 +207,9 @@ class Tape extends SharedTape {
       }
     }
     if (message.op === 'login' && values.venue === 'bitunix') {
+      const arg = Array.isArray(message.args) && message.args.length === 1 ? message.args[0] : undefined;
+      if (!this.verifySignature(arg, '', '', true)) throw new Error('Invalid Bitunix login signature/timestamp');
       socket.authenticated = true;
-      for (const arg of message.args) this.verifySignature(arg, '', '', true);
     }
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
       const validate = venue.validateSubscriptions ?? venue.validateLogin;
@@ -251,21 +252,25 @@ class Tape extends SharedTape {
   }
 
   verifySignature(headers, query, body, ws = false) {
-    const h = (name) => headers.get?.(name) ?? headers[name];
-    const key = ws ? headers.apiKey : h('api-key');
+    const h = (name) => ws ? headers?.[name] : headers?.get?.(name) ?? headers?.[name];
+    const key = ws ? headers?.apiKey : h('api-key');
     const nonce = h('nonce');
     const timestamp = h('timestamp');
     const signature = h(ws ? 'sign' : 'sign');
     const hash = (v) => createHash('sha256').update(v).digest('hex');
     const expected = hash(hash(`${nonce}${timestamp}${key}${query}${body ?? ''}`) + SECRET);
-    if (key !== KEY || !nonce || !timestamp || signature !== expected) this.signatureErrors.push('Bitunix signature mismatch');
+    const validTime = (typeof timestamp === 'string' || typeof timestamp === 'number')
+      && /^\d+$/.test(String(timestamp)) && Number.isSafeInteger(Number(timestamp));
+    const valid = key === KEY && Boolean(nonce) && validTime && signature === expected;
+    if (!valid) this.signatureErrors.push('Bitunix signature/timestamp mismatch');
+    return valid;
   }
 
   respond(method, url, body, headers = {}) {
     if (values.venue === 'bitunix' && !new URL(url).pathname.includes('/market/')) {
       const query = [...new URL(url).searchParams].sort(([a], [b]) => a.localeCompare(b))
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
-      this.verifySignature(headers, query, body);
+      if (!this.verifySignature(headers, query, body)) throw new Error('Invalid Bitunix signature/timestamp');
     }
     const firstWrite = this.writes.length;
     const response = super.respond(method, url, body, headers);
