@@ -165,3 +165,11 @@ Landing-source proofs before these focused fixes: 1,247 workspace tests; root
 PASS (public CPU 221.1/100.5 ms, retained 4.2/2.4 MB). Kraken combined-build public
 and private PASS (public CPU 1,781.2/377.9 ms; retained 3.7/1.9 MB). Final source
 reverification follows this checkpoint.
+
+### Wrapper journal parity reviewed
+
+Retained Kraken's existing account-wide fills journal declaration in the Rust
+wrapper. The generic base otherwise throws an unsupported-path error. A real
+shared-fold regression failed before, passes after, and was independently rerun
+and accepted in code-correctness review; it asserts a closed round trip and its
+account, symbol, PnL, fills provenance and single account-wide warmup fetch.

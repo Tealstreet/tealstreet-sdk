@@ -186,6 +186,9 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'kraken') {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
