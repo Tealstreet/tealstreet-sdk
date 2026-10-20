@@ -25,6 +25,17 @@ test('ten percent margin is inclusive and process CPU is an independent gate', (
   assert.equal(median([4, 1, 8, 7, 3, 6, 5, 2]), 4.5);
 });
 
+test('sub-10 ms main and steady CPU objectives allow 1 ms; process CPU and memory stay strict', () => {
+  const ts = Array.from({ length: 7 }, () => ({ cpuMs: 4, steadyCpuMs: 9.9, processCpuMs: 4, retainedBytes: 100 }));
+  const rust = (values) => Array.from({ length: 7 }, () => ({ cpuMs: 5, steadyCpuMs: 10.9, processCpuMs: 3.6, retainedBytes: 90, ...values }));
+  assert.deepEqual(performanceFailures(ts, rust()), []);
+  assert.match(performanceFailures(ts, rust({ cpuMs: 5.001 })).join('\n'), /main-thread CPU: Rust must be within 1 ms/);
+  assert.match(performanceFailures(ts, rust({ steadyCpuMs: 10.901 })).join('\n'), /steady-state CPU/);
+  assert.equal(performanceFailures(ts, rust({ processCpuMs: 4 })).length, 1);
+  const large = ts.map((value) => ({ ...value, cpuMs: 10 }));
+  assert.match(performanceFailures(large, rust({ cpuMs: 9.5 })).join('\n'), /at least 10% below TS/);
+});
+
 test('every raw CPU sample and measurement contract is validated before aggregation', () => {
   const metrics = { baselineKind: 'idle-loaded', measuredMode: 'performance', cpuMs: 1, steadyCpuMs: 1, processCpuMs: 1 };
   assert.deepEqual(performanceMetricErrors(metrics, 'performance'), []);

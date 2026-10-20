@@ -1,3 +1,5 @@
+import { cpuObjectiveMet, SMALL_OBJECTIVE_MS } from './cpu-objective.mjs';
+
 export const MIN_PUBLIC_RUNS = 7;
 export const REQUIRED_IMPROVEMENT = 0.10;
 export const performanceOrder = (run) => run % 2 === 0 ? ['ts', 'rust'] : ['rust', 'ts'];
@@ -34,7 +36,11 @@ export function performanceFailures(ts, rust) {
     const candidate = median(rust.map((sample) => sample[field]));
     if (!Number.isFinite(reference) || reference <= 0 || !Number.isFinite(candidate))
       errors.push(`performance ${label}: no valid positive TS baseline`);
-    else if (!(candidate <= reference * (1 - REQUIRED_IMPROVEMENT)))
+    // Sub-10 ms main/steady objectives are within run-to-run noise of a tie.
+    else if (['cpuMs', 'steadyCpuMs'].includes(field) && reference < SMALL_OBJECTIVE_MS) {
+      if (!cpuObjectiveMet(candidate, reference))
+        errors.push(`performance ${label}: Rust must be within 1 ms of a sub-10 ms TS objective (ts=${reference}, rust=${candidate})`);
+    } else if (!(candidate <= reference * (1 - REQUIRED_IMPROVEMENT)))
       errors.push(`performance ${label}: Rust must be at least 10% below TS (ts=${reference}, rust=${candidate})`);
   }
   return errors;

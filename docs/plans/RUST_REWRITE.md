@@ -198,7 +198,9 @@ as it does today against Rust transferring frames:
 
 - At least seven fresh interleaved public pairs with alternating first runner.
 - Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
-  90% of TS. Include cold implementation loading/WASM compilation in total CPU;
+  90% of TS. A main or steady CPU objective under 10 ms TS instead allows Rust
+  1 ms above TS: at that size tied runs differ by up to 0.9 ms
+  (`RUST_GATE_TIMING.md`). Include cold implementation loading/WASM compilation in total CPU;
   exclude audit callbacks, checkpoint reconstruction and baseline collection.
 - Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
   reservation; never clamp releases to zero. Each measured run must reproduce

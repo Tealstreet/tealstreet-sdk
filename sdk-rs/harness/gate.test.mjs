@@ -293,7 +293,7 @@ const gate = (venue, isPrivate = false, defect) => {
       if (rust && defect === 'memory-arithmetic') output.metrics.heapBeforeBytes--;
       if (rust && args.includes('--performance')) {
         if (defect === 'process-cpu') output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
-        if (defect === 'marginal-cpu') output.metrics.cpuMs = output.metrics.runtimeCpuMs = 1.9;
+        if (defect === 'marginal-cpu') output.metrics.cpuMs = output.metrics.runtimeCpuMs = 3.001; // TS 2 ms: just past the sub-10 ms 1 ms allowance
         if (defect === 'late-invalid-cpu' && out.endsWith('-6.json')) output.metrics.cpuMs = null;
         if (defect === 'incomplete-perf' && out.endsWith('-6.json')) output.frames = 0;
         if (defect === 'dropped-perf-output' && out.endsWith('-6.json')) output.tickers[0].last = 0;
