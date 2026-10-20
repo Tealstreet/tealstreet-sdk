@@ -715,3 +715,21 @@ and VM counterexamples prove RED before/GREEN after, including private-start
 clock reset and missing/nonfinite epoch fallback;218 harness tests pass. Retain
 the failed gate and rerun all18 private gates with the corrected shared helper.
 This correctness checkpoint precedes every new public performance sample.
+
+
+Fourteen-family build phase and independent review pass:release14, isolated
+wasm clippy14, web/Node budgets14each, host82 and SDKWASM41 tests pass. All224
+Rust/config/build source hashes and every generated production artifact match
+before/after checks. Fresh exact31ec control is5709830bytes (SHA256
+ca5d412a1809c026e50c2e57d96e914ab513cd98eae979ac57e633f960e2db98), with
+its original aggregate loader and immediate host. No production source changes
+are pending. Full Rust1107/108groups, fmt/bans/native+wasm clippy pass.
+
+Measured newcaps:Bitrue739539→761856,Lighter991614→1021952,WOO862985→889856.
+Only existing breach is Bitget's newly landed parity code:956167 actual bytes
+exceeds931840; applying the predeclared3% KiB rule gives985088. Other10 existing
+caps stay fixed. All14 binaries and caps remain below1MiB. Root and independent
+reviewer recomputed allfour formulas and validated family registries, feature
+isolation, inverse alias/product, static browser imports, Node packages and CI.
+Optional probes build separately; actual profiles wait for private gates to
+finish, then public comparisons wait for all owned diagnostic jobs to finish.
