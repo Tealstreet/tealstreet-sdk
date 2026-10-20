@@ -23,7 +23,7 @@ bugs. No TS venue deletion, deployment or credentialed trading.
 4. BloFin account/protocol repairs. Retain the correct per-symbol margin mode
    after position close, tolerate documented nullable row fields without
    replacing good state with malformed snapshots, and serialize/sign integer
-   WebSocket login seconds. Validate nullable shapes against committed payloads
+   WebSocket login milliseconds. Validate nullable shapes against committed payloads
    and venue contracts, stating any live-evidence limitation.
 5. Integration and gates. Review each completed venue phase with an independent
    sub-agent, fix findings, update affected CLAUDE docs and audit strikes. Extend
@@ -104,3 +104,30 @@ deduplication; missing/unmappable/failed parent and successful dedup regressions
 resolve it, re-reviewed PASS. Other account/trading/bracket and shared boundary
 review PASS. Intentional TS corrections (flat leverage preservation and complete
 cancel continuation) are listed in the gate without result normalization.
+
+### BloFin phase — implemented and independently reviewed
+
+Full-position closes (empty or explicit-zero REST/WS rows) restore the global
+account margin default only for flat symbols, preserving live overrides and
+confirmed leverage. Login serializes integer milliseconds and signs that exact
+decimal representation, including when the host clock has a fractional part.
+
+Official algo/TPSL examples contain null inactive protection prices and trigger
+types. These optional fields decode as absent; known leverage/liquidation
+metadata survive nullable position updates. Required quantities and identities
+remain strict. WS order/position/ticker rows decode independently with visible
+errors and retained state for malformed rows. A malformed initial ticker can
+recover on its next valid event. Authoritative private REST corruption retains
+the prior complete snapshot.
+
+Validation: 84 BloFin native tests pass (12 added regressions). Strict clippy
+passed before the final two-line aggregation correction; the complete rerun is
+queued behind workspace validation. Independent review caught balance sums
+dropping unmappable native instruments and rounding each mapped position's PnL;
+fixed by summing raw typed native risk/PnL before mapping and final USD rounding,
+with two regressions, re-reviewed PASS. H3/null/M2 review otherwise PASS.
+
+Evidence limitation: the captured public tape contains no null values; nullable
+protection comes from official documented examples and is now in the private
+tape. Required-field nulls in regression tests are labeled defensive corruption
+cases, not live traffic. No TS state normalization is added for these fixes.
