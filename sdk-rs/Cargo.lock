@@ -3725,6 +3725,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-grvt"
+version = "0.1.0"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-signer",
+ "alloy-signer-local",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-hyperliquid"
 version = "0.1.0"
 dependencies = [
@@ -3881,6 +3894,7 @@ dependencies = [
  "safe-cex-venue-bybit",
  "safe-cex-venue-coinbase",
  "safe-cex-venue-cryptocom",
+ "safe-cex-venue-grvt",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",

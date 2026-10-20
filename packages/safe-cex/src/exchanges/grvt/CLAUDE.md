@@ -85,13 +85,14 @@ When a TDG request fails with error code `1000` (session expired):
 3. Calls `exchange.authenticate()` to get new session
 4. Retries the failed request with new credentials
 5. Uses `_retry` flag on config to prevent infinite loops
+6. Replaces both cookie and proxy-session headers and reconnects an authenticated private socket with the new session
 
 ### EIP-712 Order Signing (`grvt.exchange.ts:1050-1126`)
 
 Every order must be cryptographically signed:
 
 1. **Wallet Initialization** (`grvt.exchange.ts:92-124`): `ethers.Wallet` created from `opts.secret` (private key). Address validated against `opts.grvtSignerAddress` if provided.
-2. **Domain Configuration**: `{ name: "Grvt", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
+2. **Domain Configuration**: `{ name: "GRVT Exchange", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
 3. **EIP-712 Message Structure** (`grvt.exchange.ts:1083-1106`):
    - `subAccountID`: Integer trading account ID
    - `isMarket`: Boolean
@@ -423,16 +424,22 @@ Trigger metadata format:
 
 ### Order Update (`grvt.exchange.ts:1459-1496`)
 
+Regular entry TP/SL options create an ordinary entry followed by distinct
+opposite-side reduce-only trigger orders. Both protective legs are retained;
+a failure reports the IDs already created. A standalone SL/TP uses market
+execution and explicit non-split trigger metadata. Symbol cancel-all uses the
+native kind/base/quote filters, which survive the client conversion.
+
 GRVT does not support native order modification. `updateOrder()` builds and
 validates the full replacement *before* cancelling the live order, then
-cancels and places it. REST `mapOrder()` and private-WS `parseOrder()` must
+cancels and places the desired total minus already-filled quantity. REST `mapOrder()` and private-WS `parseOrder()` must
 both preserve GRVT's `time_in_force`/`ti`, `post_only`/`po`, `reduce_only`/`ro`,
 and TP/SL metadata. `post_only: true` is represented as safe-cex
 `OrderTimeInForce.PostOnly`; GTT, IOC, and FOK map to their respective
 safe-cex TIF values.
 
 For standalone TP/SL, the store price is `trigger_price`, and replacement
-passes it explicitly as `triggerPrice` together with `trigger_by` and
+passes it explicitly as `triggerPrice`, preserves the native market/limit execution choice and separate limit price, together with `trigger_by` and
 `close_position`. Do not default a missing/unsupported TIF, trigger price,
 trigger type, or close flag: fail before cancellation so an existing order is
 never silently replaced with weaker semantics.
@@ -518,8 +525,8 @@ From lite format instrument data:
 
 For EIP-712 signature, values are converted to contract-level integers:
 
-- **Contract Size**: `Math.floor(size * 10^baseDecimals)` where `baseDecimals` comes from instrument (`bd` field, default 9)
-- **Limit Price**: `Math.floor(price * 1_000_000_000)` (PRICE_MULTIPLIER = 1e9, always)
+- **Contract Size**: exact decimal string scaled by instrument `bd`, using checked BigInt arithmetic; missing metadata fails preflight
+- **Limit Price**: exact decimal string scaled by 1e9 using checked BigInt arithmetic
 - **Asset ID**: `instrument_hash` passed as hex string (e.g., `"0x030501"`)
 
 ### API Payload vs EIP-712
@@ -530,8 +537,8 @@ The API payload uses **human-readable decimal strings** (e.g., `size: "0.1"`, `l
 
 GRVT uses nanosecond timestamps throughout:
 
-- `expiration`: `(Date.now() + 3600*1000) * 1e6` -- kept as string (exceeds MAX_SAFE_INTEGER)
-- `create_time`: `Date.now() * 1_000_000`
+- `expiration`: `(BigInt(Date.now()) + 3600000n) * 1000000n` as a decimal string
+- `create_time`: `BigInt(Date.now()) * 1000000n` as a decimal string
 - Kline timestamps: Divided by `1_000_000_000` to convert to seconds
 - Position update timestamps: Divided by `1_000_000` to convert to milliseconds
 
@@ -540,7 +547,7 @@ GRVT uses nanosecond timestamps throughout:
 Uses `/lite/v1/aggregated_account_summary`:
 
 - `total` = `parseFloat(aggData.te)` (total_equity)
-- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity
+- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity only when absent; an explicit zero stays zero
 - `used` = total - free
 - Spot balances parsed from `aggData.sb` array
 
@@ -595,6 +602,13 @@ Both order and position WebSocket events trigger a throttled REST fetch to ensur
 
 GRVT creates "fake" zero-size positions for every market (one-way mode). Real positions are merged with fake positions -- fake positions are filtered out for symbols that have real positions (`grvt.exchange.ts:797-800`). This ensures the UI always shows a position entry for every market.
 
+### Ticker deltas
+
+The rolling buy/sell volumes and open price are retained independently across
+partial updates. Quote volume and percentage use the current last price even
+when a frame omits the corresponding input. GRVT empty strings clear numeric
+fields to zero; next funding time is nanoseconds in either JSON numeric form.
+
 ### Ticker Population
 
 Initial tickers are placeholders with all zeros (`fetchTickers()` just creates stubs from markets). Real values are populated via WebSocket `v1.ticker.d` delta stream.
@@ -602,7 +616,7 @@ Initial tickers are placeholders with all zeros (`fetchTickers()` just creates s
 ## Exchange Metadata
 
 - **Position Mode**: One-way (`getPositionMode()` returns `PositionMode.OneWay`)
-- **Margin Type**: Isolated (`MarginType.Isolated` used in positions, `grvt.exchange.ts:789`)
+- **Margin Type**: native `mt` / `margin_type` (`CROSS` or `ISOLATED`); legacy missing fields retain isolated fallback.
 - **Default Leverage**: 10x (`grvt.exchange.ts:73`)
 - **SDK Package**: `@tealstreet/grvt-ts-sdk` (forked) for signing, `@tealstreet/grvt-client` (forked from `@grvt/client`) for API
 
