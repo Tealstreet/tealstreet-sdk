@@ -2588,3 +2588,22 @@ Paradex and Bitrue), preserving any failed result before bounded corrections.
 No source is pushed yet; remote PR head is still 6b2d580332. Reviewable commits
 now end at ce578f6962. All-gate claims, PR update/reviews/green CI/merge and the
 fresh follow-up branch remain outstanding.
+
+
+Lifecycle book causal trace confirms a replay delivery bug, not invalid depth
+sequence or missing live data. On the exact untouched fake capture, buffered
+non-I/O instrumentation observes listenOrderBook called while disconnected,
+then depth at t=75 delivered with zero parser handlers; the actual depth
+subscription follows later and no snapshot read occurs. Verbose console tracing
+changes setup timing and hides the race, so it is explicitly not accepted as
+proof. Buffered trace: /tmp/bitunix-1a10-smoke-buffered-trace.log.
+
+Bounded fix plan: register only USD-M depthUpdate's exact native symbol-derived
+@depth stream through the existing venue.streamOf/socketFor path. It already
+waits for that physical socket's actual subscription and wakes on send, under
+the original deadline. Preserve capture messages/timestamps, readiness, book
+comparison and core clock code. Verify both implementations' sent topic shape;
+add delayed, never-subscribed, wrong-symbol/socket and generation controls.
+Independent reviewer must validate the same capture and no background waiters,
+then all nine scripted lifecycle tests and affected helper controls must pass.
+Other Binance products are unchanged until evidence requires otherwise.
