@@ -138,8 +138,9 @@ Risky, after live-smoke captures:
 9. `num::whole` for leverage (five serialisations today, incl. truncation and
    `20.0`) and one Rust owner for client-id rules.
 
-Lower: shared test-support `ProbeVenue` (12 copied `secondary_tests.rs`),
-~~`RangeWalk` for the 16 hand-rolled history paginators~~ Shared
-`CursorWalk`, `windows` and `OffsetWalk` now serve 12 more venues; OKX, Kraken,
-Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
-[RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md), one `SocketSpec`.
+Lower: shared test-support `ProbeVenue` (12 copied `secondary_tests.rs`) and
+one `SocketSpec`. ~~`RangeWalk` for the 16 hand-rolled history paginators.~~
+Shared `CursorWalk`, `windows` and `OffsetWalk` now page Lighter, GRVT,
+Coinbase, Paradex, Bybit, Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and
+Binance fills; OKX, Kraken, Crypto.com, Hyperliquid, Orderly and WOO stay
+hand-rolled with reasons in [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).

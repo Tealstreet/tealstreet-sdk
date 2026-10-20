@@ -366,7 +366,7 @@ impl OffsetWalk {
         }
     }
 
-    /// Stall once the next offset would reach `max_offset`.
+    /// Stall once the next offset would pass `max_offset` (inclusive).
     pub fn max_offset(mut self, max_offset: u64) -> Self {
         self.max_offset = max_offset;
         self
@@ -420,7 +420,7 @@ impl OffsetWalk {
         let next = self
             .offset
             .saturating_add(self.fixed_step.unwrap_or(rows as u64));
-        if next >= self.max_offset {
+        if next > self.max_offset {
             return OffsetStep::Stalled(Stall::PageBudget);
         }
         self.offset = next;
@@ -642,7 +642,7 @@ mod tests {
             walk.advance(5, 5, true),
             OffsetStep::Stalled(Stall::PageBudget)
         );
-        let mut walk = OffsetWalk::new(10).max_offset(8);
+        let mut walk = OffsetWalk::new(10).max_offset(9);
         assert_eq!(walk.advance(5, 5, true), OffsetStep::More(5));
         assert_eq!(
             walk.advance(5, 5, true),

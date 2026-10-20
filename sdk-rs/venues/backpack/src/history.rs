@@ -7,11 +7,11 @@ use crate::{Backpack, Pending};
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
+use serde::Serialize;
+use std::collections::HashSet;
 
 /// Requests per read before paging that still reports more is incomplete.
 const MAX_PAGES: u32 = 50;
-use serde::Serialize;
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -274,7 +274,7 @@ impl Backpack {
             Kind::Trades => "/api/v1/trades",
         };
         if request.kind == Kind::Trades {
-            self.get(cx, path, params, Pending::History(request), true);
+            self.get(cx, path, params, Pending::History(Box::new(request)), true);
         } else {
             params.insert("sortDirection".into(), "Desc".into());
             if request.walk.offset() > 0 {
@@ -287,7 +287,7 @@ impl Backpack {
                 path,
                 params,
                 None,
-                Pending::History(request),
+                Pending::History(Box::new(request)),
                 true,
             ) {
                 cx.done(command, Err(e));

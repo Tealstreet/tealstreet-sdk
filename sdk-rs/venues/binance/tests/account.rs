@@ -782,3 +782,17 @@ fn fills_windows_cover_the_last_millisecond_of_the_range() {
     assert_eq!(param(&r.url, "startTime").as_deref(), Some("604800001"));
     assert_eq!(param(&r.url, "endTime").as_deref(), Some("604800001"));
 }
+
+/// Keeps landing's bridge contract for a failed later fills window: a command
+/// error, then an empty success that does not return earlier windows' rows.
+#[test]
+fn a_failed_later_fills_window_reports_a_command_error_before_an_empty_success() {
+    let mut h = ready();
+    fills_over(&mut h, 25, 10.0);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 200, "", TRADE);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 503, "", "unavailable");
+    assert_eq!(h.result(25), Some(&Ok("[]".into())));
+    assert!(h.command_errors.iter().any(|(command, _)| *command == 25));
+}

@@ -816,7 +816,8 @@ fn split(from: f64, to: f64) -> VecDeque<(Option<f64>, Option<f64>)> {
             .into_iter()
             .map(|(a, b)| (Some(a), Some(b)))
             .collect(),
-        // An inverted range keeps its single window for the venue to reject.
+        // A range the tiling refuses (inverted, non-finite or past 2^53 ms)
+        // keeps one window for the venue to reject.
         None => VecDeque::from([(Some(from), Some(to))]),
     }
 }
