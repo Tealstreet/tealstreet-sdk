@@ -174,7 +174,7 @@ fn posted_candle_read_preserves_body_and_streams() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTC-PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(1),
             from_ms: None,
             to_ms: Some(60000.0),
@@ -253,7 +253,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTC-PERP".into(),
-            interval: "💥".into(),
+            interval: safe_cex_engine::model::Interval::S1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -268,7 +268,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
         Event::Command(Command::FetchCandles {
             command: 2,
             symbol: "BTC-PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2000),
             from_ms: Some(1.0),
             to_ms: Some(90_000_000.0),

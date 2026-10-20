@@ -205,7 +205,7 @@ export class RustPublicFeedProvider {
           send({ op: 'error', message: 'Shared public feed symbol unavailable' });
           return;
         }
-        const interval = data.op === 'candle' ? this.source.candleIntervalForFeed(data.interval) : '1m';
+        const interval = data.op === 'candle' ? data.interval : '1m';
         const key = data.op === 'book' ? `book:${data.symbol}` : `candle:${data.symbol}:${interval}`;
         if (!data.subscribe) {
           subscriptions.get(key)?.();
@@ -239,7 +239,7 @@ export class RustPublicFeedProvider {
                 candles: [
                   {
                     symbol,
-                    interval: this.source.candleIntervalForFeed(interval),
+                    interval,
                     timestamp: candle.timestamp,
                     open: candle.open,
                     high: candle.high,

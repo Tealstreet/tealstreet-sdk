@@ -1456,17 +1456,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
-    this.name === 'asterdex' &&
-    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
-      ? '1h'
-      : interval;
-
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: this.candleInterval(opts.interval),
+      interval: opts.interval,
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -1607,7 +1601,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const interval = this.candleInterval(opts.interval);
+    const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     const first = !listeners;
@@ -1631,8 +1625,6 @@ export class RustEngineExchange extends BaseExchange {
     this.sharedPublicFeed?.send({ op: 'candle', symbol, interval, subscribe });
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
-
-  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
 
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
