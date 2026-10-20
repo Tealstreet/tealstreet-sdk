@@ -111,3 +111,7 @@ Branch `feat/rust-grvt`, based on `origin/feat/rust-rewrite`. PR and merge targe
 - Latest public three-run median GRVT **PASS**: main CPU **376.2 / 345.2 ms**, steady **264.3 / 226.7 ms**, retained **1.4 / 1.2 MB**, TS / Rust. Same 4,695 frames, 194 markets/tickers and two books. First attempt hit the unchanged TS backing-buffer settle deadline; complete retry passed without changing thresholds or comparisons.
 - Latest Binance public three-run median **PASS**: main CPU **263.1 / 136.1 ms**, steady **153.7 / 64.0 ms**, retained **4.2 / 2.3 MB**, 873 frames/three books. GRVT private **PASS** (15 frames, four exact single-use writes, zero unserved); Binance private **PASS** (14 frames). Private performance remains informational, including signed net-retention measurements; correctness is strict.
 - Every brief gate is satisfied on the integrated port; push/PR review/green-CI merge and a fresh follow-up branch next. No outstanding code finding.
+
+### PR checkpoint
+
+- Published https://github.com/Tealstreet/tealstreet-sdk/pull/1321 into `feat/rust-rewrite` after all gates passed. Three adversarial reviewers are auditing the actual PR diff. Findings/resolutions will be posted on the PR; CI is running. Merge remains gated on green checks, then a fresh follow-up branch.

@@ -309,7 +309,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | WOO | Implemented; [PR #1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316), adversarial fixes and gates passing |
 | KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| GRVT perpetuals | implemented on `feat/rust-grvt`; all local gates pass, PR landing in progress |
+| GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
 | Paradex, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
