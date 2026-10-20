@@ -9,7 +9,7 @@ const REST = 'https://api-contract.weex.com';
 const PUBLIC = 'wss://ws-contract.weex.com/v3/ws/public';
 const PRIVATE = 'wss://ws-contract.weex.com/v3/ws/private';
 const records = [];
-const http = (method, path, body, requestBody, effectiveAt = 0) => records.push({ t: 0, effectiveAt, type: 'http', method, url: REST + path, requestBody: requestBody && JSON.stringify(requestBody), status: 200, body: JSON.stringify(body) });
+const http = (method, path, body, requestBody, effectiveAt = 0, afterCommand) => records.push({ t: 0, effectiveAt, ...(afterCommand === undefined ? {} : { afterCommand }), type: 'http', method, url: REST + path, requestBody: requestBody && JSON.stringify(requestBody), status: 200, body: JSON.stringify(body) });
 const ws = (t, url, payload) => records.push({ t, type: 'ws', url, text: JSON.stringify(payload) });
 const command = (t, payload) => records.push({ t, type: 'command', ...payload });
 const market = (symbol, baseAsset, pricePrecision) => ({ symbol, baseAsset, quoteAsset: 'USDT', marginAsset: 'USDT', pricePrecision, quantityPrecision: 3, minOrderSize: 0.001, maxOrderSize: 10000, minLeverage: 1, maxLeverage: 100, contractVal: 1, makerFeeRate: 0.0002, takerFeeRate: 0.0008 });
@@ -33,9 +33,11 @@ const finalPosition = { ...position, size: '0.02', openValue: '1380', marginSize
 const algo = { algoId: '702345678901234563', symbol: 'BTCUSDT', side: 'BUY', orderType: 'STOP_MARKET', algoStatus: 'NEW', quantity: '0.001', triggerPrice: '70000', price: '0', timeInForce: 'GTC', createTime: 1773298805123 };
 const protective = { algoId: '702345678901234564', symbol: 'BTCUSDT', side: 'SELL', orderType: 'TAKE_PROFIT_MARKET', planType: 'TAKE_PROFIT', reduceOnly: true, algoStatus: 'NEW', quantity: '0.01', triggerPrice: '76000', price: '0', timeInForce: 'GTC', createTime: 1773298805123 };
 const finalAlgo = { ...algo, algoId: '702345678901234565', triggerPrice: '71000' };
-for (const [at, rows] of [[0, [resting]], [2800, [resting, placedBtc, placedEth]], [4000, [resting, placedEth]], [5200, [placedEth]], [7200, [finalEth]]]) http('GET', '/capi/v3/openOrders?limit=100&page=0', rows, undefined, at);
+// Each snapshot follows the command whose outcome it shows. A poll due at that
+// command's tape time runs first, so time alone would serve the outcome early.
+for (const [at, afterCommand, rows] of [[0, 0, [resting]], [2800, 1, [resting, placedBtc, placedEth]], [4000, 3, [resting, placedEth]], [5200, 5, [placedEth]], [7200, 6, [finalEth]]]) http('GET', '/capi/v3/openOrders?limit=100&page=0', rows, undefined, at, afterCommand);
 http('GET', '/capi/v3/account/position/allPosition', [finalPosition], undefined, 7200);
-for (const [at, rows] of [[0, []], [3200, [algo]], [4400, [protective]], [5200, []], [6000, [finalAlgo]]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at);
+for (const [at, afterCommand, rows] of [[0, 0, []], [3200, 2, [algo]], [4400, 4, [protective]], [5200, 5, []], [6000, 6, [finalAlgo]]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at, afterCommand);
 ws(400, PUBLIC, { event: 'ping', time: '1773298805000' });
 ws(800, PRIVATE, { type: 'ping', time: '1773298805000' });
 ws(1200, PRIVATE, { e: 'positions', E: 1773298805123, d: [position] });

@@ -68,11 +68,12 @@ export async function bodyBytes(body) {
 }
 
 export class ReplayClock {
-  constructor(epoch, freezeStartup = false) {
+  constructor(epoch, freezeStartup = false, continueStartup = false) {
     this.epoch = epoch;
     this.time = epoch;
     this.active = false;
     this.freezeStartup = freezeStartup;
+    this.continueStartup = continueStartup;
     this.timers = new Map();
     this.original = { now: Date.now, setTimeout, clearTimeout, setInterval, clearInterval };
   }
@@ -91,7 +92,9 @@ export class ReplayClock {
     const timer = {
       fn,
       args,
-      delay: Math.max(repeat ? 1 : 0, Number(ms) || 0),
+      // Node runs timers on whole milliseconds; a fractional backoff would
+      // otherwise make Date.now() fractional, which no real clock returns.
+      delay: Math.max(repeat ? 1 : 0, Math.trunc(Number(ms)) || 0),
       repeat,
       ref() {
         return this;
@@ -161,6 +164,9 @@ export class ReplayClock {
   }
   start() {
     const wall = this.freezeStartup ? this.time : this.original.now();
+    // Tape time 0 is the end of frozen startup. Rewinding Date.now() there would
+    // stall any pacer that stored an absolute deadline during startup.
+    if (this.freezeStartup && this.continueStartup) this.epoch = wall;
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
       timer.generation = (timer.generation ?? 0) + 1;

@@ -162,6 +162,39 @@ test('private startup advances by timer deadlines and rebases pending timers at 
   } finally { clock.restore(); }
 });
 
+test('a continuous private startup never moves Date.now backwards at tape readiness', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch, true, true);
+  clock.install();
+  try {
+    // A pacer that stored an absolute next-send time during startup.
+    let next;
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    next = Date.now() + 334;
+    let observed;
+    setTimeout(() => { observed = Date.now(); }, 100);
+    clock.start();
+    assert.equal(Date.now(), epoch + 6000);
+    await clock.advance(100);
+    assert.equal(observed, epoch + 6100);
+    await clock.advance(334);
+    assert(Date.now() >= next, 'the stored deadline is reached at its tape-relative time');
+  } finally { clock.restore(); }
+});
+
+test('virtual timers run on whole milliseconds, so Date.now() stays integral', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.start();
+    let observed;
+    setTimeout(() => { observed = Date.now(); }, 2125.905914739277);
+    await clock.advance(3000);
+    assert.equal(observed, epoch + 2125);
+  } finally { clock.restore(); }
+});
+
 test('the replay epoch begins after account startup and before its first command', async () => {
   const tape = new Tape([{ type: 'command', t: 0, op: 'example' }], { isPrivate: true });
   const seen = [];

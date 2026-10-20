@@ -9,6 +9,9 @@ export const deterministicReplay = (venue, isPrivate) => venue.polling === true 
 // just like an explicitly virtual private replay, instead of carrying that
 // startup wall-time jitter into the measured transport workload.
 export const frozenReplayStartup = (venue, isPrivate) => !isPrivate || venue.polling === true || venue.virtualPrivateClock === true;
+// A venue whose private engine paces REST by absolute deadlines keeps a
+// monotonic clock: its tape epoch follows the virtual time startup consumed.
+export const continuousReplayStartup = (venue, isPrivate) => isPrivate && venue.virtualPrivateClock === true && venue.monotonicReplayClock === true;
 export const recordingReady = (venue, { frames, httpResponses, loaded, books, requestedBooks }) =>
   (venue.polling === true ? httpResponses > 0 && loaded : frames > 0) && books >= requestedBooks;
 
