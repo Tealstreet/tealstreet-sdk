@@ -216,6 +216,8 @@ pub struct TickerRow<'a> {
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub price24h_pcnt: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
+    pub change24h: Opt<'a>,
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub open_interest: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub funding_rate: Opt<'a>,
@@ -307,6 +309,13 @@ pub struct TickerDelta<'a> {
     pub index_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub price24h_pcnt: Option<f64>,
+    /// Option frames spell quotes and change differently from derivatives.
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub bid_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub ask_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub change24h: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub open_interest: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
@@ -584,6 +593,25 @@ pub struct WsKline<'a> {
     pub close: Str<'a>,
     #[serde(borrow)]
     pub volume: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct TradeEvent<'a> {
+    #[serde(borrow)]
+    pub topic: Str<'a>,
+    #[serde(borrow, default)]
+    pub data: Vec<WsTrade<'a>>,
+}
+
+/// One `publicTrade` execution: time (ms), price and size.
+#[derive(Deserialize)]
+pub struct WsTrade<'a> {
+    #[serde(rename = "T")]
+    pub time: f64,
+    #[serde(rename = "p", borrow)]
+    pub price: Str<'a>,
+    #[serde(rename = "v", borrow)]
+    pub size: Str<'a>,
 }
 
 /// REST kline row: `[startTime, open, high, low, close, volume, turnover]`.
