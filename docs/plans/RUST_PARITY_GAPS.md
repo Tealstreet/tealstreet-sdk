@@ -544,3 +544,50 @@ behavior was lost. Formatting and all 578 harness tests pass.
 Because shared WASM and venue-descriptor inputs changed, all prior exact-source
 proofs above are historical checkpoints. Refresh all 22 replay gates, full native
 and combined/TS verification on this committed merge before final PR review/CI.
+
+## Final merged-source verification
+
+All **22 replay gates PASS** at exact runtime source
+`d06809837aadc771c5c19b9f06bfd61445e0581f`, including landing `f4ea9e06ab`.
+These supersede every earlier checkpoint: all eleven public three-run gates and
+eleven private one-run gates were refreshed on this merge, with normal egress,
+unchanged CPU/memory criteria and the fixed **1,258,291-byte** budget.
+
+| Venue | WASM bytes | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,257,815 | 445.261 / 417.729 | 200.901 / 150.586 | 18,926,697 / 2,230,172 | 33 / 15 |
+| bitrue | 811,137 | 118.912 / 97.478 | 69.120 / 49.597 | 16,988,425 / 3,292,612 | 23 / 8 |
+| kucoinspot | 681,398 | 510.892 / 453.728 | 329.012 / 295.746 | 18,434,921 / 4,235,900 | 22 / 13 |
+| kucoin | 775,517 | 394.581 / 204.665 | 240.213 / 111.375 | 21,344,617 / 4,035,076 | 32 / 17 |
+| binance | 908,744 | 274.997 / 140.337 | 163.177 / 68.249 | 18,021,497 / 4,042,004 | 14 / 3 |
+| polymarket | 854,277 | 27.650 / 22.739 | 8.974 / 4.619 | 23,621,913 / 4,987,852 | 20 / 8 |
+| bybit | 957,021 | 242.031 / 163.105 | 133.748 / 64.014 | 22,266,361 / 4,470,012 | 18 / 4 |
+| bybitinverse | 957,021 | 114.121 / 29.972 | 73.711 / 11.861 | 14,235,969 / 1,667,308 | 14 / 3 |
+| bybitspot | 957,021 | 138.374 / 97.978 | 74.625 / 41.766 | 16,275,321 / 2,732,564 | 11 / 2 |
+| bybitdemo | 957,021 | 202.783 / 138.967 | 99.964 / 51.789 | 21,811,345 / 4,478,316 | 14 / 3 |
+| hyrotrader | 957,021 | 21.732 / 16.406 | 4.155 / 2.944 | 13,384,673 / 837,260 | 13 / 3 |
+
+The five Bybit names share one standard artifact. Independent evidence review
+verifies all 22 logs, 88 raw runs and all seven standard artifacts. Request,
+write, signature and protocol audits are clean. Retained-memory arithmetic stays
+unclamped; reconstruction and cloning stay inside the measured CPU window for
+both implementations. Standalone SDK tests pass: Paradex 2, Bitrue 1, Spot 1.
+
+Fresh merged-source checks pass: **2,605 native workspace tests** (124 Bybit,
+143 KuCoin including 42 Spot), fmt, workspace/all-target and wasm32 Clippy,
+bans and PR-range secret scan; **44** typecheck tasks, **28** lint tasks,
+**578** harness tests, **27** repository test tasks with safe-cex **7,538**
+tests per CI/unit invocation. The tested default combined web/Node artifact is
+**11,615,221 bytes**, SHA256
+`9f726691cae1e9317bb8ab0b043ca772ae1006cb4b8f537d5f8cdc3ad91466a8`.
+Its **427 SDK/WASM tests in 14 files**, **74 JS host tests**, **9 scripted
+live-smoke tests**, **1 native-frame test** and **1 server-adapter test** pass.
+The default package was restored after the standalone gates and both rebuilt
+hashes match the tested artifact exactly.
+
+Three PR correctness-review rounds and both merge reviews pass; all findings
+were fixed and independently closed. Final-head review/CI remain the last
+landing checks. This PR's requested capability scope remains unchanged by
+the landing merge. Intentional TS capability skips and the unreviewed credentialed
+Spot live-smoke profile remain as documented above. Source, commands, logs,
+artifact/tape hashes and raw metrics are in the three adjacent proof files.

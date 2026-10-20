@@ -73,13 +73,13 @@ checks signing and bullet/subscription protocol; it performs no financial
 output rewriting.
 
 Both public gates pass three runs with standard egress on fresh twenty-second
-captures at `e0abc9b0f1`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
+captures at `d06809837a`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
 tape hashes, audit results, and median measurements:
 
 | Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
 | --- | --- | --- | --- | --- |
-| Spot | 594.896 / 495.324 | 388.790 / 327.918 | 18,446,273 / 4,241,500 | 681,398 |
-| Futures | 537.768 / 277.517 | 335.724 / 160.907 | 21,327,505 / 3,998,852 | 775,517 |
+| Spot | 510.892 / 453.728 | 329.012 / 295.746 | 18,434,921 / 4,235,900 | 681,398 |
+| Futures | 394.581 / 204.665 | 240.213 / 111.375 | 21,344,617 / 4,035,076 | 775,517 |
 
 Spot private correctness passes twenty-two frames and thirteen commands; futures
 passes thirty-two frames and seventeen commands. Every request, write,
