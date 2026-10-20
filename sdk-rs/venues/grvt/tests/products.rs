@@ -157,14 +157,16 @@ impl Harness {
         let index = self
             .actions
             .iter()
-            .position(
-                |a| matches!(a,Action::Notice(Notice::CommandDone{command:c,..}) if *c==command),
-            )
+            .position(|a| {
+                matches!(a, Action::Notice(Notice::CommandDone { command: c, .. }
+                    | Notice::CommandFailed { command: c, .. }) if *c == command)
+            })
             .expect("command completion");
-        let Action::Notice(Notice::CommandDone { result, .. }) = self.actions.remove(index) else {
-            unreachable!()
-        };
-        result
+        match self.actions.remove(index) {
+            Action::Notice(Notice::CommandDone { result, .. }) => result,
+            Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
+            _ => unreachable!(),
+        }
     }
 }
 

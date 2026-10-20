@@ -9,6 +9,7 @@ use base64::Engine as _;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
@@ -68,14 +69,25 @@ pub enum Pending {
         valid: bool,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 45_000.0,
+                ping_interval_ms: Some(15_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct Ladder {
@@ -218,15 +230,22 @@ impl Hyperliquid {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
             self.account_start(cx);
-            self.connection.socket = Some(cx.connect_channel(
-                self.ws(),
-                if self.options.public_data_only {
-                    safe_cex_engine::SocketChannel::Public
-                } else {
-                    safe_cex_engine::SocketChannel::Private
-                },
-            ));
+            self.connect(cx);
         }
+    }
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        let channel = if self.options.public_data_only {
+            safe_cex_engine::SocketChannel::Public
+        } else {
+            safe_cex_engine::SocketChannel::Private
+        };
+        // A suppressed public feed gets placeholder socket zero, which never opens.
+        if channel == safe_cex_engine::SocketChannel::Private
+            || cx.public_feed_policy() == PublicFeedPolicy::Direct
+        {
+            self.connection.supervisor.connecting(cx);
+        }
+        self.connection.socket = Some(cx.connect_channel(self.ws(), channel));
     }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -684,8 +703,7 @@ fn spot_rows(
     tickers: &mut Vec<Ticker>,
     excluded: &mut Vec<String>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
-    else {
+    let Ok(contexts) = safe_cex_engine::startup::rows::<SpotCtx>(raw) else {
         return false;
     };
     let positional = contexts.len() == meta.universe.len()
@@ -806,6 +824,16 @@ impl Venue for Hyperliquid {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        if self.spot {
+            safe_cex_engine::Capabilities::NO_HISTORY
+        } else {
+            safe_cex_engine::Capabilities {
+                client_order_lookup: true,
+                ..safe_cex_engine::Capabilities::BASE
+            }
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
             let matches_wallet = self
@@ -841,9 +869,7 @@ impl Venue for Hyperliquid {
             return;
         }
         self.connection.open = true;
-        self.connection.attempts = 0;
-        self.connection.last_received = cx.now;
-        self.connection.ping = Some(cx.set_timer(15_000.0));
+        self.connection.supervisor.opened(cx);
         self.private_subscribe(cx);
         if self.account.started && self.user().is_some() && !self.options.public_data_only {
             self.refresh_account(cx);
@@ -890,7 +916,7 @@ impl Venue for Hyperliquid {
         if self.connection.socket != Some(socket) {
             return;
         }
-        self.connection.last_received = cx.now;
+        self.connection.supervisor.received(cx.now);
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_frame(cx, text);
         }
@@ -903,18 +929,12 @@ impl Venue for Hyperliquid {
         }
         self.connection.open = false;
         self.connection.socket = None;
-        if let Some(timer) = self.connection.ping.take() {
-            cx.clear_timer(timer);
-        }
         for ladder in self.books.values_mut() {
             ladder.spot_depth = Default::default();
             ladder.depth_time = None;
             ladder.book.clear();
         }
-        self.connection.attempts = self.connection.attempts.saturating_add(1);
-        self.connection.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.connection.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if !(200..300).contains(&response.status) {
@@ -1120,7 +1140,7 @@ impl Venue for Hyperliquid {
                 ..
             } => {
                 match *stage {
-                    0 => match serde_json::from_str::<SpotMeta>(item) {
+                    0 => match SpotMeta::parse(item) {
                         Ok(value) => {
                             for token in &value.tokens {
                                 if token.0.is_none() {
@@ -1231,28 +1251,20 @@ impl Venue for Hyperliquid {
             }
             return;
         }
-        if self.connection.reconnect == Some(timer) {
-            self.connection.reconnect = None;
-            self.connection.socket = Some(cx.connect_channel(
-                self.ws(),
-                if self.options.public_data_only {
-                    safe_cex_engine::SocketChannel::Public
-                } else {
-                    safe_cex_engine::SocketChannel::Private
-                },
-            ));
-        }
-        if self.connection.ping == Some(timer) {
-            self.connection.ping = None;
-            if let Some(socket) = self.connection.socket {
-                if cx.now - self.connection.last_received >= 45_000.0 {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                } else {
+        match self.connection.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx),
+            Tick::Ping => {
+                if let Some(socket) = self.connection.socket {
                     cx.send(socket, "{\"method\":\"ping\"}");
-                    self.connection.ping = Some(cx.set_timer(15_000.0));
                 }
             }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.connection.socket {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+            }
+            Tick::Handled | Tick::Unhandled => (),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

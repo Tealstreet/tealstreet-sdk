@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
+use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
@@ -999,9 +1000,10 @@ pub trait Venue {
         false
     }
 
-    /// Opt in to typed option queries and IV-priced orders at the command boundary.
-    fn supports_options(&self) -> bool {
-        false
+    /// What this venue answers beyond the common commands; the engine gates
+    /// option and symbol-routed commands from it.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::BASE
     }
     /// Per-request continuation: what to do with the response.
     type Pending;
@@ -1013,11 +1015,6 @@ pub trait Venue {
         error: &str,
     ) {
         self.on_request_failed(cx, pending, error);
-    }
-
-    /// Account identity is available only after authenticated discovery.
-    fn account_id(&self) -> Option<&str> {
-        None
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
@@ -1066,10 +1063,6 @@ pub trait Venue {
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
-    /// Opt in only when amendments retain the caller's symbol routing context.
-    fn supports_amend_order_with_symbol(&self) -> bool {
-        false
-    }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
     fn on_venue_action(
@@ -1311,8 +1304,8 @@ impl<V: Venue> Engine<V> {
         self.commands_received
     }
 
-    pub fn account_id(&self) -> Option<&str> {
-        self.venue.account_id()
+    pub fn capabilities(&self) -> Capabilities {
+        self.venue.capabilities()
     }
 
     pub fn start(&mut self, now: f64) {
@@ -1464,7 +1457,7 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_venue_action(&mut cx, command, action);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
-                if !self.venue.supports_amend_order_with_symbol() =>
+                if !self.venue.capabilities().amend_with_symbol =>
             {
                 cx.done(
                     command,
@@ -1506,7 +1499,7 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
-                if !self.venue.supports_options() {
+                if !self.venue.capabilities().options {
                     let unsupported = match &command {
                         Command::FetchOptionChain { command, .. }
                         | Command::FetchOptionExpiries { command, .. }
@@ -2106,8 +2099,11 @@ mod streaming_tests {
             self.failure = Some(error.to_owned());
         }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
-        fn supports_amend_order_with_symbol(&self) -> bool {
-            self.symbol_amend
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                amend_with_symbol: self.symbol_amend,
+                ..Capabilities::BASE
+            }
         }
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, command: Command) {
             match &command {

@@ -9,8 +9,10 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -54,14 +56,25 @@ pub struct CandlePage {
     pages: u8,
 }
 const MAX_CANDLE_PAGES: u8 = 10;
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 45_000.0,
+                idle_timeout_ms: 45_000.0,
+                ping_interval_ms: Some(15_000.0),
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -119,7 +132,7 @@ impl Kraken {
             live_tickers: Default::default(),
             read_signer,
             signer,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),
@@ -182,10 +195,12 @@ impl Kraken {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Public));
         self.public.open = false;
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(15_000.0));
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, event: &str, feed: &str, products: &[&str]) {
         if let Some(s) = self.public.socket.filter(|_| self.public.open) {
@@ -441,6 +456,12 @@ impl Venue for Kraken {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
@@ -480,8 +501,7 @@ impl Venue for Kraken {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.subscribe_tickers(cx, "subscribe");
         let symbols: Vec<_> = self.books.keys().cloned().collect();
         for s in symbols {
@@ -498,7 +518,7 @@ impl Venue for Kraken {
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         if !msg.event.is_empty() {
             if msg.event == "error" {
                 cx.log(LogLevel::Warning, "Kraken public subscription error");
@@ -581,15 +601,8 @@ impl Venue for Kraken {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         self.invalidate_books(cx);
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -922,25 +935,23 @@ impl Venue for Kraken {
             }
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 45_000.0 {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, "{\"event\":\"ping\"}");
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006);
                 }
-            } else {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, "{\"event\":\"ping\"}");
-                }
-                self.public.watchdog = Some(cx.set_timer(15_000.0));
+                return;
             }
-            return;
+            Tick::Handled => return,
         }
         if self.poll == Some(timer) {
             self.poll = None;

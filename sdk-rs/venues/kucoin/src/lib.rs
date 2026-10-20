@@ -764,6 +764,12 @@ impl Venue for Kucoin {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::Native,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read

@@ -277,7 +277,9 @@ impl Grvt {
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
             Job::Account(request) => self.account_failed(cx, request, error),
-            Job::Trade(request) => self.trade_failed(cx, request, error, false),
+            Job::Trade(request) => {
+                self.trade_failed(cx, request, error, safe_cex_engine::Outcome::NotSent)
+            }
             Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
@@ -634,6 +636,15 @@ impl Grvt {
 }
 impl Venue for Grvt {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            client_order_lookup: true,
+            fills_by_order_id: true,
+            cancel_all: safe_cex_engine::CancelAll::Native,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public quotes cannot make an unseeded account appear loaded.
         if cx.store.loaded().balance && cx.store.loaded().positions {
@@ -826,7 +837,7 @@ impl Venue for Grvt {
                 }
                 self.account_refresh(cx, pending);
             } else if let Job::Trade(request) = pending.job {
-                self.trade_failed(cx, request, &error, !wire::venue_rejected(&response));
+                self.trade_failed(cx, request, &error, wire::write_outcome(&response));
             } else {
                 self.fail_pending(cx, pending, &error);
             }
@@ -978,7 +989,9 @@ impl Venue for Grvt {
         }
         match pending.job {
             Job::Account(account::Request::Login) => self.account_login_unavailable(cx),
-            Job::Trade(request) => self.trade_failed(cx, request, error, true),
+            Job::Trade(request) => {
+                self.trade_failed(cx, request, error, safe_cex_engine::Outcome::Unknown)
+            }
             _ => self.fail_pending(cx, pending, error),
         }
     }

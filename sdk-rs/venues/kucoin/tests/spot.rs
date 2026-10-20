@@ -496,7 +496,7 @@ fn hf_native_place_and_amend_keep_caller_identity_on_original() {
 }
 #[test]
 fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
-    assert!(!KucoinSpot::new(Options::default()).supports_options());
+    assert!(!KucoinSpot::new(Options::default()).capabilities().options);
     for invalid in ["duplicate", "bracket", "type", "id", "iv"] {
         let mut h = H::new(true);
         h.actions.clear();
