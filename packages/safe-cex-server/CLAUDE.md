@@ -25,13 +25,23 @@ See `docs/plans/RUST_REWRITE.md`, “Native frame server migration”.
 - A current-hour Redis hit hydrates a lazy exchange without opening sockets or
   fetching metadata. Consumers that need live feeds explicitly start the exchange.
 - A cold Rust cache miss awaits native startup before reading markets. Empty
-  successful metadata reads are rejected rather than cached.
+  successful metadata reads are rejected rather than cached. Native startup is
+  bounded by `nativeStartupTimeoutMs` (30 seconds by default), including venue
+  retry loops; timeout disposes the candidate and permits stale Redis fallback.
+  A cold fallback receives a fresh lazy engine, so explicit `exchange.start()`
+  can recover when the venue becomes available. A concurrent successful refresh
+  takes precedence over a previously pending stale-fallback read.
 - Forced refresh bypasses Redis. If the Rust engine was already started (even
-  externally), a fresh public engine re-fetches native metadata. Startup and cache
+  externally) or its store holds cached markets, a fresh public engine re-fetches
+  native metadata. Startup and cache
   persistence must succeed before the handle swaps engines and disposes the old
   one. Failed refresh leaves the last successful handle metadata and engine intact.
 - Read `handle.exchange` again after refresh; do not retain its previous engine
-  reference. Concurrent metadata refreshes share work. Disposing a handle cancels
+  reference. Concurrent metadata refreshes in the same UTC hour share work; a
+  request in the next hour waits and refreshes its own bucket. Disposing a handle cancels
   pending native startup and prevents stale completions from publishing a handle.
+- Shared ports are rejected in factory options because one port cannot survive
+  engine replacement. Attach a `RustPublicFeedProvider` to the returned direct
+  public engine outside the factory; refresh disposes that old provider source.
 - Native factory conformance: build WASM, then run
   `corepack yarn -s workspace @tealstreet/safe-cex-server test-wasm`.

@@ -20,6 +20,8 @@ export type PublicExchangeFactoryOptions = {
   forceAllProxiesOff?: boolean;
   marketTtlPolicy?: 'quantized-hour';
   staleFallbackMs?: number;
+  /** Native public startup deadline, including venue retries. Defaults to 30 seconds. */
+  nativeStartupTimeoutMs?: number;
   now?: () => number;
   exchangeOptions?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly' | 'forceAllProxiesOff'>>;
 };
@@ -39,14 +41,25 @@ type MutablePublicExchangeHandle = PublicExchangeHandle;
 export class PublicExchangeFactory {
   private readonly handles = new Map<ExchangeName, MutablePublicExchangeHandle>();
   private readonly creating = new Map<ExchangeName, Promise<MutablePublicExchangeHandle>>();
-  private readonly refreshing = new Map<ExchangeName, { force: boolean; promise: Promise<Market[]> }>();
+  private readonly refreshing = new Map<ExchangeName, { bucket: string; force: boolean; promise: Promise<Market[]> }>();
   private readonly generations = new Map<ExchangeName, number>();
   private readonly candidates = new Map<ExchangeName, Set<BaseExchange>>();
   private readonly closed = new WeakSet<PublicExchangeHandle>();
+  private readonly metadataRevisions = new WeakMap<PublicExchangeHandle, number>();
   private readonly inProcessLock = new InProcessFallbackMarketLock();
   private readonly namespace: string;
+  private readonly nativeStartupTimeoutMs: number;
 
   constructor(private readonly options: PublicExchangeFactoryOptions = {}) {
+    if (options.exchangeOptions?.publicFeed?.mode === 'shared') {
+      throw new Error(
+        'PublicExchangeFactory owns its public engine; attach a RustPublicFeedProvider outside the factory instead of passing a shared port',
+      );
+    }
+    this.nativeStartupTimeoutMs = options.nativeStartupTimeoutMs ?? 30_000;
+    if (!Number.isFinite(this.nativeStartupTimeoutMs) || this.nativeStartupTimeoutMs <= 0) {
+      throw new Error('nativeStartupTimeoutMs must be finite and positive');
+    }
     this.namespace = options.namespace ?? DEFAULT_PUBLIC_EXCHANGE_CACHE_NAMESPACE;
   }
 
@@ -61,7 +74,11 @@ export class PublicExchangeFactory {
     const cached = await this.readCurrentBucket(exchangeName, bucket);
     this.assertOpen(handle);
     if (cached) {
-      if (handle.marketsBucket === bucket && handle.markets.length > 0) return handle;
+      if (handle.marketsBucket >= bucket && handle.markets.length > 0) return handle;
+      const revision = this.metadataRevisions.get(handle);
+      await this.restoreCachedExchange(exchangeName, handle);
+      this.assertOpen(handle);
+      if (this.metadataRevisions.get(handle) !== revision && handle.markets.length > 0) return handle;
       this.hydrateHandle(handle, cached.markets, cached.bucket, cached.refreshedAt);
       return handle;
     }
@@ -72,10 +89,16 @@ export class PublicExchangeFactory {
       return handle;
     } catch (error) {
       this.assertOpen(handle);
+      const revision = this.metadataRevisions.get(handle);
       const latest = await this.readLatestFallback(exchangeName);
+      this.assertOpen(handle);
+      if (this.metadataRevisions.get(handle) !== revision && handle.markets.length > 0) return handle;
       if (!latest) {
         throw error;
       }
+      await this.restoreCachedExchange(exchangeName, handle);
+      this.assertOpen(handle);
+      if (this.metadataRevisions.get(handle) !== revision && handle.markets.length > 0) return handle;
       this.hydrateHandle(handle, latest.markets, latest.bucket, latest.refreshedAt);
       return handle;
     }
@@ -88,26 +111,26 @@ export class PublicExchangeFactory {
   }
 
   private refreshMarketsForCurrentBucket(exchangeName: ExchangeName, forceRefresh: boolean): Promise<Market[]> {
+    const bucket = this.currentBucket();
     const pending = this.refreshing.get(exchangeName);
     if (pending) {
-      if (!forceRefresh || pending.force) return pending.promise;
+      if (pending.bucket === bucket && (!forceRefresh || pending.force)) return pending.promise;
       const generation = this.generations.get(exchangeName) ?? 0;
       return pending.promise
         .catch(() => undefined)
         .then(() => {
           if ((this.generations.get(exchangeName) ?? 0) !== generation) throw new Error('Public exchange disposed');
-          return this.refreshMarketsForCurrentBucket(exchangeName, true);
+          return this.refreshMarketsForCurrentBucket(exchangeName, forceRefresh);
         });
     }
-    const refresh = this.doRefreshMarkets(exchangeName, forceRefresh).finally(() => {
+    const refresh = this.doRefreshMarkets(exchangeName, bucket, forceRefresh).finally(() => {
       if (this.refreshing.get(exchangeName)?.promise === refresh) this.refreshing.delete(exchangeName);
     });
-    this.refreshing.set(exchangeName, { force: forceRefresh, promise: refresh });
+    this.refreshing.set(exchangeName, { bucket, force: forceRefresh, promise: refresh });
     return refresh;
   }
 
-  private async doRefreshMarkets(exchangeName: ExchangeName, forceRefresh: boolean): Promise<Market[]> {
-    const bucket = this.currentBucket();
+  private async doRefreshMarkets(exchangeName: ExchangeName, bucket: string, forceRefresh: boolean): Promise<Market[]> {
     const handle = await this.getOrCreateHandle(exchangeName);
     const lockKey = getMarketCacheKeys(exchangeName, bucket, this.namespace).lockKey;
 
@@ -115,23 +138,28 @@ export class PublicExchangeFactory {
       this.assertOpen(handle);
       const nativeExchange = handle.exchange instanceof RustEngineExchange ? handle.exchange : undefined;
       const native = Boolean(nativeExchange);
+      const revision = this.metadataRevisions.get(handle);
       const latestCurrentBucket = this.options.redis
         ? await readMarketCacheSnapshot(this.options.redis, exchangeName, bucket, this.namespace)
         : null;
       this.assertOpen(handle);
       if (latestCurrentBucket && !forceRefresh) {
+        if (this.metadataRevisions.get(handle) !== revision && handle.markets.length > 0) return handle.markets;
+        await this.restoreCachedExchange(exchangeName, handle);
+        this.assertOpen(handle);
+        if (this.metadataRevisions.get(handle) !== revision && handle.markets.length > 0) return handle.markets;
         this.hydrateHandle(handle, latestCurrentBucket.markets, bucket, latestCurrentBucket.refreshedAt);
         return latestCurrentBucket.markets;
       }
       // Rust fetchMarkets reads native state. A replacement engine performs a
       // real metadata request while the last successful engine keeps serving.
-      const replacement = nativeExchange?.hasStarted === true;
+      const replacement = Boolean(nativeExchange && (nativeExchange.hasStarted || handle.markets.length > 0));
       let candidate: BaseExchange | undefined = replacement ? undefined : handle.exchange;
       try {
         if (!candidate) candidate = await this.createOwnedExchange(exchangeName);
         this.assertOpen(handle);
         if (native) {
-          await candidate.start();
+          await this.startNativeExchange(candidate);
         }
         const markets = await candidate.fetchMarkets();
         this.assertOpen(handle);
@@ -164,6 +192,23 @@ export class PublicExchangeFactory {
         throw error;
       }
     });
+  }
+
+  private async startNativeExchange(exchange: BaseExchange): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        exchange.start(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Rust public engine startup timed out after ${this.nativeStartupTimeoutMs}ms`)),
+            this.nativeStartupTimeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async invalidate(exchangeName: ExchangeName): Promise<void> {
@@ -254,6 +299,22 @@ export class PublicExchangeFactory {
     if (this.closed.has(handle)) throw new Error('Public exchange handle disposed');
   }
 
+  private async restoreCachedExchange(exchangeName: ExchangeName, handle: PublicExchangeHandle): Promise<void> {
+    const previous = handle.exchange;
+    if (!(previous instanceof RustEngineExchange) || !previous.isDisposed) return;
+    const replacement = await this.createOwnedExchange(exchangeName);
+    try {
+      this.assertOpen(handle);
+      if (handle.exchange === previous) handle.exchange = replacement;
+      else replacement.dispose();
+    } catch (error) {
+      replacement.dispose();
+      throw error;
+    } finally {
+      this.releaseCandidate(exchangeName, replacement);
+    }
+  }
+
   private async readCurrentBucket(
     exchangeName: ExchangeName,
     bucket: string,
@@ -280,6 +341,7 @@ export class PublicExchangeFactory {
     handle.markets = markets;
     handle.marketsBucket = marketsBucket;
     handle.refreshedAt = refreshedAt;
+    this.metadataRevisions.set(handle, (this.metadataRevisions.get(handle) ?? 0) + 1);
   }
 
   private currentBucket(): string {

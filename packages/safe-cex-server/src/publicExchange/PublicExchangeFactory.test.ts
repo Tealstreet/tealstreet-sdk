@@ -61,11 +61,36 @@ describe('PublicExchangeFactory', () => {
       tickers: false,
       positions: false,
     };
+    mockExchange.store.update.mockClear();
     mockExchange.store.update.mockImplementation((changes) => {
       if (changes.loaded) {
         mockExchange.store.loaded = changes.loaded;
       }
     });
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid native startup deadline %s',
+    (nativeStartupTimeoutMs) => {
+      expect(() => new PublicExchangeFactory({ nativeStartupTimeoutMs })).toThrow(
+        'nativeStartupTimeoutMs must be finite and positive',
+      );
+      expect(createPublicExchange).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a shared public port before constructing an exchange', () => {
+    expect(
+      () =>
+        new PublicExchangeFactory({
+          exchangeOptions: {
+            engine: 'rust',
+            publicFeed: { mode: 'shared', port: {} as MessagePort },
+          },
+        }),
+    ).toThrow('attach a RustPublicFeedProvider outside the factory');
+    expect(createPublicExchange).not.toHaveBeenCalled();
+    expect(mockExchange.fetchMarkets).not.toHaveBeenCalled();
   });
 
   it('refreshes the current hour instead of using latest stale markets as a normal hit', async () => {
@@ -188,6 +213,114 @@ describe('PublicExchangeFactory', () => {
     await factory.refreshMarkets('bybit', 'metadata-change');
     release();
     expect((await getting).markets[0].id).toBe('FRESH');
+    await factory.dispose();
+  });
+
+  it('does not coalesce a new UTC hour into the previous hour refresh', async () => {
+    let now = Date.UTC(2026, 4, 2, 23, 59);
+    let release = (_markets: Market[]) => {};
+    let began = () => {};
+    const ready = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    mockExchange.fetchMarkets
+      .mockImplementationOnce(() => {
+        began();
+        return new Promise<Market[]>((resolve) => {
+          release = resolve;
+        });
+      })
+      .mockResolvedValueOnce([market('NEXT_HOUR')]);
+    const factory = new PublicExchangeFactory({ now: () => now });
+    const previous = factory.refreshMarkets('bybit', 'before-midnight');
+    await ready;
+    now = Date.UTC(2026, 4, 3, 0, 1);
+    const next = factory.get('bybit');
+    release([market('PREVIOUS_HOUR')]);
+    await previous;
+    const handle = await next;
+    expect(handle.marketsBucket).toBe('2026050300');
+    expect(handle.markets[0].id).toBe('NEXT_HOUR');
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+    await factory.dispose();
+  });
+
+  it('does not hydrate stale fallback metadata after disposal during the cache read', async () => {
+    const redis = new MemoryRedis();
+    await writeMarketCacheSnapshot({
+      client: redis,
+      exchange: 'bybit',
+      bucket: '2026050222',
+      markets: [market('STALE')],
+      refreshedAt: 1,
+    });
+    const originalGet = redis.get.bind(redis);
+    let release = () => {};
+    let began = () => {};
+    const ready = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    redis.get = async (key) => {
+      const value = await originalGet(key);
+      if (key.endsWith(':latest')) {
+        began();
+        await blocked;
+      }
+      return value;
+    };
+    mockExchange.fetchMarkets.mockRejectedValueOnce(new Error('upstream unavailable'));
+    const factory = new PublicExchangeFactory({ redis, now: () => Date.UTC(2026, 4, 2, 23, 15) });
+    const getting = factory.get('bybit');
+    const outcome = expect(getting).rejects.toThrow(/disposed/);
+    await ready;
+    await factory.dispose('bybit');
+    release();
+    await outcome;
+    expect(mockExchange.store.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps a successful forced refresh ahead of an earlier pending stale-fallback read', async () => {
+    const redis = new MemoryRedis();
+    await writeMarketCacheSnapshot({
+      client: redis,
+      exchange: 'bybit',
+      bucket: '2026050222',
+      markets: [market('STALE')],
+      refreshedAt: 1,
+    });
+    const originalGet = redis.get.bind(redis);
+    let release = () => {};
+    let began = () => {};
+    const ready = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    redis.get = async (key) => {
+      const value = await originalGet(key);
+      if (key.endsWith(':latest')) {
+        began();
+        await blocked;
+      }
+      return value;
+    };
+    mockExchange.fetchMarkets.mockRejectedValueOnce(new Error('first read unavailable'));
+    const factory = new PublicExchangeFactory({ redis, now: () => Date.UTC(2026, 4, 2, 23, 15) });
+    const getting = factory.get('bybit');
+    await ready;
+    mockExchange.fetchMarkets.mockResolvedValueOnce([market('FRESH')]);
+    await factory.refreshMarkets('bybit', 'retry-succeeded');
+    const fresh = await factory.get('bybit');
+    expect(fresh.markets[0].id).toBe('FRESH');
+    release();
+    expect(await getting).toBe(fresh);
+    expect(fresh.markets[0].id).toBe('FRESH');
+    expect(fresh.marketsBucket).toBe('2026050223');
+    expect(mockExchange.store.update).toHaveBeenLastCalledWith(expect.objectContaining({ markets: [market('FRESH')] }));
     await factory.dispose();
   });
 });
