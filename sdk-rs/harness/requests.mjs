@@ -101,7 +101,7 @@ const normalize = (value, callerIds, root = true, options = {}) => {
 };
 
 const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
-  .filter(([key]) => !URL_VOLATILE.has(key))
+  .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
   .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
   .filter(([key, value]) => callerIds.has(value) || !options.generatedQueryId?.(key, value))
   .map(([key, value]) => {
@@ -164,13 +164,10 @@ export const subscriptionMessage = (message) => {
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
-  try {
-    message = typeof text === 'string' ? JSON.parse(text) : text;
-  } catch {
-    return `WS ${canonicalUrl(url, callerIds)} ${text}`;
-  }
+  try { message = typeof text === 'string' ? JSON.parse(text) : text; }
+  catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
   message = options.subscriptionMessage?.(message) ?? message;
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
     if (message?.params?.cb_id !== undefined) {
@@ -191,6 +188,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4) {
       message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
     }
+    // KuCoin TS disables public acknowledgements while Rust requests them.
+    // The audit independently checks token identity and privateChannel.
+    if (options.rust === 'kucoin') delete message.response;
     if (options.orderlyProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }
@@ -226,7 +226,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
       message.args = [...message.args].sort();
     }
   }
-  return `WS ${canonicalUrl(url, callerIds)} ${JSON.stringify(normalize(message, callerIds))}`;
+  return `WS ${canonicalUrl(url, callerIds, options)} ${JSON.stringify(normalize(message, callerIds))}`;
 };
 
 // Subscription batches and one-topic sends have the same required feed set.
@@ -238,8 +238,15 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
+    if (typeof message.topic === 'string') {
+      const colon = message.topic.indexOf(':');
+      const channel = colon < 0 ? message.topic : message.topic.slice(0, colon);
+      const symbols = colon < 0 ? undefined : message.topic.slice(colon + 1);
+      return (symbols === undefined ? [channel] : symbols.split(',').map((symbol) => `${channel}:${symbol}`))
+        .map((topic) => subscriptionKey(url, { ...message, topic }, callerIds, options));
+    }
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) =>
         subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),

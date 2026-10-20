@@ -19,7 +19,7 @@ export const withTimeout = async (promise, label, ms = 30000) => {
   }
 };
 export const within = (promise, ms, label) => withTimeout(promise, label, ms);
-export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => strictUrl(venue.requestUrl?.(url) ?? url, callerIds);
+export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => strictUrl(venue.requestUrl?.(url) ?? url, callerIds, venue);
 export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
   const url = 'https://api.mexc.com/api/v1/private/order/cancel';
   const prefix = requestKey('POST', url, undefined, callerIds, venue);
@@ -220,6 +220,7 @@ export class Tape {
       isPrivate: this.isPrivate,
       books: this.bookSymbols,
       tickers: this.publicTickers,
+      records: this.records,
     });
     this.responses = new Responses(
       this.records,
@@ -232,6 +233,7 @@ export class Tape {
     this.frames = this.records.filter(
       (r) => r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open',
     );
+    this.startupDelivered = new Set();
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
@@ -249,10 +251,10 @@ export class Tape {
     for (const record of records.filter((r) => r.type === 'ws-send')) {
       const request = venue.socketRequest?.(JSON.parse(record.text));
       if (!request) continue;
-      const key = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.id}`;
+      const key = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.id}`;
       if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
       this.recordedSocketRequests.set(key, request.key);
-      const queueKey = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.key}`;
+      const queueKey = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.key}`;
       if (!this.recordedSocketQueues.has(queueKey)) this.recordedSocketQueues.set(queueKey, []);
       this.recordedSocketQueues.get(queueKey).push(request.id);
     }
@@ -374,24 +376,17 @@ export class Tape {
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
     const response = this.bitget || this.venue.validateMatchedRequest
-      ? this.responses.respond(
-          method,
-          url,
-          body,
-          this.commandIndex,
-          (record) => {
-            this.validateBitgetMatch(record, method, url, body);
-            this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
-          },
-          elapsed,
-        )
-      : this.responses.respond(method, url, body, this.commandIndex, elapsed);
+      ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        this.validateBitgetMatch(record, method, url, body);
+        this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+      }, elapsed, headers)
+      : this.responses.respond(method, url, body, this.commandIndex, elapsed, headers);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
     return response;
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, this.callerIds);
+    const key = canonicalUrl(url, this.callerIds, this.venue);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
     const socket = {
@@ -412,6 +407,17 @@ export class Tape {
       if (!this.open.has(key)) this.open.set(key, new Set());
       this.open.get(key).add(socket);
       onOpen();
+      // Bootstrap only the first recorded frame for this exact connection. A
+      // business frame or close before welcome must keep startup fail-closed.
+      if (!socket.closed && !this.playing && this.venue.startupMessage) {
+        const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command'
+          && !this.startupDelivered.has(record) && canonicalUrl(record.url, this.callerIds, this.venue) === key
+          && (record.socket === undefined || record.socket === socket.ordinal));
+        if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
+          this.startupDelivered.add(frame);
+          this.deliver(socket, frame.text);
+        }
+      }
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
@@ -435,7 +441,7 @@ export class Tape {
       if (request) {
         if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
         if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
-          const queueKey = `${canonicalUrl(socket.url)} ${socket.ordinal} ${request.key}`;
+          const queueKey = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal} ${request.key}`;
           const count = socket.requestCounts.get(request.key) ?? 0;
           const recordedId = this.recordedSocketQueues.get(queueKey)?.[count];
           if (recordedId === undefined) throw new Error(`unrecorded websocket request ${request.key}`);
@@ -479,7 +485,13 @@ export class Tape {
     }
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
+        if (!socket.closed) this.deliver(socket, 'pong');
+      });
+      return;
+    }
+    if (this.venue.respondToJsonPing && message?.type === 'ping') {
+      setImmediate(() => {
+        if (!socket.closed) this.deliver(socket, JSON.stringify({ type: 'pong', id: message.id }));
       });
       return;
     }
@@ -577,7 +589,7 @@ export class Tape {
   }
 
   sockets(url, ordinal) {
-    return [...(this.open.get(canonicalUrl(url, this.callerIds)) ?? [])].filter((socket) =>
+    return [...(this.open.get(canonicalUrl(url, this.callerIds, this.venue)) ?? [])].filter((socket) =>
       !socket.closed && (ordinal === undefined || socket.ordinal === ordinal));
   }
 
@@ -592,7 +604,7 @@ export class Tape {
     const response = this.venue.socketResponse(message);
     if (!response) return text;
     if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
-    const scope = `${canonicalUrl(socket.url)} ${socket.ordinal}`;
+    const scope = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal}`;
     const recordedKey = `${scope} ${response.id}`;
     const recorded = this.recordedSocketRequests.get(recordedKey);
     if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
@@ -681,7 +693,7 @@ export class Tape {
       }
     }
     const sockets = this.bitget && frame.socket === undefined
-      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds)) ?? [])].filter((socket) => !socket.closed) : [latest];
+      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? [])].filter((socket) => !socket.closed) : [latest];
     if (frame.type === 'close') {
       for (const socket of sockets) {
         if (socket.url) this.close(socket, frame.code ?? 1006);
@@ -730,6 +742,7 @@ export class Tape {
       }
     })(), this.timeoutMs, 'Replay startup');
     begin();
+    this.playing = true;
     clock?.start();
     this.replayClock = clock;
     const start = performance.now();
@@ -753,6 +766,8 @@ export class Tape {
           if (error instanceof ReplayTimeout || String(error?.message).startsWith('replay timeout:')) throw error;
           return { error: String(error?.message ?? error) };
         }));
+      } else if (this.startupDelivered.has(frame)) {
+        // Still advance tape time, frame count and tick callbacks below.
       } else {
         await this.deliverFrame(frame);
       }
