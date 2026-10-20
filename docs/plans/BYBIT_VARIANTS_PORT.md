@@ -607,3 +607,22 @@ CI in parallel with the remaining regression bundles. Do not merge until the
 full regression matrix and exact final-head CI pass. Final counters/performance
 and CI evidence will be posted on PR #1307; these checkpoint entries retain the
 observed state at each commit. Hyro live connectivity remains unverified.
+
+### Adversarial stop-trigger blocker and Bitget landing
+
+Post-push review found a P1 Rust placement defect: Spot StopLoss/TakeProfit
+with neither price nor trigger_price reached an ordinary Market payload without
+orderFilter/triggerPrice. A lightweight native probe reproduced both outbound
+writes. Fix before merge: require a finite positive effective trigger before
+batch dispatch, preserving valid trigger/price fallback and position-stop paths;
+prove missing-trigger later members cannot leak earlier writes. This is a Rust
+port defect, not an additional TS KNOWN_TS_FIXES claim. The separate final
+harness/TS boundary review passed with lightweight negative probes.
+
+All root27 tasks (both6,856-case suites) and native910/wasm49/host37/frame8 pass
+on the pushed source; fourteen core/profile/Hyperliquid gates pass, and Bitrue
+public/private subsequently pass too. These are historical after the new fix.
+The landing advanced to `d172a666b1` (Bitget inverse/UTA/trailing parity), making
+the PR conflict. Stop the incomplete broader matrix, integrate the new position
+extensions/harness/aliases, then validate the corrected final source. Do not
+merge until the blocker is fixed, independent review passes and CI is green.
