@@ -51,7 +51,6 @@ fn result(actions: &[Action]) -> Result<String, String> {
             _ => None,
         })
         .expect("query completion")
-        .map_err(|error| error.message)
 }
 fn no_completion(actions: &[Action]) {
     assert!(

@@ -124,7 +124,7 @@ impl Rig {
             self.reply(&request, 200, body);
         }
     }
-    pub fn result(&self, id: u32) -> &Result<String, safe_cex_engine::VenueError> {
+    pub fn result(&self, id: u32) -> &Result<String, String> {
         self.notices
             .iter()
             .rev()

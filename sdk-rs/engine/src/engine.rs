@@ -103,9 +103,7 @@ pub enum LogLevel {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
-    Deactivate {
-        error: VenueError,
-    },
+    Deactivate,
     Log {
         level: LogLevel,
         message: String,
@@ -113,7 +111,13 @@ pub enum Notice {
     /// `Ok` carries the command's JSON result.
     CommandDone {
         command: CommandId,
-        result: Result<String, VenueError>,
+        result: Result<String, String>,
+    },
+    /// Completes a command with a structured failure; hosts report it like a
+    /// `CommandDone` error, plus the detail.
+    CommandFailed {
+        command: CommandId,
+        error: VenueError,
     },
 }
 
@@ -780,16 +784,21 @@ impl<P> Cx<'_, P> {
         }));
     }
 
-    pub fn deactivate(&mut self, error: impl Into<VenueError>) {
-        self.io.actions.push(Action::Notice(Notice::Deactivate {
-            error: error.into(),
-        }));
+    pub fn deactivate(&mut self) {
+        self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
-    pub fn done(&mut self, command: CommandId, result: Result<String, VenueError>) {
+    pub fn done(&mut self, command: CommandId, result: Result<String, String>) {
         self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
+    }
+
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        self.io.actions.push(Action::Notice(Notice::CommandFailed {
+            command,
+            error: error.into(),
+        }));
     }
 
     /// Queue a live candle for the next frame; a newer update of the same
@@ -1915,7 +1924,7 @@ mod streaming_tests {
         assert!(
             matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone {
             command: 31, result: Err(error),
-        })] if error.message.contains("unsupported"))
+        })] if error.contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(1.), before);
         let legacy = Command::SetTickerSymbols {
@@ -1964,7 +1973,7 @@ mod streaming_tests {
         for (index, action) in actions.iter().enumerate() {
             assert!(
                 matches!(action, Action::Notice(Notice::CommandDone { command, result: Err(error) })
-                if *command == index as u32 + 1 && error.message.contains("Options are not enabled"))
+                if *command == index as u32 + 1 && error.contains("Options are not enabled"))
             );
         }
     }

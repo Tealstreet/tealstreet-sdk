@@ -171,7 +171,7 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         Action::Notice(Notice::CommandDone {
             command: 8,
             result: Err(error)
-        }) if error.message.contains("rate limited")
+        }) if error.contains("rate limited")
     )));
     e.handle(now + 60_000., candles(9));
     assert!(e.drain_actions().any(|a| matches!(

@@ -420,7 +420,7 @@ impl ApexOmni {
             Pending::History(request),
             Some(ARRAYS),
         ) {
-            cx.done(command, Err(error.into()));
+            cx.done(command, Err(error));
         }
     }
     pub(crate) fn history_item(
@@ -534,9 +534,7 @@ impl ApexOmni {
         let rows: Vec<_> = request.current.into_iter().map(|row| row.row).collect();
         cx.done(
             request.command,
-            serde_json::to_string(&rows)
-                .map_err(|e| e.to_string())
-                .map_err(Into::into),
+            serde_json::to_string(&rows).map_err(|e| e.to_string()),
         );
     }
     pub(crate) fn history_timer(&mut self, _cx: &mut Cx<'_, Pending>, _timer: TimerId) -> bool {

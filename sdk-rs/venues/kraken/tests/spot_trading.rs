@@ -19,7 +19,6 @@ fn done(
             _ => None,
         })
         .unwrap()
-        .map_err(|error| error.message)
 }
 #[test]
 fn native_place_types_exact_client_id_and_trailing_distance() {

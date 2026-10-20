@@ -316,9 +316,7 @@ impl ApexOmni {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(
                     command,
-                    serde_json::to_string(&rows)
-                        .map_err(|e| e.to_string())
-                        .map_err(Into::into),
+                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
                 );
             }
         }
@@ -336,7 +334,7 @@ impl ApexOmni {
                     self.public.seed_retry = Some(cx.set_timer(1000.0));
                 }
             }
-            Request::Candles { command, .. } => cx.done(command, Err(error.to_owned().into())),
+            Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -789,7 +787,7 @@ impl ApexOmni {
                     Pending::Public(Request::Candles { command, symbol }),
                     None,
                 ) {
-                    cx.done(command, Err(error.into()));
+                    cx.done(command, Err(error));
                 }
             }
             other => return Err(other),

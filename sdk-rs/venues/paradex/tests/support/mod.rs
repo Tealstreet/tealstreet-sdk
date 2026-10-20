@@ -146,12 +146,9 @@ impl Harness {
             .iter()
             .rev()
             .find_map(|a| match a {
-                Action::Notice(Notice::CommandDone { command, result }) if *command == id => Some(
-                    result
-                        .as_ref()
-                        .map(String::as_str)
-                        .map_err(|error| error.message.as_str()),
-                ),
+                Action::Notice(Notice::CommandDone { command, result }) if *command == id => {
+                    Some(result.as_ref().map(String::as_str).map_err(String::as_str))
+                }
                 _ => None,
             })
             .unwrap()

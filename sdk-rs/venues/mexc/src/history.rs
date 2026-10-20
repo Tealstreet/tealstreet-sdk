@@ -533,9 +533,7 @@ impl MexcFutures {
         }
         cx.done(
             r.command,
-            serde_json::to_string(&r.rows)
-                .map_err(|e| e.to_string())
-                .map_err(Into::into),
+            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
         );
     }
     pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {

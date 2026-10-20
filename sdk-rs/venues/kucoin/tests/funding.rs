@@ -119,7 +119,7 @@ impl Harness {
         }
         self.event(Event::HttpEnd { request: r.id });
     }
-    fn result(&self) -> &Result<String, safe_cex_engine::VenueError> {
+    fn result(&self) -> &Result<String, String> {
         self.actions
             .iter()
             .find_map(|a| {
@@ -195,13 +195,7 @@ fn saturated_same_timestamp_cannot_silently_skip_unseen_settlements() {
     h.advance();
     let r = h.take();
     h.reply(&r, &row(2, 2000), true);
-    assert!(
-        h.result()
-            .as_ref()
-            .unwrap_err()
-            .message
-            .contains("same-timestamp")
-    );
+    assert!(h.result().as_ref().unwrap_err().contains("same-timestamp"));
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]
@@ -326,7 +320,6 @@ fn funding_requires_a_symbol_before_any_network_call() {
         h.result()
             .as_ref()
             .unwrap_err()
-            .message
             .contains("requires a symbol")
     );
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));

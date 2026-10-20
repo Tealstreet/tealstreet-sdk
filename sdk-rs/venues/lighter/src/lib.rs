@@ -1152,12 +1152,7 @@ impl Venue for Lighter {
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 if let Some(c) = command {
-                    cx.done(
-                        c,
-                        serde_json::to_string(&rows)
-                            .map_err(|e| e.to_string())
-                            .map_err(Into::into),
-                    );
+                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
                 } else {
                     if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
                         s.in_flight = false;
@@ -1365,7 +1360,7 @@ impl Venue for Lighter {
                         })
                         .map_err(|e| e.to_string())
                     });
-                cx.done(command, result.map_err(Into::into));
+                cx.done(command, result);
             }
             Command::Query { command, query } => self.history_query(cx, command, query),
             other => self.trade_command(cx, other),

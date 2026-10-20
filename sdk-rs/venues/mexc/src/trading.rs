@@ -809,7 +809,7 @@ impl MexcFutures {
         };
         if let Err(error) = &steps {
             cx.log(LogLevel::Error, error);
-            cx.done(command, Err(error.clone().into()));
+            cx.done(command, Err(error.clone()));
             return;
         }
         if self.credentials.is_none() {
@@ -819,7 +819,7 @@ impl MexcFutures {
         match steps {
             Err(error) => {
                 cx.log(LogLevel::Error, &error);
-                cx.done(command, Err(error.into()));
+                cx.done(command, Err(error));
             }
             Ok(steps) => {
                 self.trading.queue.push_back(Job {
@@ -846,7 +846,7 @@ impl MexcFutures {
         };
         let Some(next) = job.steps.front() else {
             let job = self.trading.active.take().unwrap();
-            cx.done(job.command, json(&job.ids).map_err(Into::into));
+            cx.done(job.command, json(&job.ids));
             self.advance_trade(cx);
             return;
         };
@@ -943,9 +943,15 @@ impl MexcFutures {
     pub fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, error: &str) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            let failed_index = job.failed_index.unwrap_or(job.ids.len());
-            let error = VenueError::new(error).partial(&job.ids, job.total_orders, failed_index);
-            cx.done(command, Err(error));
+            // Whole failures still use the plain path until MEXC migrates to `fail`.
+            if job.ids.is_empty() {
+                cx.done(command, Err(error.to_owned()));
+            } else {
+                let failed_index = job.failed_index.unwrap_or(job.ids.len());
+                let error =
+                    VenueError::new(error).partial(&job.ids, job.total_orders, failed_index);
+                cx.fail(command, error);
+            }
         }
         self.advance_trade(cx);
     }

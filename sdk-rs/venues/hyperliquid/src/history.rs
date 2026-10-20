@@ -533,8 +533,7 @@ impl Hyperliquid {
                 Err(format!(
                     "Invalid Hyperliquid history response (HTTP {})",
                     response.status
-                )
-                .into()),
+                )),
             );
             return;
         }
@@ -577,7 +576,7 @@ impl Hyperliquid {
                         Ok("{\"found\":false,\"definitive\":false}".into())
                     }
                 });
-            cx.done(request.command, result.map_err(Into::into));
+            cx.done(request.command, result);
             return;
         }
         let cap = if request.kind == Kind::IncomeFunding {
@@ -688,10 +687,7 @@ impl Hyperliquid {
                 serde_json::to_string(&request.trades)
             }
         };
-        cx.done(
-            request.command,
-            result.map_err(|e| e.to_string()).map_err(Into::into),
-        );
+        cx.done(request.command, result.map_err(|e| e.to_string()));
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         cx.done(request.command, Err(error.into()));

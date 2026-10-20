@@ -564,5 +564,5 @@ fn a_successful_rest_setting_fences_older_state_mode_before_publishing_hedge_rai
             .iter()
             .any(|a| matches!(a,safe_cex_engine::Action::Http(r)if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a|matches!(a,safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {command:992,result:Err(message)})if message.message.contains("hedge leverage"))));
+    assert!(actions.iter().any(|a|matches!(a,safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {command:992,result:Err(message)})if message.contains("hedge leverage"))));
 }

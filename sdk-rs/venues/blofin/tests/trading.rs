@@ -48,7 +48,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
             Action::Notice(Notice::CommandDone {
                 command: 7,
                 result: Err(error)
-            }) if error.message.contains("Bybit")
+            }) if error.contains("Bybit")
         )));
     }
 }
@@ -955,7 +955,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         h.collect();
         assert!(h.pending.is_empty());
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.message.contains("leverage limits"))));
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
 
@@ -1005,7 +1005,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             actions.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.message.contains("456") && error.message.contains("not found")
+                    if error.contains("456") && error.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );

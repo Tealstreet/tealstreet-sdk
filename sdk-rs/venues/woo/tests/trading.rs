@@ -70,7 +70,6 @@ fn result(actions: &[Action]) -> Result<String, String> {
             }
         })
         .unwrap()
-        .map_err(|error| error.message)
 }
 fn order(id: &str, kind: OrderType) -> Order {
     Order {

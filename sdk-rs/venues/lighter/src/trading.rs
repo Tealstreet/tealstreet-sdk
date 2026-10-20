@@ -172,7 +172,7 @@ impl Lighter {
                 let steps = match self.prepare_orders(cx, orders) {
                     Ok(steps) => steps,
                     Err(error) => {
-                        cx.done(command, Err(error.into()));
+                        cx.done(command, Err(error));
                         return;
                     }
                 };
@@ -192,11 +192,11 @@ impl Lighter {
                         return;
                     }
                     let Some(order) = cx.store.order(&id).cloned() else {
-                        cx.done(command, Err(format!("Lighter order {id} not found").into()));
+                        cx.done(command, Err(format!("Lighter order {id} not found")));
                         return;
                     };
                     if let Err(error) = market_id(cx, &order.symbol) {
-                        cx.done(command, Err(error.into()));
+                        cx.done(command, Err(error));
                         return;
                     }
                     steps.push_back(Step::Cancel(Box::new(order)));
@@ -272,7 +272,7 @@ impl Lighter {
                 let mut steps = match self.prepare_orders(cx, vec![opts]) {
                     Ok(steps) => steps,
                     Err(error) => {
-                        cx.done(command, Err(error.into()));
+                        cx.done(command, Err(error));
                         return;
                     }
                 };
@@ -854,7 +854,7 @@ impl Lighter {
             } else {
                 format!("; previously placed order indexes: {}", job.ids.join(","))
             };
-            cx.done(job.command, Err(format!("{error}{partial}").into()));
+            cx.done(job.command, Err(format!("{error}{partial}")));
         }
         self.trade_kick(cx);
     }

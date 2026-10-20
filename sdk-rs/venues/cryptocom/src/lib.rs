@@ -718,7 +718,7 @@ impl Venue for Cryptocom {
                         },
                     );
                 }
-                Err(error) => cx.done(command, Err(error.into())),
+                Err(error) => cx.done(command, Err(error)),
             },
             Command::Query { command, query } => self.query(cx, command, query),
             command => self.trade_command(cx, command),

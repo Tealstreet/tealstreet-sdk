@@ -258,7 +258,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
-            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone { command: done, result: Err(error) })] if *done == command && error.message.contains("credentials"))
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone { command: done, result: Err(error) })] if *done == command && error.contains("credentials"))
         );
     }
 }

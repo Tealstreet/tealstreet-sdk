@@ -989,9 +989,7 @@ impl Venue for Okx {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(
                     command,
-                    serde_json::to_string(&rows)
-                        .map_err(|e| e.to_string())
-                        .map_err(Into::into),
+                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
                 );
             }
             other => self.on_request_failed(cx, other, "malformed OKX list item"),
@@ -1136,7 +1134,7 @@ impl Venue for Okx {
                 let Some(default_start) = subtract_bars(end, &interval, limit) else {
                     cx.done(
                         command,
-                        Err(format!("unsupported candle interval {interval}").into()),
+                        Err(format!("unsupported candle interval {interval}")),
                     );
                     return;
                 };

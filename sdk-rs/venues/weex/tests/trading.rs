@@ -147,7 +147,6 @@ fn done(actions: &[Action]) -> Result<String, String> {
             _ => None,
         })
         .expect("completed command")
-        .map_err(|error| error.message)
 }
 fn batch_ack(r: &HttpRequest, first: u64) -> Value {
     let payload = body(r);

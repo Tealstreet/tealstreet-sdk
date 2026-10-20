@@ -33,7 +33,6 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
             }
         })
         .unwrap()
-        .map_err(|error| error.message)
 }
 fn fills(limit: Option<u32>) -> Query {
     Query::Fills {
@@ -239,7 +238,7 @@ fn general_income_cannot_silently_return_a_funding_only_ledger() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error.message == "MEXC income supports only kind FUNDING_FEE"
+            if error == "MEXC income supports only kind FUNDING_FEE"
         )));
     }
 }

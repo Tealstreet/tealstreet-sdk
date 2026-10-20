@@ -575,7 +575,7 @@ fn positive_dust_protection_rejects_the_whole_batch_before_writes() {
             ],
         );
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.message.contains("too small"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("too small"))));
     }
 }
 
@@ -621,7 +621,7 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.message.contains("execution price"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("execution price"))));
         assert_eq!(e.store().order(id), Some(&original));
     }
 }
@@ -645,7 +645,7 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         assert!(out.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandDone { result: Err(message), .. })
-                if message.message.contains("only on Bybit"))));
+                if message.contains("only on Bybit"))));
     }
 }
 
@@ -673,7 +673,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.message.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
 
@@ -722,7 +722,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             actions.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.message.contains("456") && error.message.contains("not found")
+                    if error.contains("456") && error.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );

@@ -436,9 +436,7 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
-    Deactivate {
-        detail: &'a safe_cex_engine::VenueError,
-    },
+    Deactivate,
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
@@ -491,9 +489,9 @@ enum ActionOut<'a> {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
-        /// The legacy text: the message, or partial-batch JSON.
+        /// The message, or the partial-batch JSON `host.mjs` unpacks.
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
+        error: Option<std::borrow::Cow<'a, str>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<&'a safe_cex_engine::VenueError>,
     },
@@ -580,7 +578,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
-            Action::Notice(Notice::Deactivate { error }) => ActionOut::Deactivate { detail: error },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -592,11 +590,14 @@ fn encode(actions: &[Action]) -> String {
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
                 result: result.as_ref().ok().map(String::as_str),
-                error: result
-                    .as_ref()
-                    .err()
-                    .map(safe_cex_engine::VenueError::legacy_text),
-                detail: result.as_ref().err(),
+                error: result.as_ref().err().map(|error| error.as_str().into()),
+                detail: None,
+            },
+            Action::Notice(Notice::CommandFailed { command, error }) => ActionOut::Done {
+                command: *command,
+                result: None,
+                error: Some(error.legacy_text().into()),
+                detail: Some(error),
             },
         })
         .collect();
@@ -1454,20 +1455,20 @@ mod tests {
     }
 
     #[test]
-    fn failures_carry_legacy_text_and_structured_detail() {
+    fn structured_failures_keep_the_legacy_error_text_beside_their_detail() {
         let ids = ["a".to_owned()];
         let actions = [
-            Action::Notice(Notice::CommandDone {
+            Action::Notice(Notice::CommandFailed {
                 command: 1,
-                result: Err(safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1)),
+                error: safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1),
             }),
             Action::Notice(Notice::CommandDone {
                 command: 2,
-                result: Ok("[]".into()),
+                result: Err("plain".into()),
             }),
-            Action::Notice(Notice::Deactivate {
-                error: safe_cex_engine::VenueError::new("key rejected")
-                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            Action::Notice(Notice::CommandDone {
+                command: 3,
+                result: Ok("[]".into()),
             }),
         ];
         assert_eq!(
@@ -1476,8 +1477,8 @@ mod tests {
                 r#"[{"op":"done","command":1,"#,
                 r#""error":"{\"message\":\"leg 2 rejected\",\"partialOrderIds\":[\"a\"],\"partialOrderCount\":1,\"totalOrderCount\":2,\"failedOrderIndex\":1}","#,
                 r#""detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}},"#,
-                r#"{"op":"done","command":2,"result":"[]"},"#,
-                r#"{"op":"deactivate","detail":{"message":"key rejected","kind":"authInvalid"}}]"#,
+                r#"{"op":"done","command":2,"error":"plain"},"#,
+                r#"{"op":"done","command":3,"result":"[]"}]"#,
             )
         );
     }

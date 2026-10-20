@@ -54,7 +54,6 @@ fn done(actions: &[Action]) -> Result<String, String> {
             }
         })
         .expect("command completed")
-        .map_err(|error| error.message)
 }
 fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
     e.handle(1000., Event::Command(c));

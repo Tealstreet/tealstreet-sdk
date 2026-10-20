@@ -402,7 +402,7 @@ impl Orderly {
         let native = match validation {
             Ok(native) => native,
             Err(e) => {
-                cx.done(command, Err(e.into()));
+                cx.done(command, Err(e));
                 return;
             }
         };
@@ -512,7 +512,7 @@ impl Orderly {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.done(request.command, Err(e.into())),
+            Err(e) => cx.done(request.command, Err(e)),
         }
     }
     pub(crate) fn history_item(
@@ -884,15 +884,13 @@ impl Orderly {
         request.rows.truncate(request.limit);
         cx.done(
             request.command,
-            serde_json::to_string(&request.rows)
-                .map_err(|e| e.to_string())
-                .map_err(Into::into),
+            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
         );
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         cx.done(
             request.command,
-            Err(format!("Orderly history read failed: {error}").into()),
+            Err(format!("Orderly history read failed: {error}")),
         );
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

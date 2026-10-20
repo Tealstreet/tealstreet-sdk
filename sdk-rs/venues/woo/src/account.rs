@@ -519,7 +519,7 @@ impl Woo {
             Pending::Account(req),
         ) && let Some(id) = command
         {
-            cx.done(id, Err(e.into()));
+            cx.done(id, Err(e));
         }
     }
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
@@ -1184,7 +1184,7 @@ impl Woo {
                     Err(e) => Err(e),
                 };
                 if let Some(command) = command {
-                    cx.done(command, result.map_err(Into::into));
+                    cx.done(command, result);
                 } else if let Err(e) = result {
                     cx.log(LogLevel::Warning, e);
                 }

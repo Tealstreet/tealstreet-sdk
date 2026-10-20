@@ -24,7 +24,6 @@ fn result(e: &mut Driver) -> Result<String, String> {
             _ => None,
         })
         .expect("query completed")
-        .map_err(|error| error.message)
 }
 fn request(e: &mut Driver) -> HttpRequest {
     requests(e).pop().expect("history request")

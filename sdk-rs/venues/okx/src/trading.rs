@@ -233,7 +233,7 @@ impl Okx {
                 self.trading.jobs.insert(id, job);
                 self.next_write(cx, id);
             }
-            Err(error) => cx.done(id, Err(error.into())),
+            Err(error) => cx.done(id, Err(error)),
         }
     }
 
@@ -778,15 +778,11 @@ impl Okx {
             }
             Finish::Amend(id) => cx.done(
                 command,
-                serde_json::to_string(&[id])
-                    .map_err(|e| e.to_string())
-                    .map_err(Into::into),
+                serde_json::to_string(&[id]).map_err(|e| e.to_string()),
             ),
             Finish::Ids => cx.done(
                 command,
-                serde_json::to_string(&job.ids)
-                    .map_err(|e| e.to_string())
-                    .map_err(Into::into),
+                serde_json::to_string(&job.ids).map_err(|e| e.to_string()),
             ),
             Finish::Empty => cx.done(command, Ok("[]".into())),
         }

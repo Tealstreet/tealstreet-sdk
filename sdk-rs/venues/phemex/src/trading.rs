@@ -100,7 +100,7 @@ enum CancelResult {
 
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
     cx.log(LogLevel::Error, &error);
-    cx.done(command, Err(error.into()));
+    cx.done(command, Err(error));
 }
 pub(crate) fn encode(s: &str) -> String {
     let mut out = String::new();

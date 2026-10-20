@@ -75,7 +75,6 @@ fn result(e: &mut Engine<Bitrue>) -> Result<String, String> {
             _ => None,
         })
         .unwrap()
-        .map_err(|error| error.message)
 }
 fn response(e: &mut Engine<Bitrue>, r: HttpRequest, body: &str) {
     e.handle(

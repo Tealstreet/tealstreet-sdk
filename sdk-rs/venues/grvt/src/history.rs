@@ -398,7 +398,7 @@ impl Grvt {
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {
-                cx.done(command, Err(e.into()));
+                cx.done(command, Err(e));
                 return;
             }
         };
@@ -795,7 +795,7 @@ impl Grvt {
                 })
                 .map_err(|e| e.to_string())
             })();
-            cx.done(r.command, result.map_err(Into::into));
+            cx.done(r.command, result);
             return;
         }
         if let Some(error) = r.failed.take() {
@@ -861,9 +861,7 @@ impl Grvt {
         r.rows.truncate(r.limit);
         cx.done(
             r.command,
-            serde_json::to_string(&r.rows)
-                .map_err(|e| e.to_string())
-                .map_err(Into::into),
+            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
         );
     }
     pub(crate) fn history_failed(
@@ -872,6 +870,6 @@ impl Grvt {
         request: Request,
         error: &str,
     ) {
-        cx.done(request.command, Err(error.to_owned().into()));
+        cx.done(request.command, Err(error.to_owned()));
     }
 }

@@ -424,7 +424,7 @@ impl Trading {
             if let Err(error) =
                 place_operations(orders, cx, account, &HashMap::new(), price_bands, false)
             {
-                cx.done(*command, Err(error.into()));
+                cx.done(*command, Err(error));
                 return true;
             }
             let mut seen = HashSet::new();
@@ -638,7 +638,7 @@ impl Trading {
                 );
                 self.advance(cx, account, job);
             }
-            Err(error) => cx.done(command, Err(error.into())),
+            Err(error) => cx.done(command, Err(error)),
         }
         true
     }
@@ -680,7 +680,7 @@ impl Trading {
                 }
                 Err(error) => {
                     let state = self.jobs.remove(&job).expect("pending job");
-                    cx.done(state.command, Err(error.into()));
+                    cx.done(state.command, Err(error));
                     return;
                 }
             }
@@ -692,7 +692,7 @@ impl Trading {
             if let Kind::Amend { id, target } = &operation.kind {
                 if let Err(error) = account.begin_amend(id, (**target).clone()) {
                     let state = self.jobs.remove(&job).expect("pending amendment");
-                    cx.done(state.command, Err(error.into()));
+                    cx.done(state.command, Err(error));
                     return;
                 }
                 self.amend_locks.insert(id.clone());
@@ -723,7 +723,7 @@ impl Trading {
                 } else {
                     Err(state.errors.join("; "))
                 };
-            cx.done(state.command, result.map_err(Into::into));
+            cx.done(state.command, result);
         }
     }
     pub fn on_response(
@@ -838,7 +838,7 @@ impl Trading {
                         buy_leverage: leverage,
                         sell_leverage: leverage,
                     })
-                    .map_err(|e| e.to_string().into()),
+                    .map_err(|e| e.to_string()),
                 );
             }
         } else {

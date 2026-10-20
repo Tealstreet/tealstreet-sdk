@@ -334,16 +334,27 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let text = encode_notice(ServerNotice::Done {
                             command: pending.original,
                             result: result.as_deref().ok(),
-                            error: result.as_ref().err().map(VenueError::legacy_text),
-                            detail: result.as_ref().err(),
+                            error: result.as_ref().err().map(|error| error.as_str().into()),
+                            detail: None,
                         });
                         self.send(client, Outgoing::Text(text));
                     }
                 }
-                Notice::Deactivate { error } => {
-                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate {
-                        detail: &error,
-                    })))
+                Notice::CommandFailed { command, error } => {
+                    if let Some(pending) = self.pending.remove(&command)
+                        && let Some(client) = pending.client
+                    {
+                        let text = encode_notice(ServerNotice::Done {
+                            command: pending.original,
+                            result: None,
+                            error: Some(error.legacy_text().into()),
+                            detail: Some(&error),
+                        });
+                        self.send(client, Outgoing::Text(text));
+                    }
+                }
+                Notice::Deactivate => {
+                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
                 Notice::Log { level, message } => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
@@ -673,7 +684,7 @@ enum ServerNotice<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
+        error: Option<std::borrow::Cow<'a, str>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<&'a VenueError>,
     },
@@ -686,9 +697,7 @@ enum ServerNotice<'a> {
         level: &'a str,
         message: &'a str,
     },
-    Deactivate {
-        detail: &'a VenueError,
-    },
+    Deactivate,
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)

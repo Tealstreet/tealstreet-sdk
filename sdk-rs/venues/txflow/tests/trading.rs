@@ -252,7 +252,7 @@ fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
         r#"{"status":"pending","txHash":"fixture"}"#,
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(e)}) if e.message.contains("uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(e)}) if e.contains("uncertain"))));
     assert!(
         !actions
             .iter()
@@ -270,7 +270,7 @@ fn unconfirmed_consensus_success_is_not_executed_success() {
         200,
         r#"{"status":"ok","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
     );
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error.message.contains("uncertain"))));
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error.contains("uncertain"))));
 }
 #[test]
 fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
@@ -278,7 +278,7 @@ fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
     place(&mut e, 7, vec![limit("same-id")]);
     let _r = write(&mut e);
     place(&mut e, 8, vec![limit("same-id")]);
-    assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.message.contains("Duplicate"))));
+    assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("Duplicate"))));
 }
 #[test]
 fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protection() {
@@ -344,7 +344,7 @@ fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protect
             .iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.message.contains("TP/SL"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:8,result:Err(e)}) if e.contains("TP/SL"))));
 }
 #[test]
 fn reserved_prefix_and_utf8_limit_fail_before_write() {
@@ -394,7 +394,7 @@ fn unimplemented_request_commands_complete_with_errors_instead_of_hanging() {
     ] {
         e.handle(NOW, Event::Command(command));
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if !error.message.is_empty())).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if !error.is_empty())).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
@@ -461,6 +461,6 @@ fn caller_id_preflight_preserves_shared_shape_duplicate_and_split_errors() {
         place(&mut e, 7, orders);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error.message == expected)), "{actions:?}");
+        assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error == expected)), "{actions:?}");
     }
 }

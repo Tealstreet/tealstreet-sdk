@@ -723,7 +723,7 @@ impl Venue for BitgetFutures {
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
-            Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned().into())),
+            Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
             Pending::Account {
                 generation,
                 request,
@@ -837,10 +837,7 @@ impl Venue for BitgetFutures {
                 to_ms,
             } => {
                 let Some(native) = interval(&value) else {
-                    cx.done(
-                        command,
-                        Err("unsupported Bitget interval".to_owned().into()),
-                    );
+                    cx.done(command, Err("unsupported Bitget interval".to_owned()));
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);

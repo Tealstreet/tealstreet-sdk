@@ -319,7 +319,7 @@ impl BybitLinear {
                 None => Err("Malformed Bybit option response".into()),
             });
         if let Err(error) = outcome {
-            cx.done(command, Err(error.into()));
+            cx.done(command, Err(error));
             return;
         }
         let result = match request {
@@ -378,11 +378,6 @@ impl BybitLinear {
                 serde_json::to_string(&rows)
             }
         };
-        cx.done(
-            command,
-            result
-                .map_err(|error| error.to_string())
-                .map_err(Into::into),
-        );
+        cx.done(command, result.map_err(|error| error.to_string()));
     }
 }

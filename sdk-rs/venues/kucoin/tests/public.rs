@@ -882,7 +882,7 @@ fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
         assert!(
             matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
             command: id, result: Err(error),
-        })] if *id == command && error.message == "KuCoin leverage query is unsupported")
+        })] if *id == command && error == "KuCoin leverage query is unsupported")
         );
     }
 }
@@ -970,7 +970,7 @@ fn spot_symbol_amend_rejects_once_without_io_or_state_changes_on_futures() {
         assert!(
             matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
             command: id, result: Err(error),
-        })] if *id == command && error.message.contains("unsupported"))
+        })] if *id == command && error.contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(0.0), before);
     }

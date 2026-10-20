@@ -323,10 +323,15 @@ impl Polymarket {
             if let Some(scope) = job.scope {
                 self.trading.scopes.remove(&scope);
             }
-            let result = result.map_err(|message| {
-                VenueError::new(message).partial(&job.ids, job.total, job.ids.len())
-            });
-            cx.done(command, result);
+            match result {
+                // Whole failures still use the plain path until Polymarket migrates to `fail`.
+                Err(message) if job.ids.is_empty() => cx.done(command, Err(message)),
+                Ok(result) => cx.done(command, Ok(result)),
+                Err(message) => cx.fail(
+                    command,
+                    VenueError::new(message).partial(&job.ids, job.total, job.ids.len()),
+                ),
+            }
         }
     }
     fn trading_next(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
@@ -623,7 +628,7 @@ impl Polymarket {
             if self.trading.jobs.contains_key(&command_id) {
                 self.trading_finish(cx, command_id, Err(error));
             } else {
-                cx.done(command_id, Err(error.into()));
+                cx.done(command_id, Err(error));
             }
         }
     }

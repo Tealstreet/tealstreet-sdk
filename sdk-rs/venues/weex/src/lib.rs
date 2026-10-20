@@ -936,10 +936,7 @@ impl Venue for WeexFutures {
                 to_ms,
             } => {
                 if !interval(&i, false) {
-                    cx.done(
-                        command,
-                        Err(format!("WEEX does not support {i} candles").into()),
-                    );
+                    cx.done(command, Err(format!("WEEX does not support {i} candles")));
                     return;
                 }
                 let historical = from_ms.is_some() || to_ms.is_some();

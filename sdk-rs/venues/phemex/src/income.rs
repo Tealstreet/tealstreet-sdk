@@ -151,9 +151,7 @@ impl PhemexPerpetuals {
                     self.income.active.remove(&request.command);
                     cx.done(
                         request.command,
-                        serde_json::to_string(&request.rows)
-                            .map_err(|e| e.to_string())
-                            .map_err(Into::into),
+                        serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
                     );
                     return;
                 }

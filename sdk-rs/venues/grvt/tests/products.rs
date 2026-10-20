@@ -164,7 +164,7 @@ impl Harness {
         let Action::Notice(Notice::CommandDone { result, .. }) = self.actions.remove(index) else {
             unreachable!()
         };
-        result.map_err(|error| error.message)
+        result
     }
 }
 

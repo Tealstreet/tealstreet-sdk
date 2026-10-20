@@ -77,7 +77,6 @@ fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
             _ => None,
         })
         .expect("completion")
-        .map_err(|error| error.message)
 }
 fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, streamed: bool) {
     let Action::Http(r) = request else {
@@ -596,7 +595,7 @@ fn finish_empty_probes(e: &mut Engine<PhemexPerpetuals>) -> Result<String, Strin
         let output = actions(e);
         for action in &output {
             if let Action::Notice(Notice::CommandDone { result, .. }) = action {
-                return result.clone().map_err(|error| error.message);
+                return result.clone();
             }
         }
         let a = output

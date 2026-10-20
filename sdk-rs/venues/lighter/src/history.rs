@@ -443,7 +443,7 @@ impl Lighter {
             match self.account_auth(cx.now) {
                 Ok(auth) => headers.push(("authorization", auth)),
                 Err(error) => {
-                    cx.done(request.command, Err(error.into()));
+                    cx.done(request.command, Err(error));
                     return;
                 }
             }
@@ -722,22 +722,23 @@ impl Lighter {
             Ok(e) => {
                 cx.done(
                     request.command,
-                    Err(
-                        format!("Lighter history failed: {} {}", response.status, e.message).into(),
-                    ),
+                    Err(format!(
+                        "Lighter history failed: {} {}",
+                        response.status, e.message
+                    )),
                 );
                 return;
             }
             Err(e) => {
                 cx.done(
                     request.command,
-                    Err(format!("Invalid Lighter history envelope: {e}").into()),
+                    Err(format!("Invalid Lighter history envelope: {e}")),
                 );
                 return;
             }
         };
         if let Some(error) = request.failed.take() {
-            cx.done(request.command, Err(error.into()));
+            cx.done(request.command, Err(error));
             return;
         }
         let enough = request
@@ -824,12 +825,12 @@ impl Lighter {
             ),
         }
         .map_err(|e| e.to_string());
-        cx.done(request.command, result.map_err(Into::into));
+        cx.done(request.command, result);
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         cx.done(
             request.command,
-            Err(format!("Lighter history failed: {error}").into()),
+            Err(format!("Lighter history failed: {error}")),
         );
     }
 }

@@ -1057,7 +1057,7 @@ impl Orderly {
             }
             Err(e) => {
                 cx.log(LogLevel::Error, &e);
-                cx.done(id, Err(e.into()));
+                cx.done(id, Err(e));
                 self.trade_queued(cx);
             }
         }
@@ -1073,16 +1073,25 @@ impl Orderly {
         };
         let Some(mut step) = job.steps.pop_front() else {
             let job = self.trading.active.take().unwrap();
-            let result = if let Some(message) = job.error {
-                Err(VenueError::new(message).partial(&job.ids, job.total, job.ids.len()))
-            } else {
-                Ok(if job.collect {
-                    json(&job.ids)
+            if let Some(message) = job.error {
+                // Whole failures still use the plain path until Orderly migrates to `fail`.
+                if job.ids.is_empty() {
+                    cx.done(job.command, Err(message));
                 } else {
-                    "[]".into()
-                })
-            };
-            cx.done(job.command, result);
+                    let error =
+                        VenueError::new(message).partial(&job.ids, job.total, job.ids.len());
+                    cx.fail(job.command, error);
+                }
+            } else {
+                cx.done(
+                    job.command,
+                    Ok(if job.collect {
+                        json(&job.ids)
+                    } else {
+                        "[]".into()
+                    }),
+                );
+            }
             self.trade_queued(cx);
             return;
         };

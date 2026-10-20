@@ -741,7 +741,7 @@ impl Bitrue {
             _ => return false,
         };
         if let Err(error) = self.trade_plan(cx, command.clone()) {
-            cx.done(id, Err(error.into()));
+            cx.done(id, Err(error));
             return true;
         }
         self.trading.queue.push_back(command);
@@ -776,7 +776,7 @@ impl Bitrue {
                 self.trade_step(cx, plan);
             }
             Err(error) => {
-                cx.done(id, Err(error.into()));
+                cx.done(id, Err(error));
                 self.trade_next(cx);
             }
         }
@@ -833,18 +833,16 @@ impl Bitrue {
         self.trading.busy = false;
         cx.done(
             plan.command,
-            error
-                .map_or_else(
-                    || {
-                        Ok(if plan.refresh_result {
-                            "[]".to_owned()
-                        } else {
-                            serde_json::to_string(&plan.ids).expect("order ids")
-                        })
-                    },
-                    Err,
-                )
-                .map_err(Into::into),
+            error.map_or_else(
+                || {
+                    Ok(if plan.refresh_result {
+                        "[]".to_owned()
+                    } else {
+                        serde_json::to_string(&plan.ids).expect("order ids")
+                    })
+                },
+                Err,
+            ),
         );
         if !plan.symbols.is_empty() {
             self.refresh_orders(cx, plan.symbols);

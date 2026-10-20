@@ -80,11 +80,11 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::CommandDone { command, result }) => self
-                    .done
-                    .push((command, result.map_err(|error| error.message))),
+                Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.done.push((command, result))
+                }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
-                Action::Notice(Notice::Deactivate { .. }) => {
+                Action::Notice(Notice::Deactivate) => {
                     panic!("unexpected Bitget account deactivation")
                 }
             }

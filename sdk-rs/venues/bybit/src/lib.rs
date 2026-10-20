@@ -1197,10 +1197,7 @@ impl BybitLinear {
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(
-                command,
-                Err(format!("Bybit has no {interval} candles").into()),
-            );
+            cx.done(command, Err(format!("Bybit has no {interval} candles")));
             return;
         };
         let query = Query::new()
@@ -1336,7 +1333,7 @@ impl BybitLinear {
                 command,
                 mut candles,
             } => match failure {
-                Some(error) => cx.done(command, Err(format!("Bybit klines: {error}").into())),
+                Some(error) => cx.done(command, Err(format!("Bybit klines: {error}"))),
                 None => {
                     // Bybit lists newest first.
                     candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));

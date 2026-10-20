@@ -205,8 +205,7 @@ impl Cryptocom {
                         command,
                         Err(format!(
                             "Order {id} not found; cancellation requires a reconciled order"
-                        )
-                        .into()),
+                        )),
                     );
                     return;
                 }
@@ -244,7 +243,7 @@ impl Cryptocom {
                 amount,
             } => {
                 let Some(order) = cx.store.order(&id) else {
-                    cx.done(command, Err(format!("Order not found: {id}").into()));
+                    cx.done(command, Err(format!("Order not found: {id}")));
                     return;
                 };
                 let price = price.unwrap_or(order.price);
@@ -319,7 +318,7 @@ impl Cryptocom {
                 symbol,
                 isolated,
             } => {
-                cx.done(command, Err(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" }).into()));
+                cx.done(command, Err(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" })));
                 return;
             }
             Command::SetPositionMode { command, .. } => {
@@ -344,7 +343,7 @@ impl Cryptocom {
             }
             Err(error) => {
                 cx.log(LogLevel::Error, &error);
-                cx.done(command, Err(error.into()));
+                cx.done(command, Err(error));
             }
         }
     }
@@ -375,7 +374,7 @@ impl Cryptocom {
             cx.done(
                 command,
                 match (job.best_effort, job.first_error) {
-                    (false, Some(error)) => Err(error.into()),
+                    (false, Some(error)) => Err(error),
                     _ => Ok(serde_json::to_string(&job.ids).unwrap()),
                 },
             );

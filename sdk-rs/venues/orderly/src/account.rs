@@ -2,7 +2,6 @@ use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
-use safe_cex_engine::{ErrorKind, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -834,9 +833,8 @@ impl Orderly {
                 && (400..500).contains(&response.status)
                 && !matches!(response.status, 408 | 429)
             {
-                const REJECTED: &str = "Orderly API key expired or rejected";
-                cx.log(LogLevel::Error, REJECTED);
-                cx.deactivate(VenueError::new(REJECTED).kind(ErrorKind::AuthInvalid));
+                cx.log(LogLevel::Error, "Orderly API key expired or rejected");
+                cx.deactivate();
                 return;
             }
             self.account_failed(cx, request, &e);

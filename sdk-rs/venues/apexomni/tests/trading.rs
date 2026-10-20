@@ -195,7 +195,7 @@ fn bybit_only_controls_reject_single_and_whole_batch_without_io_or_state_changes
             );
             assert!(actions.iter().any(|action| matches!(action,
                 Action::Notice(Notice::CommandDone { command: 42, result: Err(message) })
-                    if message.message.contains("Bybit BBO and TickSize controls are not supported by ApeX Omni")
+                    if message.contains("Bybit BBO and TickSize controls are not supported by ApeX Omni")
             )));
             assert!(e.store().orders().is_empty());
             // A rejected preflight must leave the sequenced trading queue usable.
@@ -662,7 +662,7 @@ fn unsupported_stp_rejects_single_and_mixed_batches_before_io_and_keeps_queue_us
             );
             assert!(actions.iter().any(|action| matches!(action,
                 Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
-                if error.message.contains("self-trade prevention"))));
+                if error.contains("self-trade prevention"))));
             assert!(engine.store().orders().is_empty());
             assert!(engine.store().positions().is_empty());
             assert_eq!(engine.store().balance(), &before_balance);

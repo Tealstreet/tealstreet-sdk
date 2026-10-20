@@ -1169,7 +1169,7 @@ impl Bitrue {
                 command,
                 result
                     .map(|r| serde_json::to_string(&r).unwrap())
-                    .ok_or_else(|| error.into()),
+                    .ok_or_else(|| error.to_owned()),
             );
         }
     }

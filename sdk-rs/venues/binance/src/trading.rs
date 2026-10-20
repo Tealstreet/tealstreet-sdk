@@ -392,7 +392,7 @@ impl BinanceFutures {
             }
             Err(message) => {
                 cx.log(LogLevel::Error, message.clone());
-                cx.done(id, Err(message.into()));
+                cx.done(id, Err(message));
             }
         }
     }
@@ -459,7 +459,7 @@ impl BinanceFutures {
                 Some(error) => Err(error),
                 None => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
             };
-            cx.done(command, result.map_err(Into::into));
+            cx.done(command, result);
             return;
         };
         job.outstanding = step.len();
@@ -2213,7 +2213,7 @@ mod audit_tests {
                         .any(|action| matches!(action, Action::Http(_))),
                     "{variant:?} {kind:?} fail_at={fail_at}"
                 );
-                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if error.message.contains("entropy unavailable"))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
+                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if error.contains("entropy unavailable"))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
             }
         }
     }

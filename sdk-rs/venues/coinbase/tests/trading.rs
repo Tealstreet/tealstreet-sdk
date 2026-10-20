@@ -64,9 +64,9 @@ impl Session {
         let mut requests = vec![];
         for a in self.e.drain_actions().collect::<Vec<_>>() {
             match a {
-                Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => self
-                    .results
-                    .push((command, result.map_err(|error| error.message))),
+                Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
+                    self.results.push((command, result))
+                }
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     requests.push(r)

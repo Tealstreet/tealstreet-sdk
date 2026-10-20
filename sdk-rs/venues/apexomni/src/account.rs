@@ -786,7 +786,7 @@ impl ApexOmni {
                                 user_id: id,
                                 affiliate_id: None,
                             })
-                            .map_err(|e| e.to_string().into()),
+                            .map_err(|e| e.to_string()),
                         );
                     }
                     None => cx.done(
@@ -930,7 +930,7 @@ impl ApexOmni {
     ) {
         let generation = match request {
             Request::Identity { command } => {
-                cx.done(command, Err(error.to_owned().into()));
+                cx.done(command, Err(error.to_owned()));
                 return;
             }
             Request::Positions { generation, .. } => {
@@ -1095,7 +1095,7 @@ impl ApexOmni {
             Pending::Account(Request::Identity { command }),
             None,
         ) {
-            cx.done(command, Err(error.into()));
+            cx.done(command, Err(error));
         }
         Ok(())
     }

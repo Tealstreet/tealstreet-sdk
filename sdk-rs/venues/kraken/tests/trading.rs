@@ -61,7 +61,6 @@ fn done(e: &mut Engine<Kraken>) -> Result<String, String> {
             _ => None,
         })
         .expect("command completion")
-        .map_err(|error| error.message)
 }
 fn inject(e: &mut Engine<Kraken>, id: &str, kind: OrderType, trigger: Option<StopTriggerType>) {
     e.store_mut().upsert_order(Order {
@@ -882,7 +881,7 @@ fn batch_rejects_bybit_controls_before_any_write() {
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error.message.contains("Bybit execution controls")
+                if error.contains("Bybit execution controls")
         )));
     }
 }
@@ -897,7 +896,7 @@ fn batch_rejects_foreign_stp_controls_before_writes() {
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandDone { result: Err(error), .. })
-            if error.message.contains("self-trade prevention")
+            if error.contains("self-trade prevention")
     )));
 }
 
@@ -926,6 +925,6 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = e.drain_actions().collect::<Vec<_>>();
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.message.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }

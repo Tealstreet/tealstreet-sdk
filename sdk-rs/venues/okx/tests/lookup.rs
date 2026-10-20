@@ -143,11 +143,7 @@ fn done(out: Vec<Action>) -> Result<Lookup, String> {
             Action::Notice(Notice::CommandDone {
                 command: 991,
                 result,
-            }) => Some(
-                result
-                    .map(|text| serde_json::from_str(&text).unwrap())
-                    .map_err(|error| error.message),
-            ),
+            }) => Some(result.map(|text| serde_json::from_str(&text).unwrap())),
             _ => None,
         })
         .expect("completed query")

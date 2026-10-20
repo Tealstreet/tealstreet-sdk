@@ -163,7 +163,7 @@ fn successful_cache_expires_from_request_start_and_failures_keep_tier_for_sixty_
             .any(|action| matches!(action, Action::Http(_)))
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.message.contains("Plus or Premium"))));
+        Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.contains("Plus or Premium"))));
     assert_eq!(client.tick(362_000.0).len(), 1);
 }
 #[test]
@@ -232,7 +232,7 @@ fn root_standard_tier_overrides_malformed_nested_payloads_and_replaces_cached_pr
             "{payload}"
         );
         assert!(actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.message.contains("Plus or Premium"))), "{payload}");
+            Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.contains("Plus or Premium"))), "{payload}");
     }
 }
 
@@ -261,7 +261,7 @@ fn singleton_and_nested_standard_labels_block_attributed_placement_before_any_re
             "no approval, nonce or POST for {label}"
         );
         assert!(actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.message.contains("Plus or Premium"))), "{label}");
+            Action::Notice(Notice::CommandDone { command: 51, result: Err(error) }) if error.contains("Plus or Premium"))), "{label}");
     }
 }
 

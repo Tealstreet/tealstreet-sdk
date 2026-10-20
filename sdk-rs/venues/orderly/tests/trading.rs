@@ -11,15 +11,16 @@ fn place(e: &mut Driver, command: u32, json: &str) {
 }
 fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
     out.into_iter()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { command, result }) = a {
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command, result }) => {
                 (command == id).then_some(result)
-            } else {
-                None
             }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                (command == id).then(|| Err(error.legacy_text()))
+            }
+            _ => None,
         })
         .expect("command completion")
-        .map_err(|error| error.legacy_text())
 }
 fn body(r: &safe_cex_engine::HttpRequest) -> serde_json::Value {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
@@ -100,7 +101,7 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
             out.iter().all(|action| matches!(
                 action,
                 Action::Notice(Notice::CommandDone { command: 10, result: Err(error) })
-                    if error.message.contains("Bybit BBO and TickSize controls")
+                    if error.contains("Bybit BBO and TickSize controls")
             )),
             "unexpected batch effects (busy={busy}): {out:?}"
         );
@@ -1126,7 +1127,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         );
         let out = actions(&mut e);
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.message.contains("leverage limits"))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
 

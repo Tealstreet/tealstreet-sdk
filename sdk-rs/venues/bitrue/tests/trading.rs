@@ -484,7 +484,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             actions.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.message.contains("456") && error.message.contains("not found")
+                    if error.contains("456") && error.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );

@@ -84,7 +84,7 @@ impl Driver {
                 Action::Notice(Notice::CommandDone {
                     command: 77,
                     result,
-                }) => self.result = Some(result.map_err(|error| error.message)),
+                }) => self.result = Some(result),
                 _ => {}
             }
         }

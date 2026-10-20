@@ -173,7 +173,7 @@ impl Hyperliquid {
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = self.preflight(cx, &orders) {
-                    cx.done(command, Err(error.into()));
+                    cx.done(command, Err(error));
                     return;
                 }
                 (command, orders.into_iter().map(Step::Place).collect())
@@ -190,7 +190,7 @@ impl Hyperliquid {
                 let orders = match orders {
                     Ok(orders) => orders,
                     Err(error) => {
-                        cx.done(command, Err(error.into()));
+                        cx.done(command, Err(error));
                         return;
                     }
                 };
@@ -283,14 +283,14 @@ impl Hyperliquid {
                 let cloid = match mint_cloid() {
                     Ok(c) => c,
                     Err(e) => {
-                        cx.done(command, Err(e.into()));
+                        cx.done(command, Err(e));
                         return;
                     }
                 };
                 opts.client_order_id = Some(cloid.clone());
                 replacement = Some(cloid);
                 if let Err(error) = self.preflight(cx, std::slice::from_ref(&opts)) {
-                    cx.done(command, Err(error.into()));
+                    cx.done(command, Err(error));
                     return;
                 }
                 amend_source = Some(id);
@@ -1031,25 +1031,23 @@ impl Hyperliquid {
         if let Some(job) = self.trading.active.take() {
             cx.done(
                 job.command,
-                result
-                    .map(|_| {
-                        if let Some(client_order_id) = job.replacement {
-                            #[derive(Serialize)]
-                            #[serde(rename_all = "camelCase")]
-                            struct Replacement {
-                                order_ids: Vec<String>,
-                                client_order_id: String,
-                            }
-                            serde_json::to_string(&Replacement {
-                                order_ids: job.ids,
-                                client_order_id,
-                            })
-                            .unwrap()
-                        } else {
-                            serde_json::to_string(&job.ids).unwrap()
+                result.map(|_| {
+                    if let Some(client_order_id) = job.replacement {
+                        #[derive(Serialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Replacement {
+                            order_ids: Vec<String>,
+                            client_order_id: String,
                         }
-                    })
-                    .map_err(Into::into),
+                        serde_json::to_string(&Replacement {
+                            order_ids: job.ids,
+                            client_order_id,
+                        })
+                        .unwrap()
+                    } else {
+                        serde_json::to_string(&job.ids).unwrap()
+                    }
+                }),
             );
         }
         self.pump_trades(cx);

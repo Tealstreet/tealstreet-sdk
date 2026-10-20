@@ -128,10 +128,7 @@ impl Kucoin {
             return;
         };
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(
-                command,
-                Err(format!("Unknown KuCoin market {symbol}").into()),
-            );
+            cx.done(command, Err(format!("Unknown KuCoin market {symbol}")));
             return;
         };
         let end = to_ms.unwrap_or_else(|| cx.now.floor());
@@ -281,12 +278,10 @@ impl Kucoin {
             } else {
                 cx.done(
                     request.command,
-                    Err(envelope
-                        .map_or_else(
-                            |_| "Malformed KuCoin funding response".into(),
-                            |e| format!("KuCoin funding {}: {}", e.code, e.msg),
-                        )
-                        .into()),
+                    Err(envelope.map_or_else(
+                        |_| "Malformed KuCoin funding response".into(),
+                        |e| format!("KuCoin funding {}: {}", e.code, e.msg),
+                    )),
                 );
             }
             return;
@@ -343,9 +338,7 @@ impl Kucoin {
         }
         cx.done(
             request.command,
-            serde_json::to_string(&request.rows)
-                .map_err(|e| e.to_string())
-                .map_err(Into::into),
+            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
         );
     }
     pub(crate) fn funding_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

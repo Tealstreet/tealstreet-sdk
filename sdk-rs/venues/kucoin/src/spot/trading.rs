@@ -187,7 +187,7 @@ impl KucoinSpot {
                         .into(),
                 ),
                 Err(e) => {
-                    cx.done(job.command, Err(e.to_string().into()));
+                    cx.done(job.command, Err(e.to_string()));
                     return;
                 }
             },
@@ -394,7 +394,7 @@ impl KucoinSpot {
                     returns_ids,
                 },
             ),
-            Err(e) => cx.done(id, Err(e.into())),
+            Err(e) => cx.done(id, Err(e)),
         }
     }
 }

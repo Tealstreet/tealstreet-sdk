@@ -280,7 +280,7 @@ fn delayed_futures_read_gates_startup_and_failure_preserves_old_union() {
         .unwrap();
     assert!(!e.store().loaded().positions);
     e.handle(7.0,Event::Command(Command::PlaceOrders {command:99,orders:vec![serde_json::from_str(r#"{"symbol":"BTCUSD261225","type":"limit","side":"buy","amount":2,"price":40000}"#).unwrap()]}));
-    assert!(actions(&mut e).iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:99,result:Err(error)}) if error.message.contains("not ready"))));
+    assert!(actions(&mut e).iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:99,result:Err(error)}) if error.contains("not ready"))));
     let Action::Http(request) = futures else {
         panic!()
     };
@@ -1359,7 +1359,7 @@ mod product_semantics {
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &page, 106.0);
         let out = actions(&mut e);
-        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(s), .. }) if s.message.contains("incomplete source"))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(s), .. }) if s.contains("incomplete source"))));
         assert!(
             !out.iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(_), .. })))
