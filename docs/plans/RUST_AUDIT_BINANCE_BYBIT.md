@@ -253,23 +253,24 @@ reverification has begun while this first patch completes its gates.
 ## Final merged-source gate evidence
 
 Source: `8b6e98201c` plus landing PR #1342 (`fc809a9d85`), merged at
-`1611908137`. Later documentation-only checkpoints do not change the artifacts.
+`1611908137`, and the final Spot correction `5440624e3d`. Later
+documentation-only checkpoints do not change the artifacts.
 All 23 replay invocations pass: 11 documented/scripted private and 12 public.
 Public figures are medians of three runs; pairs below are **TS / Rust**.
 
 | Profile | Frames | Main-thread CPU ms | Steady CPU ms | Retained MB |
 | --- | ---: | ---: | ---: | ---: |
-| Binance USD-M | 873 | 261.2 / 121.6 | 149.3 / 53.3 | 18.2 / 4.1 |
-| Binance COIN-M | 202 | 227.2 / 96.5 | 154.6 / 55.2 | 13.9 / 1.9 |
-| Binance Spot | 7,045 | 922.4 / 687.0 | 476.1 / 300.0 | 27.6 / 10.8 |
-| Binance PM | 873 | 266.9 / 138.8 | 155.7 / 67.3 | 17.9 / 4.1 |
+| Binance USD-M | 873 | 244.2 / 126.9 | 132.9 / 60.3 | 18.2 / 4.1 |
+| Binance COIN-M | 202 | 180.4 / 69.3 | 118.4 / 38.5 | 13.9 / 1.9 |
+| Binance Spot | 7,045 | 585.5 / 441.1 | 252.8 / 134.4 | 27.6 / 10.8 |
+| Binance PM | 873 | 247.3 / 133.7 | 135.0 / 64.4 | 18.0 / 4.1 |
 | AsterDEX | 384 | 251.7 / 136.6 | 103.1 / 71.0 | 28.4 / 6.2 |
 | Bybit linear | 4,295 | 304.9 / 230.4 | 162.9 / 94.4 | 22.2 / 4.9 |
 | Bybit inverse | 708 | 171.4 / 59.7 | 114.1 / 24.7 | 14.4 / 1.6 |
 | Bybit Spot | 4,339 | 317.9 / 242.1 | 192.6 / 129.5 | 16.4 / 3.1 |
 | Bybit Demo | 5,833 | 404.0 / 285.7 | 224.0 / 130.1 | 21.9 / 5.0 |
 | HyroTrader (scripted public) | 160 | 32.3 / 23.3 | 8.6 / 4.2 | 13.5 / 0.9 |
-| Fresh Binance public capture | 285 | 460.3 / 163.7 | 296.4 / 81.6 | 18.5 / 4.1 |
+| Fresh Binance public capture | 285 | 427.6 / 143.4 | 272.4 / 71.8 | 18.4 / 4.1 |
 | Fresh Bybit public capture | 19,946 | 844.5 / 391.3 | 507.2 / 202.3 | 22.6 / 5.3 |
 
 All public outputs match under the existing documented TS corrections and
@@ -278,17 +279,17 @@ unchanged thresholds. Process CPU is informational and does not always improve
 peak memory. Private performance is informational, with one correctness run per
 tape. Native regressions carry the adverse ordering cases outside those tapes.
 
-Selected Node/web WASM artifacts are below the unchanged 1,258,291-byte limit:
+Selected WASM artifacts are below the unchanged 1,258,291-byte limit:
 
 | Family | Bytes | SHA-256 (Node) |
 | --- | ---: | --- |
-| Binance | 996,518 | `577400d33a5ed41b7327b2d1be771d64a311cf905e18140d7a18ea55f0dc8729` |
+| Binance | 996,440 | `ccf248c7648161c8de6e763a368c4d5247fa4860b25c60f6b9d73f7e26f64183` |
 | AsterDEX | 1,094,705 | `04d842f43383813042293c1d371e37834c3a363589b0899fc39e25fc78424f03` |
 | Bybit | 1,163,223 | `6a026d6aa72c31e0ee6899d5c920b27ca4e20af919fba633c8f1964ebc34a04a` |
 
 - Gate 1: banned-pattern scan passes.
 - Gate 2: workspace formatting and strict all-target Clippy pass. Native tests:
-  engine 90, Binance 138, Bybit 150 and AsterDEX 99 (477 total).
+  engine 90, Binance 139, Bybit 150 and AsterDEX 99 (478 total).
 - Gate 3: strict default-feature WASM Clippy passes.
 - Gates 4–6: all selected release builds, private/public replay gates and
   Binance controls pass, including the fresh 20-second public captures.
@@ -297,8 +298,9 @@ Selected Node/web WASM artifacts are below the unchanged 1,258,291-byte limit:
   pool. Both complete SDK `test-ci` and `test-unit` suites subsequently pass
   with `--maxWorkers=2`: 7,767 tests across 524 files each. No assertions,
   timeout values or product code changed to accommodate host load.
-- Harness: 589 tests pass. Combined default-feature release build, compiled
-  SDK WASM boundaries, host/product/scripted live-smoke controls are in progress.
+- Harness: 589 tests pass. The final combined default-feature release build
+  passes 443 SDK WASM tests across 16 files, 76 host tests, 16 product-semantic
+  tests and 9 scripted live-smoke controls.
 
 Raw logs: `/tmp/audit-bb-<profile>-{public,private}.log`, selected builds/sizes
 `/tmp/audit-bb-{binance,aster,bybit}-{build,size}.log`, native/strict checks
@@ -327,6 +329,8 @@ captures were also trimmed and gated separately without replacing that coverage.
   reran 20 lifecycle plus 9 execution-event tests and closed the finding.
 - The initial combined build passes 443 compiled SDK WASM tests, 76 host tests,
   16 product-semantic tests and 9 scripted live-smoke controls. The Spot-only
-  correction requires a new Binance selected artifact, its nine replay reruns
-  and final combined boundary checks. Bybit and AsterDEX source/artifacts remain
-  unchanged; their recorded replay evidence still applies.
+  correction is reverified by a new Binance selected artifact, all nine Binance
+  replay reruns, strict WASM Clippy/bans and a fresh combined release build.
+  All 443 compiled SDK tests, 76 host tests, 16 product-semantic tests and 9
+  scripted live-smoke controls pass again on the final artifact. Bybit and
+  AsterDEX protocol code remains unchanged; their replay evidence still applies.
