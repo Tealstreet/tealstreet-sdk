@@ -289,13 +289,25 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
                 .and_then(|s| s.ret_msg.map(|m| m.into_owned()))
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("retCode {code}"));
-            Some((code, message))
+            // Signature diagnostics can contain the complete signed origin string.
+            Some((code, signing_rejection(code, &message).unwrap_or(message)))
         }
         None => Some((
             i64::from(response.status),
-            format!("HTTP {}: {}", response.status, response.body),
+            format!("HTTP {}", response.status),
         )),
     }
+}
+
+fn signing_rejection(code: i64, message: &str) -> Option<String> {
+    let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
+        "request signature rejected"
+    } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
+        "request timestamp outside receive window"
+    } else {
+        return None;
+    };
+    Some(format!("Bybit {reason} (retCode {code})"))
 }
 
 /// A rejection that is safe to resend once, re-signed: a bad signature
@@ -564,7 +576,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit rejected a signed request; resending it once: {text}"),
+            "Bybit rejected a signed request; resending it once",
         );
         taken.rest.resent = true;
         self.send(cx, taken.rest, taken.then);
@@ -1783,10 +1795,13 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { then, .. }) = pending else {
+        let Some(Pending { rest, then, .. }) = pending else {
             return;
         };
-        self.on_public_response(cx, then, Err(error));
+        // A rejected retry may arrive as a host error containing the signed origin URL.
+        let safe_error = (rest.signed && rest.resent)
+            .then_some("Bybit signed request failed after its signature retry");
+        self.on_public_response(cx, then, Err(safe_error.unwrap_or(error)));
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

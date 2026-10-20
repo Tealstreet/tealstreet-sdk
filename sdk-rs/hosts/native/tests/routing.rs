@@ -4,9 +4,9 @@
 #![allow(clippy::result_large_err)]
 
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{HttpRequest, Method, RequestId, SocketId};
+use safe_cex_engine::{Command, Engine, HttpRequest, Method, Notice, RequestId, SocketId};
 use safe_cex_native::{
-    HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
+    Host, HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
     SocketChannel, SocketChannelRule, Transport,
 };
 use serde::Deserialize;
@@ -1621,5 +1621,133 @@ async fn signed_requests_never_follow_cross_origin_redirects() {
             .await
             .is_err()
     );
+    server.await.unwrap();
+}
+
+const NOTICE_API_KEY: &str = "native-notice-api-key-sentinel";
+const NOTICE_SIGNATURE: &str = "native-notice-signature-sentinel";
+
+/// Keep Binance's real startup/command error paths; only route their requests to loopback.
+struct NoticeNetwork {
+    network: NetworkTransport,
+    signed_url: String,
+}
+impl Transport for NoticeNetwork {
+    fn connect(
+        &self,
+        _: SocketId,
+        _: String,
+        _: safe_cex_native::Events,
+    ) -> mpsc::UnboundedSender<String> {
+        // This test exercises real HTTP failures without opening exchange sockets.
+        mpsc::unbounded_channel().0
+    }
+    fn request(&self, mut request: HttpRequest, events: safe_cex_native::Events) {
+        request.url.clone_from(&self.signed_url);
+        request
+            .headers
+            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
+        self.network.request(request, events);
+    }
+}
+
+async fn signed_network_notices(origin: &str) -> Vec<Notice> {
+    let signed_url =
+        format!("{origin}/private?api_key={NOTICE_API_KEY}&signature={NOTICE_SIGNATURE}");
+    let engine = Engine::new(safe_cex_venue_binance::BinanceFutures::new(
+        safe_cex_venue_binance::Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+    ));
+    let transport = NoticeNetwork {
+        network: NetworkTransport::new(),
+        signed_url: signed_url.clone(),
+    };
+    let (commands, inbox) = mpsc::unbounded_channel();
+    let (notices, mut emitted) = mpsc::unbounded_channel();
+    let host = tokio::spawn(Host::new(engine, transport).run(
+        inbox,
+        Duration::from_millis(10),
+        |_| {},
+        move |notice| {
+            notices.send(notice).unwrap();
+        },
+    ));
+    commands
+        .send(Command::FetchCandles {
+            command: 411,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        })
+        .unwrap();
+    let mut collected = Vec::new();
+    let mut startup_failed = false;
+    let mut command_failed = false;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !startup_failed || !command_failed {
+            let notice = emitted.recv().await.expect("native host emitted a failure notice");
+            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message.starts_with("Binance startup request failed:"));
+            command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) });
+            collected.push(notice);
+        }
+    }).await.expect("real network failures reached startup log and command completion");
+    drop(commands);
+    host.await.unwrap();
+    while let Some(notice) = emitted.recv().await {
+        collected.push(notice);
+    }
+    // Inspect every notice, not only Log or the transport's intermediate event.
+    for notice in &collected {
+        let rendered = format!("{notice:?}");
+        let payload = match notice {
+            Notice::Log { message, .. } => message.as_str(),
+            Notice::CommandDone { result, .. } => match result {
+                Ok(value) | Err(value) => value.as_str(),
+            },
+            Notice::Deactivate => "",
+        };
+        for forbidden in [
+            NOTICE_API_KEY,
+            NOTICE_SIGNATURE,
+            signed_url.as_str(),
+            "http://",
+            "https://",
+        ] {
+            assert!(
+                !rendered.contains(forbidden) && !payload.contains(forbidden),
+                "native notice exposed authentication material: {rendered}"
+            );
+        }
+    }
+    collected
+}
+
+#[tokio::test]
+async fn signed_connection_and_body_failures_cannot_leak_through_any_native_notice() {
+    let (refused, refused_origin) = listener().await;
+    drop(refused);
+    let connection_notices = signed_network_notices(&refused_origin).await;
+    assert!(!connection_notices.is_empty());
+
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        // Binance startup and a real FetchCandles command both use NetworkTransport.
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = request_text(&mut stream).await;
+            assert!(request.contains(NOTICE_API_KEY));
+            assert!(request.contains(NOTICE_SIGNATURE));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\nconnection: close\r\n\r\nx")
+                .await
+                .unwrap();
+        }
+    });
+    let body_notices = signed_network_notices(&origin).await;
+    assert!(!body_notices.is_empty());
     server.await.unwrap();
 }

@@ -5,7 +5,7 @@ use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::model::{
     MarginType, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, RejectReason,
 };
-use safe_cex_engine::{Command, Event, HttpRequest, Method, Query};
+use safe_cex_engine::{Command, Event, HttpRequest, Method, Notice, Query};
 use safe_cex_venue_bybit::Options;
 use support::Harness;
 
@@ -64,7 +64,10 @@ fn respond_snapshot(h: &mut Harness) {
 
 /// A private engine with the account loaded and the private socket authenticated.
 fn ready() -> Harness {
-    let mut h = Harness::started(credentials());
+    ready_options(credentials())
+}
+fn ready_options(options: Options) -> Harness {
+    let mut h = Harness::started(options);
     respond_startup(&mut h);
     respond_snapshot(&mut h);
     let socket = h.socket("/v5/private").unwrap();
@@ -1107,4 +1110,128 @@ fn a_mode_switch_fences_old_position_snapshots_and_queues_a_refresh() {
     h.reply(mode.id, 200, r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":1,"size":"0"},{"symbol":"BTCUSDT","positionIdx":2,"size":"0"}]}}"#);
     let batch = h.take("/v5/order/create-batch");
     assert!(body(&batch).contains(r#""positionIdx":1}"#));
+}
+
+const LOG_SECRET: &str = "audit-origin-secret-value";
+const SIGNED_URL: &str = "https://api.bybit.com/v5/order/create?api_key=audit-origin-secret-value&signature=audit-origin-signature";
+fn log_safe_engine() -> Harness {
+    ready_options(Options {
+        key: Some(LOG_SECRET.into()),
+        secret: Some(LOG_SECRET.into()),
+        ..Options::default()
+    })
+}
+fn assert_private_notices_are_safe(h: &Harness) {
+    for notice in &h.notices {
+        let text = match notice {
+            Notice::Log { message, .. } => message.as_str(),
+            Notice::CommandDone { result, .. } => match result {
+                Ok(value) | Err(value) => value.as_str(),
+            },
+            Notice::Deactivate => "",
+        };
+        assert!(
+            !text.contains(LOG_SECRET),
+            "credential escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains(SIGNED_URL),
+            "signed URL escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains("audit-origin-signature"),
+            "signature escaped in {notice:?}"
+        );
+        assert!(
+            !text.contains("origin_string["),
+            "signed origin escaped in {notice:?}"
+        );
+    }
+}
+fn rejected_signed_origin(code: i64) -> String {
+    serde_json::json!({"retCode": code, "retMsg": format!("error sign! origin_string[1000{LOG_SECRET}20000category=linear] signed_url[{SIGNED_URL}]"), "result":{}, "retExtInfo":{"debug": LOG_SECRET}}).to_string()
+}
+#[test]
+fn signed_origin_never_escapes_on_retry_or_terminal_command_rejection() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        9001,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, &rejected_signed_origin(10004));
+    assert_private_notices_are_safe(&h);
+    let retry = h.take("/v5/order/create-batch");
+    h.reply(retry.id, 200, &rejected_signed_origin(10004));
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "signature rejection retries exactly once"
+    );
+    assert!(h.result(9001).unwrap().is_err());
+    assert!(h.logs.iter().any(|log| log.contains("retCode 10004")));
+    assert_private_notices_are_safe(&h);
+}
+#[test]
+fn signed_origin_in_private_read_retry_exhaustion_and_later_transport_failure_is_safe() {
+    for transport_failure in [false, true] {
+        let mut h = log_safe_engine();
+        h.advance(5000.0);
+        let request = h.take("/v5/account/wallet-balance");
+        h.reply(request.id, 200, &rejected_signed_origin(10004));
+        let retry = h.take("/v5/account/wallet-balance");
+        if transport_failure {
+            h.event(Event::HttpFailed {
+                request: retry.id,
+                error: SIGNED_URL,
+            });
+        } else {
+            h.reply(retry.id, 503, SIGNED_URL);
+        }
+        assert!(!h.has_request("/v5/account/wallet-balance"));
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("failed") || log.contains("HTTP 503"))
+        );
+        assert_private_notices_are_safe(&h);
+    }
+}
+#[test]
+fn receive_window_rejection_drops_echoed_credentials_but_keeps_clock_correction() {
+    let mut h = log_safe_engine();
+    h.advance(5000.0);
+    let response = serde_json::json!({"retCode":10002,"retMsg":format!("recv_window req_timestamp[6000],server_timestamp[8000], origin_string[{LOG_SECRET}] {SIGNED_URL}"),"result":{}}).to_string();
+    let request = h.take("/v5/account/wallet-balance");
+    h.reply(request.id, 200, &response);
+    assert_private_notices_are_safe(&h);
+    let retry = h.take("/v5/account/wallet-balance");
+    assert_eq!(
+        Harness::header(&retry, "X-BAPI-TIMESTAMP").as_deref(),
+        Some("8000")
+    );
+    h.reply(retry.id, 200, &response);
+    assert!(h.logs.iter().any(|log| log.contains("retCode 10002")));
+    assert_private_notices_are_safe(&h);
+}
+#[test]
+fn normal_business_rejections_remain_actionable_after_a_signature_retry() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        9002,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, &rejected_signed_origin(10004));
+    let retry = h.take("/v5/order/create-batch");
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"Available balance is insufficient","result":{}}"#,
+    );
+    let error = h.result(9002).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("Available balance is insufficient"));
+    assert!(!h.has_request("/v5/order/create-batch"));
+    assert_private_notices_are_safe(&h);
 }

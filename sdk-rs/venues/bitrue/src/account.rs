@@ -697,7 +697,10 @@ impl Bitrue {
         {
             cx.log(
                 LogLevel::Error,
-                format!("Bitrue private subscription failed: {text}"),
+                private_diagnostic(
+                    &format!("Bitrue private subscription failed ({event})"),
+                    message.code.parse::<i64>().ok(),
+                ),
             );
             self.restart_private(cx);
         }
@@ -1242,11 +1245,11 @@ impl Bitrue {
             crate::wire::check(&response).is_ok()
         };
         if !valid {
-            self.account_failed(
-                cx,
-                request,
-                &format!("Bitrue account request rejected: {}", response.body),
-            );
+            let code = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body)
+                .ok()
+                .and_then(|envelope| envelope.code.parse::<i64>().ok())
+                .or(Some(i64::from(response.status)));
+            self.account_failed_code(cx, request, code);
             return;
         }
         match request {
@@ -1269,7 +1272,7 @@ impl Bitrue {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'));
                     if !encoded {
-                        self.listen_failed(cx, "Malformed Bitrue listen key");
+                        self.listen_failed(cx, None, true);
                         return;
                     }
                     self.account.listen_key = Some(key.to_owned());
@@ -1281,7 +1284,7 @@ impl Bitrue {
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
                     self.account.health = Some(cx.set_timer(HEALTH_MS));
                 } else {
-                    self.listen_failed(cx, "Malformed Bitrue futures listen key response");
+                    self.listen_failed(cx, None, true);
                 }
             }
             Request::Keepalive { generation } => {
@@ -1432,7 +1435,7 @@ impl Bitrue {
             }
         }
     }
-    fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, code: Option<i64>, malformed: bool) {
         self.account.listen_pending = false;
         let delay = [250.0, 500.0, 1_000.0]
             .get(self.account.listen_attempt)
@@ -1441,7 +1444,14 @@ impl Bitrue {
         self.account.listen_attempt += 1;
         cx.log(
             LogLevel::Error,
-            format!("Bitrue futures private stream: {error}"),
+            private_diagnostic(
+                if malformed {
+                    "Bitrue futures private stream: malformed listen-key response"
+                } else {
+                    "Bitrue futures private stream: request rejected or unavailable"
+                },
+                code,
+            ),
         );
         self.account.reconnect = Some(cx.set_timer(delay));
     }
@@ -1451,24 +1461,36 @@ impl Bitrue {
         request: Request,
         error: &str,
     ) {
+        let body = error
+            .strip_prefix("response did not contain the expected list: ")
+            .unwrap_or(error);
+        let code = serde_json::from_str::<crate::wire::Envelope<'_>>(body)
+            .ok()
+            .and_then(|envelope| envelope.code.parse::<i64>().ok());
+        self.account_failed_code(cx, request, code);
+    }
+    fn account_failed_code(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        code: Option<i64>,
+    ) {
         match request {
             Request::Listen { generation } if generation == self.account.generation => {
-                self.listen_failed(cx, error)
+                self.listen_failed(cx, code, false)
             }
             Request::Keepalive { generation } if generation == self.account.generation => {
                 cx.log(
                     LogLevel::Error,
-                    format!("Bitrue listen key refresh failed: {error}"),
+                    private_diagnostic("Bitrue listen key refresh failed", code),
                 );
                 self.restart_private(cx);
             }
             Request::Snapshot { .. } => {
-                self.finish_leverage(cx, None, error);
+                let error = private_diagnostic("Bitrue account read failed", code);
+                self.finish_leverage(cx, None, &error);
                 self.account.snapshot_pending = false;
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue account read failed: {error}"),
-                );
+                cx.log(LogLevel::Error, error);
                 if std::mem::take(&mut self.account.snapshot_again) {
                     self.refresh_account(cx);
                 }
@@ -1476,7 +1498,7 @@ impl Bitrue {
             Request::Orders { symbol, lookup, .. } => {
                 cx.log(
                     LogLevel::Error,
-                    format!("Bitrue order read failed: {error}"),
+                    private_diagnostic("Bitrue order read failed", code),
                 );
                 if let Some((command, client_order_id)) = lookup {
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
@@ -1487,4 +1509,9 @@ impl Bitrue {
             _ => {}
         }
     }
+}
+
+// Only bounded numeric venue codes may cross this private diagnostic boundary.
+fn private_diagnostic(message: &str, code: Option<i64>) -> String {
+    code.map_or_else(|| message.into(), |code| format!("{message} (code {code})"))
 }

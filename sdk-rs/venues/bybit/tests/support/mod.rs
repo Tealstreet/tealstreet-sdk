@@ -27,6 +27,7 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub notices: Vec<Notice>,
 }
 
 impl Harness {
@@ -52,6 +53,7 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             logs: Vec::new(),
+            notices: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -74,6 +76,9 @@ impl Harness {
 
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
+            if let Action::Notice(notice) = &action {
+                self.notices.push(notice.clone());
+            }
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::SignPayload { .. } => {

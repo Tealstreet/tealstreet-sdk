@@ -318,3 +318,23 @@ live trading, weakened parity oracle, or performance threshold changes.
   then regenerate final tapes/replays and final quality checks on the merged
   source. Existing fixtures need no recapture. No lifecycle-only parity change
   or sampling-deadline/acceptance relaxation is authorized by this addition.
+
+### Named logging phase acceptance
+
+- Bitrue private failures now retain the operation and a parsed numeric code;
+  Bybit signing/window failures retain a fixed reason and code, with ordinary
+  business rejections still actionable. Retry counts, clock correction and
+  account recovery remain unchanged. Six venue regressions inspect every raw
+  notice payload for credential/signature/URL sentinels. All six fail against
+  the original implementations and pass after restoration; the full account
+  suites pass 48 tests. Independent correctness review accepted this phase.
+- A real native transport/engine regression covers both connection refusal and
+  truncated response bodies through Log and CommandDone notices. Disabling
+  connection URL stripping reproduces the leak. Disabling body URL stripping
+  does not: reqwest 0.13.5 already constructs stream decode errors without a
+  URL. Removed that redundant guard and retained the non-disclosure test;
+  this is explicitly not a claim of a reproduced body-stream defect.
+- Strict native/venue Clippy and formatting pass. The logging-phase scanner
+  exported 185 working-tree files against landing 702a62050c, zero findings,
+  without new exemptions. Final merged-source quality/replay/scanner receipts
+  supersede these checkpoints. Broader raw-body logging remains a later lane.

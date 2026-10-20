@@ -488,7 +488,7 @@ impl Transport for NetworkTransport {
                 });
                 let mut body = response.bytes_stream();
                 while let Some(chunk) = body.next().await {
-                    let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+                    let chunk = chunk.map_err(|error| error.to_string())?;
                     for piece in chunk.chunks(16 * 1024) {
                         let _ = events.send(HostEvent::HttpChunk(id, piece.to_vec()));
                     }

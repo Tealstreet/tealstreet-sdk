@@ -404,3 +404,87 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
+
+const LOG_SECRET: &str = "audit-private-stream-secret";
+const SIGNED_STREAM_URL: &str =
+    "wss://fapiws.bitrue.com/stream?listenKey=futures-key&signature=audit-private-stream-signature";
+fn assert_stream_notices_are_safe(h: &Harness) {
+    for action in &h.actions {
+        if let Action::Notice(notice) = action {
+            let text = match notice {
+                Notice::Log { message, .. } => message.as_str(),
+                Notice::CommandDone { result, .. } => match result {
+                    Ok(value) | Err(value) => value.as_str(),
+                },
+                Notice::Deactivate => "",
+            };
+            for secret in [
+                LOG_SECRET,
+                SIGNED_STREAM_URL,
+                "futures-key",
+                "audit-private-stream-signature",
+            ] {
+                assert!(!text.contains(secret), "private data escaped in {notice:?}");
+            }
+        }
+    }
+}
+#[test]
+fn private_subscription_rejection_and_followup_failures_never_log_echoed_credentials() {
+    for event in [
+        "user_account_update",
+        "user_order_update",
+        "user_balance_update",
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        h.e.handle(h.now, Event::WsOpened { socket: h.private });
+        h.collect();
+        let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
+        h.ws(&rejected);
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        h.fire_at(1001.0);
+        let request = h.take("listenKey");
+        h.respond(
+            request,
+            &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+                .to_string(),
+        );
+        assert_stream_notices_are_safe(&h);
+        h.fire_at(1251.0);
+        let request = h.take("listenKey");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: SIGNED_STREAM_URL,
+            },
+        );
+        h.collect();
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private stream") && message.contains("code 401"))));
+    }
+}
+#[test]
+fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
+    let mut h = Harness::new();
+    let snapshot = h.take("/account");
+    h.respond(
+        snapshot,
+        &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+            .to_string(),
+    );
+    let orders = h.take("/openOrders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: orders.id,
+            error: SIGNED_STREAM_URL,
+        },
+    );
+    h.collect();
+    h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
+    assert_stream_notices_are_safe(&h);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("account read failed") && message.contains("code 401"))));
+}
