@@ -167,7 +167,7 @@ fn reconnect_discards_book_and_ignores_diffs_until_fresh_snapshot() {
     let t = h
         .timers
         .iter()
-        .find(|(_, at)| *at == h.now + 1000.0)
+        .find(|(_, at)| (750. ..=1000.).contains(&(*at - h.now)))
         .unwrap()
         .0;
     h.now += 1000.0;
@@ -478,4 +478,50 @@ fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_in
         e.start(0.0);
         assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let mut h = H::new();
+    h.load();
+    h.subscribe();
+    socket_checks::flaps(h.e, h.socket.unwrap(), h.now);
+}
+
+#[test]
+fn new_market_interest_during_backoff_waits_and_restores_both_outcomes() {
+    let mut h = H::new();
+    h.load();
+    h.subscribe();
+    let old = h.socket.unwrap();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (timer, at) = *h
+        .timers
+        .iter()
+        .find(|(_, at)| (750. ..=1000.).contains(&(*at - h.now)))
+        .unwrap();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "election-No".into(),
+    }));
+    assert_eq!(
+        h.socket,
+        Some(old),
+        "new interest cannot bypass pending backoff"
+    );
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert_ne!(h.socket, Some(old));
+    h.event(Event::WsOpened {
+        socket: h.socket.unwrap(),
+    });
+    assert!(
+        h.sends
+            .iter()
+            .any(|text| text.contains(TOKEN) && text.contains("\"2\""))
+    );
 }

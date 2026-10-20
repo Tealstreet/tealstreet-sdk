@@ -245,3 +245,21 @@ reviews, affected checks and final CI now run against this merged source.
 The preceding table is explicitly the complete wire-integrated checkpoint;
 final post-listener numbers and merge status are recorded in PR #1355. No
 follow-up assignment will start after this PR lands, per wind-down.
+
+### Socket-supervisor landing integration
+
+PR #1355 reached 40/40 green checks at `42810f6bd2`. One synthetic HyroTrader
+steady-CPU timing failure (TS/Rust 3.8/4.1 ms) passed a single bounded rerun,
+after comparison with both passing prior-head and landing results. The evidence
+and unchanged hot-path comparison are posted on the PR; no thresholds changed.
+The redundant local replay repeat was stopped after compiled SDK, host, wire,
+server, harness, lifecycle and all four consumer tests passed; CI had completed
+the same full venue gates. Its canceled MCP smoke is not counted as a pass.
+
+GitHub then rejected the merge because landing advanced to `d17518bc5f`
+(PR #1350 socket supervision). Integrated it locally. The only conflicts were
+adjacent MEXC gate-handler edits (kept both exact mini-subscription correction
+and auth-recovery documentation) and appended Bitrue tests (kept both suites).
+Production auto-merges now receive independent integration reviews and affected
+checks; final CI must pass again before merge. The current final root checkpoint
+is 44/28/27 tasks, safe-cex 7,854 tests per runner; pre-supervisor native is 2,959.
