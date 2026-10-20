@@ -24,6 +24,10 @@ type SubscribedTopics = {
 };
 
 export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
+  private readonly bookResets = new Set<() => void>();
+  private readonly resetBooks = () => {
+    if (!this.isDisposed) for (const reset of this.bookResets) reset();
+  };
   topics: SubscribedTopics = {
     // add instrument_info topics to subscribe on
     instrumentInfo: 'instrumentInfo.all',
@@ -49,12 +53,14 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
+      this.ws.addEventListener('close', this.resetBooks);
       this.ws.addEventListener('close', this.onClose);
     }
   };
 
   onOpen = () => {
     if (!this.isDisposed) {
+      this.resetBooks();
       this.subscribe();
       this.ping();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
@@ -82,8 +88,12 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
     if (this.isDisposed) return;
     this.trackLastReceived();
 
-    if (data.includes('op":"ping')) {
-      this.send(JSON.stringify({ op: 'pong', args: [`${virtualClock.getCurrentTimeMs()}`] }));
+    if (data.includes('"op"') && data.includes('"ping"')) {
+      const control = jsonParse(data);
+      if (control?.op === 'ping') {
+        this.send(JSON.stringify({ op: 'pong', args: [`${virtualClock.getCurrentTimeMs()}`] }));
+        return;
+      }
     }
 
     // Extract `topic` once via targeted indexOf — see exchanges/CLAUDE.md
@@ -329,64 +339,60 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
     const topic = `orderBook200.H.${symbol}`;
     const orderBook: OrderBook = { bids: [], asks: [] };
 
+    let sequence: number | undefined;
+    const reset = (notify = false) => {
+      sequence = undefined;
+      const hadLevels = orderBook.bids.length > 0 || orderBook.asks.length > 0;
+      orderBook.bids = [];
+      orderBook.asks = [];
+      if (notify || hadLevels) callback(orderBook);
+    };
+    this.bookResets.add(reset);
+
+    const parseLevels = (levels: unknown): OrderBook['asks'] | undefined => {
+      if (levels === undefined) return [];
+      if (!Array.isArray(levels)) return undefined;
+      const parsed: OrderBook['asks'] = [];
+      for (const level of levels) {
+        if (!Array.isArray(level) || level.length !== 2) return undefined;
+        if (
+          level.some(
+            (value) =>
+              (typeof value !== 'string' && typeof value !== 'number') ||
+              (typeof value === 'string' && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)),
+          )
+        )
+          return undefined;
+        const price = Number(level[0]);
+        const amount = Number(level[1]);
+        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) return undefined;
+        parsed.push({ price, amount, total: 0 });
+      }
+      return parsed;
+    };
     const parser = (data: Data) => {
       const d = data.data;
-
+      if (!d || !Number.isSafeInteger(d.u) || d.u < 0) return;
+      const asks = parseLevels(d.a);
+      const bids = parseLevels(d.b);
+      // Validate the complete frame before touching either side or its cursor.
+      if (!asks || !bids) return;
       if (data.type === 'snapshot') {
         orderBook.bids = [];
         orderBook.asks = [];
-
-        const asks = d?.a;
-        if (asks) {
-          for (let i = 0; i < asks.length; i++) {
-            const o = asks[i];
-            orderBook.asks.push({
-              price: parseFloat(o[0]),
-              amount: parseFloat(o[1]),
-              total: 0,
-            });
-          }
+      } else if (data.type === 'delta') {
+        if (sequence === undefined || d.u <= sequence) return;
+        if (d.u !== sequence + 1) {
+          reset(true);
+          this.send(JSON.stringify({ op: 'unsubscribe', args: [topic] }));
+          this.send(JSON.stringify({ op: 'subscribe', args: [topic] }));
+          return;
         }
-        const bids = d?.b;
-        if (bids) {
-          for (let i = 0; i < bids.length; i++) {
-            const o = bids[i];
-            orderBook.bids.push({
-              price: parseFloat(o[0]),
-              amount: parseFloat(o[1]),
-              total: 0,
-            });
-          }
-        }
-      }
-
-      if (data.type === 'delta') {
-        const asks = d?.a;
-        if (asks) {
-          for (let i = 0; i < asks.length; i++) {
-            const o = asks[i];
-            updateOrderBook(orderBook, 'asks', {
-              price: parseFloat(o[0]),
-              amount: parseFloat(o[1]),
-              total: 0,
-            });
-          }
-        }
-        const bids = d?.b;
-        if (bids) {
-          for (let i = 0; i < bids.length; i++) {
-            const o = bids[i];
-            updateOrderBook(orderBook, 'bids', {
-              price: parseFloat(o[0]),
-              amount: parseFloat(o[1]),
-              total: 0,
-            });
-          }
-        }
-      }
-
+      } else return;
+      sequence = d.u;
+      for (const update of asks) updateOrderBook(orderBook, 'asks', update);
+      for (const update of bids) updateOrderBook(orderBook, 'bids', update);
       calcOrderBookTotal(orderBook);
-
       callback(orderBook);
     };
 
@@ -409,6 +415,7 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
     waitForConnectedAndSubscribe();
 
     return () => {
+      this.bookResets.delete(reset);
       this.messageHandlers[topic] = [...(this.messageHandlers[topic] || []).filter((f) => f !== parser)];
 
       if (!this.messageHandlers[topic].length) {

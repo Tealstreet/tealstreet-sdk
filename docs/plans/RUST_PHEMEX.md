@@ -263,3 +263,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - ApexOmniecb313026f landedwhile07c93f8459CIwasrunning. It addsonevenue/scopedwrapper+harnesspaths, no sharedengine/model/cryptoproductionchange. Preserve20feature/build/factoryregistration,exactPhemexcallerIDs/auth/bootstrap/oracle/memoryfixesandallpriorvenuehooks;independentboundedreviewsrequested. Expected66replays(24public42private)+7controls.
 - RequiredPhemex/BinancegatesalreadyPASSonunchangedvenuecode;verifynewaffectednative/SDK/harness/typecheck/lintandcommit/publishstablemerge promptly. Runcombined/localcontrolsinparallelwithfinal-headfullCIacceptance;all66replays+7controls/source/general/secretchecks mustgreenbeforemerge. ThisavoidsserializingunaffectedlocalrepeatsoverfullCI,withoutomittingfinalexact-headgates.
+
+### Apex Omni source publication checkpoint
+
+-20optionalfeatures/factories/buildentriespreserved;independentharness/WASM/wrapperreviewsandcross-reviewsCLEAN. AllPhemex/Binance/PMcaller-IDrules/mints/unconditionalguardsremainexact;sharedensureHostpreservesoneinitialization/startup/disposalguardsandApex-onlyaccount-before-startbehavior. Apextypedoptions/account/historyscopeiscorrect;all3WSAPIs/routing/newcommandsretained. No sharedengine/model/crypto/Phemexsourcechange.
+-191affectednativePASS(86Phemex,99Apex,6WASM),181SDK/20filesPASS,308harnessPASS,bans/fmt/lockedmetadata/workspace+WASMclippy/typecheck44/lint28PASS. Commit/publishstablemergeforfullCI66replays(24public42private)+7controls,whilecombined20-featurehost/SDKWASMboundaryandlocalPhemex/Binance/Apexreplaysruninparallel. Noneofthese pendingfinalgatechecksisbeingclaimedcomplete.
