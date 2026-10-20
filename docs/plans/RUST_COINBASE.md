@@ -27,7 +27,7 @@ JSON emulation described by stale Coinbase documentation.
    auth, permission probes, snapshot races, fill replay and CFM units; review,
    fix, commit.
 3. Trading: preflight full batches and caller IDs; Market, Limit and StopLoss
-   configurations; CFM quantity conversion; stable-ID spot edits with exact
+   configurations; native CFM contract quantities; stable-ID spot edits with exact
    provenance; confirmed INTX cancel/replace; per-ID batch cancellation; fixed
    one-way/cross/leverage behavior. No automatic write retries. Verify ambiguous
    responses and cancellation failures; review, fix, commit.
@@ -177,3 +177,23 @@ Clippy pass; engine 49 tests and JS frame 7 tests pass. The currency extension's
 presence flag preserves independent absent/empty collateral and spot holdings.
 Future trading/query hooks have explicit temporary lint expectations, removed
 when their following phase consumes them. No replay or live private gate claimed.
+
+### Phase 3 checkpoint
+
+Native placement, exact caller IDs, confirmed INTX cancellation before replacement,
+proof-checked spot edits, per-ID cancellation and fixed account settings are wired.
+Placement amounts retain venue units (CFM contracts); store orders retain base units.
+The optional engine account identity exposes only the selected portfolio.
+
+Independent code-correctness reviews found and fixed queued cancel-all omitting
+earlier accepted jobs, late create acknowledgements resurrecting terminal orders,
+and closing fills releasing reserved exposure before causal position reconciliation.
+Grouped execution reservations now cover overlapping own and external orders,
+retain ambiguous writes, and require fresh post-event position evidence before
+release. This is a bounded client-side reduce constraint; the API has no native
+reduce-only flag and cannot make external concurrent trading atomic.
+
+Verification: 67 venue tests pass (8 module, 16 account, 17 public, 26 trading),
+including the race regressions; strict targeted Clippy passes. Known TS corrections
+include per-ID cancellation outcomes, confirmed cancel/replace, placement caller
+IDs/order prices, and explicit fixed-setting limitations. Replay gates remain open.

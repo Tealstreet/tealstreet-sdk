@@ -9,7 +9,6 @@ const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
 #[derive(Clone)]
-#[expect(dead_code, reason = "consumed by the following trading phase")]
 pub(crate) struct Editable {
     pub native_product: String,
     pub price: String,
@@ -44,6 +43,7 @@ pub enum Request {
     Positions {
         rows: Vec<Position>,
         invalid: bool,
+        read_revision: u64,
     },
     Orders(Orders),
 }
@@ -79,6 +79,9 @@ pub(crate) struct Account {
     backoff_until: f64,
     revision: u64,
     snapshot_revision: u64,
+    position_read_revision: Option<u64>,
+    position_generation: u64,
+    terminal_fills: HashMap<String, (u64, f64)>,
     versions: HashMap<String, u64>,
     totals: HashMap<String, f64>,
     fill_values: HashMap<String, f64>,
@@ -88,13 +91,24 @@ pub(crate) struct Account {
     has_snapshot: bool,
     pending_clients: HashSet<String>,
 }
-#[expect(dead_code, reason = "consumed by the following trading phase")]
 impl Account {
     pub(crate) fn editable(&self, id: &str) -> Option<&Editable> {
         self.proofs.get(id)
     }
     pub(crate) fn is_intx(&self) -> bool {
         self.kind == Some(ProductKind::Intx)
+    }
+    pub(crate) fn position_read_revision(&self) -> Option<u64> {
+        self.position_read_revision
+    }
+    pub(crate) fn position_generation(&self) -> u64 {
+        self.position_generation
+    }
+    pub(crate) fn order_revision(&self, id: &str) -> u64 {
+        self.versions.get(id).copied().unwrap_or(0)
+    }
+    pub(crate) fn terminal_fill(&self, id: &str) -> Option<(u64, f64)> {
+        self.terminal_fills.get(id).copied()
     }
 }
 fn decimal(s: &str) -> Result<f64, String> {
@@ -146,9 +160,10 @@ fn market<'a>(store: &'a safe_cex_engine::Store, product: &str) -> Option<&'a Ma
     let alias = if let Some(base) = product.strip_suffix("-USD") {
         Some(format!("{base}-USDC"))
     } else {
-        product.strip_suffix("-USDC")
+        product
+            .strip_suffix("-USDC")
             .filter(|_| !matches!(product, "USDT-USDC" | "EURC-USDC"))
-            .map(|base|format!("{base}-USD"))
+            .map(|base| format!("{base}-USD"))
     };
     if product.ends_with("-USD")
         && let Some(m) = alias.as_deref().and_then(|s| store.market(s))
@@ -173,7 +188,10 @@ struct Mapped {
     proof: Option<Editable>,
     average: f64,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "consumed by the following query phase"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "consumed by the following query phase")
+)]
 pub(crate) fn map_order(
     store: &safe_cex_engine::Store,
     text: &str,
@@ -638,6 +656,7 @@ impl Coinbase {
                     Request::Positions {
                         rows: vec![],
                         invalid: false,
+                        read_revision: self.account.revision,
                     },
                 )
             }
@@ -662,7 +681,6 @@ impl Coinbase {
             )
         }
     }
-    #[expect(dead_code, reason = "consumed by the following trading phase")]
     pub(crate) fn private_placement_started(&mut self, client_id: &str) -> Result<(), String> {
         if self.account.pending_clients.len() >= 1000 {
             return Err("Coinbase unresolved placement limit".into());
@@ -670,11 +688,9 @@ impl Coinbase {
         self.account.pending_clients.insert(client_id.into());
         Ok(())
     }
-    #[expect(dead_code, reason = "consumed by the following trading phase")]
     pub(crate) fn private_placement_finished(&mut self, client_id: &str) {
         self.account.pending_clients.remove(client_id);
     }
-    #[expect(dead_code, reason = "consumed by the following trading phase")]
     pub(crate) fn private_after_write(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.revision = self.account.revision.wrapping_add(1);
         if let Some(t) = self.account.write_timer.take() {
@@ -689,15 +705,23 @@ impl Coinbase {
             .insert(id.into(), self.account.revision);
         self.account.proofs.remove(id);
     }
-    #[expect(dead_code, reason = "consumed by the following trading phase")]
     pub(crate) fn private_order_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
         self.private_order_changed(id);
+        let filled = cx
+            .store
+            .order(id)
+            .and_then(|o| o.extra.as_ref().and_then(|e| e.filled_in_placement_units))
+            .unwrap_or(0.0);
+        self.account
+            .terminal_fills
+            .insert(id.into(), (self.account.revision, filled));
         if self.account.terminal.insert(id.into()) {
             self.account.terminal_fifo.push_back(id.into());
         }
         while self.account.terminal_fifo.len() > MAX_ROWS {
             if let Some(old) = self.account.terminal_fifo.pop_front() {
                 self.account.terminal.remove(&old);
+                self.account.terminal_fills.remove(&old);
                 self.account.versions.remove(&old);
                 self.account.totals.remove(&old);
                 self.account.fill_values.remove(&old);
@@ -1062,7 +1086,11 @@ impl Coinbase {
                         cx.store.set_balance(Balance::default());
                     }
                 }
-                Request::Positions { mut rows, invalid } => {
+                Request::Positions {
+                    mut rows,
+                    invalid,
+                    read_revision,
+                } => {
                     self.account.inflight[2] = false;
                     if invalid {
                         return Err("Coinbase rejected partial position snapshot".into());
@@ -1104,6 +1132,10 @@ impl Coinbase {
                         });
                     }
                     cx.store.set_positions(rows);
+                    self.account.position_read_revision = Some(read_revision);
+                    self.account.position_generation =
+                        self.account.position_generation.wrapping_add(1);
+                    self.trading_positions(cx);
                     if self.account.kind == Some(ProductKind::Intx) && cx.store.loaded().balance {
                         let mut b = cx.store.balance().clone();
                         b.upnl = upnl;
@@ -1530,18 +1562,30 @@ impl Coinbase {
             self.account.proofs.insert(o.id.clone(), proof);
         }
         if o.status != OrderStatus::Open {
+            let native = o
+                .extra
+                .as_ref()
+                .and_then(|e| e.filled_in_placement_units)
+                .unwrap();
+            self.account
+                .terminal_fills
+                .insert(o.id.clone(), (self.account.revision, native));
             if self.account.terminal.insert(o.id.clone()) {
                 self.account.terminal_fifo.push_back(o.id.clone());
             }
             while self.account.terminal_fifo.len() > MAX_ROWS {
                 if let Some(id) = self.account.terminal_fifo.pop_front() {
                     self.account.terminal.remove(&id);
+                    self.account.terminal_fills.remove(&id);
                     self.account.versions.remove(&id);
                     self.account.totals.remove(&id);
                     self.account.fill_values.remove(&id);
                     self.account.proofs.remove(&id);
                 }
             }
+        }
+        if o.filled > old.unwrap_or(0.0) {
+            self.trading_observed_fill(cx, &o, old.unwrap_or(0.0));
         }
         if let Some(s) = &mut self.account.snapshot {
             if let Some(p) = self.account.proofs.get(&o.id) {

@@ -4,6 +4,7 @@ mod account_wire;
 mod public;
 mod rest;
 mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::Book;
@@ -29,6 +30,7 @@ pub enum ProductKind {
 pub enum Pending {
     Public(public::Request),
     Account(account::Request),
+    Trading(trading::Request),
 }
 pub struct Coinbase {
     pub(crate) options: Options,
@@ -36,6 +38,7 @@ pub struct Coinbase {
     pub(crate) credentials: Option<sign::Credentials>,
     rest: rest::Rest,
     pub(crate) account: account::Account,
+    pub(crate) trading: trading::Trading,
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
@@ -56,11 +59,15 @@ impl Coinbase {
             credentials,
             rest: rest::Rest::default(),
             account: account::Account::default(),
+            trading: trading::Trading::default(),
         })
     }
 }
 impl Venue for Coinbase {
     type Pending = Pending;
+    fn account_id(&self) -> Option<&str> {
+        self.account.portfolio_id.as_deref()
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_some() {
             self.private_start(cx);
@@ -87,18 +94,21 @@ impl Venue for Coinbase {
         match pending {
             Pending::Public(p) => self.public_response(cx, p, response),
             Pending::Account(p) => self.private_on_response(cx, p, response),
+            Pending::Trading(p) => self.trading_response(cx, p, response),
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Public(p) => self.public_item(cx, p, item),
             Pending::Account(p) => self.private_on_item(cx, p, item),
+            Pending::Trading(_) => {}
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Public(p) => self.public_failed(cx, p, error),
             Pending::Account(p) => self.private_failed(cx, p, error),
+            Pending::Trading(p) => self.trading_failed(cx, p, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -117,7 +127,9 @@ impl Venue for Coinbase {
             | Command::SetPositionMode { command, .. }
             | Command::FetchLeverage { command, .. }
             | Command::Query { command, .. },
-        ) = self.public_command(cx, command)
+        ) = self
+            .public_command(cx, command)
+            .and_then(|command| self.trading_command(cx, command))
         {
             cx.done(command, Err("Coinbase account is not ready".into()));
         }

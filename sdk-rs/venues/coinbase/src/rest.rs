@@ -81,6 +81,13 @@ impl Coinbase {
                 return;
             }
         };
+        if let Pending::Trading(pending) = &request.pending
+            && let Err(error) = self.trading_before_dispatch(cx, pending)
+        {
+            self.on_request_failed(cx, request.pending, &error);
+            self.dispatch(cx);
+            return;
+        }
         let url = if public && request.path.starts_with("https://") {
             request.path
         } else {

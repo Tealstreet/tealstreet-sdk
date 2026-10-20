@@ -149,6 +149,14 @@ fn user_order(id: &str, product: &str, status: &str, filled: &str, left: &str) -
         r#"{{"order_id":"{id}","client_order_id":"client-{id}","product_id":"{product}","status":"{status}","order_side":"BUY","order_type":"Limit","cumulative_quantity":"{filled}","leaves_quantity":"{left}","limit_price":"100","stop_price":"0","avg_price":"100"}}"#
     )
 }
+
+#[test]
+fn account_identity_tracks_selected_portfolio_after_discovery() {
+    let session = Session::new("DEFAULT", true);
+    assert_eq!(session.e.account_id(), None);
+    let session = session.ready();
+    assert_eq!(session.e.account_id(), Some("portfolio-one"));
+}
 #[test]
 fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
     let s = Session::new("DEFAULT", true).ready();
