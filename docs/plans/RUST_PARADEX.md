@@ -357,3 +357,20 @@ Its14-frame private replay passes without changing correctness requirements.
 No additional source change or single-Binance artifact was needed. All mandatory
 local port gates are now complete. Final exact-head CI remains the merge gate;
 posted independent adversarial reports have no unresolved blocking finding.
+
+### KuCoin landing integration
+
+KuCoin #1312 landed during final CI. Merged its workspace and host registrations,
+signed request contracts and welcome-message bootstrap while retaining Paradex's
+binary ingress, signature verification, lifecycle routing and explicit observation
+horizon. A single-KuCoin credential cfg omission is corrected in the composed
+host. Independent SDK/host review and both-parent harness review pass: 105 native
+Paradex tests, Paradex and single-KuCoin Clippy, and 269 harness tests pass.
+Final artifact/gate measurements and exact-head CI are tracked on PR #1320.
+
+The complete repository test run before this integration passed all 27 tasks;
+both safe-cex suites passed 7,048 tests across 481 files. A docs-only CI head
+exposed a 0.3ms WOO steady-CPU sample reversal on its 77-frame tape; independent
+review verified identical code/base/artifact and the prior passing control. No
+threshold, tape or correctness check was changed. This integration still requires
+green CI for every venue before merge.

@@ -19,8 +19,7 @@ export const withTimeout = async (promise, label, ms = 30000) => {
   }
 };
 export const within = (promise, ms, label) => withTimeout(promise, label, ms);
-export const canonicalUrl = (url, callerIds = new Set(), venue = {}) =>
-  strictUrl(venue.requestUrl?.(url) ?? url, callerIds);
+export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => strictUrl(venue.requestUrl?.(url) ?? url, callerIds, venue);
 export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
   const url = 'https://api.mexc.com/api/v1/private/order/cancel';
   const prefix = requestKey('POST', url, undefined, callerIds, venue);
@@ -217,8 +216,20 @@ export class Tape {
       )
       .map((record) => this.keyFor(record.method, record.url, record.requestBody));
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
-    this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers });
-    this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url), true, impl);
+    this.audit = this.venue.createSocketAudit?.(impl, {
+      isPrivate: this.isPrivate,
+      books: this.bookSymbols,
+      tickers: this.publicTickers,
+      records: this.records,
+    });
+    this.responses = new Responses(
+      this.records,
+      this.keyFor,
+      this.venue.checkRequest,
+      (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url),
+      true,
+      impl,
+    );
     this.frames = this.records.filter((r) => (r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open' || r.type === 'wait') && !this.venue.skipFrame?.(r));
     if (this.frames.some((frame) => frame.type === 'wait' && (!Number.isFinite(frame.t) || frame.t < 0)))
       throw new Error('Invalid replay wait timestamp');
@@ -229,10 +240,12 @@ export class Tape {
       const data = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
       const stream = this.venue.streamOf?.(data);
       if (!stream) continue;
-      const key = `${strictUrl(frame.url, this.callerIds)} ${frame.socket}`;
+      const key = `${canonicalUrl(frame.url, this.callerIds, this.venue)} ${frame.socket}`;
       if (!this.lifecycleStreams.has(key)) this.lifecycleStreams.set(key, new Set());
       this.lifecycleStreams.get(key).add(stream);
     }
+    this.startupDelivered = new Set();
+
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
@@ -375,24 +388,17 @@ export class Tape {
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
     const response = this.bitget || this.venue.validateMatchedRequest
-      ? this.responses.respond(
-          method,
-          url,
-          body,
-          this.commandIndex,
-          (record) => {
-            this.validateBitgetMatch(record, method, url, body);
-            this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
-          },
-          elapsed,
-        )
-      : this.responses.respond(method, url, body, this.commandIndex, elapsed);
+      ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        this.validateBitgetMatch(record, method, url, body);
+        this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+      }, elapsed, headers)
+      : this.responses.respond(method, url, body, this.commandIndex, elapsed, headers);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
     return response;
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, this.callerIds);
+    const key = canonicalUrl(url, this.callerIds, this.venue);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
     const socket = {
@@ -413,6 +419,17 @@ export class Tape {
       if (!this.open.has(key)) this.open.set(key, new Set());
       this.open.get(key).add(socket);
       onOpen();
+      // Bootstrap only the first recorded frame for this exact connection. A
+      // business frame or close before welcome must keep startup fail-closed.
+      if (!socket.closed && !this.playing && this.venue.startupMessage) {
+        const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command' && record.type !== 'wait'
+          && !this.startupDelivered.has(record) && canonicalUrl(record.url, this.callerIds, this.venue) === key
+          && (record.socket === undefined || record.socket === socket.ordinal));
+        if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
+          this.startupDelivered.add(frame);
+          this.deliver(socket, frame.text);
+        }
+      }
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
@@ -481,7 +498,13 @@ export class Tape {
     }
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
+        if (!socket.closed) this.deliver(socket, 'pong');
+      });
+      return;
+    }
+    if (this.venue.respondToJsonPing && message?.type === 'ping') {
+      setImmediate(() => {
+        if (!socket.closed) this.deliver(socket, JSON.stringify({ type: 'pong', id: message.id }));
       });
       return;
     }
@@ -609,11 +632,8 @@ export class Tape {
   }
 
   async socketFor(url, text, ordinal) {
-    if (typeof text === 'number') {
-      ordinal = text;
-      text = undefined;
-    }
-    const key = strictUrl(url, this.callerIds);
+    if (typeof text === 'number') { ordinal = text; text = undefined; }
+    const key = canonicalUrl(url, this.callerIds, this.venue);
     const stream = text && this.venue.streamOf?.(text);
     const lifecycleKey = ordinal === undefined ? undefined : `${key} ${ordinal}`;
     const streams = this.venue.subscriptionRouting && lifecycleKey ? this.lifecycleStreams.get(lifecycleKey) : undefined;
@@ -673,14 +693,9 @@ export class Tape {
 
   async deliverFrame(frame) {
     const latest = await this.socketFor(frame.url, frame.text, frame.socket);
-    const sockets =
-      this.bitget && frame.socket === undefined
-        ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds)) ?? [])].filter((socket) => !socket.closed)
-        : [latest];
-    if (frame.type === 'close') {
-      for (const socket of sockets) this.close(socket, frame.code ?? 1006);
-      return;
-    }
+    const sockets = this.bitget && frame.socket === undefined
+      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? [])].filter((socket) => !socket.closed) : [latest];
+    if (frame.type === 'close') { for (const socket of sockets) this.close(socket, frame.code ?? 1006); return; }
     if (frame.type === 'open') return;
     let arg;
     try {
@@ -708,7 +723,7 @@ export class Tape {
         await ready(!this.venue.bootstrapPrivateFromTape);
         // Native and TS outboxes batch sends independently of handler registration.
         // Begin the tape only after every seed-derived startup topic reached send.
-        while (this.pendingStartupSubscriptions || (this.audit && !this.audit.ready())) {
+        while (this.pendingStartupSubscriptions || (this.audit?.ready && !this.audit.ready())) {
           if (performance.now() >= startupDeadline) throw new ReplayTimeout('replay timeout: startup subscriptions');
           await new Promise((resolve) => setTimeout(resolve, 1));
         }
@@ -717,6 +732,7 @@ export class Tape {
       'Replay startup',
     );
     begin();
+    this.playing = true;
     clock?.start();
     this.replayClock = clock;
     const start = performance.now();
@@ -750,6 +766,8 @@ export class Tape {
         );
       } else if (frame.type === 'wait') {
         // Observe timers at this explicit horizon without inventing socket traffic.
+      } else if (this.startupDelivered.has(frame)) {
+        // Still advance tape time, frame count and tick callbacks below.
       } else if (this.bitget) {
         await this.deliverFrame(frame);
       } else {

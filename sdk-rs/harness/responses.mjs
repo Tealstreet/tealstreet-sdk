@@ -22,10 +22,12 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, matchTime = 0) {
+  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, timeOrHeaders, matchHeaders) {
+    // Time, signed headers and pre-consumption validation are independent inputs.
     const onMatch = typeof timeOrMatch === 'function' ? timeOrMatch : undefined;
-    const elapsed = onMatch ? matchTime : timeOrMatch;
-    const queue = this.check?.(method, url, body) === false ? undefined : this.queues.get(this.key(method, url, body));
+    const elapsed = onMatch ? (timeOrHeaders ?? 0) : timeOrMatch;
+    const headers = onMatch ? matchHeaders : timeOrHeaders;
+    const queue = this.check?.(method, url, body, headers) === false ? undefined : this.queues.get(this.key(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };

@@ -159,6 +159,15 @@ test('Crypto authenticated POST reads reuse snapshots while writes remain single
   assert.equal(responses.unusedWrites(), 0);
 });
 
+test('response time visibility and header authentication remain independent', () => {
+  const url = 'https://venue.test/private';
+  const records = [{ type: 'http', method: 'GET', url, availableAfter: 100, status: 200, body: '{}' }];
+  const responses = new Responses(records, () => 'read', (_method, _url, _body, headers) => headers?.auth === 'fixture', () => false);
+  assert.equal(responses.respond('GET', url, undefined, 0, 99, { auth: 'fixture' }).status, 599);
+  assert.equal(responses.respond('GET', url, undefined, 0, 100, {}).status, 599);
+  assert.equal(responses.respond('GET', url, undefined, 0, 100, { auth: 'fixture' }).status, 200);
+});
+
 test('implementation-specific responses preserve exact matching and selected write consumption', () => {
   const make = (requestBody, impl) => ({
     type: 'http',
