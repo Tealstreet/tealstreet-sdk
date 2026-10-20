@@ -647,7 +647,7 @@ impl WasmEngine {
                 secret: options.secret,
             }))),
             #[cfg(feature = "bitget")]
-            "bitget" | "bitgetusdc" => {
+            "bitget" | "bitgetusdc" | "bitgetinverse" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
                     && options.secret.as_ref().is_some_and(|s| !s.is_empty())
@@ -661,7 +661,9 @@ impl WasmEngine {
                     key: options.key,
                     secret: options.secret,
                     passphrase: options.passphrase,
-                    product: if venue == "bitgetusdc" {
+                    product: if venue == "bitgetinverse" {
+                        Product::Inverse
+                    } else if venue == "bitgetusdc" {
                         Product::Usdc
                     } else {
                         Product::Usdt

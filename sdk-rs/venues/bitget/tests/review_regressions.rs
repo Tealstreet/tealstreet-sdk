@@ -127,6 +127,7 @@ fn older_rest_positions_preserve_side_specific_isolated_hedge_leverage() {
                 200,
                 r#"{"code":"00000","data":[]}"#,
             );
+            h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
             h.login();
             h
         } else {

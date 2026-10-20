@@ -112,6 +112,8 @@ struct Income {
     timestamp: f64,
     tran_id: String,
     category: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fee: Option<f64>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,6 +212,25 @@ struct Cursor<'a> {
     end_id: Option<Identifier<'a>>,
 }
 
+// https://www.bitget.com/docs/catalog/account/assets-balance#get-financial-records
+#[derive(Deserialize)]
+struct UtaBill<'a> {
+    #[serde(borrow)]
+    id: Identifier<'a>,
+    #[serde(default, borrow)]
+    category: &'a str,
+    #[serde(default, borrow)]
+    symbol: &'a str,
+    #[serde(borrow)]
+    coin: &'a str,
+    #[serde(rename = "type", borrow)]
+    kind: &'a str,
+    amount: Number,
+    #[serde(default)]
+    fee: Option<Number>,
+    ts: Number,
+}
+
 impl BitgetFutures {
     pub(crate) fn start_query(
         &mut self,
@@ -306,13 +327,6 @@ impl BitgetFutures {
     fn query_request(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request) {
         let public = matches!(r.query, Query::PublicTrades { .. });
         r.uta = self.account.uta;
-        if r.uta && matches!(r.query, Query::Income { .. }) {
-            cx.done(
-                r.command,
-                Err("Bitget UTA income history is not supported".into()),
-            );
-            return;
-        }
         let (endpoint, symbol, order, limit) = match &r.query {
             Query::OrderByClientId { .. } => {
                 cx.done(
@@ -346,7 +360,16 @@ impl BitgetFutures {
                 None,
                 *limit,
             ),
-            Query::Income { limit, .. } => ("/api/v2/mix/account/bill", None, None, *limit),
+            Query::Income { limit, .. } => (
+                if r.uta {
+                    "/api/v3/account/financial-records"
+                } else {
+                    "/api/v2/mix/account/bill"
+                },
+                None,
+                None,
+                *limit,
+            ),
             Query::PublicTrades { symbol, limit } => (
                 "/api/v2/mix/market/fills",
                 Some(symbol.as_str()),
@@ -409,11 +432,19 @@ impl BitgetFutures {
             Method::Get,
             format!("{}{path}", paths::REST),
             headers,
-            ArrayAt::Envelope(ARRAYS),
+            if r.uta && matches!(r.query, Query::Income { .. }) {
+                ArrayAt::Path(&["data", "list"])
+            } else {
+                ArrayAt::Envelope(ARRAYS)
+            },
             Pending::History(Box::new(r)),
         );
     }
-    pub(crate) fn query_item(&self, r: &mut Request, item: &str) {
+    pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
+        if r.uta && matches!(r.query, Query::Income { .. }) {
+            self.query_uta_bill(r, item);
+            return;
+        }
         let Ok(n) = serde_json::from_str::<Native<'_>>(item) else {
             r.invalid = true;
             return;
@@ -508,6 +539,22 @@ impl BitgetFutures {
                         }
                     })
                     .sum::<f64>();
+                let commission_asset = if let Some(asset) = n
+                    .fee_detail
+                    .first()
+                    .map(|f| f.fee_coin)
+                    .filter(|s| !s.is_empty())
+                {
+                    asset
+                } else if self.inverse() {
+                    let Some(market) = cx.store.market(&symbol) else {
+                        r.invalid = true;
+                        return;
+                    };
+                    market.base.as_str()
+                } else {
+                    self.coin()
+                };
                 r.page.push(Row::Fill(Execution {
                     id: id.into_owned(),
                     timestamp: (time / 1000.0).floor(),
@@ -517,13 +564,7 @@ impl BitgetFutures {
                     qty,
                     side,
                     commission: if r.uta { fee } else { -fee },
-                    commission_asset: n
-                        .fee_detail
-                        .first()
-                        .map(|f| f.fee_coin)
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(self.coin())
-                        .into(),
+                    commission_asset: commission_asset.into(),
                     position_side,
                     realized_pnl: if r.uta {
                         n.exec_pnl.0
@@ -661,6 +702,7 @@ impl BitgetFutures {
                             timestamp: time,
                             tran_id: format!("{id}:{suffix}"),
                             category,
+                            fee: None,
                         }));
                     }
                 }
@@ -689,6 +731,49 @@ impl BitgetFutures {
                 }));
             }
         }
+    }
+    fn query_uta_bill(&self, r: &mut Request, item: &str) {
+        let Ok(n) = serde_json::from_str::<UtaBill<'_>>(item) else {
+            r.invalid = true;
+            return;
+        };
+        r.page_count += 1;
+        if !n.category.is_empty() && !n.category.eq_ignore_ascii_case(self.product()) {
+            return;
+        }
+        let Query::Income { symbol, kind, .. } = &r.query else {
+            return;
+        };
+        if symbol
+            .as_ref()
+            .is_some_and(|s| !s.eq_ignore_ascii_case(n.symbol))
+            || kind.as_ref().is_some_and(|k| k != n.kind)
+        {
+            return;
+        }
+        let id = n.id.text();
+        if id.is_empty()
+            || n.kind.is_empty()
+            || n.coin.is_empty()
+            || n.ts.get() <= 0.0
+            || n.amount.0.is_none()
+            || n.fee.is_some_and(|fee| fee.0.is_none())
+        {
+            r.invalid = true;
+            return;
+        }
+        // Amount is the venue's signed ledger change. Keep its fee as metadata;
+        // the v3 schema does not establish that adding it again is a new delta.
+        r.page.push(Row::Income(Income {
+            symbol: n.symbol.to_ascii_uppercase(),
+            income_type: n.kind.into(),
+            income: n.amount.get(),
+            asset: n.coin.into(),
+            timestamp: n.ts.get(),
+            tran_id: format!("{id}:{}", uta_income_category(n.kind)),
+            category: uta_income_category(n.kind),
+            fee: n.fee.and_then(|f| f.0),
+        }));
     }
     pub(crate) fn query_response(
         &mut self,
@@ -820,6 +905,54 @@ fn side(s: &str) -> Option<&'static str> {
         Some("sell")
     } else {
         None
+    }
+}
+// https://www.bitget.com/docs/uta/enum#type-financial-records
+fn uta_income_category(kind: &str) -> &'static str {
+    match kind {
+        "CONTRACT_MAIN_SETTLE_FEE_USER_IN"
+        | "CONTRACT_MAIN_SETTLE_FEE_USER_OUT"
+        | "MARGIN_SETTLE_FEE_USER_IN"
+        | "MARGIN_SETTLE_FEE_USER_OUT"
+        | "RWA_CROSS_SETTLE_FEE_USER_IN"
+        | "RWA_CROSS_SETTLE_FEE_USER_OUT"
+        | "RWA_FIXED_SETTLE_FEE_USER_IN"
+        | "RWA_FIXED_SETTLE_FEE_USER_OUT"
+        | "RWA_CONTRACT_MAIN_SETTLE_FEE_USER_IN"
+        | "RWA_CONTRACT_MAIN_SETTLE_FEE_USER_OUT" => "funding",
+        "ORDER_PLF_FEE_OUT" => "commission",
+        "TRANSFER_IN"
+        | "TRANSFER_OUT"
+        | "RESERVE_TRANSFER_IN"
+        | "RESERVE_TRANSFER_OUT"
+        | "LIQ_TRANSFER_IN"
+        | "LIQ_TRANSFER_OUT"
+        | "ON_CHAIN_TRANSFER_REFUND"
+        | "ON_CHAIN_TRANSFER_OUT"
+        | "MT5_TRANSFER_IN"
+        | "MT5_REFUND_IN"
+        | "MT5_TRANSFER_OUT"
+        | "TRACE_TRANSFER_USER_OUT"
+        | "TRACE_TRANSFER_USER_IN"
+        | "TRACE_TRANSFER_REFUND_IN"
+        | "FINANCIAL_TRANSFER_OUT"
+        | "FINANCIAL_TRANSFER_IN"
+        | "CONVERT_TRANSFER_IN"
+        | "CONVERT_TRANSFER_OUT"
+        | "BGPAY_TRANSFER_OUT"
+        | "BGPAY_REFUND_IN"
+        | "WITHDRAW_TRANSFER_OUT"
+        | "WITHDRAW_TRANSFER_IN" => "transfer",
+        "BURST_CLOSE_LONG"
+        | "BURST_CLOSE_SHORT"
+        | "BURST_BUY_SSM"
+        | "BURST_SELL_SSM"
+        | "FIXED_BURST_CLOSE_LONG"
+        | "FIXED_BURST_CLOSE_SHORT"
+        | "FIXED_BURST_BUY_SSM"
+        | "FIXED_BURST_SELL_SSM"
+        | "LIQ_FEE" => "liquidation",
+        _ => "other",
     }
 }
 fn fill_direction(n: &Native<'_>, uta: bool) -> Option<(&'static str, &'static str)> {

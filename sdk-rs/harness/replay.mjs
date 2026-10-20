@@ -139,6 +139,7 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
@@ -171,13 +172,15 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
@@ -272,6 +275,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      isInverse: (markets.flags[i] & 2) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
@@ -293,7 +297,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -359,12 +363,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (orders?.count ?? 0); i++) {
     const row = { id: orders.id(i), ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -591,6 +597,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
+          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -613,7 +620,7 @@ async function runTs() {
     : undefined;
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -628,6 +635,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
+    ...(venue.inverseNativeAmounts ? { remainingNative: o.extra?.remainingNative } : {}),
     ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     remaining: o.remaining,
     reduceOnly: Boolean(o.reduceOnly),
@@ -641,6 +649,7 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
+    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,
@@ -680,6 +689,8 @@ writeFileSync(
     writeCount: result.writes.length,
     subscriptions: result.subscriptions,
     unusedWrites: result.unusedWrites,
+    missingWrites: result.unusedWrites,
+    invalidSignatures: result.invalidSignatures,
     protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,

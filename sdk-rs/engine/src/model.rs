@@ -252,6 +252,14 @@ pub struct Balance {
     pub upnl: f64,
 }
 
+/// Collateral holdings alongside the account's aggregate balance.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CoinBalance {
+    pub base: String,
+    pub amount: f64,
+    pub notional: f64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct Loaded {
     pub balance: bool,

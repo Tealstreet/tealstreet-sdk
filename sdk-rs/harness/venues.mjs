@@ -238,6 +238,15 @@ export const VENUES = {
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
+  bitgetinverse: {
+    inverseNativeAmounts: true,
+    rust: 'bitgetinverse',
+    ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
   backpack: {
     rust: 'backpack',
     ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'clientId' && !callerIds.has(String(value))

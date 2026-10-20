@@ -215,7 +215,7 @@ fn uta_fills_use_native_exec_values_filter_symbols_and_preserve_rebates() {
     assert_eq!(r[0]["id"], "9007199254740995");
 }
 #[test]
-fn uta_bills_are_explicitly_unsupported_and_future_range_does_not_panic() {
+fn uta_bills_use_financial_records_and_future_range_does_not_panic() {
     let mut h = Harness::private_started();
     h.respond(
         "/account/settings",
@@ -232,8 +232,13 @@ fn uta_bills_are_explicitly_unsupported_and_future_range_does_not_panic() {
             limit: None,
         },
     );
-    assert!(h.done[0].1.is_err());
     assert!(h.requests.iter().all(|r| !r.url.contains("/account/bill")));
+    h.respond(
+        "/financial-records",
+        200,
+        r#"{"code":"00000","data":{"list":[],"cursor":""}}"#,
+    );
+    assert_eq!(result(&h), json!([]));
     let mut h = Harness::classic();
     query(
         &mut h,
@@ -334,4 +339,37 @@ fn first_query_late_uta_signal_reprobes_and_uses_v3() {
         r#"{"code":"00000","data":{"list":[],"cursor":""}}"#,
     );
     assert_eq!(result(&h), json!([]));
+}
+
+#[test]
+fn inverse_fill_without_fee_coin_uses_the_symbol_collateral() {
+    use safe_cex_venue_bitget::{Options, Product};
+    let mut h = Harness::started(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        product: Product::Inverse,
+        ..Options::default()
+    });
+    h.respond(
+        "/contracts",
+        200,
+        &CONTRACTS
+            .replace("BTCUSDT", "ETHUSD")
+            .replace("BTC", "ETH")
+            .replace("USDT", "USD"),
+    );
+    h.respond("/tickers", 200, &TICKERS.replace("BTCUSDT", "ETHUSD"));
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    query(&mut h, fills());
+    let mut row = fill("eth-fill", "buy", "buy_single");
+    row["symbol"] = json!("ETHUSD");
+    row["feeDetail"] = json!([{"totalFee":"-0.0001"}]);
+    page(&mut h, json!([row]), "");
+    assert_eq!(result(&h)[0]["commissionAsset"], "ETH");
+    assert_eq!(result(&h)[0]["commission"], 0.0001);
 }
