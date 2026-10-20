@@ -2393,3 +2393,13 @@ still reject with ACK retained. Focused 27/27 and aggregate 819/819 helpers,
 syntax and diff checks pass; fail-before socket proof retained. No new URL
 projection, fixture or measurement change. Owned jobs are quiet; restart the
 related release batch on this reviewed two-file correction.
+
+
+Fresh shared-identity candidate passes both Lighter public profiles and all
+four mainnet/testnet private profiles. Lighter module is 996,888 bytes. Bitunix
+private and public controls also PASS on the current harness; selected module
+remains 806,839 bytes. Latest Bitunix public result supersedes earlier timing
+receipts: 28,694 frames, 697 markets/tickers, two books; TS/Rust main CPU
+1,330.4/1,252.6 ms, steady 757.8/719.4 ms, retained 3.7/2.6 MB, sampled peak
+12.1/5.1 MB. No unchanged retry or measurement-policy change. Binance controls
+and remaining venue checks continue under /tmp/bitunix-df2-identityscope-*.
