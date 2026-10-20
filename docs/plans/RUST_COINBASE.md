@@ -224,3 +224,13 @@ Independent source/test review is clear after checking quote-size provenance,
 pagination, proof tokens, timestamp bounds, aliases and public trade side. All
 84 venue tests and strict targeted Clippy pass, including 13 new query cases.
 Integration and full acceptance gates remain open.
+
+### Host routing checkpoint
+
+Coinbase's native standard Bearer header now survives ordinary authenticated
+proxy routing through a generic host `headerAliases` policy; direct/HOW traffic
+keeps the original header. Aliasing precedes proxy authorization and conflicts
+fail before network I/O. Independent transport review is clear. All 187 JS
+transport tests and 31 native-host tests pass; existing 48 routing-policy cases
+remain unchanged alongside four Coinbase cases. Repository typecheck (44 tasks)
+and lint (28 tasks) pass. No final acceptance claim yet.

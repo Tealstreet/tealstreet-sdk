@@ -527,6 +527,14 @@ it to `NetworkTransport::with_routing` with a fresh context token provider; neve
 serialize a JWT. The engine rejects secondary signing keys before startup because
 its single signer cannot safely honor the TS secondary-read account contract.
 
+Engine venue requests use native authorization headers. On Coinbase and its
+spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the
+venue JWT to `Coinbase-Authorization` before acquiring proxy authorization.
+Direct and HOW requests retain the original `Authorization`. Native plans carry
+this as optional per-route `headerAliases`; native code applies those aliases
+before route authorization and has no Coinbase routing table. Alias conflicts
+fail before network I/O. Plans contain header names, never credential values.
+
 **The default is `directTransport` (`transport/direct.ts`).** Every Tealstreet entry
 point imports `transport/registerTealstreetTransport` as a side effect: the web main
 thread (through `apps/web/src/registerTealstreetRealm.ts`, which also registers the

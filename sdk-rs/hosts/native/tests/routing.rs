@@ -162,6 +162,80 @@ async fn proxy_public_selection_headers_and_fresh_tokens_reach_the_wire() {
 }
 
 #[tokio::test]
+async fn resolved_header_alias_keeps_venue_jwt_separate_from_proxy_token() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let captured = request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+            .await
+            .unwrap();
+        captured
+    });
+    let plan = RoutingPlan {
+        http: HttpRoute {
+            prefix: format!("{origin}/proxy"),
+            authorize: true,
+            header_aliases: BTreeMap::from([(
+                "Authorization".into(),
+                "Coinbase-Authorization".into(),
+            )]),
+            ..HttpRoute::default()
+        },
+        ..RoutingPlan::default()
+    };
+    let mut request = http_request(
+        2,
+        "https://api.coinbase.com/api/v3/brokerage/orders?cursor=a%2Fb".into(),
+    );
+    request
+        .headers
+        .push(("authorization", "Bearer venue-jwt".into()));
+    let (send, mut events) = mpsc::unbounded_channel();
+    NetworkTransport::with_routing(plan, tokens()).request(request, send);
+    assert_eq!(http_body(&mut events).await, b"{}");
+    let captured = server.await.unwrap();
+    assert!(captured.starts_with(
+        "POST /proxy/https://api.coinbase.com/api/v3/brokerage/orders?cursor=a%2Fb HTTP/1.1\r\n"
+    ));
+    let (head, body) = captured.split_once("\r\n\r\n").unwrap();
+    let headers: BTreeMap<_, _> = head
+        .lines()
+        .filter_map(|l| l.split_once(": "))
+        .map(|(k, v)| (k.to_ascii_lowercase(), v))
+        .collect();
+    assert_eq!(headers["authorization"], "Bearer account-token");
+    assert_eq!(headers["coinbase-authorization"], "Bearer venue-jwt");
+    assert_eq!(body, r#"{"id":18446744073709551615}"#);
+}
+
+#[tokio::test]
+async fn direct_http_without_aliases_preserves_standard_venue_authorization() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let captured = request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+            .await
+            .unwrap();
+        captured
+    });
+    let mut request = http_request(3, origin + "/orders");
+    request
+        .headers
+        .push(("Authorization", "Bearer venue-jwt".into()));
+    let (send, mut events) = mpsc::unbounded_channel();
+    NetworkTransport::with_routing(RoutingPlan::default(), tokens()).request(request, send);
+    assert_eq!(http_body(&mut events).await, b"{}");
+    let captured = server.await.unwrap().to_ascii_lowercase();
+    assert!(captured.contains("\r\nauthorization: bearer venue-jwt\r\n"));
+    assert!(!captured.contains("coinbase-authorization"));
+    assert!(!captured.contains("account-token"));
+}
+
+#[tokio::test]
 async fn direct_without_a_plan_preserves_engine_websocket_headers() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {
@@ -474,6 +548,8 @@ async fn how_preserves_signed_url_headers_and_integer_body_and_streams_raw_respo
         );
         assert_eq!(arg.method, "POST");
         assert_eq!(arg.headers["X-Signature"], "unchanged");
+        assert_eq!(arg.headers["Authorization"], "Bearer venue-jwt");
+        assert!(!arg.headers.contains_key("Coinbase-Authorization"));
         assert_eq!(
             serde_json::from_str::<String>(arg.data.get()).unwrap(),
             r#"{"id":18446744073709551615}"#
@@ -502,6 +578,9 @@ async fn how_preserves_signed_url_headers_and_integer_body_and_streams_raw_respo
     let (send, mut events) = mpsc::unbounded_channel();
     let mut request = http_request(10, "https://venue.invalid/v1/order?signature=exact".into());
     request.headers.push(("X-Signature", "unchanged".into()));
+    request
+        .headers
+        .push(("Authorization", "Bearer venue-jwt".into()));
     NetworkTransport::with_routing(plan, tokens()).request(request, send);
     assert_eq!(
         http_body(&mut events).await,
