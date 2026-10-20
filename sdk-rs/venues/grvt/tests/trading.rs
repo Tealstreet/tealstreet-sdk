@@ -686,7 +686,11 @@ fn bracket_failure_reports_partial_progress_and_never_sends_next_child() {
         "create_order",
     );
     let actions = reply(&mut e, &child, 400, r#"{"c":2001,"m":"rejected"}"#);
-    assert_eq!(failure(&actions).outcome, None, "the entry was already created");
+    assert_eq!(
+        failure(&actions).outcome,
+        None,
+        "the entry was already created"
+    );
     let error = done(&actions, 5).unwrap().unwrap_err();
     assert!(error.contains(&format!("already created GRVT order IDs: {entry_id}")));
     assert!(
