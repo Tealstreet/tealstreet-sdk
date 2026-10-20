@@ -87,6 +87,12 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 ### Tick Loop
 
+- REST and `accounts_p` pushes use the same balance convention: each currency's
+  `total = accountBalanceRv - position UPnL`, `free = accountBalanceRv - totalUsedBalanceRv`,
+  and `used = totalUsedBalanceRv`. Aggregate `total`, `free`, and `used` sum those
+  independent currency fields; free must not be derived from normalized total.
+  This keeps a fresh REST poll from changing total solely because it followed a
+  WebSocket update, including when UPnL is negative.
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
 - Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
 - Position row mapping intentionally does not require a populated `marketsBySymbol` index. Full account snapshots filter to known markets before committing the store, while symbol-scoped recovery may need to preserve a valid nonzero REST row during hosted startup or stale-index windows.

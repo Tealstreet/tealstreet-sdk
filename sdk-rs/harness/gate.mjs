@@ -291,8 +291,10 @@ const KNOWN_TS_FIXES = {
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {
-    // Paired TS authority fences now protect REST reads across private pushes,
-    // socket generations and other REST commits; compare balances unchanged.
+    // Paired TS/Rust REST balance totals now exclude position UPnL just as
+    // their WS handlers do; native free remains reported total minus used.
+    // Authority fences protect reads across pushes, socket generations and
+    // other REST commits; compare balances without financial normalization.
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
     // Phemex zero-open ticker changes remain finite.

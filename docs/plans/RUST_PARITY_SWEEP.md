@@ -641,3 +641,21 @@ than treating the original port boundary as a waiver.
 - CIalsoexposed existingPhemexREST/WS normalization inconsistency; paired
   productionfix/regressions are being completed and separately reviewed. No
   gatefinancialnormalization or failedread/revision guard is changed.
+
+### Phemex REST/WS consistency repair after union CI
+
+- Same reported accountBalanceRv/used fields normalized differently by channel:
+  REST used rawtotal while both TS/nativeWS used rawtotal minuscurrencyUPnL.
+  Real-timer final-writer order exposed1300vs1280 withUPnL20. This is a
+  production consistency defect, not a financial-output normalization issue.
+- Pair TS/nativeREST with the existingWS convention. Free remains raw-minus-used;
+  TS aggregatefree sums proven currencyfree instead of subtracting adjusted
+  total. Reported income, native rawaccountinfo,lookup,Triggered finality and
+  stale/failedread guards remain unchanged. KNOWN_TS_FIXES documents the fix
+  without rewriting either replay balance.
+- Meaningful native red1000vs990 retained; green97Phemexnative +41focusedTS
+  tests PASS. Positive/negative two-currency combinations, WS-to-newREST
+  equality and failed-sibling retention are covered. Independent repair
+  re-review PASS, with source hashes and red/green receipts posted onPR1340.
+- Commit the paired repair, rebuildcombinedbindings and run freshfinalquality/
+  gates. Earlier product-union source receipts remain attributed tob00644c7d8.
