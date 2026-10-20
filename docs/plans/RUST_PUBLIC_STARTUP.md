@@ -283,3 +283,30 @@ passed445 actual Wasm SDK cases before this new integration. Full root tests
 have exposed additional old mock loaders that preload JS flags without native
 frames; repair their scripted startup evidence, keeping runtime decoded proof
 and existing timeouts. Repeat final affected gates against the integrated source.
+
+## Wind-down checkpoint: pushed branch handoff, no public PR yet
+
+The owner authorized pushing and handing off if no PR had opened and the
+remaining verification was substantial. Use that route; do not claim a merged
+or ready public PR. Twelve wrapper fixtures now publish real scripted native
+startup tables after fake.start, retaining their actions/spies/identity-only
+lookup behavior. Shared test helper reuses the existing consumer frame encoder.
+Focused201/201 cases, package TypeScript and independent source review passed;
+root lint28/28, format and bans passed. No runtime proof or timeouts were relaxed.
+
+The earlier integrated native workspace passed3118 cases/259 targets before
+the zero-balance and latest Paradex landing. Rebuilt zero-balance engine passed108
+cases; its actual Wasm SDK passed445/445. The64 private replay integration
+checkpoint passed, but a fresh final-source matrix is still required. The final
+workspace/standalone-size sweeps were deliberately interrupted for wind-down;
+five of26 sizes had passed the unchanged1258291-byte budget. Public40 performance
+gates were not started. Root full tests must rerun after the fixture repairs;
+remaining host/harness/consumer/Clippy/final artifact checks and PR/CI/merge also
+remain. No all-gates pass is claimed.
+
+Detailed handoff: `/Users/sam/cs/tealstreet-sdk/.aimux/plans/handoff-codex-u1pmrg.md`.
+`claude-nfncln` accepted PR3 (private rows, ticker verification, app payloads,
+Kraken market-entry TP/SL errors and Lighter trailing rejection), including
+BreakoutProp authenticated startup and MEXC private mode/plan bootstrap. MEXC
+ticker/order-row changes remain with `feat/rust-venue-highs-a`; Orderly remains
+with its race lane. No PR3 implementation or branch was started here.

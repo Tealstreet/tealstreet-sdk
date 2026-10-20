@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, PayloadSignerRequest, PlaceOrderOpts } from '../../types';
@@ -39,6 +40,7 @@ describe('Rust Paradex account boundary', () => {
     const load = vi.fn(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     setWasmEngineLoader(load);
     const store = new DefaultStore();
+    installNativeStartupFrames(engine, store);
     store.update({ markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
     const exchange = new RustEngineExchange('paradex', { ...credentials, secret: '', ...options }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
@@ -100,7 +102,8 @@ describe('Rust Paradex account boundary', () => {
       return { signature: 'opaque' };
     });
     const { exchange, engine } = setup({ payloadSigner, key: 'public-subkey' });
-    engine.start = () => JSON.stringify([{ op: 'signPayload', request: 1, payload, timeoutMs: 20_000 }]);
+    const start = engine.start;
+    engine.start = (now) => { start(now); return JSON.stringify([{ op: 'signPayload', request: 1, payload, timeoutMs: 20_000 }]); };
     engine.payloadSigned = () => '[]';
     engine.payloadSignFailed = () => '[]';
     await exchange.start();

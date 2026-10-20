@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { Transport as EngineHostTransport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -158,6 +159,7 @@ describe('Orderly Rust transport boundary', () => {
       return engine;
     });
     const store = new DefaultStore();
+    installNativeStartupFrames(engine, store);
     store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
     const exchange = new RustEngineExchange(
       'mode',

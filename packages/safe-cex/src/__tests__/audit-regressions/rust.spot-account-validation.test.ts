@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -17,6 +18,7 @@ const setup = (reject = true) => {
   const construct = vi.fn(function () { return engine; });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new DefaultStore();
+  installNativeStartupFrames(engine, store);
   // A reused account store must not turn old loaded flags into validation.
   store.update({ loaded: { markets: true, tickers: true, orders: true, positions: true, balance: true } });
   const exchange = new RustEngineExchange('hyperliquidspot', { key: 'wallet', secret: 'invalid' }, store);
