@@ -286,6 +286,11 @@ export class Tape {
     return response;
   }
 
+  validateSocket(url, headers) {
+    if (this.venue.validateSocket) this.verifySignature(
+      () => this.venue.validateSocket(url, headers) !== false, undefined, 'invalid replay socket upgrade validation');
+  }
+
   connect(url, onOpen, onMessage, onClose) {
     const key = canonicalUrl(url, this.callerIds);
     const generation = (this.generations.get(key) ?? 0) + 1;

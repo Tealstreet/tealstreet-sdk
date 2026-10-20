@@ -1232,3 +1232,40 @@ test('every caught outbound socket audit failure remains fatal exactly once', ()
     assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
   }
 });
+
+
+test('WEEX upgrade rejection caught by the real host remains fatal in the replay audit', async () => {
+  const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+  const tape = new Tape([], venueOf('weex'), true);
+  let connected = false;
+  const host = new EngineHost({ command: () => JSON.stringify([{ op: 'wsConnect', socket: 1,
+    url: 'wss://ws-contract.weex.com/v3/ws/private', headers: [['ACCESS-KEY', 'wrong']] }]) }, {
+    webSocketHeaders: true,
+    now: Date.now,
+    clearTimeout() {},
+    connect(url, { headers }) {
+      tape.validateSocket(url, headers);
+      connected = true;
+      return { close() {} };
+    },
+  });
+  try {
+    await assert.rejects(host.command({ op: 'fetchBalance' }), /invalid WEEX authentication timestamp/);
+    assert.equal(connected, false);
+    assert.equal(host.commands.size, 0);
+    assert.equal(tape.invalidSignatures, 1);
+    assert.equal(tape.missingWrites, 0);
+    assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+  } finally { host.dispose(); }
+});
+
+test('upgrade validation accepts void success and persists explicit false exactly once', () => {
+  let reject = false;
+  const tape = new Tape([], { validateSocket: () => reject ? false : undefined });
+  tape.validateSocket('wss://fixture.test/socket', {});
+  assert.equal(tape.invalidSignatures, 0);
+  reject = true;
+  assert.throws(() => tape.validateSocket('wss://fixture.test/socket', {}), /invalid replay socket upgrade validation/);
+  assert.equal(tape.invalidSignatures, 1);
+  assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+});

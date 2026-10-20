@@ -152,7 +152,7 @@ async function runRust() {
     now: () => Date.now(),
     webSocketHeaders: true,
     connect: (url, { headers, onOpen, onMessage, onClose }) => {
-      venue.validateSocket?.(url, headers);
+      tape.validateSocket(url, headers);
       const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
@@ -367,7 +367,7 @@ async function runTs() {
     static CLOSING = 2;
     static CLOSED = 3;
     constructor(url, _protocols, options = {}) {
-      venue.validateSocket?.(url, options.headers);
+      tape.validateSocket(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };

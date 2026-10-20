@@ -546,3 +546,12 @@ validation might leave no outstanding write. Persist validator/send failures in
 the final authentication audit, preserve the original thrown error and avoid
 double counting nested checks. Counterexample tests require final failure even
 after a later successful read. This repairs the gate, not venue behavior.
+
+Eleven-family release and final auth audit checkpoint: all modules build and
+all isolated clippys pass. Existing MEXC cap alone is exceeded by inherited
+compiler/dispatch changes:793913 bytes, new818176 cap using the same3% KiB
+rounding rule; other nine prior caps remain fixed. Hyperliquid1012824 receives
+1043456. Persistent upgrade-header checks now cover both replay factories; an
+actual EngineHost WEEX command regression proves caught validation still fails
+the final audit.175 harness tests and independent review pass. All gate source
+is frozen for final helper copy, private gates and controlled public comparison.
