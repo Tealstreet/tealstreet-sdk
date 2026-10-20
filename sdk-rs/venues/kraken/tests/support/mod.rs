@@ -138,3 +138,34 @@ pub fn fill_count(frame: &[u8]) -> u32 {
     }
     0
 }
+/// Drains actions with failures as the plain text the host renders.
+pub trait Plain {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action>;
+}
+impl<V: safe_cex_engine::Venue> Plain for Engine<V> {
+    fn drain_plain(&mut self) -> std::vec::IntoIter<Action> {
+        use safe_cex_engine::Notice;
+        self.drain_actions()
+            .map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    })
+                }
+                a => a,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+}
+/// Drains the classified failures, dropping every other action.
+pub fn failures<V: safe_cex_engine::Venue>(e: &mut Engine<V>) -> Vec<safe_cex_engine::VenueError> {
+    use safe_cex_engine::Notice;
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}

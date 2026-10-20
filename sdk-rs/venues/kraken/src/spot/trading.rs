@@ -2,7 +2,9 @@ use super::{
     KrakenSpot, Pending,
     account::{Kind, order_kind},
 };
-use safe_cex_engine::{Command, CommandId, Cx, Query, model::*, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Outcome, Query, VenueError, model::*, num,
+};
 use serde::Deserialize;
 use std::collections::VecDeque;
 
@@ -32,6 +34,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     cancel: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Deserialize)]
 struct Placed {
@@ -248,6 +252,7 @@ impl KrakenSpot {
             steps,
             ids: vec![],
             cancel,
+            effective: false,
         });
         self.trade_next(cx)
     }
@@ -286,7 +291,7 @@ impl KrakenSpot {
                         && o.time_in_force != Some(TimeInForce::ImmediateOrCancel)
                 }))
         {
-            self.trade_failed(cx, "Kraken Spot order closed before amend");
+            self.trade_failed(cx, not_sent("Kraken Spot order closed before amend"));
             return;
         }
         let (path, params) = match &step {
@@ -304,47 +309,54 @@ impl KrakenSpot {
         self.trading.waiting = false;
         let r = (|| {
             let Some(job) = self.trading.active.as_mut() else {
-                return Err("Kraken Spot unexpected trade reply".into());
+                return Err(unproven("Kraken Spot unexpected trade reply"));
             };
             match step {
                 Step::Place { .. } => {
                     let r: Placed = serde_json::from_str(text)
-                        .map_err(|_| "Kraken Spot missing placement txids")?;
+                        .map_err(|_| unproven("Kraken Spot missing placement txids"))?;
                     if r.txid.is_empty() || r.txid.iter().any(String::is_empty) {
-                        return Err("Kraken Spot empty placement txid".into());
+                        return Err(unproven("Kraken Spot empty placement txid"));
                     }
                     job.ids.extend(r.txid);
                 }
                 Step::Amend { id, .. } => {
-                    let r: Amended =
-                        serde_json::from_str(text).map_err(|_| "Kraken Spot missing amend_id")?;
+                    let r: Amended = serde_json::from_str(text)
+                        .map_err(|_| unproven("Kraken Spot missing amend_id"))?;
                     if r.amend_id.is_empty() {
-                        return Err("Kraken Spot missing amend_id".into());
+                        return Err(unproven("Kraken Spot missing amend_id"));
                     }
                     job.ids.push(id);
                 }
                 Step::Cancel { .. } => {
                     let r: Canceled = serde_json::from_str(text)
-                        .map_err(|_| "Kraken Spot missing cancel count")?;
+                        .map_err(|_| unproven("Kraken Spot missing cancel count"))?;
                     if r.count == 0 {
-                        return Err("Kraken Spot order was not canceled".into());
+                        // An explicit answer that nothing was cancelled.
+                        return Err(VenueError::new("Kraken Spot order was not canceled"));
                     }
                 }
             }
-            Ok::<_, String>(())
+            job.effective = true;
+            Ok::<_, VenueError>(())
         })();
         match r {
             Ok(()) => {
                 self.account.revision += 1;
                 self.trade_next(cx)
             }
-            Err(e) => self.trade_failed(cx, &e),
+            Err(e) => self.trade_failed(cx, e),
         }
     }
-    pub(super) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    pub(super) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            cx.done(job.command, Err(error.into()));
+            if (job.effective || !job.ids.is_empty())
+                && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
+                error.outcome = None;
+            }
+            cx.fail(job.command, error);
         }
         self.trade_next(cx);
     }
@@ -352,7 +364,7 @@ impl KrakenSpot {
         match command {
             Command::PlaceOrders { command, orders } => match self.prepare_batch(cx, orders) {
                 Ok(steps) => self.enqueue(cx, *command, steps, false),
-                Err(e) => cx.done(*command, Err(e)),
+                Err(e) => cx.fail(*command, not_sent(e)),
             },
             Command::AmendOrder {
                 command,
@@ -361,11 +373,11 @@ impl KrakenSpot {
                 amount,
             } => match self.amend(cx, id, *price, *amount) {
                 Ok(s) => self.enqueue(cx, *command, VecDeque::from([s]), false),
-                Err(e) => cx.done(*command, Err(e)),
+                Err(e) => cx.fail(*command, not_sent(e)),
             },
             Command::CancelOrders { command, ids } => {
                 if ids.iter().any(String::is_empty) {
-                    cx.done(*command, Err("Kraken Spot empty cancel identity".into()))
+                    cx.fail(*command, not_sent("Kraken Spot empty cancel identity"))
                 } else {
                     self.enqueue(
                         cx,
@@ -379,7 +391,7 @@ impl KrakenSpot {
             }
             Command::CancelOrdersWithSymbols { command, orders } => {
                 if orders.iter().any(|o| o.id.is_empty()) {
-                    cx.done(*command, Err("Kraken Spot empty cancel identity".into()))
+                    cx.fail(*command, not_sent("Kraken Spot empty cancel identity"))
                 } else {
                     self.enqueue(
                         cx,
@@ -412,9 +424,10 @@ impl KrakenSpot {
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. }
             | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. } => cx.done(
+            | Command::SetStpMode { command, .. } => cx.fail(
                 *command,
-                Err("Kraken Spot does not support this account setting".into()),
+                not_sent("Kraken Spot does not support this account setting")
+                    .kind(ErrorKind::Unsupported),
             ),
             Command::Query { command, query } => match query {
                 Query::OrderByClientId { .. } => {
@@ -430,4 +443,54 @@ impl KrakenSpot {
         }
         true
     }
+}
+
+/// Refused before any request was sent.
+pub(super) fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A 2xx answer that does not prove what happened.
+fn unproven(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// A refused private write, classified by HTTP status and Kraken's documented
+/// error prefixes. 408/5xx and malformed answers do not prove a refusal.
+pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match status {
+        200..=299 => {}
+        401 => return rejected(error, ErrorKind::AuthInvalid),
+        403 => return rejected(error, ErrorKind::AuthPermission),
+        429 => return rejected(error, ErrorKind::RateLimited),
+        408 => return error.outcome(Outcome::Unknown),
+        400..=499 => return rejected(error, ErrorKind::Rejected),
+        _ => return error.outcome(Outcome::Unknown),
+    }
+    let Some(code) = serde_json::from_str::<super::wire::Envelope<'_>>(body)
+        .ok()
+        .and_then(|e| e.error.first().map(|code| code.to_string()))
+    else {
+        return error.outcome(Outcome::Unknown);
+    };
+    let error = match code.as_str() {
+        "EAPI:Invalid key" | "EAPI:Invalid signature" | "EAPI:Invalid nonce" => {
+            rejected(error, ErrorKind::AuthInvalid)
+        }
+        "EGeneral:Permission denied" => rejected(error, ErrorKind::AuthPermission),
+        "EAPI:Rate limit exceeded" | "EOrder:Rate limit exceeded" => {
+            rejected(error, ErrorKind::RateLimited)
+        }
+        "EService:Unavailable"
+        | "EService:Busy"
+        | "EService:Deadline elapsed"
+        | "EGeneral:Internal error" => error.outcome(Outcome::Unknown),
+        code if code.starts_with("EOrder:") || code.starts_with("EGeneral:Invalid arguments") => {
+            rejected(error, ErrorKind::Rejected)
+        }
+        _ => error,
+    };
+    error.venue_code(code)
 }
