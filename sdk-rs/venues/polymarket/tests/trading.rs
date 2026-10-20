@@ -14,6 +14,7 @@ struct H {
     now: f64,
     http: Vec<HttpRequest>,
     done: Vec<(u32, Result<String, String>)>,
+    failures: Vec<safe_cex_engine::VenueError>,
     private: Option<SocketId>,
 }
 impl H {
@@ -37,6 +38,7 @@ impl H {
             now: 1700000000123.0,
             http: vec![],
             done: vec![],
+            failures: vec![],
             private: None,
         };
         h.e.start(h.now);
@@ -63,7 +65,8 @@ impl H {
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.legacy_text())))
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push(error);
                 }
                 Action::WsConnect {
                     socket,
@@ -1139,4 +1142,56 @@ fn cancellation_with_symbol_uses_native_id_without_store_lookup() {
     assert_eq!(request.body.as_deref(), Some(r#"["unseen"]"#));
     h.respond(request, 200, r#"{"canceled":["unseen"],"not_canceled":{}}"#);
     assert!(matches!(&h.done[..], [(91, Ok(_))]));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, outcome) in [
+        (503, "unavailable", None, Some(Outcome::Unknown)),
+        (
+            400,
+            r#"{"error":"invalid order"}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
+        ),
+        (
+            200,
+            r#"{"success":false,"orderID":"","errorMsg":"not enough balance","status":""}"#,
+            None,
+            None,
+        ),
+        (200, "not json", None, Some(Outcome::Unknown)),
+    ] {
+        let mut h = H::new();
+        h.command(Command::PlaceOrders {
+            command: 9,
+            orders: vec![order()],
+        });
+        let r = h.take("/order");
+        h.respond(r, status, body);
+        let [error] = h.failures.as_slice() else {
+            panic!("{status} {body}: {:?}", h.failures);
+        };
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, outcome),
+            "{status} {body}: {}",
+            error.message
+        );
+    }
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 9,
+        orders: vec![order()],
+    });
+    let r = h.take("/order");
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "connection reset",
+    });
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
 }
