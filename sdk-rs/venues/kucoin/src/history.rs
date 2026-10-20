@@ -246,6 +246,13 @@ impl Kucoin {
             return;
         }
         let (kind, symbol, order, filter, from, to, limit) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("Client ID query is not supported by this venue".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,
@@ -769,6 +776,27 @@ mod tests {
                 }
             })
             .unwrap()
+    }
+    #[test]
+    fn client_id_lookup_fails_explicitly_without_network_io() {
+        let mut e = Engine::new(Kucoin::new(Options::default()));
+        e.handle(
+            1740640088002.5,
+            Event::Command(safe_cex_engine::Command::Query {
+                command: 77,
+                query: Query::OrderByClientId {
+                    symbol: "BTCUSDT".into(),
+                    client_order_id: "caller-id".into(),
+                },
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            &actions[0],
+            Action::Notice(Notice::CommandDone { command: 77, result: Err(error) })
+                if error == "Client ID query is not supported by this venue"
+        ));
     }
     #[test]
     fn documented_fill_converts_lots_and_nanosecond_time() {

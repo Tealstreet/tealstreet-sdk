@@ -17,7 +17,7 @@ const lines = readFileSync(values.tape, 'utf8').split('\n').filter(Boolean);
 const served = new Map();
 const kept = lines.filter((line) => {
   const record = JSON.parse(line);
-  if (record.type === 'meta') return true;
+  if (record.type === 'meta' || record.type === 'config') return true;
   if (record.t > limit) return false;
   if (record.type !== 'http' || httpLimit === 0) return true;
   const key = `${record.method} ${record.url}`;

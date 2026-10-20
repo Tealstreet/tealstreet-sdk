@@ -116,3 +116,121 @@ test('Rust KuCoin subscription audit rejects sends before recorded welcome', () 
   audit.sent(url, '{"type":"subscribe","topic":"/contractMarket/snapshot:XBTUSDTM","privateChannel":false}');
   assert(audit.errors().some((error) => error.includes('before welcome')));
 });
+
+
+const contractFixture = async () => {
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'kucoin-contracts-'));
+  try {
+    const file = join(dir, 'fixture.jsonl');
+    const generated = spawnSync(process.execPath, [new URL('./private-tape-kucoin.mjs', import.meta.url).pathname, '--out', file], { encoding: 'utf8' });
+    assert.equal(generated.status, 0, generated.stderr);
+    return readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+};
+const { applyKucoinRequestContracts } = await import('./kucoin-request-contracts.mjs');
+const { requestKey } = await import('./requests.mjs');
+const fixtureReads = (records) => {
+  const nativePages = new Set(records.map((record) => record.sameReadAs).filter(Boolean));
+  const keys = (selected) => [...new Set(selected.map((record) => requestKey('GET', record.url)))];
+  const reads = records.filter((record) => record.type === 'http' && record.method === 'GET');
+  return {
+    ts: keys(reads.filter((record) => !record.nativeRead && !nativePages.has(record.url))),
+    rust: keys(reads.filter((record) => !record.sameReadAs)),
+  };
+};
+
+test('KuCoin read contracts use independent fixture declarations and preserve strict request equality', async () => {
+  const records = await contractFixture();
+  assert.equal(records.filter((record) => record.nativeRead).length, 7);
+  const { ts, rust } = fixtureReads(records);
+  const adjusted = applyKucoinRequestContracts(records, ts, rust);
+  assert.deepEqual(adjusted.tsRequests, adjusted.rustRequests);
+  const extra = requestKey('GET', 'https://api-futures.kucoin.com/api/v1/fills?wrong=true');
+  assert.notDeepEqual(applyKucoinRequestContracts(records, ts, [...rust, extra]).rustRequests, adjusted.tsRequests);
+  const write = requestKey('DELETE', 'https://api-futures.kucoin.com/api/v1/orders/bogus');
+  assert.notDeepEqual(applyKucoinRequestContracts(records, ts, [...rust, write]).rustRequests, adjusted.tsRequests);
+  for (const record of records.filter((record) => record.nativeRead)) {
+    const missing = rust.filter((key) => key !== requestKey('GET', record.url));
+    assert.throws(() => applyKucoinRequestContracts(records, ts, missing), /required native GET/);
+    assert.throws(() => applyKucoinRequestContracts(records, ts, [...missing, requestKey('GET', record.url + '&wrong=1')]), /required native GET/);
+  }
+});
+
+test('KuCoin read metadata rejects mutations, unknown reasons, mismatched command or query parameters', async () => {
+  const original = await contractFixture();
+  for (const mutate of [
+    (record) => { record.method = 'DELETE'; },
+    (record) => { record.nativeRead.reason = 'ignore'; },
+    (record) => { record.nativeRead.command = 1; },
+    (record) => { record.url += '&wrong=1'; },
+    (record) => { record.url = record.url.replace('api-futures.kucoin.com', 'other.test'); },
+    (record) => { record.requestBody = '{}'; },
+    (record) => { record.nativeRead.extra = true; },
+  ]) {
+    const records = structuredClone(original);
+    mutate(records.find((record) => record.nativeRead?.reason === 'query'));
+    const { ts, rust } = fixtureReads(records);
+    assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /KuCoin read contract/);
+  }
+  for (const reason of ['query', 'cancel-proof', 'position-mode']) {
+    const records = structuredClone(original);
+    const row = records.find((record) => record.nativeRead?.reason === reason);
+    row.afterCommand = 99;
+    const { ts, rust } = fixtureReads(records);
+    assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /KuCoin read contract/);
+  }
+  const records = structuredClone(original);
+  const command = records.filter((record) => record.type === 'command')[5];
+  delete command.expected;
+  const { ts, rust } = fixtureReads(records);
+  assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /independently expected/);
+});
+
+test('KuCoin first-page aliases require identical response, stage, origin, pagination and bounded census', async () => {
+  const original = await contractFixture();
+  for (const mutate of [
+    (row) => { row.body = row.body.replace('old-order', 'different-order'); },
+    (row) => { row.afterCommand = 99; },
+    (row) => { row.status = 201; },
+    (row) => { row.method = 'POST'; },
+    (row) => { row.sameReadAs = row.sameReadAs.replace('pageSize=100', 'pageSize=50'); },
+    (row) => { row.sameReadAs = row.sameReadAs.replace('currentPage=1', 'currentPage=2'); },
+    (row) => { row.sameReadAs = row.sameReadAs.replace('api-futures.kucoin.com', 'other.test'); },
+    (row) => { row.sameReadAs = row.sameReadAs.replace('/orders?', '/stopOrders?'); },
+  ]) {
+    const records = structuredClone(original);
+    mutate(records.find((record) => record.sameReadAs));
+    const { ts, rust } = fixtureReads(records);
+    assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /KuCoin read contract/);
+  }
+  const records = structuredClone(original);
+  const row = records.find((record) => record.sameReadAs);
+  const target = records.find((record) => record.url === row.sameReadAs);
+  const body = JSON.parse(row.body);
+  body.data.items = Array.from({ length: 51 }, () => body.data.items[0]);
+  body.data.totalNum = 51;
+  row.body = target.body = JSON.stringify(body);
+  const { ts, rust } = fixtureReads(records);
+  assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /first-page coverage/);
+});
+
+test('KuCoin native read reasons cannot be reused for unrelated account or cancel-proof reads', async () => {
+  const original = await contractFixture();
+  for (const mutate of [
+    (rows) => { rows.find((row) => row.nativeRead?.reason === 'position-mode').url += '?symbol=XBTUSDTM'; },
+    (rows) => { rows.find((row) => row.nativeRead?.reason === 'position-mode').nativeRead.command = 1; },
+    (rows) => { const row = rows.find((row) => row.nativeRead?.reason === 'cancel-proof'); row.nativeRead.command = 1; row.afterCommand = 1; },
+    (rows) => { const row = rows.find((row) => row.nativeRead?.reason === 'cancel-proof'); row.url = row.url.replace('placed-order', 'another-order'); },
+    (rows) => { const row = rows.find((row) => row.nativeRead?.reason === 'cancel-proof'); row.body = row.body.replace('"isActive":false', '"isActive":true'); },
+    (rows) => { const row = rows.find((row) => row.type === 'http' && row.method === 'DELETE' && row.url.includes('/placed-order?')); row.body = '{"code":"200000","data":{"cancelledOrderIds":[]}}'; },
+  ]) {
+    const records = structuredClone(original);
+    mutate(records);
+    const { ts, rust } = fixtureReads(records);
+    assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /KuCoin read contract/);
+  }
+});

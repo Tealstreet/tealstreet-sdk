@@ -349,44 +349,22 @@ the full ten-venue CI matrix runs while the local import failure is diagnosed.
 
 ### Bitget landing integration
 
-Landing advanced through Bitget (#1308), commit 4e468ed2e5, while final-head CI
-was running. The ten-venue head's required brief gates and native/Wasm CI pass;
-its root CI has also passed, confirming the local import timeouts are not a
-reproduced functional failure. Local serial SDK suite passed all6,565 tests;
-the duplicate suite retained one five-second Hyro import flake, while original
-Hyro targeted tests passed10/10 unchanged. No source, assertion or timeout
-changes were made for the diagnostic; temporary files were removed.
+Merged Bitget (#1308), landing 4e468ed2e5, in 5a2f2211a4. Independent shared
+harness, host/SDK, engine/parser and gate/CI reviews passed with no new P1/P2.
+Retained strict typed matching, generated-ID validation, signed headers, recorded
+welcomes, query-only oracles, bounded settling and native units. Restored
+5300f4960f's ESBUILD_WORKER_THREADS=0 for both replay implementations; that
+setting had been lost during an earlier incoming merge. Runtime construction is
+measured symmetrically and all public performance assertions remain strict.
 
-Integrate Bitget's strict indexed replay transport, envelope streaming hook and
-throughput profiles while preserving KuCoin signatures, welcomes, query oracles,
-queued reads and native quantities. Host/TS/shared parser audit PASS. Shared
-harness and gate reviews, eleven-venue rebuild/size measurement and required
-KuCoin/Binance plus incoming-venue compatibility gates precede the next push.
-The incoming ten-venue build was3,497,553 bytes against3.5MiB; size the fixed
-eleven-venue aggregate budget from the actual combined artifact. Final CI must
-be green at the next head before merging.
+Workspace 763 native tests (96 KuCoin), fmt/bans and native/Wasm clippy passed.
+Harness 129, wire 4, actual Wasm 26, host 25 and root typecheck/lint passed.
+Eleven-venue Wasm was 3,775,268 bytes against the fixed 4 MiB aggregate budget.
 
-Bitget integration review checkpoint: all shared harness, gate/CI, host/TS
-bridge and engine/parser independent reviews PASS, no new P1/P2. Restored
-5300f4960f's ESBUILD_WORKER_THREADS=0 for both replay implementations (lost in
-an incoming earlier merge); measured public runtime and memory assertions stay
-strict. Shared factory handles both legacy and callback response signatures,
-preserving signed headers, stage/time eligibility and rejection rollback.
+### Eleven-venue brief gates
 
-Workspace 763 native tests (KuCoin96), fmt/bans and all-workspace native+wasm
-clippy PASS. Harness129, wire4, actual wasm26, host25 PASS. Root typecheck44
-and lint28 tasks PASS. Eleven-venue wasm3,775,268 bytes, fixed4MiB budget.
-Previous head e5c9b0e38a's FULL CI is green (including both root suites and all
-ten-venue replays); that closes the unchanged local import-latency diagnostic
-without weakening assertions/timeouts. Current integrated KuCoin/Binance private
-PASS; remaining public/incoming compatibility gates run before the next push.
-
-### Final eleven-venue brief gates
-
-Eight required/compatibility replays PASS: KuCoin, Binance, Bitget and Backpack
-public/private. All outputs, signed requests, typed bodies, stage/time matching,
-mutation accounting and socket protocols compare exactly. Three-run public
-medians (TS/Rust):
+All eight local required/compatibility replays passed: KuCoin, Binance, Bitget
+and Backpack public/private. Three-run public medians (TS / Rust):
 
 | Venue | CPU ms | Steady CPU ms | Retained MB |
 | --- | ---: | ---: | ---: |
@@ -395,13 +373,64 @@ medians (TS/Rust):
 | Bitget | 554.6 / 533.6 | 367.6 / 365.1 | 6.0 / 2.5 |
 | Backpack | 172.8 / 100.9 | 95.0 / 67.2 | 3.4 / 1.8 |
 
-KuCoin public16,157 frames/692 markets/two books; private32frames/17commands
-PASS. Baseline construction is symmetric; compiler-worker exclusion restored
-for both implementations, and strict public CPU/steady/memory and buffer/heap
-settling assertions remain intact. Private memory remains informational.
+KuCoin public covered 16,157 frames, 692 markets and two books; private covered
+32 frames and 17 commands. Exact output, request, signature, mutation and socket
+checks passed. Checkpoint b8fbe9d07f was pushed and now has full green CI. One
+BingX steady-CPU inversion (37.9 versus 37.4 ms) passed an unchanged local replay
+and one unchanged CI retry; no assertion or threshold was relaxed. The unchanged
+local cold-import diagnostic also closed with full CI passing both root suites.
+Before that head could merge, Hyperliquid landed and required integration.
 
-Workspace763 native tests(KuCoin96), fmt/bans/native+wasm clippy, harness129,
-wire4, real wasm26, host25, root typecheck44/lint28 tasks PASS. Eleven-venue
-wasm3,775,268 bytes < fixed4MiB. All R1–R11 and final shared-code reviews pass.
-Push the final integration checkpoint and require green CI at this exact head
-before merging PR1312 into feat/rust-rewrite; then cut the follow-up branch.
+### Hyperliquid landing and per-venue gate integration
+
+Integrating Hyperliquid (#1306), landing 5c47683969. Adopt its feature-selected
+Wasm builds and 12-venue CI matrix, with a fixed 1,258,291-byte per-venue budget.
+Keep KuCoin in the host's default/optional features, build whitelist and SDK
+registration, preserving broker/passphrase options and native lot metadata.
+The new OrderByClientId query explicitly errors without I/O for KuCoin, matching
+peer ports; all 97 KuCoin tests and clippy pass.
+
+Workspace 831 native tests, fmt/bans/native+Wasm clippy, full Wasm 26/host 25,
+root typecheck 44/lint 28 tasks, and 315 focused wrapper/client-ID tests pass.
+Independent shared merge reviews pass. The full 12-venue artifact is 4,752,442
+bytes and is exercised by integration tests; delivery-size enforcement now
+follows the landing's individual venue bundles.
+
+The new exact request-set comparison exposed only documented TS read gaps.
+Independent fixture declarations require exactly seven native GETs: five missing
+query reads, final cancellation proof and authoritative position mode. Each key
+must actually be sent by Rust. Query declarations bind command, range, symbol,
+pagination, stage and independent expected output; cancellation binds the order,
+market, successful DELETE evidence and stage. Active-book aliases require exact
+first-page keys, identical responses at the same stage, one page and at most 50
+items. Every other read, every write, signatures, timing and protocol checks
+remain strict. No expected key is derived from observed Rust output. Harness
+169 and wire 4 tests pass. Independent final read-contract review passes with
+no P1/P2 findings; raw child replay JSON remains unchanged.
+
+Selective KuCoin Wasm is 742,907 bytes, below the fixed 1,258,291-byte budget.
+Public medians TS/Rust: CPU 633.9/393.3 ms, steady CPU 452.7/238.7 ms and retained
+memory 7.0/3.2 MB, across 16,157 frames, 692 markets and two books. Private
+32 frames/17 commands pass. Exact output/request/signature/protocol checks pass.
+One earlier attempt hit the existing memory-settling deadline before comparison
+during concurrent checks; an unchanged quiet rerun passed. Binance and incoming
+Hyperliquid selective compatibility gates run next before commit/push and green
+final-head CI.
+
+### Twelve-venue integration checkpoint
+
+All six required/compatibility selective replays pass: KuCoin, Binance and
+Hyperliquid public/private. Exact request and write comparisons remain enabled.
+Three-run public medians (TS / Rust):
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 633.9 / 393.3 | 452.7 / 238.7 | 7.0 / 3.2 | 742,907 |
+| Binance | 257.9 / 128.3 | 149.4 / 62.6 | 4.2 / 2.2 | 750,118 |
+| Hyperliquid | 297.6 / 41.2 | 22.1 / 11.3 | 4.9 / 1.9 | 986,799 |
+
+Each bundle is below the fixed 1,258,291-byte budget. KuCoin private remains
+32 frames/17 commands. Independent phase, adversarial repair, shared-merge and
+read-contract reviews pass. The pending merge is ready to commit; then integrate
+the latest roster-only landing update, push, post the final review evidence and
+require green CI at the new head before merging PR #1312 into feat/rust-rewrite.
