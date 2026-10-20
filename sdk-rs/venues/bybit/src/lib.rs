@@ -242,6 +242,9 @@ pub struct BybitLinear {
     book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
     candles: HashMap<(String, String), u32>,
+    /// Live bar per subscription, extended by trades between native klines.
+    live_candles: HashMap<(String, String), Candle>,
+    trade_subscribers: HashMap<String, u32>,
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
     clock_offset_ms: f64,
@@ -268,6 +271,56 @@ fn interval_code(interval: &str) -> Option<&'static str> {
         "1M" => "M",
         _ => return None,
     })
+}
+
+/// Seconds intervals have no native kline; they are built from trades alone.
+fn seconds_interval(interval: &str) -> Option<f64> {
+    let seconds = interval.strip_suffix('s')?.parse::<f64>().ok()?;
+    (seconds > 0.0 && 60.0 % seconds == 0.0).then_some(seconds)
+}
+
+/// The bar start (seconds) holding `time`: Monday weeks and UTC calendar months
+/// for `1w`/`1M`, matching the native `W`/`M` klines; epoch floors otherwise.
+fn candle_start(interval: &str, time: f64) -> Option<f64> {
+    const DAY: f64 = 86_400.0;
+    let step = match interval {
+        "1w" => return Some(((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY),
+        "1M" => {
+            // Civil date from days since the epoch (Hinnant's algorithm).
+            let days = (time / DAY).floor() as i64 + 719_468;
+            let era = days.div_euclid(146_097);
+            let doe = days.rem_euclid(146_097);
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let month = if mp < 10 { mp + 3 } else { mp - 9 };
+            let year = yoe + era * 400 + i64::from(month <= 2);
+            // Days back to the first of that month.
+            let (y, m) = if month <= 2 {
+                (year - 1, month + 9)
+            } else {
+                (year, month - 3)
+            };
+            let era = y.div_euclid(400);
+            let yoe = y - era * 400;
+            let doy = (153 * m + 2) / 5;
+            let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+            return Some((era * 146_097 + doe - 719_468) as f64 * DAY);
+        }
+        _ => seconds_interval(interval).or_else(|| {
+            let (n, unit) = interval.split_at(interval.len().checked_sub(1)?);
+            let n = n.parse::<f64>().ok()?;
+            Some(
+                n * match unit {
+                    "m" => 60.0,
+                    "h" => 3_600.0,
+                    "d" => DAY,
+                    _ => return None,
+                },
+            )
+        })?,
+    };
+    Some((time / step).floor() * step)
 }
 
 /// Bybit's message for a rejected request, from any envelope or body.
@@ -373,6 +426,8 @@ impl BybitLinear {
             books: HashMap::new(),
             book_levels: BookLevels::default(),
             candles: HashMap::new(),
+            live_candles: HashMap::new(),
+            trade_subscribers: HashMap::new(),
             startup: Startup {
                 retry_ms: STARTUP_RETRY_MIN_MS,
                 prelaunch: options.variant.is_spot().then(Vec::new),
@@ -1098,6 +1153,10 @@ impl BybitLinear {
             && let Ok(event) = serde_json::from_str::<KlineEvent>(text)
         {
             self.on_kline(cx, &event);
+        } else if topic.starts_with("publicTrade.")
+            && let Ok(event) = serde_json::from_str::<TradeEvent>(text)
+        {
+            self.on_trades(cx, &event);
         }
     }
 
@@ -1165,19 +1224,96 @@ impl BybitLinear {
         else {
             return;
         };
+        let key = (symbol.to_owned(), interval);
         for k in &event.data {
-            cx.candle(
-                symbol,
-                &interval,
-                Candle {
-                    timestamp: k.start / 1000.0,
-                    open: float(&k.open),
-                    high: float(&k.high),
-                    low: float(&k.low),
-                    close: float(&k.close),
-                    volume: float(&k.volume),
+            let native = Candle {
+                timestamp: k.start / 1000.0,
+                open: float(&k.open),
+                high: float(&k.high),
+                low: float(&k.low),
+                close: float(&k.close),
+                volume: float(&k.volume),
+            };
+            let candle = match self.live_candles.get(&key) {
+                // Never move a live bar backwards.
+                Some(live) if live.timestamp > native.timestamp => continue,
+                // Keep trade extremes the kline has not caught up with; its volume is cumulative.
+                Some(live) if live.timestamp == native.timestamp => Candle {
+                    high: live.high.max(native.high),
+                    low: live.low.min(native.low),
+                    ..native
                 },
-            );
+                _ => native,
+            };
+            self.live_candles.insert(key.clone(), candle);
+            cx.candle(symbol, &key.1, candle);
+        }
+    }
+
+    /// Extend each live bar of this symbol with every trade in the packet, in order.
+    fn on_trades(&mut self, cx: &mut Cx<'_, Pending>, event: &TradeEvent<'_>) {
+        let Some(symbol) = event.topic.strip_prefix("publicTrade.") else {
+            return;
+        };
+        let trades: Vec<(f64, f64, f64)> = event
+            .data
+            .iter()
+            .map(|t| (t.time / 1000.0, float(&t.price), float(&t.size)))
+            .collect();
+        if trades.iter().any(|(time, price, size)| {
+            !(time.is_finite() && price.is_finite() && *price > 0.0 && size.is_finite())
+        }) {
+            return;
+        }
+        let intervals: Vec<String> = self
+            .candles
+            .keys()
+            .filter(|(s, _)| s == symbol)
+            .map(|(_, interval)| interval.clone())
+            .collect();
+        for interval in intervals {
+            let key = (symbol.to_owned(), interval);
+            let seconds = seconds_interval(&key.1).is_some();
+            let mut live = self.live_candles.get(&key).copied();
+            let before = live;
+            for &(time, price, size) in &trades {
+                let Some(start) = candle_start(&key.1, time) else {
+                    break;
+                };
+                let bar = match live {
+                    // Minute and longer bars start from a native kline.
+                    None if !seconds => continue,
+                    None => Candle {
+                        timestamp: start,
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price,
+                        volume: 0.0,
+                    },
+                    Some(bar) if bar.timestamp > start => continue,
+                    Some(bar) if bar.timestamp < start => Candle {
+                        timestamp: start,
+                        open: bar.close,
+                        high: bar.close,
+                        low: bar.close,
+                        close: bar.close,
+                        volume: 0.0,
+                    },
+                    Some(bar) => bar,
+                };
+                live = Some(Candle {
+                    high: bar.high.max(price),
+                    low: bar.low.min(price),
+                    close: price,
+                    volume: bar.volume + size,
+                    ..bar
+                });
+            }
+            if let Some(candle) = live.filter(|c| Some(*c) != before) {
+                self.live_candles.insert(key.clone(), candle);
+                cx.candle(symbol, &key.1, candle);
+            }
         }
     }
 
@@ -1234,25 +1370,45 @@ impl BybitLinear {
             cx.log(LogLevel::Warning, "Bybit has no candles for this product");
             return;
         }
-        let Some(topic) = Self::kline_topic(&symbol, &interval) else {
+        let trades = !self.variant.is_hyro();
+        let kline = Self::kline_topic(&symbol, &interval);
+        // Hyro has no trade feed, so its seconds intervals stay unsupported.
+        if kline.is_none() && !(trades && seconds_interval(&interval).is_some()) {
             cx.log(
                 LogLevel::Warning,
                 format!("Bybit has no {interval} candles"),
             );
             return;
-        };
-        let key = (symbol, interval);
+        }
+        let key = (symbol.clone(), interval);
         if add {
             let count = self.candles.entry(key).or_insert(0);
             *count += 1;
             if *count == 1 {
-                self.subscribe(cx, "subscribe", &[topic]);
+                let mut topics: Vec<String> = kline.into_iter().collect();
+                if trades {
+                    let subscribers = self.trade_subscribers.entry(symbol.clone()).or_insert(0);
+                    *subscribers += 1;
+                    if *subscribers == 1 {
+                        topics.push(format!("publicTrade.{symbol}"));
+                    }
+                }
+                self.subscribe(cx, "subscribe", &topics);
             }
         } else if let Some(count) = self.candles.get_mut(&key) {
             *count -= 1;
             if *count == 0 {
                 self.candles.remove(&key);
-                self.subscribe(cx, "unsubscribe", &[topic]);
+                self.live_candles.remove(&key);
+                let mut topics: Vec<String> = kline.into_iter().collect();
+                if trades && let Some(subscribers) = self.trade_subscribers.get_mut(&symbol) {
+                    *subscribers -= 1;
+                    if *subscribers == 0 {
+                        self.trade_subscribers.remove(&symbol);
+                        topics.push(format!("publicTrade.{symbol}"));
+                    }
+                }
+                self.subscribe(cx, "unsubscribe", &topics);
             }
         }
     }
@@ -1745,6 +1901,12 @@ impl Venue for BybitLinear {
                         .filter(|(symbol, _)| self.owns_symbol(symbol))
                         .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
                 );
+                topics.extend(
+                    self.trade_subscribers
+                        .keys()
+                        .filter(|symbol| self.owns_symbol(symbol))
+                        .map(|symbol| format!("publicTrade.{symbol}")),
+                );
                 self.subscribe(cx, "subscribe", &topics);
             }
             Channel::Private => self.on_private_open(cx, socket),
@@ -2083,3 +2245,22 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+#[cfg(test)]
+mod candle_start_tests {
+    use super::candle_start;
+
+    #[test]
+    fn calendar_bars_match_native_week_and_month_boundaries() {
+        // 2026-10-20 12:34:56 UTC is a Tuesday.
+        let t = 1_792_499_696.0;
+        assert_eq!(candle_start("1w", t), Some(1_792_368_000.0)); // Monday 2026-10-19
+        assert_eq!(candle_start("1M", t), Some(1_790_812_800.0)); // 2026-10-01
+        assert_eq!(candle_start("1M", 1_709_251_199.0), Some(1_706_745_600.0)); // 2024-02-29 -> 02-01
+        assert_eq!(candle_start("1M", 1_704_067_200.0), Some(1_704_067_200.0)); // 2024-01-01
+        assert_eq!(candle_start("1d", t), Some(1_792_454_400.0));
+        assert_eq!(candle_start("4h", t), Some(1_792_497_600.0));
+        assert_eq!(candle_start("15s", t), Some(1_792_499_685.0));
+        assert_eq!(candle_start("7s", t), None);
+    }
+}

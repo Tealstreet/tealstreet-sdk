@@ -434,11 +434,17 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   income ids keep TS's shape; distinct native rows that would share one (same-
   instant hedge legs) get their native id, side and signed size appended, and
   exact page repeats still collapse.
-- Medium: option failures stall linear startup (`lib.rs:857`).
+- ~~Medium: option failures stall linear startup (`lib.rs:857`).~~ Fixed: a failed
+  option catalog or seed lets the other products publish (markets, tickers,
+  sockets, account); options join later by appending (stable indexes, live rows kept).
 - ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
   documentation explicitly permits `baseCoin=All` for `category=option`.
-- Medium: live candles lack trade aggregation and seconds intervals.
-- Medium: option WS ticker field names likely wrong.
+- ~~Medium: live candles lack trade aggregation and seconds intervals.~~ Fixed:
+  `publicTrade` extends the native kline bar (every trade in a packet, in order;
+  Monday weeks, UTC months), seconds intervals are built from trades alone; Hyro
+  stays native-kline-only.
+- ~~Medium: option WS ticker field names likely wrong.~~ Fixed: documented option
+  `bidPrice`/`askPrice`/`change24h` (REST option rows: `change24h`) now update quotes.
 - ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
   with `accountType only support UNIFIED` switches the account to UTA and retries
   once; other errors never change the account type.

@@ -627,6 +627,25 @@ pub struct WsKline<'a> {
     pub volume: Str<'a>,
 }
 
+#[derive(Deserialize)]
+pub struct TradeEvent<'a> {
+    #[serde(borrow)]
+    pub topic: Str<'a>,
+    #[serde(borrow, default)]
+    pub data: Vec<WsTrade<'a>>,
+}
+
+/// One `publicTrade` execution: time (ms), price and size.
+#[derive(Deserialize)]
+pub struct WsTrade<'a> {
+    #[serde(rename = "T")]
+    pub time: f64,
+    #[serde(rename = "p", borrow)]
+    pub price: Str<'a>,
+    #[serde(rename = "v", borrow)]
+    pub size: Str<'a>,
+}
+
 /// REST kline row: `[startTime, open, high, low, close, volume, turnover]`.
 #[derive(Deserialize)]
 pub struct KlineRow<'a>(#[serde(borrow)] pub Vec<Str<'a>>);
