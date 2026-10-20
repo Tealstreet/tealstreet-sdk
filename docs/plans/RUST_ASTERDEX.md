@@ -318,3 +318,15 @@ unknown-ID success always fences older REST and records a timestamp-only
 cancellation tombstone. Delayed NEW/fresh Open snapshots cannot reopen it;
 late FILLED still emits once and creates a real terminal row. Account20/20
 and strict clippy pass; no synthetic Store order is introduced.
+
+### Cross-venue oracle isolation
+
+CI caught Lighter private replay with invalid negative heap/net retention. Aster's
+independent ethers verifier was eagerly imported by every venue registry user.
+It now loads only for selected Aster replay, through initializeReplay before both
+measurement baselines. Memory validation remains strict and unchanged; no values
+are clamped or skipped. New process-level module-load regression and all234
+harness tests pass. Independent reviewer verified repeated Rust/TS initialization
+loads ethers exactly once, unchanged checksum literals/signature/economic oracles,
+and9 focused tests. Selected Lighter private replay now passes with1.1MB positive
+Rust retention; a3-run stability gate is running before rebuilt Aster/Binance gates.

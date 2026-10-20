@@ -1,20 +1,15 @@
 // Independent request oracle: Ethereum primitives come from ethers, not the engine signer.
 import { createHmac } from 'node:crypto';
-import {
-  AbiCoder,
-  getAddress,
-  getBytes,
-  hashMessage,
-  keccak256,
-  recoverAddress,
-  TypedDataEncoder,
-  Wallet,
-} from 'ethers';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+let crypto;
+export const initializeAsterCrypto = () => crypto ??= require('ethers');
 
 // Public documentation demonstration identities; never a funded account.
 export const ASTER_PRIVATE_KEY = '0x4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1';
-export const ASTER_USER = getAddress('0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e');
-export const ASTER_SIGNER = getAddress('0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0');
+export const ASTER_USER = '0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e';
+export const ASTER_SIGNER = '0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0';
 const ZERO = '0x0000000000000000000000000000000000000000';
 const PUBLIC = /^\/fapi\/v[13]\/(?:time|exchangeInfo|ticker(?:\/.*)?|openInterest|depth|klines|trades|aggTrades|ping)$/;
 
@@ -38,6 +33,7 @@ const validTiming = (value, now) =>
   Number(value) < now + 1000;
 
 export const createAsterRequestValidator = (options = {}) => {
+  const { AbiCoder, getAddress, getBytes, hashMessage, keccak256, recoverAddress, TypedDataEncoder, Wallet } = initializeAsterCrypto();
   const nonces = new Map();
   return ({ method, url, headers = {}, body, now = Date.now() }) => {
     const parsed = new URL(url);

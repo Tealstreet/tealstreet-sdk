@@ -4,7 +4,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
-import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator } from './asterdex-requests.mjs';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
@@ -510,6 +510,7 @@ export const mexcRequestUrl = (url) => {
 
 export const VENUES = {
   asterdex: {
+    initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',
     ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
     privateSocket: '/ws/',
