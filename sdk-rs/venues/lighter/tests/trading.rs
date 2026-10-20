@@ -83,7 +83,7 @@ fn failure(e: &mut Engine<Lighter>) -> String {
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 result: Err(error), ..
-            }) => Some(error),
+            }) => Some(error.message),
             _ => None,
         })
         .expect("command rejection")
@@ -113,7 +113,7 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
         actions.iter().all(|action| matches!(
             action,
             Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
-                if error.contains("Bybit BBO and TickSize controls")
+                if error.message.contains("Bybit BBO and TickSize controls")
         )),
         "unexpected batch effects: {actions:?}"
     );
@@ -255,7 +255,7 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
             .iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx")))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:Err(error),.. }) if error.contains("Uncertain"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:Err(error),.. }) if error.message.contains("Uncertain"))));
     place(&mut e, vec![limit()]);
     assert!(http(&mut e, "nextNonce").url.contains("api_key_index=1"));
 }

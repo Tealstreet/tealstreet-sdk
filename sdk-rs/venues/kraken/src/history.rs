@@ -543,7 +543,7 @@ impl Kraken {
             at,
             Pending::History(Box::new(request)),
         ) {
-            cx.done(command, Err(error));
+            cx.done(command, Err(error.into()));
         }
     }
     pub(crate) fn history_item(
@@ -924,7 +924,7 @@ impl Kraken {
             let rows: Vec<_> = request.rows.into_iter().map(|row| row.data).collect();
             match serde_json::to_string(&rows) {
                 Ok(rows) => cx.done(request.command, Ok(rows)),
-                Err(error) => cx.done(request.command, Err(error.to_string())),
+                Err(error) => cx.done(request.command, Err(error.to_string().into())),
             }
         }
     }
@@ -936,7 +936,7 @@ impl Kraken {
     ) {
         cx.done(
             request.command,
-            Err(format!("Kraken history failed: {error}")),
+            Err(format!("Kraken history failed: {error}").into()),
         );
     }
 }

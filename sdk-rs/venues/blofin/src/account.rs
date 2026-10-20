@@ -109,7 +109,7 @@ impl Blofin {
         symbol: String,
     ) {
         let Some(market) = cx.store.market(&symbol) else {
-            cx.done(command, Err(format!("Unknown market {symbol}")));
+            cx.done(command, Err(format!("Unknown market {symbol}").into()));
             return;
         };
         let Some(margin) = self.account.margin.filter(|_| self.account.mode_loaded) else {
@@ -796,7 +796,7 @@ impl Blofin {
                     });
                     Ok(json)
                 })();
-                cx.done(command, result.map_err(str::to_owned));
+                cx.done(command, result.map_err(str::to_owned).map_err(Into::into));
             }
             Request::Margin { revision } => {
                 if let Ok(Data { data: m }) =
@@ -1081,7 +1081,7 @@ impl Blofin {
     ) {
         match request {
             Request::Leverage { command, .. } => {
-                cx.done(command, Err(error.to_owned()));
+                cx.done(command, Err(error.to_owned().into()));
             }
             Request::Orders { attempt, .. } => {
                 self.account.orders_busy = false;

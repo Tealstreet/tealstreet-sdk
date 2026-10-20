@@ -851,8 +851,8 @@ fn stale_sizing_failure_cannot_deactivate_a_replacement_socket() {
     );
     s.e.drain_actions().for_each(drop);
     s.reply(request, 401, r#"{"error":"expired"}"#);
-    assert!(
-        !s.e.drain_actions()
-            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Deactivate)))
-    );
+    assert!(!s.e.drain_actions().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::Deactivate { .. })
+    )));
 }

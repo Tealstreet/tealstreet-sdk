@@ -664,7 +664,9 @@ impl Venue for Bingx {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(
                     command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
+                    serde_json::to_string(&rows)
+                        .map_err(|e| e.to_string())
+                        .map_err(Into::into),
                 )
             }
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
@@ -803,7 +805,7 @@ impl Venue for Bingx {
                 to_ms,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("unknown market {symbol}")));
+                    cx.done(command, Err(format!("unknown market {symbol}").into()));
                     return;
                 };
                 let Some(step) = interval_ms(&interval) else {

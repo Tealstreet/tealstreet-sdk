@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
+use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
@@ -102,7 +103,9 @@ pub enum LogLevel {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
-    Deactivate,
+    Deactivate {
+        error: VenueError,
+    },
     Log {
         level: LogLevel,
         message: String,
@@ -110,7 +113,7 @@ pub enum Notice {
     /// `Ok` carries the command's JSON result.
     CommandDone {
         command: CommandId,
-        result: Result<String, String>,
+        result: Result<String, VenueError>,
     },
 }
 
@@ -777,11 +780,13 @@ impl<P> Cx<'_, P> {
         }));
     }
 
-    pub fn deactivate(&mut self) {
-        self.io.actions.push(Action::Notice(Notice::Deactivate));
+    pub fn deactivate(&mut self, error: impl Into<VenueError>) {
+        self.io.actions.push(Action::Notice(Notice::Deactivate {
+            error: error.into(),
+        }));
     }
 
-    pub fn done(&mut self, command: CommandId, result: Result<String, String>) {
+    pub fn done(&mut self, command: CommandId, result: Result<String, VenueError>) {
         self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
@@ -1910,7 +1915,7 @@ mod streaming_tests {
         assert!(
             matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone {
             command: 31, result: Err(error),
-        })] if error.contains("unsupported"))
+        })] if error.message.contains("unsupported"))
         );
         assert_eq!(engine.snapshot_frame(1.), before);
         let legacy = Command::SetTickerSymbols {
@@ -1959,7 +1964,7 @@ mod streaming_tests {
         for (index, action) in actions.iter().enumerate() {
             assert!(
                 matches!(action, Action::Notice(Notice::CommandDone { command, result: Err(error) })
-                if *command == index as u32 + 1 && error.contains("Options are not enabled"))
+                if *command == index as u32 + 1 && error.message.contains("Options are not enabled"))
             );
         }
     }

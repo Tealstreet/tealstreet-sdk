@@ -1005,7 +1005,7 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. })))
         );
         assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("wallet address pair"))));
         assert!(
@@ -1033,7 +1033,7 @@ fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. })))
     );
     let r = actions
         .iter()
@@ -1072,11 +1072,10 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
         let r = take_http(&mut e);
         support::reply(&mut e, &r, 200, META);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(
-            !actions
-                .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::Deactivate) | Action::Http(_)))
-        );
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::Deactivate { .. }) | Action::Http(_)
+        )));
         assert!(actions.iter().any(|a| matches!(
             a,
             Action::WsConnect {

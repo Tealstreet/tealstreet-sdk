@@ -448,7 +448,12 @@ impl PhemexPerpetuals {
                 serde_json::to_string(rows)
             }
         };
-        cx.done(request.command, result.map_err(|error| error.to_string()));
+        cx.done(
+            request.command,
+            result
+                .map_err(|error| error.to_string())
+                .map_err(Into::into),
+        );
     }
     pub(crate) fn history_failed(
         &mut self,

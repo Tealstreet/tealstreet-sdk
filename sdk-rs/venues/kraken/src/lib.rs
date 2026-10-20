@@ -771,7 +771,12 @@ impl Venue for Kraken {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    cx.done(
+                        c,
+                        serde_json::to_string(&rows)
+                            .map_err(|e| e.to_string())
+                            .map_err(Into::into),
+                    );
                 } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
                     s.in_flight = false;
                     s.next_poll = cx.now + 5_000.0;

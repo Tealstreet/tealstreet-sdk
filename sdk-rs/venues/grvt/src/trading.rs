@@ -1224,7 +1224,7 @@ impl Grvt {
             _ => {}
         }
         if let Err(error) = self.trade_plan(cx, command.clone()) {
-            cx.done(id, Err(error));
+            cx.done(id, Err(error.into()));
             return true;
         }
         self.trading.queue.push_back(command);
@@ -1246,7 +1246,7 @@ impl Grvt {
                 self.trade_step(cx, plan);
             }
             Err(error) => {
-                cx.done(id, Err(error));
+                cx.done(id, Err(error.into()));
                 self.trade_next(cx);
             }
         }
@@ -1332,12 +1332,14 @@ impl Grvt {
                 Some(error) if !plan.created.is_empty() => Err(format!(
                     "{error}; already created GRVT order IDs: {}",
                     plan.created.join(",")
-                )),
+                )
+                .into()),
                 Some(error) if !plan.cancel_attempts.is_empty() => Err(format!(
                     "{error}; reconcile GRVT cancellation identities: {}",
                     plan.cancel_attempts.join(",")
-                )),
-                Some(error) => Err(error),
+                )
+                .into()),
+                Some(error) => Err(error.into()),
                 None => Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
             },
         );

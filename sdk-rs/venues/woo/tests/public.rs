@@ -21,6 +21,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
             }
         })
         .unwrap()
+        .map_err(|error| error.message)
 }
 const UPDATE: &str = r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":102,"data":{"bids":[[59000,4],[58000,5]],"asks":[[61000,0]]}}"#;
 

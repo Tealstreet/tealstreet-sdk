@@ -208,7 +208,7 @@ fn invalid_leverage_bounds_reject_setting_write_and_preserve_account_state() {
         assert!(!actions.iter().any(
             |action| matches!(action, Action::Http(request) if request.url.contains("sendTx"))
         ));
-        assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:8, result:Err(error) }) if error.contains("leverage limits"))));
+        assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:8, result:Err(error) }) if error.message.contains("leverage limits"))));
         assert_eq!(e.store().positions(), before_positions);
     }
 }

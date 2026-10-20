@@ -355,7 +355,7 @@ impl BybitLinear {
                     Ok(())
                 };
                 if let Err(error) = valid {
-                    cx.done(*command, Err(error));
+                    cx.done(*command, Err(error.into()));
                     return;
                 }
             }
@@ -365,7 +365,7 @@ impl BybitLinear {
         if let Command::PlaceOrders { command, orders } = &command
             && let Err(error) = validate_stop_triggers(cx, orders)
         {
-            cx.done(*command, Err(error));
+            cx.done(*command, Err(error.into()));
             return;
         }
         if self.variant.is_hyro() {
@@ -395,7 +395,7 @@ impl BybitLinear {
             }
         }
         if let Some((id, result)) = self.variant_control(&command) {
-            cx.done(id, result.map(|_| "[]".to_owned()));
+            cx.done(id, result.map(|_| "[]".to_owned()).map_err(Into::into));
             return;
         }
         // A settle-coin snapshot omits flat symbols. Resolve their mode before
@@ -430,7 +430,7 @@ impl BybitLinear {
             if let Command::PlaceOrders { orders, .. } = &command
                 && let Err(message) = check_client_order_ids(cx, orders)
             {
-                cx.done(id, Err(message));
+                cx.done(id, Err(message.into()));
                 return;
             }
             self.send(
@@ -619,7 +619,7 @@ impl BybitLinear {
             }
             Err(message) => {
                 cx.log(LogLevel::Error, message.clone());
-                cx.done(id, Err(message));
+                cx.done(id, Err(message.into()));
             }
         }
     }
@@ -699,7 +699,7 @@ impl BybitLinear {
                     Some(error) if job.ids.is_empty() || !job.continue_on_error => Err(error),
                     _ => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
                 };
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
         }
     }
@@ -783,7 +783,7 @@ impl BybitLinear {
                     }
                     Err(message) => {
                         cx.log(LogLevel::Error, message.clone());
-                        cx.done(command, Err(message));
+                        cx.done(command, Err(message.into()));
                     }
                 }
                 return;

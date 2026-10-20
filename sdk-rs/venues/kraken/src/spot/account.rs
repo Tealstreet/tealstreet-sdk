@@ -3,6 +3,7 @@ use crate::wire::{number, optional_number};
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*,
 };
+use safe_cex_engine::{ErrorKind, VenueError};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
@@ -251,7 +252,7 @@ impl KrakenSpot {
     }
     pub(super) fn reject_auth(&self, cx: &mut Cx<'_, Pending>, error: &str) {
         cx.log(LogLevel::Error, error);
-        cx.deactivate();
+        cx.deactivate(VenueError::new(error).kind(ErrorKind::AuthInvalid));
     }
     pub(super) fn request_private(
         &mut self,
@@ -531,7 +532,13 @@ impl KrakenSpot {
                     self.balance_read(cx, None);
                 }
                 if let Some(c) = command {
-                    cx.done(*c, r.as_ref().map(|_| "null".into()).map_err(Clone::clone));
+                    cx.done(
+                        *c,
+                        r.as_ref()
+                            .map(|_| "null".into())
+                            .map_err(Clone::clone)
+                            .map_err(Into::into),
+                    );
                 }
                 r
             }

@@ -501,7 +501,7 @@ impl BreakoutProp {
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.done(id, Err(error.into())),
         }
         true
     }
@@ -622,10 +622,12 @@ impl BreakoutProp {
             let job = self.trading.jobs.remove(&id).expect("job present");
             cx.done(
                 id,
-                job.error.map_or_else(
-                    || Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                    Err,
-                ),
+                job.error
+                    .map_or_else(
+                        || Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
+                        Err,
+                    )
+                    .map_err(Into::into),
             );
             return;
         }

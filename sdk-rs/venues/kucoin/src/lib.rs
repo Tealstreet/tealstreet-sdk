@@ -999,13 +999,15 @@ impl Venue for Kucoin {
             } => {
                 cx.done(
                     command,
-                    success(status, body).and_then(|_| {
-                        if invalid {
-                            Err("invalid KuCoin candle row".into())
-                        } else {
-                            serde_json::to_string(&rows).map_err(|e| e.to_string())
-                        }
-                    }),
+                    success(status, body)
+                        .and_then(|_| {
+                            if invalid {
+                                Err("invalid KuCoin candle row".into())
+                            } else {
+                                serde_json::to_string(&rows).map_err(|e| e.to_string())
+                            }
+                        })
+                        .map_err(Into::into),
                 );
             }
         }
@@ -1177,7 +1179,7 @@ impl Venue for Kucoin {
                         let api = api_symbol(cx.store, &symbol);
                         self.public(cx,&format!("/api/v1/kline/query?symbol={api}&granularity={minutes}&from={}&to={}",start as u64,end as u64),Some(ArrayAt::EnvelopeField("data")),Pending::Candles{command,rows:vec![],invalid:false});
                     }
-                    Err(e) => cx.done(command, Err(e)),
+                    Err(e) => cx.done(command, Err(e.into())),
                 }
             }
             Command::Query { command, query } => self.history_command(cx, command, query),

@@ -717,7 +717,7 @@ impl Woo {
         } else {
             match self.signed(cx, Method::Get, path, params, None, Pending::History(r)) {
                 Ok(id) => cx.stream_response(id, at),
-                Err(error) => cx.done(command, Err(error)),
+                Err(error) => cx.done(command, Err(error.into())),
             }
         }
     }
@@ -778,7 +778,7 @@ impl Woo {
         let page = match meta(response.body) {
             Ok(m) => m,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.done(r.command, Err(e.into()));
                 return;
             }
         };
@@ -869,7 +869,9 @@ impl Woo {
         let rows = r.rows.into_iter().map(|r| r.row).collect::<Vec<_>>();
         cx.done(
             r.command,
-            serde_json::to_string(&rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
     // The active TS adapter tries each venue spelling before falling back to
@@ -892,7 +894,7 @@ impl Woo {
             r.page = 1;
             self.history_page(cx, r);
         } else if let Some(error) = r.last_fill_error.take() {
-            cx.done(r.command, Err(error));
+            cx.done(r.command, Err(error.into()));
         } else if r.walk.is_some() {
             r.route = Route::Fills;
             self.history_next_window(cx, r);

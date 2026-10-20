@@ -1029,7 +1029,9 @@ impl Coinbase {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                     cx.done(
                         command,
-                        serde_json::to_string(&rows).map_err(|e| e.to_string()),
+                        serde_json::to_string(&rows)
+                            .map_err(|e| e.to_string())
+                            .map_err(Into::into),
                     );
                 }
             }
@@ -1535,7 +1537,7 @@ impl Coinbase {
                         invalid: false,
                     }),
                 ) {
-                    cx.done(command, Err(error));
+                    cx.done(command, Err(error.into()));
                 }
             }
             Command::SetTickerSymbols { .. } => {}

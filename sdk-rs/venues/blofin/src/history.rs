@@ -245,7 +245,7 @@ impl Blofin {
         if let Some(s) = symbol
             && cx.store.market(s).is_none()
         {
-            cx.done(command, Err(format!("Unknown market {s}")));
+            cx.done(command, Err(format!("Unknown market {s}").into()));
             return;
         }
         if matches!(&query, Query::Fills { symbol: None, .. }) {
@@ -371,7 +371,7 @@ impl Blofin {
                     Pending::History(request),
                 );
             }
-            Err(e) => cx.done(request.command, Err(e)),
+            Err(e) => cx.done(request.command, Err(e.into())),
         }
     }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -637,7 +637,7 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if let Err(e) = check(&response) {
-            cx.done(request.command, Err(e));
+            cx.done(request.command, Err(e.into()));
             return;
         }
         if request.failed {
@@ -694,7 +694,10 @@ impl Blofin {
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
         };
-        cx.done(request.command, result.map_err(|e| e.to_string()));
+        cx.done(
+            request.command,
+            result.map_err(|e| e.to_string()).map_err(Into::into),
+        );
     }
     pub(crate) fn history_failed(
         &mut self,

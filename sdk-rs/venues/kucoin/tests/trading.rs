@@ -128,7 +128,7 @@ impl Harness {
         }
         self.pace();
     }
-    fn done(&self, command: u32) -> &Result<String, String> {
+    fn done(&self, command: u32) -> &Result<String, safe_cex_engine::VenueError> {
         self.actions
             .iter()
             .find_map(|a| match a {
@@ -242,7 +242,7 @@ fn unsupported_slippage_protection_rejects_the_entire_batch_before_transport() {
         protected.max_slippage_pct = Some(1.0);
         place(&mut h, vec![order(), protected]);
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(h.done(1).as_ref().unwrap_err().contains("slippage"));
+        assert!(h.done(1).as_ref().unwrap_err().message.contains("slippage"));
     }
 }
 #[test]
@@ -261,7 +261,7 @@ fn bybit_execution_controls_reject_the_whole_batch_before_transport() {
         }
         place(&mut h, vec![order(), protected]);
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(h.done(1).as_ref().unwrap_err().contains("Bybit"));
+        assert!(h.done(1).as_ref().unwrap_err().message.contains("Bybit"));
     }
 }
 #[test]
@@ -901,7 +901,13 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         assert!(!h.actions.iter().any(
             |action| matches!(action, Action::Http(request) if request.method != Method::Get)
         ));
-        assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+        assert!(
+            h.done(99)
+                .as_ref()
+                .unwrap_err()
+                .message
+                .contains("leverage limits")
+        );
     }
 }
 

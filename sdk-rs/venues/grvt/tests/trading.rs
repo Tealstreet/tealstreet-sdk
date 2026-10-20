@@ -190,7 +190,7 @@ fn reply(e: &mut Engine<Grvt>, r: &HttpRequest, status: u16, body: &str) -> Vec<
     );
     e.drain_actions().collect()
 }
-fn done(actions: &[Action], id: u32) -> Option<&Result<String, String>> {
+fn done(actions: &[Action], id: u32) -> Option<&Result<String, safe_cex_engine::VenueError>> {
     actions.iter().find_map(|a| {
         if let Action::Notice(Notice::CommandDone { command, result }) = a {
             (*command == id).then_some(result)
@@ -447,6 +447,7 @@ fn bybit_specific_options_reject_the_entire_batch_before_any_write() {
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("Bybit-specific")
         );
         assert!(
@@ -479,6 +480,7 @@ fn unsupported_self_trade_prevention_rejects_the_entire_batch_before_any_write()
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("self-trade prevention")
         );
         assert!(
@@ -518,6 +520,7 @@ fn foreign_commands_fail_without_bypassing_known_order_cancellation_identity() {
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("Unsupported GRVT command")
         );
         assert!(
@@ -627,7 +630,11 @@ fn bracket_failure_reports_partial_progress_and_never_sends_next_child() {
     );
     let actions = reply(&mut e, &child, 400, r#"{"c":2001,"m":"rejected"}"#);
     let error = done(&actions, 5).unwrap().as_ref().unwrap_err();
-    assert!(error.contains(&format!("already created GRVT order IDs: {entry_id}")));
+    assert!(
+        error
+            .message
+            .contains(&format!("already created GRVT order IDs: {entry_id}"))
+    );
     assert!(
         !actions
             .iter()
@@ -660,6 +667,7 @@ fn uncertain_write_is_not_retried_and_exposes_reconciliation_identity() {
             .unwrap()
             .as_ref()
             .unwrap_err()
+            .message
             .contains("9223372036854775807")
     );
     assert!(
@@ -1231,6 +1239,7 @@ fn fill_topic_only_execution_aborts_pending_inspection_and_final_proof() {
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("account execution")
         );
         assert!(
@@ -1318,6 +1327,7 @@ fn unchanged_fill_but_older_inspection_or_cancellation_proof_is_rejected() {
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("predates")
         );
         assert!(
@@ -1353,6 +1363,7 @@ fn cancellation_proof_cannot_predate_the_authoritative_inspection() {
             .unwrap()
             .as_ref()
             .unwrap_err()
+            .message
             .contains("predates")
     );
     assert!(
@@ -1423,6 +1434,7 @@ fn authentication_resend_rechecks_execution_progress_for_pending_verify_and_plac
                 .unwrap()
                 .as_ref()
                 .unwrap_err()
+                .message
                 .contains("execution")
         );
         assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order")||r.url.ends_with("/order"))));

@@ -12,6 +12,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
+use safe_cex_engine::{ErrorKind, VenueError};
 use serde::Serialize;
 use std::collections::HashMap;
 use wire::*;
@@ -706,11 +707,9 @@ impl Venue for Hyperliquid {
                         .is_ok_and(|wallet| wallet.eq_ignore_ascii_case(key))
                 });
             if !matches_wallet {
-                cx.log(
-                    LogLevel::Error,
-                    "Hyperliquid spot invalid private key & wallet address pair",
-                );
-                cx.deactivate();
+                const INVALID: &str = "Hyperliquid spot invalid private key & wallet address pair";
+                cx.log(LogLevel::Error, INVALID);
+                cx.deactivate(VenueError::new(INVALID).kind(ErrorKind::AuthInvalid));
                 return;
             }
         }

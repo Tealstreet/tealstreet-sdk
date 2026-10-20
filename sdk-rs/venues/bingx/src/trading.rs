@@ -343,7 +343,7 @@ impl Trading {
             }
             Err(error) => {
                 cx.log(LogLevel::Error, error.clone());
-                cx.done(id, Err(error));
+                cx.done(id, Err(error.into()));
             }
         }
         true
@@ -380,7 +380,7 @@ impl Trading {
             cx.done(
                 command,
                 match job.error {
-                    Some(error) => Err(error),
+                    Some(error) => Err(error.into()),
                     None => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
                 },
             );

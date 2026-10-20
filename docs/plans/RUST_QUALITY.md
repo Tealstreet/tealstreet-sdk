@@ -54,7 +54,10 @@ Error` with `kind`, `category` (1:1 onto `ErrorCategory`), `outcome`,
 `failedOrderIndex`, redacted `debug`. Regex classification stays only as the
 TS-venue fallback.
 
-PRs: (1) types and plumbing, byte-identical messages, URL redaction; (2) one
+PRs: (1) types and plumbing, byte-identical messages, URL redaction
+(Rust side landed: `engine/src/error.rs`, `Cx::done`/`Cx::deactivate(error)`,
+wasm/native `detail` beside the unchanged `error` text, partial batches as
+fields; TS `ExchangeError` follows the bridge PR); (2) one
 shared parser per venue family, replacing `malformed` flags; (3) TS toast on
 rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
 `StartupFailed`, per-venue auth codes (**risky**: ends infinite retries); (6)

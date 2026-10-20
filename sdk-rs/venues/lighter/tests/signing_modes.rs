@@ -75,7 +75,7 @@ fn reject_write(engine: &mut Engine<Lighter>) {
             .any(|action| matches!(action, Action::Http(_)))
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 9, result: Err(error) }) if error.contains("signer unavailable"))));
+        Action::Notice(Notice::CommandDone { command: 9, result: Err(error) }) if error.message.contains("signer unavailable"))));
 }
 
 #[test]

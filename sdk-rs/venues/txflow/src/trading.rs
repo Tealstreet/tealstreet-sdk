@@ -282,7 +282,7 @@ impl TxFlow {
                         .ok_or_else(|| {
                             format!("TxFlow account leverage is not confirmed for {symbol}")
                         });
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
                 return;
             }
             Command::FetchAccount { command } => {
@@ -316,7 +316,7 @@ impl TxFlow {
             return;
         }
         match built {
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.done(id, Err(error.into())),
             Ok(steps) => {
                 self.trading.queue.push_back(Job {
                     command: id,
@@ -835,7 +835,9 @@ impl TxFlow {
         if let Some(job) = self.trading.active.take() {
             cx.done(
                 job.command,
-                result.map(|_| serde_json::to_string(&job.ids).unwrap()),
+                result
+                    .map(|_| serde_json::to_string(&job.ids).unwrap())
+                    .map_err(Into::into),
             );
         }
         self.pump_trades(cx);

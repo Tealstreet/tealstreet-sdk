@@ -1015,7 +1015,7 @@ impl Venue for KucoinSpot {
                         )
                     })
                     .map_err(|e| e.to_string());
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
             Pending::Fills(command) => {
                 #[derive(Serialize)]
@@ -1049,7 +1049,7 @@ impl Venue for KucoinSpot {
                     }
                     serde_json::to_string(&rows).map_err(|e| e.to_string())
                 })();
-                cx.done(command, out);
+                cx.done(command, out.map_err(Into::into));
             }
         }
     }

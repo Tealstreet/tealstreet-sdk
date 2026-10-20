@@ -783,7 +783,10 @@ impl History {
                 })
             }
         };
-        cx.done(request.command, result.map_err(|e| e.to_string()));
+        cx.done(
+            request.command,
+            result.map_err(|e| e.to_string()).map_err(Into::into),
+        );
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         cx.done(request.command, Err(error.into()));

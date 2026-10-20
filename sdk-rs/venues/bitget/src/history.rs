@@ -423,7 +423,7 @@ impl BitgetFutures {
             match self.signed_headers(cx.now, Method::Get, &path, "") {
                 Ok(h) => h,
                 Err(e) => {
-                    cx.done(r.command, Err(e));
+                    cx.done(r.command, Err(e.into()));
                     return;
                 }
             }
@@ -861,14 +861,16 @@ impl BitgetFutures {
             .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
         cx.done(
             r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&r.rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
         if r.retries >= 3 {
             cx.done(
                 r.command,
-                Err(format!("Bitget history incomplete: {error}")),
+                Err(format!("Bitget history incomplete: {error}").into()),
             );
             return;
         }

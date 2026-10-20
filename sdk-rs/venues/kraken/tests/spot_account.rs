@@ -430,7 +430,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. })))
     );
     let retry = actions
         .into_iter()
@@ -449,7 +449,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. })))
     );
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
     assert!(actions.iter().any(|a| matches!(
@@ -471,7 +471,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. })))
     );
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("invalid secret"))));
     assert!(

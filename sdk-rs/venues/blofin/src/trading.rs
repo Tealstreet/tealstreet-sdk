@@ -872,7 +872,7 @@ impl Blofin {
                 self.trading.queue.push_back(command);
                 self.trade_next(cx);
             }
-            Err(e) => cx.done(id, Err(e)),
+            Err(e) => cx.done(id, Err(e.into())),
         }
     }
     fn plan_trade(
@@ -1104,7 +1104,7 @@ impl Blofin {
             let job = match plan {
                 Ok(job) => job,
                 Err(e) => {
-                    cx.done(id, Err(e));
+                    cx.done(id, Err(e.into()));
                     self.trade_next(cx);
                     return;
                 }
@@ -1289,7 +1289,7 @@ impl Blofin {
             return;
         }
         self.cleanup_job(cx, &request.job);
-        cx.done(request.job.command, Err(error.to_owned()));
+        cx.done(request.job.command, Err(error.to_owned().into()));
         self.trading.busy = false;
         self.trade_next(cx);
     }
@@ -1467,7 +1467,7 @@ impl Blofin {
         let joined = self.trading.joined.take().unwrap();
         if let Some(error) = joined.error {
             self.cleanup_job(cx, &joined.job);
-            cx.done(joined.job.command, Err(error));
+            cx.done(joined.job.command, Err(error.into()));
             self.trading.busy = false;
             self.refresh_account(cx);
             self.trade_next(cx);

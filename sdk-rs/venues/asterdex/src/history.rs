@@ -608,7 +608,7 @@ impl AsterDex {
                 range: Some(mut range),
             } => {
                 if let Some(error) = error {
-                    cx.done(command, Err(error));
+                    cx.done(command, Err(error.into()));
                 } else if invalid {
                     cx.done(command, Err("Malformed Aster history response".into()));
                 } else {
@@ -649,7 +649,7 @@ impl AsterDex {
         } else {
             result.map_err(|e| e.to_string())
         };
-        cx.done(command, result);
+        cx.done(command, result.map_err(Into::into));
     }
 
     fn next_income_page(
@@ -692,7 +692,7 @@ impl AsterDex {
                 } else {
                     serde_json::to_string(&range.collected).map_err(|error| error.to_string())
                 };
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
         }
     }

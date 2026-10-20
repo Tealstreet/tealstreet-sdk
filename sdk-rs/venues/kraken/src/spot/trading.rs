@@ -331,7 +331,7 @@ impl KrakenSpot {
         match command {
             Command::PlaceOrders { command, orders } => match self.prepare_batch(cx, orders) {
                 Ok(steps) => self.enqueue(cx, *command, steps, false),
-                Err(e) => cx.done(*command, Err(e)),
+                Err(e) => cx.done(*command, Err(e.into())),
             },
             Command::AmendOrder {
                 command,
@@ -340,7 +340,7 @@ impl KrakenSpot {
                 amount,
             } => match self.amend(cx, id, *price, *amount) {
                 Ok(s) => self.enqueue(cx, *command, VecDeque::from([s]), false),
-                Err(e) => cx.done(*command, Err(e)),
+                Err(e) => cx.done(*command, Err(e.into())),
             },
             Command::CancelOrders { command, ids } => {
                 if ids.iter().any(String::is_empty) {

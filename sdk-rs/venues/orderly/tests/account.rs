@@ -278,7 +278,7 @@ fn only_definitive_account_validation_rejection_deactivates() {
         assert_eq!(
             output
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::Deactivate))),
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate { .. }))),
             status == 401 || status == 403
         );
         assert_eq!(

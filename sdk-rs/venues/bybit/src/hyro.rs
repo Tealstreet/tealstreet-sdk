@@ -136,7 +136,7 @@ impl BybitLinear {
         let key = match key {
             Ok(key) => key,
             Err(message) => {
-                cx.done(command, Err(message));
+                cx.done(command, Err(message.into()));
                 return;
             }
         };
@@ -255,7 +255,7 @@ impl BybitLinear {
         let creates = match creates {
             Ok(creates) => creates,
             Err(error) => {
-                cx.done(command, Err(error));
+                cx.done(command, Err(error.into()));
                 return;
             }
         };
@@ -381,7 +381,7 @@ impl BybitLinear {
         };
         cx.log(LogLevel::Error, message.clone());
         for command in group.waiters.drain(..) {
-            cx.done(command, Err(message.clone()));
+            cx.done(command, Err(message.clone().into()));
         }
         group.running = false;
         if rejected {

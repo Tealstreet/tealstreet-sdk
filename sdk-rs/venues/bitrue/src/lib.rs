@@ -534,7 +534,7 @@ impl Bitrue {
                     }
                 }
             };
-            cx.done(request.command, result);
+            cx.done(request.command, result.map_err(Into::into));
         }
         self.reads.retain(|_, v| !v.is_empty());
         self.send_socket_read(cx, &message.channel);

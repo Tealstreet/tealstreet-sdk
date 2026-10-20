@@ -1,4 +1,7 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
+use safe_cex_engine::{ErrorKind, VenueError};
+
+const CREDENTIALS_REJECTED: &str = "Coinbase credentials rejected";
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId};
@@ -1313,8 +1316,8 @@ impl Coinbase {
                 self.account.backoff_until = cx.now + delay;
             }
             if response.status == 401 {
-                cx.log(LogLevel::Error, "Coinbase credentials rejected");
-                cx.deactivate();
+                cx.log(LogLevel::Error, CREDENTIALS_REJECTED);
+                cx.deactivate(VenueError::new(CREDENTIALS_REJECTED).kind(ErrorKind::AuthInvalid));
                 return;
             }
             if matches!(response.status, 403 | 404) {
@@ -1328,8 +1331,10 @@ impl Coinbase {
                         return;
                     }
                     Request::Portfolios => {
-                        cx.log(LogLevel::Error, "Coinbase credentials rejected");
-                        cx.deactivate();
+                        cx.log(LogLevel::Error, CREDENTIALS_REJECTED);
+                        cx.deactivate(
+                            VenueError::new(CREDENTIALS_REJECTED).kind(ErrorKind::AuthInvalid),
+                        );
                         return;
                     }
                     _ => {}

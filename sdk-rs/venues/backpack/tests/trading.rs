@@ -22,6 +22,7 @@ fn done(e: &mut Driver) -> Result<String, String> {
             }
         })
         .expect("command completed")
+        .map_err(|error| error.message)
 }
 #[test]
 fn bybit_execution_controls_reject_entire_batch_before_writes() {
@@ -45,7 +46,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
             a,
             Action::Notice(Notice::CommandDone {
                 result: Err(error), ..
-            }) if error.contains("Bybit")
+            }) if error.message.contains("Bybit")
         )));
     }
 }

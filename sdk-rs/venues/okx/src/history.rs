@@ -336,7 +336,10 @@ impl Request {
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
         };
-        cx.done(self.command, json.map_err(|e| e.to_string()));
+        cx.done(
+            self.command,
+            json.map_err(|e| e.to_string()).map_err(Into::into),
+        );
     }
 }
 
@@ -504,7 +507,7 @@ impl Okx {
                 order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
-            cx.done(command, found(order.clone(), None));
+            cx.done(command, found(order.clone(), None).map_err(Into::into));
             return;
         }
         if self.credentials.is_none() || self.options.public_data_only {
@@ -679,7 +682,7 @@ impl Okx {
             };
             found(order, Some(rows[0]))
         })();
-        cx.done(r.command, result);
+        cx.done(r.command, result.map_err(Into::into));
     }
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut r: Request) {

@@ -112,7 +112,11 @@ fn failed_refresh_login_drains_portfolio_without_starting_another_login() {
     assert!(login.url.ends_with("/login"));
     rig.reply(&login, 500, "{}");
     assert!(rig.requests.is_empty());
-    assert!(!rig.notices.contains(&Notice::Deactivate));
+    assert!(
+        !rig.notices
+            .iter()
+            .any(|notice| matches!(notice, Notice::Deactivate { .. }))
+    );
     assert_eq!(*rig.engine.store().balance(), before);
     let failure_at = rig.now;
     let retry = rig.next_request();
@@ -130,7 +134,11 @@ fn rejected_refresh_login_stops_account_polling_without_clearing_snapshot() {
     rig.reply(&login, 403, "{}");
     assert!(rig.requests.is_empty());
     assert!(rig.timers.is_empty());
-    assert!(rig.notices.contains(&Notice::Deactivate));
+    assert!(
+        rig.notices
+            .iter()
+            .any(|notice| matches!(notice, Notice::Deactivate { .. }))
+    );
     assert_eq!(*rig.engine.store().balance(), before);
     assert_eq!(rig.engine.store().positions().len(), 2);
 }

@@ -566,7 +566,9 @@ impl Venue for KrakenSpot {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(
                     command,
-                    serde_json::to_string(&rows).map_err(|e| e.to_string()),
+                    serde_json::to_string(&rows)
+                        .map_err(|e| e.to_string())
+                        .map_err(Into::into),
                 );
                 Ok(())
             }

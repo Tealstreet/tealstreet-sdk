@@ -956,7 +956,7 @@ impl Woo {
                 });
                 self.trade_pump(cx);
             }
-            Err(error) => cx.done(command, Err(error)),
+            Err(error) => cx.done(command, Err(error.into())),
         }
     }
     fn trade_pump(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -977,7 +977,7 @@ impl Woo {
                 } else {
                     Err(job.errors.join("; "))
                 };
-                cx.done(job.command, result);
+                cx.done(job.command, result.map_err(Into::into));
                 continue;
             };
             let command = job.command;
@@ -1111,7 +1111,7 @@ impl Woo {
             } else {
                 format!("; accepted native IDs: {}", json(&job.ids).unwrap())
             };
-            cx.done(job.command, Err(format!("{error}{suffix}")));
+            cx.done(job.command, Err(format!("{error}{suffix}").into()));
         }
         self.trading.waiting = false;
     }

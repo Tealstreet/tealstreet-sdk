@@ -3,7 +3,7 @@
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
-use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
+use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -334,13 +334,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let text = encode_notice(ServerNotice::Done {
                             command: pending.original,
                             result: result.as_deref().ok(),
-                            error: result.as_ref().err().map(String::as_str),
+                            error: result.as_ref().err().map(VenueError::legacy_text),
+                            detail: result.as_ref().err(),
                         });
                         self.send(client, Outgoing::Text(text));
                     }
                 }
-                Notice::Deactivate => {
-                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
+                Notice::Deactivate { error } => {
+                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate {
+                        detail: &error,
+                    })))
                 }
                 Notice::Log { level, message } => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
@@ -670,7 +673,9 @@ enum ServerNotice<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'a VenueError>,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -681,11 +686,13 @@ enum ServerNotice<'a> {
         level: &'a str,
         message: &'a str,
     },
-    Deactivate,
+    Deactivate {
+        detail: &'a VenueError,
+    },
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)
-        .expect("notice contains only strings and integers")
+        .expect("notice contains only strings, numbers and enums")
         .into()
 }
 

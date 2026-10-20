@@ -191,7 +191,7 @@ impl Kraken {
             _ => return false,
         };
         match result {
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.done(id, Err(error.into())),
             Ok((steps, amend)) => {
                 if self.signer.is_none() || self.options.public_data_only {
                     cx.done(id, Err("Kraken trading requires API credentials".into()));
@@ -873,7 +873,7 @@ impl Kraken {
                     error
                 }
             });
-            cx.done(job.command, result);
+            cx.done(job.command, result.map_err(Into::into));
         }
     }
     pub(crate) fn trading_failed(

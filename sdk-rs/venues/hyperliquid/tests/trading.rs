@@ -97,7 +97,7 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
         assert!(actions.iter().any(|a| matches!(
             a,
             Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("Bybit")
+                if error.message.contains("Bybit")
         )));
     }
 }
@@ -407,7 +407,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
             command: 2, result: Err(error),
-        }) if error.contains("settings are uncertain")))
+        }) if error.message.contains("settings are uncertain")))
         );
         message(
             &mut e,
@@ -427,7 +427,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
             e.drain_actions()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
             command: 3, result: Err(ref error),
-        }) if error.contains("settings are uncertain")))
+        }) if error.message.contains("settings are uncertain")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -670,7 +670,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
         let rejected = e.drain_actions().collect::<Vec<_>>();
         assert!(rejected.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandDone { command: 3, result: Err(error) })
-            if error.contains("amendment pending"))));
+            if error.message.contains("amendment pending"))));
         assert!(!rejected.iter().any(|a| matches!(a, Action::Http(_))));
         reply_at(
             &mut e,
@@ -687,7 +687,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
             );
             assert!(actions.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
-                if error.contains("no longer open"))));
+                if error.message.contains("no longer open"))));
         } else {
             let cancel = action_write(&actions);
             assert_eq!(body(cancel)["action"]["cancels"][0]["o"], 9);
@@ -807,7 +807,7 @@ fn definite_settings_rejection_keeps_next_queued_command_usable() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
         command: 1, result: Err(error),
-    }) if error == "Cannot switch margin mode with open orders"))
+    }) if error.message == "Cannot switch margin mode with open orders"))
     );
     let second = action_write(&actions);
     assert_eq!(body(second)["action"]["isCross"], true);
@@ -866,7 +866,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
         e.drain_actions()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
         command: 2, result: Err(ref error),
-    }) if error.contains("settings are uncertain")))
+    }) if error.message.contains("settings are uncertain")))
     );
     reply_at(
         &mut e,
@@ -1004,7 +1004,7 @@ fn filled_source_aborts_inflight_amend_but_own_cancel_frame_allows_replacement()
             );
             assert!(actions.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
-                if error.contains("source was filled"))));
+                if error.message.contains("source was filled"))));
         } else {
             let replacement = action_write(&actions);
             assert_eq!(body(replacement)["action"]["orders"][0]["p"], "85");
@@ -1108,7 +1108,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             actions.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                    if error.message.contains("456") && error.message.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );

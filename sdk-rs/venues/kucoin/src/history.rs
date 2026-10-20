@@ -294,7 +294,7 @@ impl Kucoin {
         if let Some(s) = &symbol
             && cx.store.market(s).is_none()
         {
-            cx.done(command, Err(format!("Unknown KuCoin market {s}")));
+            cx.done(command, Err(format!("Unknown KuCoin market {s}").into()));
             return;
         }
         let end = to.unwrap_or_else(|| cx.now.floor());
@@ -592,7 +592,7 @@ impl Kucoin {
                 |_| "Malformed KuCoin query response".into(),
                 |e| format!("KuCoin {}: {}", e.code, e.msg),
             );
-            cx.done(r.command, Err(message));
+            cx.done(r.command, Err(message.into()));
             return;
         }
         let data = envelope.unwrap().data.unwrap();
@@ -620,7 +620,7 @@ impl Kucoin {
         let more = match more {
             Ok(m) => m,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.done(r.command, Err(e.into()));
                 return;
             }
         };
@@ -677,7 +677,9 @@ impl Kucoin {
         }
         cx.done(
             r.command,
-            serde_json::to_string(&r.rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&r.rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -795,7 +797,7 @@ mod tests {
         assert!(matches!(
             &actions[0],
             Action::Notice(Notice::CommandDone { command: 77, result: Err(error) })
-                if error == "Client ID query is not supported by this venue"
+                if error.message == "Client ID query is not supported by this venue"
         ));
     }
     #[test]

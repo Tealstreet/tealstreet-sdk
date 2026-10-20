@@ -529,7 +529,7 @@ impl AsterDex {
                             .map_err(|e| e.to_string())
                         })
                 };
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
             Request::ListenKey => {
                 if valid

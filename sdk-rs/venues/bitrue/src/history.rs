@@ -292,7 +292,7 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
-            cx.done(request.command, Err(error));
+            cx.done(request.command, Err(error.into()));
             return;
         }
         if request.failed {
@@ -313,7 +313,9 @@ impl Bitrue {
         request.rows.truncate(request.limit);
         cx.done(
             request.command,
-            serde_json::to_string(&request.rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&request.rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
 

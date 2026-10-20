@@ -355,7 +355,7 @@ impl BinanceFutures {
                 order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
-            cx.done(command, found(order.clone(), None));
+            cx.done(command, found(order.clone(), None).map_err(Into::into));
             return;
         }
         if self.credentials.is_none() || self.options.public_data_only {
@@ -492,7 +492,7 @@ impl BinanceFutures {
                 serde_json::from_str::<&RawValue>(response.body).map_err(|e| e.to_string())?;
             found(order, Some(info))
         })();
-        cx.done(command, result);
+        cx.done(command, result.map_err(Into::into));
     }
 
     fn history_request(

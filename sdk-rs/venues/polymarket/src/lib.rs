@@ -806,7 +806,12 @@ impl Venue for Polymarket {
                     rows.drain(..rows.len() - limit);
                 }
                 if let Some(c) = command {
-                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                    cx.done(
+                        c,
+                        serde_json::to_string(&rows)
+                            .map_err(|e| e.to_string())
+                            .map_err(Into::into),
+                    );
                 } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval.clone()))
                 {
                     for row in rows {

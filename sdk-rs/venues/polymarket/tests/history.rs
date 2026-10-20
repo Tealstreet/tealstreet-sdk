@@ -35,7 +35,7 @@ fn unsupported_histories_fail_explicitly_without_network_or_empty_success() {
         e.handle(0.0, Event::Command(Command::Query { command: 1, query }));
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(
-            matches!(&actions[..],[Action::Notice(Notice::CommandDone{command:1,result:Err(error)})] if error.contains("unsupported"))
+            matches!(&actions[..],[Action::Notice(Notice::CommandDone{command:1,result:Err(error)})] if error.message.contains("unsupported"))
         );
     }
 }
@@ -144,7 +144,7 @@ fn stp_queries_and_setters_reject_without_network_or_state_mutation() {
         assert!(matches!(
             &actions[..],
             [Action::Notice(Notice::CommandDone { command: 8, result: Err(error) })]
-                if error.contains("unsupported")
+                if error.message.contains("unsupported")
         ));
         assert!(!e.store().loaded().balance);
         assert!(!e.store().loaded().positions);
@@ -226,7 +226,7 @@ fn fetch_book(
     let [Action::Notice(Notice::CommandDone { command: 9, result })] = &actions[..] else {
         panic!("unexpected book response actions: {actions:?}");
     };
-    result.clone()
+    result.clone().map_err(|error| error.message)
 }
 
 #[test]

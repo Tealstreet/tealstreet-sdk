@@ -62,9 +62,9 @@ impl H {
         for action in self.engine.drain_actions() {
             match action {
                 Action::Http(r) => self.requests.push(r),
-                Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
-                }
+                Action::Notice(Notice::CommandDone { command, result }) => self
+                    .done
+                    .push((command, result.map_err(|error| error.message))),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),

@@ -585,7 +585,7 @@ impl TxFlow {
         let page = match valid {
             Ok(p) => p,
             Err(e) => {
-                cx.done(r.command, Err(e));
+                cx.done(r.command, Err(e.into()));
                 return;
             }
         };

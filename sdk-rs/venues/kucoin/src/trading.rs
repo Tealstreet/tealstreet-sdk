@@ -629,7 +629,7 @@ impl Kucoin {
             _ => Ok(()),
         };
         if let Err(error) = validation {
-            cx.done(id, Err(error));
+            cx.done(id, Err(error.into()));
             return;
         }
         if self.credentials.is_none() {
@@ -735,7 +735,7 @@ impl Kucoin {
             cx.done(
                 command,
                 match job.error {
-                    Some(e) => Err(e),
+                    Some(e) => Err(e.into()),
                     None => Ok(json(&job.ids)),
                 },
             );

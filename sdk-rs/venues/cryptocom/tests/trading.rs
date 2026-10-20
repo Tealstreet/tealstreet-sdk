@@ -93,7 +93,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
             Action::Notice(Notice::CommandDone {
                 command: 1,
                 result: Err(message)
-            }) if message.contains("Bybit")
+            }) if message.message.contains("Bybit")
         )));
     }
 }
@@ -311,7 +311,7 @@ fn unsuccessful_http_write_preserves_native_rejection_details() {
     });
     pace(&mut h);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone {
-        command: 1, result: Err(error) }) if error.contains("30003") && error.contains("INVALID_INSTRUMENT_NAME"))));
+        command: 1, result: Err(error) }) if error.message.contains("30003") && error.message.contains("INVALID_INSTRUMENT_NAME"))));
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             actions.iter().any(|a| matches!(
                 a,
                 Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                    if error.message.contains("456") && error.message.contains("not found")
             )),
             "missing cancellation error: {actions:?}"
         );

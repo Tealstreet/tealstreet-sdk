@@ -243,7 +243,7 @@ impl BitgetFutures {
             self.preflight(cx, &command)
         };
         if let Err(error) = validation {
-            cx.done(id, Err(error));
+            cx.done(id, Err(error.into()));
             return;
         }
         self.trading.queue.push_back(command);
@@ -380,7 +380,7 @@ impl BitgetFutures {
         }
         if let Some(symbol) = job.metadata.pop_front() {
             if cx.store.market(&symbol).is_none() {
-                cx.done(job.id, Err(format!("Market {symbol} not found")));
+                cx.done(job.id, Err(format!("Market {symbol} not found").into()));
                 self.resume_trading(cx);
                 return;
             }
@@ -406,7 +406,7 @@ impl BitgetFutures {
                 job.positions_checked = true;
             }
             if let Err(error) = self.plan_job(cx, &mut job) {
-                cx.done(job.id, Err(error));
+                cx.done(job.id, Err(error.into()));
                 self.resume_trading(cx);
                 return;
             }
@@ -420,7 +420,7 @@ impl BitgetFutures {
                 Some(error) => Err(error),
                 None => Ok(serde_json::to_string(&job.ids).expect("order ids")),
             };
-            cx.done(job.id, result);
+            cx.done(job.id, result.map_err(Into::into));
             self.resume_trading(cx);
         }
     }
@@ -446,7 +446,7 @@ impl BitgetFutures {
                     let coin = match self.margin_coin(cx, symbol) {
                         Ok(coin) => coin,
                         Err(error) => {
-                            cx.done(job.id, Err(error));
+                            cx.done(job.id, Err(error.into()));
                             self.resume_trading(cx);
                             return;
                         }
@@ -473,7 +473,7 @@ impl BitgetFutures {
             match self.signed_headers(cx.now, method, &path, body.as_deref().unwrap_or("")) {
                 Ok(headers) => headers,
                 Err(error) => {
-                    cx.done(job.id, Err(error));
+                    cx.done(job.id, Err(error.into()));
                     self.resume_trading(cx);
                     return;
                 }
@@ -1449,7 +1449,8 @@ impl BitgetFutures {
                     Err(format!(
                         "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
                         job.ids
-                    )),
+                    )
+                    .into()),
                 );
             }
             return;
@@ -1732,7 +1733,7 @@ impl BitgetFutures {
             let error = job.error.map_or(error.clone(), |original| {
                 format!("{original}; protection rollback failed: {error}")
             });
-            cx.done(job.id, Err(error));
+            cx.done(job.id, Err(error.into()));
             self.refresh_orders(cx, false);
             self.resume_trading(cx);
             return;

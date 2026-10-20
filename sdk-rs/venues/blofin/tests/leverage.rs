@@ -33,7 +33,8 @@ fn result(h: &Harness) -> Result<serde_json::Value, String> {
             }) => Some(
                 result
                     .clone()
-                    .map(|body| serde_json::from_str(&body).unwrap()),
+                    .map(|body| serde_json::from_str(&body).unwrap())
+                    .map_err(|error| error.message),
             ),
             _ => None,
         })

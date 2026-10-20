@@ -761,7 +761,7 @@ impl Venue for AsterDex {
                         .map_err(|e| e.to_string())
                     })
                 };
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
             Pending::MarketBrackets { rows } => {
                 if account::venue_error(&response).is_none() {
@@ -825,7 +825,7 @@ impl Venue for AsterDex {
                         response.status
                     ))
                 };
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
         }
     }
@@ -908,7 +908,7 @@ impl Venue for AsterDex {
             Pending::OpenInterest {
                 initial, single, ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, None),
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned().into())),
             _ => cx.log(
                 LogLevel::Error,
                 format!("Aster public request failed: {error}"),
@@ -1062,7 +1062,7 @@ impl Venue for AsterDex {
                         )
                     })
                     .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                cx.done(command, result);
+                cx.done(command, result.map_err(Into::into));
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             command => self.on_trade_command(cx, command),

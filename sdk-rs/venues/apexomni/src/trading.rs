@@ -510,7 +510,7 @@ impl ApexOmni {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = validate(&orders, cx) {
                     cx.log(LogLevel::Error, &error);
-                    cx.done(command, Err(error));
+                    cx.done(command, Err(error.into()));
                     return Ok(());
                 }
                 (command, vec![Step::Build(orders)], true)
@@ -538,7 +538,7 @@ impl ApexOmni {
                     if !valid_id(&id) {
                         let error = "ApeX Omni cancel requires an order ID".to_owned();
                         cx.log(LogLevel::Error, &error);
-                        cx.done(command, Err(error));
+                        cx.done(command, Err(error.into()));
                         return Ok(());
                     }
                     if unique.insert(id.clone()) {
@@ -555,7 +555,10 @@ impl ApexOmni {
             }
             Command::CancelSymbolOrders { command, symbol } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("ApeX Omni market {symbol} not found")));
+                    cx.done(
+                        command,
+                        Err(format!("ApeX Omni market {symbol} not found").into()),
+                    );
                     return Ok(());
                 };
                 (
@@ -577,7 +580,10 @@ impl ApexOmni {
                 side: _,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("ApeX Omni market {symbol} not found")));
+                    cx.done(
+                        command,
+                        Err(format!("ApeX Omni market {symbol} not found").into()),
+                    );
                     return Ok(());
                 };
                 if !positive(leverage) {
@@ -651,7 +657,7 @@ impl ApexOmni {
         {
             let error = "ApeX Omni private commands require API credentials".to_owned();
             cx.log(LogLevel::Error, &error);
-            cx.done(command, Err(error));
+            cx.done(command, Err(error.into()));
             return Ok(());
         }
         self.trading.queue.push_back(Job {
@@ -717,7 +723,7 @@ impl ApexOmni {
                         Ok(amendment) => amendment,
                         Err(error) => {
                             cx.log(LogLevel::Error, &error);
-                            cx.done(job.command, Err(error));
+                            cx.done(job.command, Err(error.into()));
                             continue;
                         }
                     };
@@ -746,7 +752,7 @@ impl ApexOmni {
                     });
                     if let Err(error) = result {
                         cx.log(LogLevel::Error, &error);
-                        cx.done(job.command, Err(error));
+                        cx.done(job.command, Err(error.into()));
                         continue;
                     }
                     for step in prepared.into_iter().rev() {

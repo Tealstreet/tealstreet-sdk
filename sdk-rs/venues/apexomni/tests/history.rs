@@ -65,6 +65,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
             }
         })
         .expect("query completed")
+        .map_err(|error| error.message)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

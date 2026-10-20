@@ -180,9 +180,9 @@ impl H {
             )
             .unwrap();
         match self.actions.remove(i) {
-            Action::Notice(Notice::CommandDone { result, .. }) => {
-                result.map(|r| serde_json::from_str(&r).unwrap())
-            }
+            Action::Notice(Notice::CommandDone { result, .. }) => result
+                .map(|r| serde_json::from_str(&r).unwrap())
+                .map_err(|error| error.message),
             _ => unreachable!(),
         }
     }

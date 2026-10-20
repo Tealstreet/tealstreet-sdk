@@ -651,7 +651,7 @@ impl Venue for Blofin {
             return;
         }
         if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.to_string()));
+            cx.done(command, Err(error.to_string().into()));
         } else {
             cx.log(LogLevel::Error, format!("BloFin read failed: {error}"));
         }
@@ -781,7 +781,7 @@ impl Venue for Blofin {
                         },
                     );
                 } else {
-                    cx.done(command, Err(format!("Unknown market {symbol}")));
+                    cx.done(command, Err(format!("Unknown market {symbol}").into()));
                 }
             }
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),

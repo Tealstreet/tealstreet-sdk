@@ -44,6 +44,7 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
             }
         })
         .unwrap()
+        .map_err(|error| error.message)
 }
 fn fills(limit: Option<u32>) -> Query {
     Query::Fills {

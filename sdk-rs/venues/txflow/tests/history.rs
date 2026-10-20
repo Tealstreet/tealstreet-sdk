@@ -46,7 +46,11 @@ fn done(e: &mut Engine<TxFlow>) -> Result<Value, String> {
             Action::Notice(Notice::CommandDone {
                 command: 91,
                 result,
-            }) => Some(result.map(|s| serde_json::from_str(&s).unwrap())),
+            }) => Some(
+                result
+                    .map(|s| serde_json::from_str(&s).unwrap())
+                    .map_err(|error| error.message),
+            ),
             _ => None,
         })
         .unwrap()

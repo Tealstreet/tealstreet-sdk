@@ -14,6 +14,7 @@ fn result(e: &mut Driver) -> Result<String, String> {
             }
         })
         .unwrap()
+        .map_err(|error| error.message)
 }
 #[test]
 fn fills_stream_into_execution_shape_with_millisecond_filters_and_seconds_output() {

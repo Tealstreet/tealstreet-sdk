@@ -517,7 +517,7 @@ impl BybitLinear {
                     format!("Bybit history ({}): {message}", walk.path),
                 );
                 self.history.reads.remove(&command);
-                cx.done(command, Err(message));
+                cx.done(command, Err(message.into()));
                 return;
             }
         };

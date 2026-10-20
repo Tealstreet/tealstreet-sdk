@@ -334,7 +334,7 @@ impl Coinbase {
                 self.history.active.insert(command);
                 self.history_read(cx, req, None)
             }
-            Err(e) => cx.done(command, Err(e)),
+            Err(e) => cx.done(command, Err(e.into())),
         }
     }
     fn history_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request, cursor: Option<&str>) {
@@ -424,12 +424,12 @@ impl Coinbase {
                     self.request(cx, Method::Get, path, None, Some(at), Pending::History(req))
                 {
                     self.history.active.remove(&command);
-                    cx.done(command, Err(e));
+                    cx.done(command, Err(e.into()));
                 }
             }
             Err(e) => {
                 self.history.active.remove(&command);
-                cx.done(command, Err(e));
+                cx.done(command, Err(e.into()));
             }
         }
     }
@@ -705,7 +705,9 @@ impl Coinbase {
         self.history.active.remove(&req.command);
         cx.done(
             req.command,
-            serde_json::to_string(&req.rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&req.rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {

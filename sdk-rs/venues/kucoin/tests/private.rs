@@ -495,7 +495,7 @@ fn unknown_partial_order_requires_rest_metadata_before_amending() {
         price: Some(101.0),
         amount: None,
     }));
-    assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone {command: 9, result: Err(error)}) if error.contains("metadata unavailable"))));
+    assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone {command: 9, result: Err(error)}) if error.message.contains("metadata unavailable"))));
     assert!(!h.actions.iter().any(|action| matches!(action, Action::Http(request) if request.method == safe_cex_engine::Method::Delete)));
     h.poll();
     h.reply("/orders?", &Harness::page(r#"{"id":"unknown","symbol":"XBTUSDTM","type":"limit","side":"sell","size":10,"filledSize":0,"price":"100","reduceOnly":true,"closeOrder":false,"timeInForce":"GTC","postOnly":true}"#, 1));
@@ -818,5 +818,5 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     h.pace();
     assert!(!h.actions.iter().any(|action| matches!(action, Action::Http(request) if request.method == safe_cex_engine::Method::Post && request.url.contains("/api/v1/orders"))));
     h.pace();
-    assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
+    assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.message.contains("newer fills"))));
 }

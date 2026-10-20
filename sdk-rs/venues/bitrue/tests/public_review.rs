@@ -36,7 +36,7 @@ fn completions(actions: &[Action]) -> Vec<(u32, Result<String, String>)> {
         .iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::CommandDone { command, result }) => {
-                Some((*command, result.clone()))
+                Some((*command, result.clone().map_err(|error| error.message)))
             }
             _ => None,
         })

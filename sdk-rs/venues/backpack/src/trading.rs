@@ -508,7 +508,7 @@ impl Backpack {
                 );
                 self.run_trade(cx, u64::from(id));
             }
-            Err(e) => cx.done(id, Err(e)),
+            Err(e) => cx.done(id, Err(e.into())),
         }
     }
     fn run_trade(&mut self, cx: &mut Cx<'_, Pending>, command: u64) {
@@ -639,7 +639,7 @@ impl Backpack {
         );
         if let Err(e) = result {
             self.trading.jobs.remove(&command);
-            cx.done(command as CommandId, Err(e));
+            cx.done(command as CommandId, Err(e.into()));
         }
     }
     pub(crate) fn trade_response(

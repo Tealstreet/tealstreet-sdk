@@ -1034,7 +1034,7 @@ impl BinanceFutures {
         if status != 200 {
             cx.done(
                 command,
-                Err(format!("Binance klines HTTP {status}: {body}")),
+                Err(format!("Binance klines HTTP {status}: {body}").into()),
             );
             return;
         }
@@ -1352,7 +1352,7 @@ impl Venue for BinanceFutures {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned().into())),
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation

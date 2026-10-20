@@ -104,7 +104,9 @@ impl Harness {
         for action in self.engine.drain_actions() {
             match action {
                 Action::Http(r) => self.requests.push(r),
-                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                Action::Notice(Notice::CommandDone { result, .. }) => {
+                    self.done.push(result.map_err(|error| error.message))
+                }
                 _ => {}
             }
         }

@@ -59,9 +59,9 @@ impl H {
         for a in self.e.drain_actions() {
             match a {
                 Action::Http(r) => self.http.push(r),
-                Action::Notice(Notice::CommandDone { command, result }) => {
-                    self.done.push((command, result))
-                }
+                Action::Notice(Notice::CommandDone { command, result }) => self
+                    .done
+                    .push((command, result.map_err(|error| error.legacy_text()))),
                 Action::WsConnect {
                     socket,
                     channel: Some(safe_cex_engine::SocketChannel::Private),

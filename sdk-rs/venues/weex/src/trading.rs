@@ -327,7 +327,7 @@ fn price(value: Option<f64>, step: f64) -> Result<Option<String>, String> {
 }
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
     cx.log(LogLevel::Error, &error);
-    cx.done(command, Err(error));
+    cx.done(command, Err(error.into()));
 }
 fn post(path: &'static str, body: String, call: Call) -> Step {
     Step {

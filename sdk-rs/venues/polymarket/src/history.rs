@@ -100,7 +100,7 @@ impl Polymarket {
                         user_id: self.address.as_deref().unwrap_or("unknown"),
                         affiliate_id: None,
                     })
-                    .map_err(|error| error.to_string()),
+                    .map_err(|error| error.to_string().into()),
                 );
             }
             Command::FetchStpMode { command } | Command::SetStpMode { command, .. } => {
@@ -168,6 +168,6 @@ impl Polymarket {
             };
             serde_json::to_string(&book).map_err(|error| error.to_string())
         })();
-        cx.done(command, result);
+        cx.done(command, result.map_err(Into::into));
     }
 }

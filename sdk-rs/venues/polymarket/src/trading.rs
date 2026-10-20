@@ -4,7 +4,7 @@ use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
 use crate::{Pending, Polymarket, encode, success};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -324,26 +324,7 @@ impl Polymarket {
                 self.trading.scopes.remove(&scope);
             }
             let result = result.map_err(|message| {
-                if job.ids.is_empty() {
-                    return message;
-                }
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Partial<'a> {
-                    message: &'a str,
-                    partial_order_ids: &'a [String],
-                    partial_order_count: usize,
-                    total_order_count: usize,
-                    failed_order_index: usize,
-                }
-                serde_json::to_string(&Partial {
-                    message: &message,
-                    partial_order_ids: &job.ids,
-                    partial_order_count: job.ids.len(),
-                    total_order_count: job.total,
-                    failed_order_index: job.ids.len(),
-                })
-                .expect("partial placement result")
+                VenueError::new(message).partial(&job.ids, job.total, job.ids.len())
             });
             cx.done(command, result);
         }
@@ -642,7 +623,7 @@ impl Polymarket {
             if self.trading.jobs.contains_key(&command_id) {
                 self.trading_finish(cx, command_id, Err(error));
             } else {
-                cx.done(command_id, Err(error));
+                cx.done(command_id, Err(error.into()));
             }
         }
     }

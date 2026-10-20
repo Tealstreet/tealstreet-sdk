@@ -9,6 +9,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{ErrorKind, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 
@@ -757,7 +758,7 @@ impl Venue for BreakoutProp {
             self.auth_failed = true;
             self.auth_error = format!("DXtrade HTTP {}", response.status);
             self.fail_operation(cx, pending.operation, &self.auth_error.clone());
-            cx.deactivate();
+            cx.deactivate(VenueError::new(self.auth_error.clone()).kind(ErrorKind::AuthInvalid));
             return;
         }
         if response.status == 401

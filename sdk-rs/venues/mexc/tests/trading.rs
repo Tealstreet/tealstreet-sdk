@@ -33,7 +33,7 @@ fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
         .filter_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
+                Some(result.map_err(|error| error.legacy_text()))
             } else {
                 None
             }
@@ -67,7 +67,7 @@ fn bybit_execution_controls_reject_entire_batch_before_writes() {
             a,
             Action::Notice(Notice::CommandDone {
                 result: Err(error), ..
-            }) if error.contains("Bybit")
+            }) if error.message.contains("Bybit")
         )));
     }
 }
@@ -87,7 +87,7 @@ fn every_caller_id_rejects_the_whole_batch_before_a_write() {
         );
         let actions: Vec<_> = e.drain_actions().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(error),..}) if error=="mexc cannot honor a caller clientOrderId")));
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(error),..}) if error.message == "mexc cannot honor a caller clientOrderId")));
     }
     assert!(serde_json::from_str::<PlaceOrderOpts>(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":60,"price":59000,"clientOrderId":null}"#).is_err());
 }
@@ -115,7 +115,7 @@ fn unsupported_opening_conditional_and_trailing_reject_before_any_batch_write() 
             assert!(e.store().orders().is_empty());
             assert!(actions.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandDone { result: Err(error), .. })
-                if error == "MEXC opening conditional and trailing-stop placement is not implemented"
+                if error.message == "MEXC opening conditional and trailing-stop placement is not implemented"
             )));
         }
     }
@@ -551,7 +551,7 @@ fn stale_terminal_amend_read_cannot_erase_a_newer_partial_fill_or_replace_it() {
     assert!((e.store().order("one").unwrap().filled - 0.004).abs() < 1e-12);
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(e),..}) if e.contains("Stale"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(e),..}) if e.message.contains("Stale"))));
 }
 
 #[test]

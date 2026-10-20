@@ -673,7 +673,9 @@ impl History {
         }
         cx.done(
             command,
-            serde_json::to_string(&read.rows).map_err(|e| e.to_string()),
+            serde_json::to_string(&read.rows)
+                .map_err(|e| e.to_string())
+                .map_err(Into::into),
         );
     }
 
@@ -698,7 +700,7 @@ impl History {
 
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         self.reads.remove(&request.command);
-        cx.done(request.command, Err(error.to_owned()));
+        cx.done(request.command, Err(error.to_owned().into()));
     }
 }
 

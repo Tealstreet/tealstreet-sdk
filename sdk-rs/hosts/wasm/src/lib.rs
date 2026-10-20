@@ -431,7 +431,9 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
-    Deactivate,
+    Deactivate {
+        detail: &'a safe_cex_engine::VenueError,
+    },
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
@@ -484,8 +486,11 @@ enum ActionOut<'a> {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
+        /// The legacy text: the message, or partial-batch JSON.
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'a safe_cex_engine::VenueError>,
     },
 }
 
@@ -570,7 +575,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
-            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
+            Action::Notice(Notice::Deactivate { error }) => ActionOut::Deactivate { detail: error },
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -582,7 +587,11 @@ fn encode(actions: &[Action]) -> String {
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
                 result: result.as_ref().ok().map(String::as_str),
-                error: result.as_ref().err().map(String::as_str),
+                error: result
+                    .as_ref()
+                    .err()
+                    .map(safe_cex_engine::VenueError::legacy_text),
+                detail: result.as_ref().err(),
             },
         })
         .collect();
@@ -1435,6 +1444,35 @@ mod tests {
         assert!(
             rows.iter()
                 .all(|row| row["headers"] == serde_json::json!([]))
+        );
+    }
+
+    #[test]
+    fn failures_carry_legacy_text_and_structured_detail() {
+        let ids = ["a".to_owned()];
+        let actions = [
+            Action::Notice(Notice::CommandDone {
+                command: 1,
+                result: Err(safe_cex_engine::VenueError::new("leg 2 rejected").partial(&ids, 2, 1)),
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 2,
+                result: Ok("[]".into()),
+            }),
+            Action::Notice(Notice::Deactivate {
+                error: safe_cex_engine::VenueError::new("key rejected")
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            }),
+        ];
+        assert_eq!(
+            encode(&actions),
+            concat!(
+                r#"[{"op":"done","command":1,"#,
+                r#""error":"{\"message\":\"leg 2 rejected\",\"partialOrderIds\":[\"a\"],\"partialOrderCount\":1,\"totalOrderCount\":2,\"failedOrderIndex\":1}","#,
+                r#""detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}},"#,
+                r#"{"op":"done","command":2,"result":"[]"},"#,
+                r#"{"op":"deactivate","detail":{"message":"key rejected","kind":"authInvalid"}}]"#,
+            )
         );
     }
 

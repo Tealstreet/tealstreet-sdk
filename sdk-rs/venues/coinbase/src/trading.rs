@@ -1038,7 +1038,7 @@ impl Coinbase {
                 self.trading.queue.push_back(job);
                 self.trading_next(cx);
             }
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.done(id, Err(error.into())),
         }
         None
     }
@@ -1243,7 +1243,7 @@ impl Coinbase {
         {
             self.trading.active = None;
             self.trading.waiting = false;
-            cx.done(command, Err(error));
+            cx.done(command, Err(error.into()));
             self.trading_next(cx);
         }
     }

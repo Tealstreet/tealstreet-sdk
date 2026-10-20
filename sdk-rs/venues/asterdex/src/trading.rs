@@ -343,7 +343,7 @@ impl AsterDex {
                         .and_then(|credentials| credentials.validate());
                     if let Err(error) = valid {
                         cx.log(LogLevel::Error, error.clone());
-                        cx.done(id, Err(error));
+                        cx.done(id, Err(error.into()));
                         return;
                     }
                 }
@@ -367,7 +367,7 @@ impl AsterDex {
                 {
                     let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
                     cx.log(LogLevel::Error, error.clone());
-                    cx.done(id, Err(error));
+                    cx.done(id, Err(error.into()));
                     return;
                 }
                 if let Some(error) = &job.error {
@@ -378,7 +378,7 @@ impl AsterDex {
             }
             Err(error) => {
                 cx.log(LogLevel::Error, error.clone());
-                cx.done(id, Err(error));
+                cx.done(id, Err(error.into()));
             }
         }
     }
@@ -416,7 +416,7 @@ impl AsterDex {
                 .result
                 .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default()))
         };
-        cx.done(id, result);
+        cx.done(id, result.map_err(Into::into));
     }
     pub(crate) fn on_trade_response(
         &mut self,

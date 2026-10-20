@@ -284,7 +284,7 @@ impl Backpack {
                 Pending::History(request),
                 true,
             ) {
-                cx.done(command, Err(e));
+                cx.done(command, Err(e.into()));
             }
         }
     }
@@ -432,10 +432,7 @@ impl Backpack {
         if !(200..300).contains(&response.status) || r.invalid {
             cx.done(
                 r.command,
-                Err(format!(
-                    "Backpack history read failed: HTTP {}",
-                    response.status
-                )),
+                Err(format!("Backpack history read failed: HTTP {}", response.status).into()),
             );
             return;
         }
