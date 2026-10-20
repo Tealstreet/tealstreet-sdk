@@ -382,3 +382,18 @@ fn documented_deposit_withdrawal_and_rollback_variants_are_transfers() {
     assert_eq!(result.matches(r#""category":"transfer""#).count(), 4);
     assert_eq!(result.matches(r#""income":-100.0"#).count(), 4);
 }
+#[test]
+fn null_optional_fill_fields_do_not_fail_history() {
+    let mut h = Harness::new();
+    h.load();
+    query(&mut h, fills(1));
+    let row = fill(1, 1610000000000000001)
+        .replace(r#""-0.02""#, "null")
+        .replace(r#""USD""#, "null")
+        .replace(r#""MAKER""#, "null");
+    h.reply(
+        "private/get-trades",
+        &format!(r#"{{"code":0,"result":{{"data":[{row}]}}}}"#),
+    );
+    assert!(done(&h, 1).unwrap().contains(r#""id":"1""#));
+}

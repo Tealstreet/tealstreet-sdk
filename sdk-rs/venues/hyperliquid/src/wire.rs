@@ -60,6 +60,20 @@ pub struct Instrument {
     pub max_leverage: f64,
     #[serde(default)]
     pub is_delisted: bool,
+    #[serde(default)]
+    pub only_isolated: bool,
+    #[serde(default)]
+    pub margin_mode: Option<String>,
+}
+impl Instrument {
+    /// Cross margin is refused for these assets, so writes must default to isolated.
+    pub fn isolated_only(&self) -> bool {
+        self.only_isolated
+            || matches!(
+                self.margin_mode.as_deref(),
+                Some("strictIsolated" | "noCross")
+            )
+    }
 }
 fn one() -> f64 {
     1.0
