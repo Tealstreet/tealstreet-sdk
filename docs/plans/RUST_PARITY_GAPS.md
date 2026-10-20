@@ -316,3 +316,15 @@ Spot frame assertion; native/full repository tests and artifact refresh remain.
 The replay gate now prints its exact output directory before running. Final
 proofs bind PASS logs to that directory rather than choosing files by recency;
 an independent review confirms this diagnostic changes no gate criteria.
+
+The first fresh Paradex artifact after the shared decoder merge measured
+1,258,633 bytes, failing the unchanged 1,258,291-byte budget by 342 bytes.
+Its three signing schemas are fixed, so replacing runtime field-name
+formatting/joining with their exact type strings removes allocations without
+changing selector bytes, field order, hashes or signatures. Independent plan
+and implementation reviews pass; Paradex's 115 native tests (including local
+signature and delegated-hash vectors), Clippy, default engine's 74 tests and
+standalone Paradex host tests pass. The standard artifact measures 1,258,055
+bytes (578 bytes saved; 236 bytes below budget), with identical web/Node SHA256
+`d6aef4f270652d49f04d18d6d885db67775b4841ee9e48925164959309cb3cff`.
+Performance gates still require the final committed build and CPU release.

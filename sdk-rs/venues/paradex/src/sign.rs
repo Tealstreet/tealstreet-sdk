@@ -177,16 +177,8 @@ impl Credentials {
         &self.subkey
     }
 
-    fn signature(&self, primary: &str, names: &[&str], values: &[Felt]) -> Result<String, String> {
-        let definition = format!(
-            "{primary}({})",
-            names
-                .iter()
-                .map(|name| format!("{name}:felt"))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let mut fields = vec![selector(&definition).map_err(|_| "Invalid Paradex signing type")?];
+    fn signature(&self, definition: &str, values: &[Felt]) -> Result<String, String> {
+        let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
         fields.extend_from_slice(values);
         let domain = hash_elements(&[
             selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
@@ -217,8 +209,7 @@ impl Credentials {
             .checked_add(86400)
             .ok_or("Invalid Paradex auth timestamp")?;
         let signature = self.signature(
-            "Request",
-            &["method", "path", "body", "timestamp", "expiration"],
+            "Request(method:felt,path:felt,body:felt,timestamp:felt,expiration:felt)",
             &[
                 short_string("POST").expect("short string"),
                 short_string("/v1/auth").expect("short string"),
@@ -294,7 +285,6 @@ impl Credentials {
         } else {
             quantum(price.expect("price is present"))?
         };
-        let mut names = vec!["timestamp", "market", "side", "orderType", "size", "price"];
         let mut values = vec![
             Felt::from(now_ms),
             word(market)?,
@@ -304,12 +294,14 @@ impl Credentials {
             felt(&price)?,
         ];
         if let Some(id) = id {
-            names.push("id");
             values.push(word(id)?);
         }
         let signature = self.signature(
-            if id.is_some() { "ModifyOrder" } else { "Order" },
-            &names,
+            if id.is_some() {
+                "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)"
+            } else {
+                "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
+            },
             &values,
         )?;
         Ok(OrderSignature {
