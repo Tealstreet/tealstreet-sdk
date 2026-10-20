@@ -249,3 +249,26 @@ merge. PR adversarial reviews and green CI are the remaining landing steps.
 PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1320, targeting
 `feat/rust-rewrite`. Two adversarial reviewers are examining the actual PR diff;
 findings will be posted as PR comments and addressed before merging on green CI.
+
+### Adversarial PR review, first round
+
+- Posted both independent reports on PR #1320. One confirmed P1 stale-order
+  repair and three P2 history/book/candle findings were reproduced. Repairs retain
+  per-order timestamp/exact-fill watermarks and valid amendment data; walk empty
+  cursor pages in Rust and TS; apply all JSON book rows; and prevent candle polls
+  from rewinding buckets or known volume in either runtime.
+- A review of the repair rejected permanent terminal inference from REST absence:
+  a lagging replica can omit a live order. Actual terminal-event tombstones remain;
+  later valid REST evidence can restore an unchanged order after an omission.
+  Duplicate order IDs invalidate an entire snapshot before state mutation.
+- Regression proof: native and TS empty-page tests fail before the change and
+  pass after; the independent stale-order reproduction now passes. Latest suites:
+  23 account, 15 history, 32 public, 14 trading, 8 unit and 4 signing tests.
+  Final independent re-review reports PASS with no outstanding blocker.
+- CI's secret scan flagged two deterministic derived keys in the synthetic signing
+  corpus. The exception names only that exact fixture file and documents its public
+  repeated-0x11 seed; the complete new-commit scan now passes without disabling any
+  detector. CI also exposed missing single-feature WOO/Lighter credential cfgs
+  after merging those ports; the shared options now include both features.
+- Repository full test rerun passes all27 tasks, in addition to typecheck/lint.
+  Fresh artifact/replay gates and green CI are required after these review fixes.
