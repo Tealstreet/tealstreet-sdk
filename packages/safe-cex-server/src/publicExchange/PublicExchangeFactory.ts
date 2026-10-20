@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import { createPublicExchange } from '@tealstreet/safe-cex/src';
 import type { BaseExchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import { rustPublicFeedIdentity } from '@tealstreet/safe-cex/src/exchanges/rust/publicFeed';
 import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import type { ExchangeName, Market, PublicExchangeOptions } from '@tealstreet/safe-cex/src/types';
 
@@ -132,7 +135,8 @@ export class PublicExchangeFactory {
 
   private async doRefreshMarkets(exchangeName: ExchangeName, bucket: string, forceRefresh: boolean): Promise<Market[]> {
     const handle = await this.getOrCreateHandle(exchangeName);
-    const lockKey = getMarketCacheKeys(exchangeName, bucket, this.namespace).lockKey;
+    const namespace = this.cacheNamespace(exchangeName);
+    const lockKey = getMarketCacheKeys(exchangeName, bucket, namespace).lockKey;
 
     return this.inProcessLock.runExclusive(lockKey, async () => {
       this.assertOpen(handle);
@@ -140,7 +144,7 @@ export class PublicExchangeFactory {
       const native = Boolean(nativeExchange);
       const revision = this.metadataRevisions.get(handle);
       const latestCurrentBucket = this.options.redis
-        ? await readMarketCacheSnapshot(this.options.redis, exchangeName, bucket, this.namespace)
+        ? await readMarketCacheSnapshot(this.options.redis, exchangeName, bucket, namespace)
         : null;
       this.assertOpen(handle);
       if (latestCurrentBucket && !forceRefresh) {
@@ -171,7 +175,7 @@ export class PublicExchangeFactory {
             exchange: exchangeName,
             bucket,
             markets,
-            namespace: this.namespace,
+            namespace,
             refreshedAt,
           });
         }
@@ -321,13 +325,23 @@ export class PublicExchangeFactory {
   ): Promise<SerializedMarketCacheSnapshot | null> {
     if (!this.options.redis) return null;
 
-    return readMarketCacheSnapshot(this.options.redis, exchangeName, bucket, this.namespace);
+    return readMarketCacheSnapshot(this.options.redis, exchangeName, bucket, this.cacheNamespace(exchangeName));
   }
 
   private async readLatestFallback(exchangeName: ExchangeName): Promise<SerializedMarketCacheSnapshot | null> {
     if (!this.options.redis) return null;
 
-    return readLatestMarketCacheSnapshot(this.options.redis, exchangeName, this.namespace);
+    return readLatestMarketCacheSnapshot(this.options.redis, exchangeName, this.cacheNamespace(exchangeName));
+  }
+
+  private cacheNamespace(exchangeName: ExchangeName): string {
+    // Preserve existing keys for TS callers and the default native catalog.
+    if (this.options.exchangeOptions?.engine !== 'rust') return this.namespace;
+    const defaults = { key: '', secret: '' };
+    const identity = rustPublicFeedIdentity(exchangeName, { ...defaults, ...this.options.exchangeOptions });
+    if (identity === rustPublicFeedIdentity(exchangeName, defaults)) return this.namespace;
+    const profile = createHash('sha256').update(identity).digest('hex');
+    return `${this.namespace}:rust-public-profile:v1:${profile}`;
   }
 
   private hydrateHandle(

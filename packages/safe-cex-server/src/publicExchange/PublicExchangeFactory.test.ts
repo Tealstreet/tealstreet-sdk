@@ -2,6 +2,7 @@ import type { Market } from '@tealstreet/safe-cex/src/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PublicExchangeFactory } from './PublicExchangeFactory';
+import { getMarketCacheKeys } from './buckets';
 import { type RedisLikeMarketCacheClient, writeMarketCacheSnapshot } from './marketCache';
 
 const mockExchange = vi.hoisted(() => ({
@@ -153,6 +154,60 @@ describe('PublicExchangeFactory', () => {
     expect(createPublicExchange).toHaveBeenCalledTimes(1);
     expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(1);
     await factory.dispose();
+  });
+
+  it('partitions Rust product catalogs while preserving each profile warm cache and semantic metadata', async () => {
+    const redis = new MemoryRedis();
+    const now = () => Date.UTC(2026, 4, 2, 23, 15);
+    const linear = market('BTCUSDT');
+    const option = {
+      ...market('BTC-30DEC26-100000-C'),
+      info: { symbolType: '', instrumentKind: 'CALL', expiry: 1798588800, strike: 100000 },
+      option: { underlying: 'BTC', expiry: 1798588800, strike: 100000, right: 'call', style: 'european', settlement: 'cash', settleAsset: 'USDC', premiumAsset: 'USDC' },
+    } as Market;
+    mockExchange.fetchMarkets.mockResolvedValueOnce([linear]).mockResolvedValueOnce([linear, option]);
+    const defaultFactory = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust' } });
+    const combinedOptions = { engine: 'rust' as const, enableInverseMarkets: true, enableOptionMarkets: true };
+    const combinedFactory = new PublicExchangeFactory({ redis, now, exchangeOptions: combinedOptions });
+    expect((await defaultFactory.get('bybit')).markets).toEqual([linear]);
+    expect((await combinedFactory.get('bybit')).markets).toEqual([linear, option]);
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+
+    const defaultWarm = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust', enableInverseMarkets: false, enableOptionMarkets: false } });
+    const combinedWarm = new PublicExchangeFactory({ redis, now, exchangeOptions: combinedOptions });
+    expect((await defaultWarm.get('bybit')).markets).toEqual([linear]);
+    expect((await combinedWarm.get('bybit')).markets).toEqual([linear, option]);
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+    expect(redis.values.has(getMarketCacheKeys('bybit', '2026050223').bucketKey)).toBe(true);
+    expect([...redis.values.keys()].filter((key) => key.endsWith(':latest'))).toHaveLength(2);
+  });
+
+  it('never uses a default-product stale fallback for another Rust profile', async () => {
+    const redis = new MemoryRedis();
+    const options = { redis, now: () => Date.UTC(2026, 4, 2, 23, 15) };
+    await writeMarketCacheSnapshot({ client: redis, exchange: 'bybit', bucket: '2026050222', markets: [market('LINEAR')], refreshedAt: 1 });
+    mockExchange.fetchMarkets.mockRejectedValueOnce(new Error('combined discovery unavailable'));
+    const combined = new PublicExchangeFactory({ ...options, exchangeOptions: { engine: 'rust', enableOptionMarkets: true } });
+    await expect(combined.get('bybit')).rejects.toThrow('combined discovery unavailable');
+    expect(mockExchange.store.update).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes Rust public selections and isolates testnet without changing TypeScript keys', async () => {
+    const redis = new MemoryRedis();
+    const now = () => Date.UTC(2026, 4, 2, 23, 15);
+    mockExchange.fetchMarkets.mockResolvedValueOnce([market('SELECTED')]).mockResolvedValueOnce([market('TESTNET')]);
+    const selected = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust', polymarket: { marketSlugs: ['b', 'a'] } } });
+    expect((await selected.get('polymarket')).markets[0].id).toBe('SELECTED');
+    const sortedWarm = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust', polymarket: { marketSlugs: ['a', 'b'] } } });
+    expect((await sortedWarm.get('polymarket')).markets[0].id).toBe('SELECTED');
+    const testnet = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust', testnet: true } });
+    expect((await testnet.get('polymarket')).markets[0].id).toBe('TESTNET');
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
+
+    await writeMarketCacheSnapshot({ client: redis, exchange: 'bybit', bucket: '2026050223', markets: [market('LEGACY_TS')], refreshedAt: now() });
+    const legacy = new PublicExchangeFactory({ redis, now, exchangeOptions: { enableOptionMarkets: true } });
+    expect((await legacy.get('bybit')).markets[0].id).toBe('LEGACY_TS');
+    expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
   });
 
   it('does not publish an exchange whose construction completes after disposal', async () => {

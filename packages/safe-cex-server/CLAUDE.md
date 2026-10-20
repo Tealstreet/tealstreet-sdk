@@ -33,6 +33,12 @@ deployed application routes, authorization and shell features remain caller-owne
 
 - A current-hour Redis hit hydrates a lazy exchange without opening sockets or
   fetching metadata. Consumers that need live feeds explicitly start the exchange.
+- Rust public catalogs with nondefault product/deployment selectors use a
+  profile-qualified Redis namespace for snapshots, latest fallback and locks.
+  The profile shares the public-feed identity (environment, product flags,
+  Bybit site, Hyro mode and sorted Polymarket slugs). Default native catalogs
+  and existing TS callers retain their original keys. Semantic `Market.info`
+  and option terms survive serialization and warm hydration.
 - A cold Rust cache miss awaits native startup before reading markets. Empty
   successful metadata reads are rejected rather than cached. Native startup is
   bounded by `nativeStartupTimeoutMs` (30 seconds by default), including venue
