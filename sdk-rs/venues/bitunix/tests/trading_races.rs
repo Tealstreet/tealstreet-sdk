@@ -155,6 +155,7 @@ fn settings_ack_invalidates_older_position_snapshots() {
                 command: 3,
                 symbol: "BTCUSDT".into(),
                 leverage: 30.0,
+                side: None,
             },
             30.0,
             Some(MarginType::Isolated),
@@ -197,6 +198,7 @@ fn position_mode_ack_invalidates_older_balance_and_position_snapshots() {
         Event::Command(Command::SetPositionMode {
             command: 4,
             hedged: false,
+            symbol: None,
         }),
     );
     let write = requests(&mut e).remove(0);

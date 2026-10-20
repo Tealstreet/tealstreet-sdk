@@ -198,7 +198,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
     socket.message(frame);
     socket.message(frame);
     await until(() => workerFills.length > 0 && mainFills.length > 0);
-    expect(workerFills).toEqual([{ id: '42', symbol: 'ETH', side: 'buy', price: 90, amount: 0.05 }]);
+    expect(workerFills).toEqual([{ id: '42', orderId: '42', symbol: 'ETH', side: 'buy', price: 90, amount: 0.05 }]);
     expect(mainFills).toEqual(workerFills);
     socket.message(frame);
     await new Promise((resolve) => setTimeout(resolve, 150));

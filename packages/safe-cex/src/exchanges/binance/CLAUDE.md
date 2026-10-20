@@ -22,14 +22,34 @@ liveness. It exposes native per-asset free/used/total currency balances alongsid
 USD totals and coin amounts. Full snapshots replace assets; partial socket
 updates retain untouched assets and explicit zeros. It has no derivative positions/settings. Spot
 order identity is the native client ID. A cancel/replace preserves time in
-force but generates a new client ID. Spot/COIN-M cancellation replies must prove
-native identity, terminal status and cumulative quantity before replacement.
+force but generates a new client ID. Regular-order cancellation replies on all
+four Rust profiles must prove native identity, terminal status and cumulative
+quantity before replacement. Algo/PM conditional cancellation uses its own
+identity and terminal-acknowledgement contract.
 Amendment recomputes the remaining size after the acknowledgement and racing
 fills; Filled wins, and ambiguous/unknown cancellation never places a replacement.
 Cancel-all handles Spot order-list/OCO replies atomically and preserves native
 terminal fences against stale replicas and reused client IDs. Whole-batch validation rejects unsupported
 trailing/conditional parameters, derivative execution flags, invalid triggers
 and client IDs before cancellation or placement.
+
+Rust derivative fills require `x=TRADE` and valid last quantity/price. Native
+trade IDs are deduplicated in a bounded 16,384-execution window retained across
+private reconnects; missing IDs use cumulative progress, so complete identity
+coverage requires the venue's documented `t`. Execution delivery is independent
+of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
+while an old generation cannot close a new PM order within the same native
+family. Cross-family client-ID stream ownership remains a tracked follow-up.
+Accepted cancellations invalidate in-flight order snapshots. Generated-ID
+entropy failures return an error instead of sharing a broker-only ID.
+
+TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
+`Canceled`, including fills received while cancellation was in flight. Accepted
+nonterminal rows, including local Creating/Updating/Canceling states, become
+Canceled; PM commits each success before attempting the next cancellation.
+These TS paths retain their existing stale-snapshot limitation. Rust tracks
+native order incarnations; TS cancellation does not add canonical client-ID
+tombstones that would block immediate PM client-ID reuse.
 
 The shared engine STP option is currently AsterDEX-only: every Binance profile
 rejects it for the whole batch before any action. Newly shared STP, native

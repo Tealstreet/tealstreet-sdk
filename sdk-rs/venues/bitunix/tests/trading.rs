@@ -411,6 +411,7 @@ fn rejected_settings_write_never_changes_settings() {
             command: 7,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);

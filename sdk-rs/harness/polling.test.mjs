@@ -484,7 +484,7 @@ test('polling idle fence distinguishes housekeeping timer progress from idle eve
     {type:'http',t:20,method:'GET',url,status:200,body:'final',availableAfter:20},
   ], {polling:true});
   tape.respond('GET',url);
-  const clock = new ReplayClock(1700000000000); clock.install();
+  const clock = new ReplayClock(1700000000000); clock.install(); clock.start();
   let poll, housekeeping;
   try {
     await tape.play(undefined,undefined,undefined,clock,()=> {

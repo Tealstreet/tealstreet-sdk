@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
+import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { isRead, subscriptionKeys, requestKey as keyOf } from './requests.mjs';
 import { replayStoreReady, replayBooksReady, ReplayClock, Tape as SharedTape, canonicalUrl as sharedUrl } from './tape.mjs';
@@ -494,7 +494,7 @@ async function runRust() {
       }
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
+        fills.push({ market: executed.market[i], symbol: executed.symbol?.(i) ?? markets?.symbol(executed.market[i]), side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
       }
     },
   });
@@ -580,7 +580,7 @@ async function runRust() {
     }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
-    const row = { symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]) };
+    const row = { symbol: tickers.identity?.(i)?.symbol ?? markets.symbol(tickers.market[i]) };
     for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
     tickerRows.push(row);
   }
@@ -607,9 +607,11 @@ const commandArgs = ({ t, type, expected, ...args }) => args;
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) {
   const symbol = (i) => markets.symbol(i);
+  const rowSymbol = (table, i) => table.symbol?.(i) ?? symbol(table.market[i]);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
-    const row = { id: orders.id(i), clientOrderId: orders.clientOrderId(i), parentId: orders.parentId(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    const row = { id: orders.id(i), clientOrderId: orders.clientOrderId(i), parentId: orders.parentId(i), symbol: rowSymbol(orders, i), ...orderEnums(orders.enums[i]),
+      ...(orders.tpTriggerType ? { tpTriggerType: orders.tpTriggerType(i), slTriggerType: orders.slTriggerType(i) } : {}) };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
     if (venue.coinNativeAmounts) row.extra = { remainingNative: row.remaining };
     if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
@@ -617,7 +619,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
-    const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
+    const row = { symbol: rowSymbol(positions, i), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
     const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
     if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
@@ -629,7 +631,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   for (let i = 0; i < (settings?.count ?? 0); i++) {
     // Match TS placeholders while retaining margin-only rails in real frames.
     if (!venue.independentLeverage && !(settings.leverage[i] > 0)) continue;
-    settingRows.push({ symbol: symbol(settings.market[i]), marginType: settings.marginType(i),
+    settingRows.push({ symbol: rowSymbol(settings, i), marginType: settings.marginType(i),
       ...(venue.independentLeverage ? { buyLeverage: settings.buyLeverage[i], sellLeverage: settings.sellLeverage[i] } : { leverage: settings.leverage[i] }) });
   }
   return {
@@ -641,7 +643,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+    fills: fills.map((f) => ({ id: f.id, symbol: f.symbol ?? symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
   };
 }
 
@@ -924,9 +926,9 @@ async function runTsCommand(exchange, store, record, { candleListeners, candleUp
       const result = await exchange.updateOrder({ order, update });
       return values.venue === 'mexc' ? result ?? [] : result;
     }
-    case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage); return [];
+    case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage, args.side); return [];
     case 'setMarginType': await exchange.changeMarginType(args.isolated, args.symbol); return [];
-    case 'setPositionMode': await exchange.changePositionMode(args.hedged); return [];
+    case 'setPositionMode': await exchange.changePositionMode(args.hedged, args.symbol); return [];
     case 'findOrderByClientOrderId':
       return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage': return exchange.fetchLeverageForSymbol(args.symbol);

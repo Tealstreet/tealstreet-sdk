@@ -286,6 +286,7 @@ fn queued_leverage_uses_margin_mode_from_preceding_command() {
             command: 2,
             symbol: "BTC-PERP".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     reply(
@@ -360,6 +361,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 command: 2,
                 symbol: "BTC-PERP".into(),
                 leverage: 5.0,
+                side: None,
             }),
         );
         if malformed_reply {
@@ -426,6 +428,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 command: 4,
                 symbol: "BTC-PERP".into(),
                 leverage: 5.0,
+                side: None,
             }),
         );
         let recovered = write(&mut e);
@@ -452,6 +455,7 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
             command: 2,
             symbol: "BTC-PERP".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     e.handle(
@@ -614,6 +618,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
                 command: 1,
                 symbol: "ETH-PERP".into(),
                 leverage: 5.0,
+                side: None,
             }),
         );
         let earlier = write(&mut e);
@@ -762,6 +767,7 @@ fn definite_settings_rejection_keeps_next_queued_command_usable() {
             command: 2,
             symbol: "BTC-PERP".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     reply_at(
@@ -827,6 +833,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
             command: 2,
             symbol: "ETH-PERP".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     assert!(
@@ -848,6 +855,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
             command: 3,
             symbol: "ETH-PERP".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let recovered = write(&mut e);

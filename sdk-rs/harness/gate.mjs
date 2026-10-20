@@ -131,6 +131,16 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 // KuCoin Spot fixes stay in production: native execution deduplication, stale
 // read and malformed account-row fences, and URL-encoded cancellation IDs.
 // Both replay outputs are compared directly without a KuCoin Spot repair.
+// Trading audit: cancel/replace waits for cancellation evidence, subtracts
+// racing cumulative fills, and refuses unknown-order replacement. Successful
+// writes fence old USD-M/PM snapshots; generated client-ID RNG errors reject.
+// Derivative lifecycle packets cannot emit fills; native trade IDs dedupe
+// retries even after reconnect. Native race tests pin these TS corrections;
+// these audit notes add no output or request rewrite.
+// Bybit deduplicates native execId and fences acknowledged Demo/Hyro
+// cancellations against REST reads issued before, during or after the write,
+// with bounded native terminal retention against stale replicas. Native tests
+// exercise equal-time and late-response races without normalization.
 const fixBackpack = (ts) => {
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
@@ -239,6 +249,9 @@ const fixBackpack = (ts) => {
 // totals, plain-trigger/caller-ID whole-batch rejection, post-only amendment,
 // cumulative-fill/terminal replay fences and malformed openOrders retention.
 // TS cancel-all marks already FILLED rows canceled; use explicit tape events.
+// Trading audit: derivatives require x=TRADE, deduplicate native trade IDs,
+// and report genuine late trades after stop-trigger EXPIRED/cancellation.
+// Native regressions cover those adverse packets; no fill is normalized here.
 // Other documented Binance variant fixes have native regression proofs:
 // - TS split lots divide the whole request and can round away quantity;
 //   Rust sends max-size lots plus the exact native-unit remainder.
@@ -429,6 +442,8 @@ KNOWN_TS_FIXES.krakenspot = {
       'Preserve native order txid across atomic amendments and reject ambiguous edits before a write.',
     ],
 };
+// Price-only cancel/replace amendments re-place the remaining quantity after
+// partial execution; TS re-places the original amount and increases exposure.
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
 KNOWN_TS_FIXES.woo = [];
   // ApeX repairs are in the TS reference; output is compared without rewriting:

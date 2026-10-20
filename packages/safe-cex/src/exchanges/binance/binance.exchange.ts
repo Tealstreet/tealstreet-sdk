@@ -74,7 +74,7 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from './binance.types';
-import { USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
+import { markBinanceOrdersCanceled, USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
 
@@ -1528,17 +1528,11 @@ export class BinanceExchange extends BaseExchange {
               });
             }
 
-            this.store.updateOrdersStatus(
-              request.orders.map((o) => ({ id: o.id })),
-              OrderStatus.Canceled,
-            );
+            markBinanceOrdersCanceled(this.store, request.orders);
           } catch (err: any) {
             // -2011 "Unknown order sent" means order is already gone - treat as success
             if (err?.code === -2011) {
-              this.store.updateOrdersStatus(
-                request.orders.map((o) => ({ id: o.id })),
-                OrderStatus.Canceled,
-              );
+              markBinanceOrdersCanceled(this.store, request.orders);
               return;
             }
             // Re-throw other errors
@@ -1558,11 +1552,11 @@ export class BinanceExchange extends BaseExchange {
               params: { algoId },
             });
 
-            this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+            markBinanceOrdersCanceled(this.store, [order]);
           } catch (err: any) {
             // -2011 "Unknown order sent" means order is already gone - treat as success
             if (err?.code === -2011) {
-              this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+              markBinanceOrdersCanceled(this.store, [order]);
               continue;
             }
             this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -1579,26 +1573,19 @@ export class BinanceExchange extends BaseExchange {
   cancelSymbolOrders = async (symbol: string) => {
     try {
       const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
-      const regularIds = new Set(
-        symbolOrders.filter((order) => !this.isAlgoOrderType(order.type)).map((order) => order.id),
-      );
-      const algoIds = new Set(symbolOrders.filter((order) => this.isAlgoOrderType(order.type)).map((order) => order.id));
+      const regularOrders = symbolOrders.filter((order) => !this.isAlgoOrderType(order.type));
+      const algoOrders = symbolOrders.filter((order) => this.isAlgoOrderType(order.type));
       const [regularResult, algoResult] = await Promise.allSettled([
         this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } }),
         this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ALGO_ORDERS, { params: { symbol } }),
       ]);
 
-      // A cancel-all ACK cannot overwrite a racing fill or cancel a later placement locally.
-      const markCanceled = (ids: Set<string>) => {
-        this.store.updateOrdersStatus(
-          this.store.orders.filter(
-            (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
-          ),
-          OrderStatus.Canceled,
-        );
-      };
-      if (regularResult.status === 'fulfilled') markCanceled(regularIds);
-      if (algoResult.status === 'fulfilled') markCanceled(algoIds);
+      if (regularResult.status === 'fulfilled') {
+        markBinanceOrdersCanceled(this.store, regularOrders);
+      }
+      if (algoResult.status === 'fulfilled') {
+        markBinanceOrdersCanceled(this.store, algoOrders);
+      }
 
       if (regularResult.status === 'rejected') throw regularResult.reason;
       if (algoResult.status === 'rejected') throw algoResult.reason;

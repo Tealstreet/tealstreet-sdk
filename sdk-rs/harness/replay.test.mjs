@@ -1132,3 +1132,73 @@ test('production Bitunix login requires exactly one independently verified argum
     tape.close(socket);
   }
 });
+
+
+test('production native account projection retains stored identities and per-leg triggers with legacy fallback', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function rustAccount('), end = source.indexOf('\nasync function runTs()', start);
+  assert(start >= 0 && end > start);
+  const project = new Function('venue', 'ORDER_COLUMNS', 'POSITION_COLUMNS', 'orderEnums', 'positionEnums',
+    `${source.slice(start, end)};return rustAccount;`)({}, [], [], () => ({}), () => ({}));
+  const input = () => ({
+    markets: { symbol: () => 'REPLACEMENT' }, balance: {},
+    orders: { count: 1, market: [0], enums: [0], id: () => 'order', clientOrderId: () => undefined, parentId: () => undefined,
+      symbol: () => 'ORPHAN-ORDER', tpTriggerType: () => 'mark', slTriggerType: () => 'last' },
+    positions: { count: 1, market: [0], enums: [0], symbol: () => 'ORPHAN-POSITION' },
+    settings: { count: 1, market: [0], leverage: [5], marginType: () => 'cross', symbol: () => 'ORPHAN-SETTING' },
+    fills: [{ market: 0, symbol: 'DELIVERED-FILL', side: 0, id: 'order', amount: 1 }],
+  });
+  const modern = project(input());
+  assert.deepEqual([modern.orders[0].symbol, modern.positions[0].symbol, modern.settings[0].symbol, modern.fills[0].symbol],
+    ['ORPHAN-ORDER', 'ORPHAN-POSITION', 'ORPHAN-SETTING', 'DELIVERED-FILL']);
+  assert.equal(modern.orders[0].tpTriggerType, 'mark');
+  assert.equal(modern.orders[0].slTriggerType, 'last');
+  const legacy = input();
+  for (const rows of [legacy.orders, legacy.positions, legacy.settings]) delete rows.symbol;
+  delete legacy.orders.tpTriggerType;
+  delete legacy.orders.slTriggerType;
+  delete legacy.fills[0].symbol;
+  const old = project(legacy);
+  assert.deepEqual([old.orders[0].symbol, old.positions[0].symbol, old.settings[0].symbol, old.fills[0].symbol],
+    ['REPLACEMENT', 'REPLACEMENT', 'REPLACEMENT', 'REPLACEMENT']);
+  assert.equal(Object.hasOwn(old.orders[0], 'tpTriggerType'), false);
+});
+
+test('production fill delivery snapshots stored symbols and ticker projection prefers stored identities', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('      const executed = frame.fills();');
+  const end = source.indexOf('\n    },', start);
+  assert(start >= 0 && end > start);
+  const deliver = new Function('frame', 'fills', 'markets', source.slice(start, end));
+  let deliveredSymbol = 'ORIGINAL';
+  const fills = [];
+  deliver({ fills: () => ({ count: 1, market: [0], side: [0], rows: [90, 1], orderId: () => 'order', symbol: () => deliveredSymbol }) }, fills);
+  deliveredSymbol = 'REPLACED';
+  assert.equal(fills[0].symbol, 'ORIGINAL');
+  let catalogSymbol = 'LEGACY-AT-DELIVERY';
+  const deliveryMarkets = { symbol: () => catalogSymbol };
+  deliver({ fills: () => ({ count: 1, market: [0], side: [1], rows: [91, 2], orderId: () => 'legacy' }) }, fills, deliveryMarkets);
+  catalogSymbol = 'REINDEXED-MARKET';
+  assert.equal(fills[1].symbol, 'LEGACY-AT-DELIVERY');
+  deliver({ fills: () => ({ count: 1, market: [0], side: [1], rows: [92, 3], orderId: () => 'no-catalog' }) }, fills);
+  assert.equal(fills[2].symbol, undefined, 'only a missing catalog defers legacy symbol resolution');
+  const tickerStart = source.indexOf('  const tickerRows = [];');
+  const tickerEnd = source.indexOf('\n  const bookRows = {};', tickerStart);
+  assert(tickerStart >= 0 && tickerEnd > tickerStart);
+  const tickers = new Function('tickers', 'markets', `${source.slice(tickerStart, tickerEnd)};return tickerRows;`);
+  const markets = { symbol: () => 'CURRENT-MARKET' };
+  assert.equal(tickers({ count: 1, market: [0], columns: {}, identity: () => ({ symbol: 'STORED-TICKER' }) }, markets)[0].symbol, 'STORED-TICKER');
+  assert.equal(tickers({ count: 1, market: [0], columns: {} }, markets)[0].symbol, 'CURRENT-MARKET');
+});
+
+test('production TS command dispatch forwards leverage side and position-mode symbol', async () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('async function runTsCommand('), end = source.indexOf('\n/** The fields both implementations carry', start);
+  assert(start >= 0 && end > start);
+  const command = new Function('commandArgs', `${source.slice(start, end)};return runTsCommand;`)((record) => record);
+  const seen = [];
+  const exchange = { setLeverage: (...args) => seen.push(args), changePositionMode: (...args) => seen.push(args) };
+  await command(exchange, {}, { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 5, side: 'long' }, {});
+  await command(exchange, {}, { op: 'setPositionMode', hedged: true, symbol: 'BTCUSDT' }, {});
+  assert.deepEqual(seen, [['BTCUSDT', 5, 'long'], [true, 'BTCUSDT']]);
+});

@@ -574,6 +574,7 @@ impl ApexOmni {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
                     cx.done(command, Err(format!("ApeX Omni market {symbol} not found")));
@@ -617,7 +618,11 @@ impl ApexOmni {
                 );
                 return Ok(());
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 cx.done(
                     command,
                     if hedged {

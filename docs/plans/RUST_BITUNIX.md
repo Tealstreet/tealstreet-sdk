@@ -3139,3 +3139,66 @@ Module byte counts: Bitunix856206, KuCoin819125, KuCoinSpot721043,
 Binance969416, OKX861779, Paradex1224575, Bitrue850131. Each under1258291.
 All source/native/compiled/consumer checks above remain current. Actual PR review
 and green CI are still required; no live private credentials were used.
+
+## Published review and required c44f22bd8e conflict integration
+
+Publishedfcc1156ea7 receives3independent adversarial PASS verdicts after matching
+actualPRhead/title/body/diff: private/trading/history, public/hosts/SDK, and shared
+harness/integrity/performance accounting. All37prior findings/resolutions are now
+posted; round1PASS summary also posted. No review claimsCIgreen or waivesBitrue.
+
+GitHub reportsCONFLICTING, preventing fullCI. Fetching finds60landingcommits to
+c44f22bd8e from wire-fixes, leverage-side and Binance/Bybit audit PRs. Merge now:
+resolve8files in3disjoint reviewed groups (coreStore/wire/JS reader; Binance
+TS/PM/native trading; gate/replay). Preserve all incoming revision1wire identity,
+midpoints, display names, side rails, recovery ownership and native cancellation
+proofs, while retaining this lane's ticker indices, scoped cancellation fences,
+strict oracles/auth/physical sockets/clock/CPU/memory and finalizer controls.
+
+Bitunix is coupled-leverage/global-mode like its TS adapter. Adapt only the new
+sharedCommand optional fields (`side: _`, `symbol: _`) as the incoming coupled
+venues do; retain existing leverage/global-mode behavior and addNone to legacy
+native fixtures. Root owns this3file adaptation. Re-read the revisedwire and
+leverage spec before verification. Then independent union audits, refresh affected
+native/source/compiled proofs plus mandatory Bitunix/Binance gates, push resolved
+head, freshactualPRreviews and ALL41greenCI. Do not chase anothermovingbase unless
+GitHub reports a new conflict. Bitrueextra public remains mandatoryCIverification.
+
+All c44 conflict unions frozen and independently audited PASS. Core preserves
+revision1 layouts/reservation widths, ownedidentity, symbol-keyedsettings and
+our exactlegacycurrency/BCM1 bytes/O(1)indices. Binance native/USD-M equal the
+incoming stronger proof implementation; PM keeps both-family Promise.allSettled
+and successful-family-only commits. Coupled Bitunix command adaptation and SDK
+factory/CID/credential/recovery union independently PASS. Harness keeps every
+strict guard, forwards new optional command args and projects stored native
+identity/per-leg triggers through existing comparison fields.
+
+Review catches legacy fill identity still resolving after catalog replacement.
+Capture the current legacy symbol at delivery as well as modern stored symbols;
+only absent catalog permits late fallback. Production-source regression fails
+before this correction and passes afterward; source restored byte-for-byte after
+the temporary probe. 76focused replay/polling controls PASS; independent follow-up
+review PASS. Preserve /tmp/bitunix-c44-legacy-fill-fail-before.log.
+
+First855helper run has854pass/1flakyfixture: the idle-fence test's100ms timer
+legitimately spends1ms before conversion from real startup time. Make this exact
+logical100ms unit start its own active clock before scheduling; exact100assertion
+stays. Production timers/deadlines/clock modules unchanged. Fresh855helpers,
+44typecheck/28lint PASS; root source tests still running. Distinct corrected
+logs /tmp/bitunix-c44-fixed-* retain the first failed aggregate.
+
+Fresh combined release+454compiledSDKcases PASS. Initial engine suite stops at
+120pass/1oldfixtureexpecting deltas after market replacement; incoming contract
+requires a full replacement. Updated fixture requires exact3identities/nativeIDs,
+marketrefs/values in the serialized full table, THEN exact indexed delta after
+drain, retaining all delist/relist lookups. Focused114enginecontrols PASS. Initial
+host109pass/1onlybalanceerror-vocabularyfixture mismatch: retain exact RangeError
+'Malformed balance section' for its bounds helper; all other readers keep their
+truncated predicate. All110hostcontrols PASS. No production change for either.
+
+Re-run full native checks with updated test source and finish remaining consumer
+checks using distinct native-fixed/consumers-tail logs. Existing454compiled proof
+stays current (test-only follow-ups). Then mandatory Bitunix/baseBinance private/
+public4gates before resolved-head push. All other modes/venues, including every
+Binance mode and Bitrue public, remain strict exact-head CI requirements; do not
+repeat the extra15localprofile batch. No sampling/output/performance waiver.

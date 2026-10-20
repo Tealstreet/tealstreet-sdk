@@ -12,6 +12,26 @@ const DAILY: &str = r#"{"result":[{"symbol":"BTCUSDT","bidRp":"69999","askRp":"7
 const BTC: &str = r#"{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","side":"Buy","size":"0.01","leverageRr":"-20","avgEntryPriceRp":"69000","liquidationPriceRp":"50000","transactTimeNs":1700000000000000000}"#;
 const ETH: &str = r#"{"symbol":"ETHUSDC","currency":"USDC","posMode":"Hedged","posSide":"Long","side":"Buy","size":"1","leverageRr":"10","avgEntryPriceRp":"1900","liquidationPriceRp":"1000","transactTimeNs":1700000000000000000}"#;
 const FLAT: &str = r#"{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"-30"}"#;
+fn execution_rows(frame: &[u8], expected_count: usize) -> &[u8] {
+    let mut at = 16;
+    while at < frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let length = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == safe_cex_engine::wire::section::FILLS {
+            assert_eq!(
+                u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
+                1
+            );
+            let payload = &frame[at + 8..at + 8 + length];
+            let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+            assert_eq!(count, expected_count);
+            let rows = (4 + 12 * count).next_multiple_of(8);
+            return &payload[rows..rows + 16 * count];
+        }
+        at += 8 + length;
+    }
+    panic!("missing execution fills");
+}
 fn requests(actions: &[Action]) -> Vec<HttpRequest> {
     actions
         .iter()
@@ -393,13 +413,9 @@ fn execution_fills_deduplicate_individually_even_after_terminal_row() {
         .replace("\"execPriceRp\":\"69000\"", "\"execPriceRp\":\"69100\"");
     push_orders(&mut e, s, "incremental", 2, &format!("{first},{second}"));
     push_orders(&mut e, s, "incremental", 3, &format!("{first},{second}"));
-    let frame = e.take_market_frame(NOW).unwrap();
-    let payload = safe_cex_engine::wire::sections(frame)
-        .find(|(kind, _)| *kind == 11)
-        .unwrap()
-        .1;
-    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 2);
-    let data = &payload[payload.len() - 32..];
+    assert!(e.take_market_frame(NOW).is_none());
+    let frame = e.take_frame(NOW).unwrap();
+    let data = execution_rows(frame, 2);
     assert_eq!(f64::from_le_bytes(data[..8].try_into().unwrap()), 69000.);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
     assert_eq!(f64::from_le_bytes(data[16..24].try_into().unwrap()), 69100.);
@@ -944,13 +960,9 @@ fn late_unique_execution_after_terminal_emits_fill_without_reopening_order() {
     push_orders(&mut e, s, "incremental", 3, &late);
     push_orders(&mut e, s, "incremental", 4, &late);
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
-    let frame = e.take_market_frame(NOW).unwrap();
-    let payload = safe_cex_engine::wire::sections(frame)
-        .find(|(kind, _)| *kind == 11)
-        .unwrap()
-        .1;
-    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 2);
-    let data = &payload[payload.len() - 32..];
+    assert!(e.take_market_frame(NOW).is_none());
+    let frame = e.take_frame(NOW).unwrap();
+    let data = execution_rows(frame, 2);
     assert_eq!(f64::from_le_bytes(data[..8].try_into().unwrap()), 69100.);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.2);
     assert_eq!(f64::from_le_bytes(data[16..24].try_into().unwrap()), 69000.);

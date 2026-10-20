@@ -735,6 +735,7 @@ fn mode_ack_installs_confirmed_context_and_fences_dependent_placements() {
         Command::SetPositionMode {
             command: 1,
             hedged: true,
+            symbol: Some("BTCUSDT".into()),
         },
     );
     let r = &writes(&a)[0];
@@ -1235,6 +1236,7 @@ fn flat_cross_leverage_margin_and_overlapping_settings() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.,
+            side: None,
         },
     );
     let r = &writes(&a)[0];
@@ -1337,4 +1339,342 @@ fn unknown_context_and_public_only_fail_closed() {
     );
     assert!(done(&a).is_err());
     assert!(writes(&a).is_empty());
+}
+
+#[test]
+fn per_side_leverage_preserves_opposite_signed_rail_and_publishes_distinct_settings() {
+    for isolated in [false, true] {
+        for side in [Some(PositionSide::Long), Some(PositionSide::Short), None] {
+            let (mut e, socket) = authenticated("Hedged");
+            let sign = if isolated { 1. } else { -1. };
+            let text = json!({"type":"incremental","positions_p":[
+                {"symbol":"BTCUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":10.*sign,"crossMargin":!isolated},
+                {"symbol":"BTCUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":20.*sign,"crossMargin":!isolated}
+            ]}).to_string();
+            e.handle(
+                1000.,
+                Event::WsMessage {
+                    socket,
+                    text: &text,
+                },
+            );
+            e.drain_actions().for_each(drop);
+            let a = command(
+                &mut e,
+                Command::SetLeverage {
+                    command: 501,
+                    symbol: "BTCUSDT".into(),
+                    leverage: 37.,
+                    side,
+                },
+            );
+            let r = &writes(&a)[0];
+            let long = if side == Some(PositionSide::Short) {
+                10.
+            } else {
+                37.
+            };
+            let short = if side == Some(PositionSide::Long) {
+                20.
+            } else {
+                37.
+            };
+            assert_eq!(p(r, "longLeverageRr"), Some((long * sign).to_string()));
+            assert_eq!(p(r, "shortLeverageRr"), Some((short * sign).to_string()));
+            let a = respond(&mut e, r, json!({"code":0,"data":null}));
+            assert!(done(&a).is_ok());
+            let setting = e.store().setting("BTCUSDT").unwrap();
+            assert_eq!(setting.buy_leverage, Some(long));
+            assert_eq!(setting.sell_leverage, Some(short));
+            assert_eq!(
+                setting.margin_type,
+                Some(if isolated {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                })
+            );
+            // The cached opposite rail must survive into a subsequent margin request.
+            let a = command(
+                &mut e,
+                Command::SetMarginType {
+                    command: 502,
+                    symbol: "BTCUSDT".into(),
+                    isolated: !isolated,
+                },
+            );
+            let r = &writes(&a)[0];
+            assert_eq!(p(r, "longLeverageRr"), Some((-long * sign).to_string()));
+            assert_eq!(p(r, "shortLeverageRr"), Some((-short * sign).to_string()));
+        }
+    }
+}
+
+#[test]
+fn rejected_phemex_side_leverage_and_oneway_side_do_not_corrupt_context() {
+    let (mut e, _) = authenticated("Hedged");
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 503,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let a = respond(&mut e, &writes(&a)[0], json!({"code":100,"msg":"rejected"}));
+    assert!(done(&a).is_err());
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().sell_leverage, None);
+    let mut e = engine_mode("OneWay");
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 504,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "leverageRr"), Some("-37".into()));
+    assert_eq!(p(r, "shortLeverageRr"), None);
+    respond(&mut e, r, json!({"code":0,"data":null}));
+    let s = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!((s.buy_leverage, s.sell_leverage), (Some(37.), Some(37.)));
+}
+
+#[test]
+fn symbol_mode_switch_sends_one_put_and_leaves_other_market_mode_unchanged() {
+    let (mut e, socket) = authenticated("Hedged");
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    e.handle(1000.,Event::WsMessage{socket,text:r#"{"type":"incremental","positions_p":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"-10","crossMargin":true},{"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"-20","crossMargin":true}]}"#});
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 701,
+            hedged: false,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert!(r.url.contains("/g-positions/switch-pos-mode-sync"));
+    assert_eq!(p(r, "symbol"), Some("BTCUSDT".into()));
+    assert_eq!(p(r, "targetPosMode"), Some("OneWay".into()));
+    let a = respond(&mut e, r, json!({"code":0,"data":null}));
+    assert!(done(&a).is_ok());
+    assert!(writes(&a).is_empty());
+    assert!(e.store().hedged(), "ETH remains in hedge mode");
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 702,
+            symbol: "ETHUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "longLeverageRr"), Some("-10".into()));
+    assert_eq!(p(r, "shortLeverageRr"), Some("-37".into()));
+    assert_eq!(p(r, "leverageRr"), None);
+}
+
+#[test]
+fn phemex_missing_unknown_and_rejected_symbol_modes_never_switch_other_markets() {
+    for symbol in [None, Some(String::new()), Some("UNKNOWN".into())] {
+        let mut e = engine();
+        let a = command(
+            &mut e,
+            Command::SetPositionMode {
+                command: 703,
+                hedged: true,
+                symbol,
+            },
+        );
+        assert!(writes(&a).is_empty());
+        assert!(done(&a).is_err());
+        assert!(!e.store().hedged());
+    }
+    let mut e = engine();
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 704,
+            hedged: true,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    let a = respond(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":39201,"msg":"positions not closed"}),
+    );
+    assert!(done(&a).is_err());
+    assert!(!e.store().hedged());
+    assert!(writes(&a).is_empty());
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 705,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: None,
+        },
+    );
+    assert_eq!(p(&writes(&a)[0], "leverageRr"), Some("-37".into()));
+}
+
+#[test]
+fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_reads() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 710,
+            hedged: true,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "symbol"), Some("ETHUSDT".into()));
+    assert_eq!(p(r, "targetPosMode"), Some("Hedged".into()));
+    let a = respond(&mut e, r, json!({"code":0,"data":null}));
+    assert!(done(&a).is_ok());
+    assert!(e.store().hedged());
+    assert!(
+        e.store().setting("ETHUSDT").is_none(),
+        "a mode ACK cannot invent leverage or margin"
+    );
+    let stale = requests(&a);
+    assert_eq!(stale.len(), 2);
+    // A delayed untimed OneWay row must not erase the acknowledged Hedged mode.
+    e.handle(1001., Event::WsMessage { socket, text: r#"{"type":"incremental","positions_p":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"8"},{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"-10","crossMargin":true}]}"# });
+    e.drain_actions().for_each(drop);
+    assert!(e.store().hedged());
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 711,
+            symbol: "ETHUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Long),
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+    let mut order = opts("no-unknown-margin");
+    order.symbol = "ETHUSDT".into();
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 712,
+            orders: vec![order],
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 713,
+            hedged: false,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    let a = respond(&mut e, &writes(&a)[0], json!({"code":0,"data":null}));
+    assert!(done(&a).is_ok());
+    assert!(!e.store().hedged());
+    let mut completed = vec![];
+    for r in stale {
+        let currency = if r.url.contains("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let rows = if currency == "USDT" {
+            json!([
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"10"},
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"20"}
+            ])
+        } else {
+            json!([])
+        };
+        completed.extend(respond(&mut e, &r, json!({"code":0,"data":{"account":{"currency":currency,"accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":rows}})));
+    }
+    assert!(
+        !e.store().hedged(),
+        "reads started before the last ACK cannot replace its mode"
+    );
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let (timer, at) = completed
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= 3000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("the next authoritative account refresh is scheduled");
+    e.handle(at, Event::TimerFired { timer });
+    let fresh: Vec<_> = e.drain_actions().collect();
+    assert_eq!(requests(&fresh).len(), 2);
+    for r in requests(&fresh) {
+        let currency = if r.url.contains("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let rows = if currency == "USDT" {
+            json!([
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"10"},
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"20"}
+            ])
+        } else {
+            json!([])
+        };
+        respond(
+            &mut e,
+            &r,
+            json!({"code":0,"data":{"account":{"currency":currency,"accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":rows}}),
+        );
+    }
+    assert!(
+        e.store().hedged(),
+        "a fresh authoritative row supersedes the mode-only ACK"
+    );
+    let s = e.store().setting("ETHUSDT").unwrap();
+    assert_eq!((s.buy_leverage, s.sell_leverage), (Some(10.), Some(20.)));
+    assert_eq!(s.margin_type, Some(MarginType::Isolated));
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 714,
+            symbol: "ETHUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "longLeverageRr"), Some("10".into()));
+    assert_eq!(p(r, "shortLeverageRr"), Some("37".into()));
 }

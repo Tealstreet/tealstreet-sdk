@@ -480,7 +480,24 @@ fn late_poll_cannot_overwrite_newer_trade_or_restart_removed_subscription() {
     });
     let r = h.take("klines");
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"111","size":"2","created_at":1700000000000}}}"#);
-    assert!(h.e.take_market_frame(h.now).is_some());
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    let sections: Vec<_> = safe_cex_engine::wire::sections(startup).collect();
+    assert!(
+        sections
+            .iter()
+            .any(|(kind, _)| *kind == safe_cex_engine::wire::section::MARKETS)
+    );
+    let candle = sections
+        .iter()
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::CANDLES)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(candle[..4].try_into().unwrap()), 1);
+    let values: [f64; 6] = std::array::from_fn(|i| {
+        f64::from_le_bytes(candle[16 + i * 8..24 + i * 8].try_into().unwrap())
+    });
+    assert_eq!(values, [1699999980000., 111., 111., 111., 111., 2.]);
     h.respond(r, 200, r#"{"results":[[1699999980000,100,100,100,100,1]]}"#);
     assert!(h.e.take_market_frame(h.now).is_none());
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"112","size":"1","created_at":1699999900000}}}"#);
@@ -866,7 +883,12 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         interval: "1m".into(),
     });
     h.reply("klines", r#"{"results":[]}"#);
-    let _ = h.e.take_market_frame(h.now);
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(startup)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::MARKETS)
+    );
     h.ws(&format!(r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"trades.BTC-USD-PERP","data":{{"price":"100","size":"2","created_at":{}}}}}}}"#, h.now));
     assert_eq!(emitted(&mut h), Some([bucket, 100., 100., 100., 100., 2.]));
     for (timestamp, price, volume, expected) in [

@@ -327,6 +327,7 @@ impl BitunixFutures {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let result = (|| {
                     let m = cx
@@ -389,7 +390,11 @@ impl BitunixFutures {
                 };
                 (command, result)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let result = if !cx.store.positions().is_empty() {
                     Err("Please close all positions before switching position mode".into())
                 } else {

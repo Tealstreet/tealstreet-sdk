@@ -43,6 +43,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { patternClientOrderIdRule } from '../clientOrderId';
+import { markBinanceOrdersCanceled } from './binance.utils';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import {
   ENDPOINTS,
@@ -264,7 +265,6 @@ export class BinancePMExchange extends BaseExchange {
       orders,
       loaded: { ...this.store.loaded, orders: true },
     });
-
   };
 
   _startPublicDataOnly = async () => {
@@ -788,17 +788,13 @@ export class BinancePMExchange extends BaseExchange {
                 },
               });
             }
+            markBinanceOrdersCanceled(this.store, [order]);
           } catch (err: any) {
             this.emitAndLogError(`Failed to cancel order ${order.id}: ${err?.response?.data?.msg || err?.message}`);
             throw err;
           }
         });
       });
-
-      this.store.updateOrdersStatus(
-        orders.map((order) => ({ id: order.id })),
-        OrderStatus.Canceled,
-      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -809,28 +805,19 @@ export class BinancePMExchange extends BaseExchange {
     try {
       const conditionalTypes = [OrderType.StopLoss, OrderType.TakeProfit, OrderType.TrailingStopLoss];
       const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
-      const regularIds = new Set(
-        symbolOrders.filter((order) => !conditionalTypes.includes(order.type)).map((order) => order.id),
-      );
-      const conditionalIds = new Set(
-        symbolOrders.filter((order) => conditionalTypes.includes(order.type)).map((order) => order.id),
-      );
+      const regularOrders = symbolOrders.filter((order) => !conditionalTypes.includes(order.type));
+      const conditionalOrders = symbolOrders.filter((order) => conditionalTypes.includes(order.type));
       const [regularResult, conditionalResult] = await Promise.allSettled([
         this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } }),
         this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_CONDITIONAL_ORDERS, { params: { symbol } }),
       ]);
 
-      // A cancel-all ACK cannot overwrite a racing fill or cancel a later placement locally.
-      const markCanceled = (ids: Set<string>) => {
-        this.store.updateOrdersStatus(
-          this.store.orders.filter(
-            (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
-          ),
-          OrderStatus.Canceled,
-        );
-      };
-      if (regularResult.status === 'fulfilled') markCanceled(regularIds);
-      if (conditionalResult.status === 'fulfilled') markCanceled(conditionalIds);
+      if (regularResult.status === 'fulfilled') {
+        markBinanceOrdersCanceled(this.store, regularOrders);
+      }
+      if (conditionalResult.status === 'fulfilled') {
+        markBinanceOrdersCanceled(this.store, conditionalOrders);
+      }
       if (regularResult.status === 'rejected') throw regularResult.reason;
       if (conditionalResult.status === 'rejected') throw conditionalResult.reason;
     } catch (err: any) {
