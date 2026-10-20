@@ -89,7 +89,11 @@ it.each([false, true])('preserves BloFin broker gate, range units, flat leverage
   const store = new DefaultStore();
   const exchange = new RustEngineExchange(
     'blofin',
-    { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', tealstreetProxy, transport: directTransport },
+    {
+      key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', tealstreetProxy,
+      // Accept the proxy intent while keeping every request on the scripted transport.
+      transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
+    },
     store,
   );
   const main = new BaseExchange('blofin', { key: '', secret: '' }, new DefaultStore());
