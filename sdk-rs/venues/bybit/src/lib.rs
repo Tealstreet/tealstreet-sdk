@@ -385,7 +385,13 @@ impl BybitLinear {
             Channel::Public => self.urls.public_ws,
             Channel::Private => self.urls.private_ws,
         };
-        let socket = cx.connect(url);
+        let socket = cx.connect_channel(
+            url,
+            match channel {
+                Channel::Public => safe_cex_engine::SocketChannel::Public,
+                Channel::Private => safe_cex_engine::SocketChannel::Private,
+            },
+        );
         let connection = self.connection(channel);
         connection.socket = Some(socket);
         connection.open = false;

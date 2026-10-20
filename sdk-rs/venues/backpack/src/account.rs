@@ -361,7 +361,8 @@ impl Backpack {
             Next::Orders => self.orders_read(cx, Next::Finish),
             Next::Finish => {
                 if self.account.socket.socket.is_none() && self.account.socket.reconnect.is_none() {
-                    self.account.socket.socket = Some(cx.connect(WS));
+                    self.account.socket.socket =
+                        Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
                 }
                 if let Some(t) = self.account.tick.take() {
                     cx.clear_timer(t);
@@ -767,7 +768,8 @@ impl Backpack {
             self.fill_refresh(cx);
         } else if self.account.socket.reconnect == Some(timer) {
             self.account.socket.reconnect = None;
-            self.account.socket.socket = Some(cx.connect(WS));
+            self.account.socket.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
         } else if self.account.socket.watchdog == Some(timer) {
             self.account.socket.watchdog = None;
             if let Some(socket) = self.account.socket.socket {

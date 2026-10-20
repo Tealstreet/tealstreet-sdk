@@ -344,7 +344,7 @@ impl MexcFutures {
         }
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect(WS));
+        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         self.account_start(cx);
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(|s| s.is_empty()) {
             cx.store.set_orders(vec![]);
@@ -695,7 +695,8 @@ impl Venue for MexcFutures {
         }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
-            self.public.socket = Some(cx.connect(WS));
+            self.public.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         }
         if self.public.heartbeat == Some(timer) {
             self.public.heartbeat = None;

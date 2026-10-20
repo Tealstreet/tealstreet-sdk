@@ -253,11 +253,11 @@ export class Tape {
   }
 
   respond(method, url, body, headers) {
-    if (this.venue.validateRequest) {
-      this.verifySignature((request) => {
-        this.venue.validateRequest(request);
-        return true;
-      }, { method, url, body, headers }, `invalid replay request: ${method} ${url}`);
+    try {
+      this.venue.validateRequest?.({ method, url, body, headers });
+    } catch (error) {
+      this.invalidSignatures++;
+      throw error;
     }
     if (this.isPrivate && this.venue.verifyRequest) {
       this.verifySignature(this.venue.verifyRequest, { method, url, body, headers }, `invalid replay signature: ${method} ${url}`);

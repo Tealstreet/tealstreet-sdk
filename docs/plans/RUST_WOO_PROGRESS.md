@@ -277,3 +277,16 @@ was retained. Final fixture review PASS. Native workspace now passes 843 tests
 The latest full root test attempt hit host fork EAGAIN and unrelated Hyro import
 timeouts under concurrent lane runs. Retrying unchanged coverage with two Vitest
 workers and one Turbo task at a time; no timeout or assertion was relaxed.
+
+## Latest landing transport integration
+
+Fetched fc18c55874 (transport #1313 and Bitrue #1314) before pushing. Resolved
+additive registration/feature/test conflicts keeping both venues and landing
+transport policy. The landing already persists validator exceptions, so retained
+its equivalent try/catch implementation and WOO's regression. Harness159 PASS;
+focused wrapper/routing203 PASS. The refreshed brief requires explicit socket
+roles; WOO public/private tagging and initial/reconnect regressions are in progress.
+Pre-integration final WOO gates passed: 60 private frames/20 commands/144 records,
+public CPU73.6 ->59.1 ms, steady35.3 ->27.9 ms, retained1.6 ->1.1 MB, wasm834024.
+Stopped the superseded root test run before mixed-version results could be used;
+rebuild and rerun integration gates after the merge and socket-role update.

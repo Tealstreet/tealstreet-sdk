@@ -44,7 +44,7 @@ pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
     let sockets: Vec<_> = actions(&mut engine)
         .into_iter()
         .filter_map(|a| {
-            if let Action::WsConnect { socket, url } = a {
+            if let Action::WsConnect { socket, url, .. } = a {
                 Some((socket, url))
             } else {
                 None

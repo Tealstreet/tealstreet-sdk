@@ -264,3 +264,23 @@ fn ticker_row_storage_preserves_empty_and_multiple_rows_and_escaped_envelopes() 
     h.message(r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"101"},{"instId":"BTCUSDT","lastPr":"102"}]}"#);
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 102.0);
 }
+
+#[test]
+fn shared_public_socket_urls_keep_independent_feed_identities() {
+    let h = Harness::public();
+    let feeds: std::collections::HashSet<_> = h
+        .socket_contexts
+        .iter()
+        .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
+        .map(|(_, _, context)| context.as_ref().expect("feed context").feed)
+        .collect();
+    assert_eq!(
+        feeds,
+        std::collections::HashSet::from(["primary", "secondary-1", "secondary-2"])
+    );
+    assert!(
+        h.socket_contexts
+            .iter()
+            .all(|(_, _, context)| !context.as_ref().unwrap().recover)
+    );
+}
