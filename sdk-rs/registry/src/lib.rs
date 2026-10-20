@@ -293,7 +293,8 @@ pub fn supported(venue: &str) -> bool {
     }
 }
 
-/// Venues that sign with a local key and secret; the rest delegate or derive signing.
+/// Venues that sign with a local key and secret refuse a remote signer in place of one;
+/// the rest delegate or derive signing.
 #[cfg(any(
     feature = "grvt",
     feature = "coinbase",
@@ -333,7 +334,8 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
         "polymarket",
         "breakoutprop",
     ];
-    if options.public_data_only || DELEGATED.contains(&venue) {
+    // Without a remote signer, missing credentials simply mean a public account.
+    if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
         return Ok(());
     }
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
@@ -1033,6 +1035,36 @@ pub struct EngineOptions {
     ))]
     #[serde(default)]
     pub secret: Option<String>,
+    #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
+        feature = "binance",
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "breakoutprop",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "phemex",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "txflow",
+        feature = "kraken",
+        feature = "lighter",
+        feature = "woo",
+        feature = "orderly",
+        feature = "okx"
+    ))]
+    /// The caller signs remotely (a remote or payload signer) rather than with a local secret.
+    #[serde(default)]
+    pub remote_signing: bool,
     #[cfg(feature = "paradex")]
     #[serde(default)]
     pub paradex_address: Option<String>,

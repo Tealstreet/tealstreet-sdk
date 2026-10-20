@@ -542,6 +542,7 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
+        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,

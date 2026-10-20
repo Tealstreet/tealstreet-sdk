@@ -295,12 +295,16 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "kraken",
     ] {
         for options in [
-            r#"{}"#,
-            r#"{"key":"k"}"#,
-            r#"{"secret":"s"}"#,
-            r#"{"key":"","secret":"s"}"#,
+            r#"{"remoteSigning":true}"#,
+            r#"{"remoteSigning":true,"key":"k"}"#,
+            r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
         ] {
             assert_eq!(rejected(venue, options), message, "{venue} {options}");
+        }
+        // Incomplete credentials without a remote signer build a public account, as before
+        // (Orderly's own rules still apply to its private accounts).
+        if venue != "orderly" {
+            construct(venue, r#"{"key":"k"}"#).unwrap();
         }
     }
     // Delegated and derived signers have their own rules.
@@ -313,15 +317,24 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "breakoutprop",
     ] {
         assert_ne!(
-            construct(venue, "{}").err().map(|error| error.message),
+            construct(venue, r#"{"remoteSigning":true}"#)
+                .err()
+                .map(|error| error.message),
             Some(message.into()),
             "{venue}"
         );
     }
     // AsterDEX signs with the wallet private key, from auth or the secret.
-    construct("asterdex", r#"{"key":"k","asterdex":{"privateKey":"p"}}"#).unwrap();
+    construct(
+        "asterdex",
+        r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#,
+    )
+    .unwrap();
     assert_eq!(
-        rejected("asterdex", r#"{"key":"k","secret":"  "}"#),
+        rejected(
+            "asterdex",
+            r#"{"remoteSigning":true,"key":"k","secret":"  "}"#
+        ),
         message
     );
 }
