@@ -73,7 +73,11 @@ const replay = (impl, run) => {
   });
   if (result.status !== 0)
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
-  return JSON.parse(readFileSync(out, 'utf8'));
+  const output = JSON.parse(readFileSync(out, 'utf8'));
+  if (smokeResult && (!Array.isArray(output.commands) || output.commands.length !== smokeResult.commands.length ||
+      output.commands.some((result) => !result || !Object.hasOwn(result, 'ok') || Object.hasOwn(result, 'error'))))
+    throw new Error(`${impl} live-smoke replay did not successfully complete every lifecycle command`);
+  return output;
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];

@@ -200,7 +200,8 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     const setting = initial.settings.find((s) => s.symbol === selected.symbol);
     originalLeverage = setting?.leverage;
     if (!positive(originalLeverage) && (selected.flags & MARKET_FLAG.SPOT || profile.leverage === 'fixed')) originalLeverage = 1;
-    if (!positive(originalLeverage) || (positive(setting?.buyLeverage) && positive(setting?.sellLeverage) && setting.buyLeverage !== setting.sellLeverage)) fail('unknown-original-leverage');
+    if (!positive(originalLeverage) || (positive(setting?.buyLeverage) && setting.buyLeverage !== originalLeverage) ||
+        (positive(setting?.sellLeverage) && setting.sellLeverage !== originalLeverage)) fail('unknown-original-leverage');
     if (profile.leverage !== 'fixed' && (!positive(selected.minLeverage) || !positive(selected.maxLeverage) ||
         originalLeverage < selected.minLeverage || originalLeverage > selected.maxLeverage)) fail('leverage-outside-engine-limits');
     recorder.markReady?.();
