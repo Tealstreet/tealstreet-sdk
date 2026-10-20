@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Engine, Event, SocketId, TimerId};
+use safe_cex_engine::{Action, Engine, Event, SocketId};
 use safe_cex_venue_orderly::Orderly;
 use support::*;
 
@@ -192,6 +192,55 @@ fn accepted_execution_invalidates_an_already_pending_positions_and_balance_read(
 }
 
 #[test]
+fn steady_fills_cannot_starve_the_rest_only_balance() {
+    let (mut e, s, mut tick) = ready_ticking(ORDER, "[]", POSITIONS);
+    let mut read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v1/positions"))
+        .unwrap();
+    let prior = e.store().balance().clone();
+    let stale =
+        r#"{"success":true,"data":{"rows":[],"total_collateral_value":99,"free_collateral":1}}"#;
+    for i in 0..3u32 {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"executionreport","ts":2000,"data":{{"orderId":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":50000,"quantity":1,"totalExecutedQuantity":0.{n},"executedQuantity":0.1,"executedPrice":50000,"tradeId":{t},"seq":{t}}}}}"#,
+                n = i + 1,
+                t = 60 + i
+            ),
+        );
+        actions(&mut e);
+        reply(&mut e, &read, 200, stale);
+        let rereads: Vec<_> = requests(&mut e)
+            .into_iter()
+            .filter(|r| r.url.ends_with("/v1/positions"))
+            .collect();
+        // Positions keep their stream-maintained rows; only the balance commits.
+        assert_eq!(e.store().positions().len(), 2);
+        if i < 2 {
+            assert_eq!(e.store().balance(), &prior);
+            assert!(rereads.is_empty());
+            e.handle(3000.0, Event::TimerFired { timer: tick });
+            let mut next = None;
+            for a in actions(&mut e) {
+                match a {
+                    Action::Http(r) if r.url.ends_with("/v1/positions") => next = Some(r),
+                    Action::SetTimer { timer, .. } => tick = timer,
+                    _ => {}
+                }
+            }
+            read = next.unwrap();
+        } else {
+            assert_eq!(e.store().balance().total, 99.0);
+            assert_eq!(e.store().balance().free, 1.0);
+            assert_eq!(rereads.len(), 1);
+        }
+    }
+}
+
+#[test]
 fn documented_algo_status_fields_coexist_and_root_rejection_cascades() {
     let algos = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","root_algo_order_status":"NEW","margin_mode":"CROSS","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","status":"NEW","algo_status":"NEW","trigger_price":49000,"quantity":1,"total_executed_quantity":0}]}]"#;
     let (mut e, s) = ready_with(ORDER, algos, POSITIONS);
@@ -288,12 +337,12 @@ fn only_definitive_account_validation_rejection_deactivates() {
     }
 }
 
-fn private_connecting() -> (Driver, SocketId, TimerId) {
+fn private_connecting() -> (Driver, SocketId, Clock) {
     let mut e = Engine::new(Orderly::new(options()));
+    let mut clock = Clock::new(1000.0);
     e.start(1000.0);
     for _ in 0..10 {
-        let mut private = None;
-        for action in actions(&mut e) {
+        for action in clock.drain(&mut e) {
             match action {
                 Action::Http(r) => {
                     let body = if r.url.ends_with("/v1/client/info") {
@@ -315,90 +364,61 @@ fn private_connecting() -> (Driver, SocketId, TimerId) {
                     ..
                 } if url.contains("private") => {
                     assert_eq!(channel, Some(safe_cex_engine::SocketChannel::Private));
-                    private = Some(socket);
-                }
-                Action::SetTimer { timer, at_ms } if private.is_some() => {
-                    assert_eq!(at_ms, 11000.0);
-                    return (e, private.unwrap(), timer);
+                    return (e, socket, clock);
                 }
                 _ => {}
             }
         }
     }
-    panic!("private connect did not arm a handshake timer");
+    panic!("private socket never connected");
+}
+
+fn closed(out: &[(f64, Action)], socket: SocketId) -> bool {
+    out.iter()
+        .any(|(_, a)| matches!(a, Action::WsClose { socket: s } if *s == socket))
+}
+
+fn private_connect(out: &[(f64, Action)]) -> Option<(f64, SocketId)> {
+    out.iter().find_map(|(at, a)| match a {
+        Action::WsConnect { socket, url, .. } if url.contains("private") => Some((*at, *socket)),
+        _ => None,
+    })
 }
 
 #[test]
 fn private_initial_and_reconnect_handshakes_time_out_without_open_callbacks() {
-    let (mut e, old, handshake) = private_connecting();
-    e.handle(11000.0, Event::TimerFired { timer: handshake });
-    let out = actions(&mut e);
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::WsClose { socket } if *socket == old))
-    );
-    let retry = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 12000.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
-    e.handle(12000.0, Event::TimerFired { timer: retry });
-    let out = actions(&mut e);
-    let fresh = out
-        .iter()
-        .find_map(|a| match a {
-            Action::WsConnect { socket, url, .. } if url.contains("private") => Some(*socket),
-            _ => None,
-        })
-        .unwrap();
+    let (mut e, old, mut clock) = private_connecting();
+    assert!(!closed(&clock.advance(&mut e, 10_999.0), old));
+    assert!(closed(&clock.advance(&mut e, 11_000.0), old));
+    let (reconnected, fresh) = private_connect(&clock.advance(&mut e, 12_000.0)).unwrap();
+    assert!((11_750.0..=12_000.0).contains(&reconnected));
     assert_ne!(fresh, old);
-    let next_handshake = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 22000.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
-    e.handle(13000.0, Event::WsOpened { socket: old });
+    e.handle(clock.now, Event::WsOpened { socket: old });
     assert!(
         actions(&mut e).is_empty(),
-        "late old opens cannot authenticate or replace the fresh timer"
+        "late old opens cannot authenticate or replace the fresh deadline"
     );
-    e.handle(
-        22000.0,
-        Event::TimerFired {
-            timer: next_handshake,
-        },
-    );
-    let out = actions(&mut e);
+    assert!(!closed(
+        &clock.advance(&mut e, reconnected + 9_999.0),
+        fresh
+    ));
+    assert!(closed(
+        &clock.advance(&mut e, reconnected + 10_000.0),
+        fresh
+    ));
+    let failed = clock.now;
     assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::WsClose { socket } if *socket == fresh))
-    );
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 24000.0)),
+        private_connect(&clock.advance(&mut e, failed + 1_499.0)).is_none(),
         "consecutive handshake failures back off"
     );
+    assert!(private_connect(&clock.advance(&mut e, failed + 2_000.0)).is_some());
 }
 
 #[test]
 fn private_open_replaces_handshake_timer_and_duplicate_open_cannot_resend_auth() {
-    let (mut e, socket, handshake) = private_connecting();
-    e.handle(2000.0, Event::WsOpened { socket });
-    let out = actions(&mut e);
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == handshake))
-    );
+    let (mut e, socket, mut clock) = private_connecting();
+    clock.advance(&mut e, 2000.0);
+    let out = clock.handle(&mut e, Event::WsOpened { socket });
     assert_eq!(
         out.iter()
             .filter(
@@ -407,40 +427,35 @@ fn private_open_replaces_handshake_timer_and_duplicate_open_cannot_resend_auth()
             .count(),
         1
     );
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 12000.0))
-    );
-    e.handle(
-        3000.0,
+    clock.advance(&mut e, 3000.0);
+    let out = clock.handle(
+        &mut e,
         Event::WsMessage {
             socket,
             text: r#"{"event":"auth","success":true}"#,
         },
     );
-    let out = actions(&mut e);
     assert_eq!(
         out.iter()
             .filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
             .count(),
         3
     );
-    e.handle(4000.0, Event::WsOpened { socket });
-    assert!(actions(&mut e).is_empty());
-    e.handle(11000.0, Event::TimerFired { timer: handshake });
+    clock.advance(&mut e, 4000.0);
+    assert!(clock.handle(&mut e, Event::WsOpened { socket }).is_empty());
     assert!(
-        actions(&mut e).is_empty(),
-        "cleared handshake callbacks cannot close the authenticated socket"
+        !closed(&clock.advance(&mut e, 11_500.0), socket),
+        "the satisfied handshake deadline cannot close the authenticated socket"
     );
-    e.handle(
-        11500.0,
+    let out = clock.handle(
+        &mut e,
         Event::WsMessage {
             socket,
             text: r#"{"event":"auth","success":true}"#,
         },
     );
     assert!(
-        actions(&mut e).is_empty(),
+        out.is_empty(),
         "duplicate opens must preserve authentication and subscriptions"
     );
 }

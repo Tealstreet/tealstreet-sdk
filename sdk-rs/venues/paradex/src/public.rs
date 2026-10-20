@@ -1,10 +1,11 @@
 use crate::{Paradex, Pending, wire::*};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -22,7 +23,7 @@ pub enum Request {
     Candles {
         target: CandleTarget,
         symbol: String,
-        interval: String,
+        interval: Interval,
         from: Option<f64>,
         to: Option<f64>,
         legacy: bool,
@@ -46,7 +47,7 @@ pub(crate) struct Public {
     live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
 }
 struct Subscription {
@@ -71,46 +72,24 @@ struct CandleState {
     revision: u64,
 }
 
-fn interval_ms(interval: &str) -> Option<f64> {
+fn interval_ms(interval: Interval) -> Option<f64> {
+    use Interval::*;
+    (!matches!(interval, S1 | S5 | S15 | S30)).then(|| interval.ms())
+}
+fn resolution(interval: Interval) -> Option<String> {
+    let ms = interval_ms(interval)?;
     Some(match interval {
-        "1m" => 60_000.,
-        "3m" => 180_000.,
-        "5m" => 300_000.,
-        "15m" => 900_000.,
-        "30m" => 1_800_000.,
-        "1h" => 3_600_000.,
-        "2h" => 7_200_000.,
-        "3h" => 10_800_000.,
-        "4h" => 14_400_000.,
-        "5h" => 18_000_000.,
-        "6h" => 21_600_000.,
-        "7h" => 25_200_000.,
-        "8h" => 28_800_000.,
-        "9h" => 32_400_000.,
-        "10h" => 36_000_000.,
-        "11h" => 39_600_000.,
-        "12h" => 43_200_000.,
-        "1d" | "24h" => 86_400_000.,
-        "2d" => 172_800_000.,
-        "3d" => 259_200_000.,
-        "1w" => 604_800_000.,
-        "1M" => 2_592_000_000.,
-        _ => return None,
+        Interval::D1 => "1D".into(),
+        Interval::D2 => "2D".into(),
+        Interval::D3 => "3D".into(),
+        Interval::W1 => "1W".into(),
+        Interval::Mo1 => "1M".into(),
+        _ => safe_cex_engine::num::format(ms / 60_000.),
     })
 }
-fn resolution(interval: &str) -> Option<String> {
-    interval_ms(interval)?;
-    Some(match interval {
-        "1d" => "1D".into(),
-        "2d" => "2D".into(),
-        "3d" => "3D".into(),
-        "1w" => "1W".into(),
-        "1M" => "1M".into(),
-        _ => safe_cex_engine::num::format(interval_ms(interval)? / 60_000.),
-    })
-}
-fn documented(interval: &str) -> bool {
-    matches!(interval, "1m" | "3m" | "5m" | "15m" | "30m" | "1h")
+fn documented(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(interval, M1 | M3 | M5 | M15 | M30 | H1)
 }
 fn book_channel(symbol: &str) -> String {
     format!("order_book.{symbol}.deltas")
@@ -168,7 +147,10 @@ impl Paradex {
             return;
         }
         self.public.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Public));
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
     }
     fn public_subscribe(
         &mut self,
@@ -589,7 +571,7 @@ impl Paradex {
             if s != symbol {
                 continue;
             }
-            let step = interval_ms(interval).unwrap();
+            let step = interval_ms(*interval).unwrap();
             let timestamp = (timestamp / step).floor() * step;
             if state.last.is_some_and(|c| c.timestamp > timestamp) {
                 continue;
@@ -613,7 +595,7 @@ impl Paradex {
             state.last_trade = cx.now;
             if state.last != Some(c) {
                 state.last = Some(c);
-                cx.candle(s, interval, c);
+                cx.candle(s, *interval, c);
             }
         }
     }
@@ -788,16 +770,11 @@ impl Paradex {
                     .candles
                     .iter()
                     .map(|((symbol, interval), state)| {
-                        (
-                            symbol.clone(),
-                            interval.clone(),
-                            state.generation,
-                            state.revision,
-                        )
+                        (symbol.clone(), interval, state.generation, state.revision)
                     })
                     .collect();
                 for (symbol, interval, generation, revision) in queued {
-                    let step = interval_ms(&interval).expect("validated interval");
+                    let step = interval_ms(*interval).expect("validated interval");
                     self.fetch_candles(
                         cx,
                         CandleTarget::Poll {
@@ -805,7 +782,7 @@ impl Paradex {
                             revision,
                         },
                         symbol,
-                        interval,
+                        *interval,
                         (Some(cx.now - step * 3.), Some(cx.now)),
                         false,
                     );
@@ -877,7 +854,7 @@ impl Paradex {
                         }
                     }
                 }
-                self.finish_candles(cx, target, &symbol, &interval, rows);
+                self.finish_candles(cx, target, &symbol, interval, rows);
             }
             other => self.public_failed(cx, other, "Malformed Paradex response"),
         }
@@ -913,7 +890,7 @@ impl Paradex {
                     cx.done(command, Err(error.into()));
                 } else {
                     cx.log(LogLevel::Warning, error);
-                    self.finish_candles(cx, target, &symbol, &interval, vec![]);
+                    self.finish_candles(cx, target, &symbol, interval, vec![]);
                 }
             }
         }
@@ -923,13 +900,13 @@ impl Paradex {
         cx: &mut Cx<'_, Pending>,
         target: CandleTarget,
         symbol: String,
-        interval: String,
+        interval: Interval,
         bounds: (Option<f64>, Option<f64>),
         legacy: bool,
     ) {
         let (from, to) = bounds;
-        let legacy = legacy || !documented(&interval);
-        let resolution = resolution(&interval).unwrap();
+        let legacy = legacy || !documented(interval);
+        let resolution = resolution(interval).unwrap();
         let path = if legacy {
             let mut p = format!("/tradingview/history?symbol={symbol}&resolution={resolution}");
             if let Some(from) = from {
@@ -948,7 +925,7 @@ impl Paradex {
             p
         } else {
             let end = to.unwrap_or(cx.now);
-            let start = from.unwrap_or(end - interval_ms(&interval).unwrap() * 2000.);
+            let start = from.unwrap_or(end - interval_ms(interval).unwrap() * 2000.);
             format!(
                 "/markets/klines?symbol={symbol}&resolution={resolution}&start_at={}&end_at={}&price_kind=last",
                 safe_cex_engine::num::format(start),
@@ -988,7 +965,7 @@ impl Paradex {
         cx: &mut Cx<'_, Pending>,
         target: CandleTarget,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         rows: Vec<Candle>,
     ) {
         match target {
@@ -1002,7 +979,7 @@ impl Paradex {
                 let Some(state) = self
                     .public
                     .candles
-                    .get_mut(&(symbol.into(), interval.into()))
+                    .get_mut(&(symbol.into(), interval))
                     .filter(|s| s.generation == generation)
                 else {
                     return;
@@ -1088,13 +1065,13 @@ impl Paradex {
             self.public.candles.iter_mut().find_map(|((s, i), state)| {
                 if state.timer == Some(timer) {
                     state.timer = None;
-                    Some((s.clone(), i.clone(), state.generation, state.revision))
+                    Some((s.clone(), *i, state.generation, state.revision))
                 } else {
                     None
                 }
             })
         {
-            let step = interval_ms(&interval).unwrap();
+            let step = interval_ms(interval).unwrap();
             self.fetch_candles(
                 cx,
                 CandleTarget::Poll {
@@ -1148,17 +1125,19 @@ impl Paradex {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if interval_ms(&interval).is_none()
+                if interval_ms(interval).is_none()
                     || (cx.store.loaded().markets && cx.store.market(&symbol).is_none())
                 {
-                    cx.log(LogLevel::Warning, "Unsupported Paradex candle subscription");
+                    cx.log(
+                        LogLevel::Warning,
+                        match interval_ms(interval) {
+                            None => interval.unsupported("Paradex"),
+                            Some(_) => "Unknown Paradex candle market".into(),
+                        },
+                    );
                     return None;
                 }
-                if let Some(state) = self
-                    .public
-                    .candles
-                    .get_mut(&(symbol.clone(), interval.clone()))
-                {
+                if let Some(state) = self.public.candles.get_mut(&(symbol.clone(), interval)) {
                     state.subscribers += 1;
                     return None;
                 }
@@ -1166,7 +1145,7 @@ impl Paradex {
                 let generation = self.public.generation;
                 let revision = 0;
                 self.public.candles.insert(
-                    (symbol.clone(), interval.clone()),
+                    (symbol.clone(), interval),
                     CandleState {
                         subscribers: 1,
                         generation,
@@ -1180,7 +1159,7 @@ impl Paradex {
                 if !cx.store.loaded().markets {
                     return None;
                 }
-                let step = interval_ms(&interval).unwrap();
+                let step = interval_ms(interval).unwrap();
                 self.fetch_candles(
                     cx,
                     CandleTarget::Poll {
@@ -1213,11 +1192,10 @@ impl Paradex {
                 to_ms,
                 ..
             } => {
-                if interval_ms(&interval).is_none() || cx.store.market(&symbol).is_none() {
-                    cx.done(
-                        command,
-                        Err("Unsupported Paradex candle market/interval".into()),
-                    );
+                if interval_ms(interval).is_none() {
+                    cx.done(command, Err(interval.unsupported("Paradex")));
+                } else if cx.store.market(&symbol).is_none() {
+                    cx.done(command, Err("Unknown Paradex candle market".into()));
                 } else {
                     self.fetch_candles(
                         cx,

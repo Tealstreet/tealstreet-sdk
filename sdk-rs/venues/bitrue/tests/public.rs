@@ -1,5 +1,6 @@
 use safe_cex_engine::{
-    Action, Command, Engine, Event, Notice, Response, SocketChannel, SocketId, Venue,
+    Action, Command, Engine, Event, Notice, PublicFeedPolicy, RequestId, Response, SocketChannel,
+    SocketId, TimerId, Venue,
 };
 use safe_cex_venue_bitrue::{Bitrue, Options};
 fn contracts() -> &'static str {
@@ -226,7 +227,7 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "E-BTC-USDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1704067200000.0),
             to_ms: Some(1704067260000.0),
@@ -358,4 +359,66 @@ fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
             );
         }
     }
+}
+
+#[derive(Default)]
+struct Suppressed {
+    requests: Vec<RequestId>,
+    timers: Vec<(TimerId, f64)>,
+    connects: usize,
+    closes: usize,
+}
+
+impl Suppressed {
+    fn collect(&mut self, e: &mut Engine<Bitrue>) {
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(r) => self.requests.push(r.id),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } => self.connects += 1,
+                Action::WsClose { .. } => self.closes += 1,
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(Bitrue::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
+    e.start(0.0);
+    let mut h = Suppressed::default();
+    h.collect(&mut e);
+    let request = h.requests.remove(0);
+    let response = Response {
+        status: 200,
+        headers: "",
+        body: contracts(),
+    };
+    e.handle(1.0, Event::HttpResponse { request, response });
+    h.collect(&mut e);
+    assert_eq!(e.store().markets().len(), 2, "public startup completed");
+    let mut fired = 0;
+    while let Some(&(timer, at)) = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= 600_000.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        h.timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        h.collect(&mut e);
+        fired += 1;
+    }
+    assert_eq!(
+        (h.connects, h.closes),
+        (0, 0),
+        "no public connects or closes"
+    );
+    assert_eq!(fired, 0, "no supervision timers fire");
 }

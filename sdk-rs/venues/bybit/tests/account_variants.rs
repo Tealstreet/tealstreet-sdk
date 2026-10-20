@@ -639,7 +639,7 @@ fn hyro_transient_periodic_read_failure_keeps_the_ready_stream_and_last_good_sta
         h.respond("/v5/position/list", 200, POSITIONS);
         h.respond("/v5/account/wallet-balance", 200, WALLET);
         assert!(
-            h.closed.is_empty(),
+            !h.closed.contains(&socket),
             "a transient poll failure tore down the stream"
         );
         assert_eq!(h.socket("/v5/private"), Some(socket));
@@ -649,7 +649,7 @@ fn hyro_transient_periodic_read_failure_keeps_the_ready_stream_and_last_good_sta
     // The next tick repairs.
     h.advance(5000.0);
     hyro_snapshot(&mut h);
-    assert!(h.closed.is_empty());
+    assert!(!h.closed.contains(&socket));
     assert!(h.engine.store().loaded().orders);
 }
 
@@ -665,6 +665,7 @@ fn hyro_initial_snapshot_transport_failure_still_recovers_the_session() {
 fn hyro_reads_orphaned_by_a_transient_failure_cannot_fill_the_next_snapshot() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
+    let private = h.socket("/v5/private").unwrap();
     hyro_snapshot(&mut h);
     h.advance(5000.0);
     let old_orders = h.take("/v5/order/realtime");
@@ -684,26 +685,137 @@ fn hyro_reads_orphaned_by_a_transient_failure_cannot_fill_the_next_snapshot() {
         3.0,
         "a read issued before the stream event overwrote it"
     );
-    assert!(h.closed.is_empty());
+    assert!(!h.closed.contains(&private));
 }
 
 #[test]
 fn hyro_streamed_venue_refusal_is_transient_but_repeated_failures_reconnect() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
+    let private = h.socket("/v5/private").unwrap();
     hyro_snapshot(&mut h);
     let refusal =
         r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
     for _ in 0..3 {
         h.advance(5000.0);
+        // "Connect": the private pong keeps the healthy stream alive.
+        h.message(
+            "/v5/private",
+            r#"{"req_id":"","op":"pong","args":["1675418560633"],"conn_id":"cfcb4ocsvfriu23r3er0-1b"}"#,
+        );
         h.respond("/v5/order/realtime", 200, refusal);
-        assert!(h.closed.is_empty(), "a venue refusal tore down the stream");
+        assert!(
+            !h.closed.contains(&private),
+            "a venue refusal tore down the stream"
+        );
         h.requests.clear();
     }
     h.advance(5000.0);
     h.respond("/v5/order/realtime", 200, refusal);
     assert!(
-        !h.closed.is_empty(),
+        h.closed.contains(&private),
         "persistent failures must recover the session"
     );
+}
+
+/// Every closed socket is a public one the supervisor dropped for idling (code 4000):
+/// the harness feeds no public traffic, so those closes are expected.
+fn only_public_idle_closes(h: &Harness) {
+    for closed in &h.closed {
+        let url = &h.sockets.iter().find(|(s, _)| s == closed).unwrap().1;
+        assert!(url.contains("/v5/public"), "unexpected close of {url}");
+    }
+    let closes = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("Bybit socket closed"))
+        .count();
+    let idle = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("Bybit socket closed (4000)"))
+        .count();
+    assert_eq!(
+        closes, idle,
+        "a close other than the idle timeout: {:?}",
+        h.logs
+    );
+}
+
+#[test]
+fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    let richer = WALLET.replace("\"totalEquity\":\"1100\"", "\"totalEquity\":\"1600\"");
+    // Every periodic read is overtaken by a live position frame.
+    for _ in 0..6 {
+        h.advance(5000.0);
+        while h.has_request("/v5/order/realtime") {
+            h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+            h.respond("/v5/order/realtime", 200, EMPTY);
+            h.respond("/v5/position/list", 200, POSITIONS);
+            h.respond("/v5/account/wallet-balance", 200, &richer);
+        }
+    }
+    // The harness feeds no public traffic, so only the private stream is in question.
+    assert!(
+        !h.closed.contains(&socket),
+        "steady frames forced a reconnect"
+    );
+    only_public_idle_closes(&h);
+    assert_eq!(h.socket("/v5/private"), Some(socket));
+    assert!(
+        h.engine.store().balance().total > 1000.0,
+        "the unfenced wallet still refreshed"
+    );
+}
+
+#[test]
+fn hyro_steady_frames_during_initial_recovery_still_become_ready_without_reconnecting() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    // Three reads in a row are overtaken; the third is admitted.
+    for _ in 0..3 {
+        h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+        hyro_snapshot(&mut h);
+    }
+    assert!(
+        h.closed.is_empty(),
+        "steady frames during recovery forced a reconnect"
+    );
+    assert!(h.engine.store().loaded().positions && h.engine.store().loaded().orders);
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("kept moving during reconciliation"))
+    );
+}
+
+#[test]
+fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let private = h.socket("/v5/private").unwrap();
+    let refusal =
+        r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
+    for _ in 0..5 {
+        h.advance(5000.0);
+        h.respond("/v5/order/realtime", 200, refusal);
+        h.requests.clear();
+        // Successful reads overtaken by frames are admitted and clear the streak.
+        h.advance(5000.0);
+        for _ in 0..3 {
+            h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+            hyro_snapshot(&mut h);
+        }
+        h.requests.clear();
+    }
+    assert!(
+        !h.closed.contains(&private),
+        "spaced-out transient blips accumulated into a reconnect"
+    );
+    only_public_idle_closes(&h);
 }

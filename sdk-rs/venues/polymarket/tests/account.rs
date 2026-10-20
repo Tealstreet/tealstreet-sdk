@@ -501,6 +501,23 @@ fn trade_during_positions_read_fences_old_holdings_and_refreshes_again() {
     assert!(h.http.iter().any(|r| r.url.contains("/positions")));
 }
 #[test]
+fn steady_trades_cannot_starve_holdings_and_an_admitted_stale_read_rereads() {
+    let mut h = H::new();
+    h.initial();
+    for i in 0..3 {
+        h.poll();
+        h.ws(&format!(r#"{{"event_type":"trade","id":"steady{i}","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"1","price":"0.5","status":"MATCHED","trader_side":"TAKER"}}"#));
+        h.response("/positions", 200, "[]");
+        h.response("/balance-allowance", 200, r#"{"balance":"12345678"}"#);
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        let held = h.e.store().positions().first().map(|p| p.contracts);
+        assert_eq!(held, (i < 2).then_some(10.0));
+        assert_eq!(h.timers.last().unwrap().1, h.now + 250.0);
+    }
+    h.poll();
+    assert!(h.http.iter().any(|r| r.url.contains("/positions")));
+}
+#[test]
 fn maker_ownership_without_trader_side_does_not_emit_counterparty_taker_fill() {
     let mut h = H::new();
     h.initial();
