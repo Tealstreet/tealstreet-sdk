@@ -391,3 +391,13 @@ live trading, weakened parity oracle, or performance threshold changes.
   remains under `security-v4-quality-attempt1.json`. The final matrix has
   started: Paradex is 1222994 bytes against 1258291 and its fresh private
   replay passes. No final-source public timing has started yet.
+
+### Primary private/size acceptance (v4)
+
+- All 30 CI-primary isolated Wasm builds, size gates and fresh private tape
+  replays pass at runtime `9fe87d1eed`, with no failed stage in this matrix.
+  Largest bundle: Paradex 1222994 bytes against the unchanged 1258291 limit.
+- Node/web artifacts and fixture/tape hashes are retained in
+  `/tmp/security-v4-gates.json` and `/tmp/security-v4-artifacts/`. The combined
+  bundle is rebuilding for the 18 host/consumer/integration checks; it has no
+  isolated size budget. Public correctness/CPU/memory and PR/CI remain pending.
