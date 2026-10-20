@@ -280,13 +280,17 @@ impl Okx {
 
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
         let headers = self.headers(cx.now, Method::Get, path, "", private);
-        cx.request_streamed(
+        let scope = account::auth_scope(&pending);
+        let id = cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.rest()),
             headers,
             ArrayAt::EnvelopeField("data"),
             pending,
         );
+        if private && let Some(scope) = scope {
+            cx.tag_account_read(id, if self.options.read_credentials.is_some() { safe_cex_engine::CredentialSlot::Secondary } else { safe_cex_engine::CredentialSlot::Primary }, scope);
+        }
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
@@ -571,6 +575,9 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn account_auth_outcome(&self, pending: &Self::Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

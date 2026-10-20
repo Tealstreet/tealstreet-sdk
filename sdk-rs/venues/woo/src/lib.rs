@@ -195,7 +195,12 @@ impl Woo {
         } else {
             format!("{}{}", self.rest, request.path)
         };
-        Ok(cx.request(method, url, request.headers, request.body, pending))
+        let scope = account::auth_scope(&pending);
+        let id = cx.request(method, url, request.headers, request.body, pending);
+        if let Some(scope) = scope {
+            cx.tag_account_read(id, if read.is_some() { safe_cex_engine::CredentialSlot::Secondary } else { safe_cex_engine::CredentialSlot::Primary }, scope);
+        }
+        Ok(id)
     }
     pub fn new(options: Options) -> Self {
         Self {
@@ -597,6 +602,9 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn account_auth_outcome(&self, pending: &Self::Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth(pending, response)
+    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

@@ -1406,3 +1406,20 @@ fn valid_order(o: &OrderRow<'_>) -> bool {
                 .parse::<f64>()
                 .is_ok_and(|n| n.is_finite() && n >= 0.0))
 }
+
+pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+    use safe_cex_engine::AccountReadScope::*;
+    let Pending::Account(r) = pending else { return None };
+    Some(match r { Request::Config => Settings, Request::Balance { .. } => Balance, Request::Positions { .. } => Positions, Request::Orders { .. } => Orders })
+}
+impl Okx {
+    fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
+        let Pending::Account(r) = pending else { return None };
+        if !self.account_request_current(r) { return None; }
+        let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
+        if matches!(e.code, "50105" | "50110" | "50111" | "50113" | "50114" | "50119" | "50120") { return Some(Rejected); }
+        let valid = match r { Request::Config => true, Request::Balance { invalid, .. } | Request::Positions { invalid, .. } | Request::Orders { invalid, .. } => !invalid };
+        (e.code == "0" && (200..300).contains(&response.status) && valid).then_some(Accepted)
+    }
+}
