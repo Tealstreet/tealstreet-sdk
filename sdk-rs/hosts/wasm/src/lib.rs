@@ -5,6 +5,7 @@
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
 #[cfg(not(any(
+    feature = "grvt",
     feature = "paradex",
     feature = "bitrue",
     feature = "coinbase",
@@ -30,7 +31,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -65,6 +66,8 @@ use safe_cex_venue_bybit::{
 use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "grvt")]
+use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "kraken")]
@@ -155,6 +158,7 @@ struct KucoinExtra {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "grvt",
     feature = "bitrue",
     feature = "backpack",
     feature = "phemex",
@@ -185,6 +189,7 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "grvt",
         feature = "coinbase",
         feature = "paradex",
         feature = "binance",
@@ -210,6 +215,7 @@ struct EngineOptions {
     #[serde(default)]
     key: Option<String>,
     #[cfg(any(
+        feature = "grvt",
         feature = "coinbase",
         feature = "binance",
         feature = "apexomni",
@@ -284,6 +290,15 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_trading_account_id: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_signer_address: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_session_proxy: bool,
     #[cfg(feature = "bybit")]
     #[serde(default)]
     endpoints: Option<EndpointOptions>,
@@ -826,6 +841,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "grvt",
         feature = "bitrue",
         feature = "backpack",
         feature = "phemex",
@@ -856,6 +872,16 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "grvt")]
+            "grvt" => Box::new(Engine::new(Grvt::new(GrvtOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                trading_account_id: options.grvt_trading_account_id,
+                signer_address: options.grvt_signer_address,
+                session_proxy: options.grvt_session_proxy,
+            }))),
             #[cfg(feature = "coinbase")]
             "coinbase" | "coinbasespot" => Box::new(Engine::new(
                 Coinbase::new(CoinbaseOptions {
