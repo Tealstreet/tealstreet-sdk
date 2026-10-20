@@ -79,7 +79,14 @@ interest from attached accounts; late book subscribers receive the native
 snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
-sections or account metadata. A running/loaded direct source is mandatory.
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`). One hub per source keeps a single store
+subscription and broadcasts changed tickers every 250 ms. Like TS, it is lenient:
+private startup continues after 30 s without a loaded source, account markets the
+source has not listed are tolerated, and book/candle requests for them wait. A real
+field mismatch still fails. Testnet accounts ignore the venue-keyed source and run
+their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means
@@ -119,6 +126,32 @@ never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. Missing history axes
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
 once the engine exists.
+
+## Rust main-thread trading
+
+The web builds a second `RustEngineExchange` on the main thread; the worker's
+instance owns the engine. An instance with a `callMethod` listener (the host's
+worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
+(trading, nuke, client-ID lookup, public trades, candles, history axes; plus
+`fetchHistoricalPositions` by name) whole through
+`callMethodInWorker`, so preflight, placement scopes and nuke retries run
+against the worker's state and report there once. This holds even if a
+main-thread read (`fetchMarkets` during warm start) started a local engine; the
+worker never has that listener. Without a bridge, an instance runs locally.
+`updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties
+do not survive a JSON bridge. Interrupted forwarded writes carry
+`outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
+`workerCallClientOrderIds`); requests still buffered when a worker stops before
+startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+
+A bridged mirror never builds an engine for capabilities. In frame mode it
+adopts the record a snapshot frame carries; in store-payload mode (and from
+`loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the
+mirror store reports markets loaded. Capability-defined methods
+(Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
+the mirror, and the tier methods forward to the worker
+(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds. Branded
+capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
 

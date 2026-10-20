@@ -164,7 +164,7 @@ test('both socket control planes require a subscription channel and exact placem
   assert.throws(() => validateTxFlowSocketMessage({ url: 'wss://rpc.txflow.com/ws' }, '{"method":"ping"}'));
 });
 
-test('private replay freezes the startup epoch and advances pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
+test('private replay advances logical startup deadlines then rebases pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
   const clock = new ReplayClock(EPOCH, true);
   const tape = new Tape([{ type: 'command', t: 0, op: 'pacedWrite' }, { type: 'command', t: 10_000, op: 'afterPings' }], { virtualPrivateClock: true }, true, 2000);
   clock.install();
@@ -174,7 +174,7 @@ test('private replay freezes the startup epoch and advances pacing and 10-second
   try {
     assert.equal(Date.now(), EPOCH);
     await new Promise((resolve) => setTimeout(resolve, 1));
-    assert.equal(Date.now(), EPOCH);
+    assert.equal(Date.now(), EPOCH + 1);
     const interval = setInterval(() => pings.push(Date.now()), 10_000);
     const frames = await tape.play(undefined, async () => {}, async (frame) => {
       timestamps.push(Date.now());
@@ -227,6 +227,16 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     });
     assert.equal(generated.status, 0, generated.stderr || generated.error?.message);
     const records = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const reads = records.filter(record => record.type === 'http' && new URL(record.url).pathname === '/info')
+      .map(record => JSON.parse(record.requestBody));
+    const initialTickerCount = reads.filter(body => body.type === 'activeAssetCtx').length;
+    assert.equal(initialTickerCount, 2);
+    const accountFills = reads.filter(body => body.type === 'userFills' && body.limit === 500);
+    assert.ok(accountFills.length > 0);
+    for (const body of accountFills) assert.equal(body.startTimeMs, EPOCH + initialTickerCount * 25);
+    const queryFills = reads.filter(body => body.type === 'userFills' && body.limit === 2000);
+    assert.ok(queryFills.length > 0);
+    for (const body of queryFills) assert.equal(body.startTimeMs, EPOCH);
     const closeIndex = records.findIndex((record) => record.type === 'close');
     assert(closeIndex >= 0, 'the fixture must exercise a disconnect');
     const closed = records[closeIndex];

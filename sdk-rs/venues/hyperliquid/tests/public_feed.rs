@@ -76,7 +76,7 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
             },
             Command::SubscribeCandles {
                 symbol: "BTC-PERP".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             engine.handle(2000., Event::Command(command));

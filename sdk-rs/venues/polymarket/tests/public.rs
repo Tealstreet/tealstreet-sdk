@@ -1,5 +1,6 @@
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId, Venue,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketId,
+    TimerId, Venue,
 };
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
@@ -17,9 +18,14 @@ struct H {
     closed: Vec<SocketId>,
     done: Vec<Result<String, String>>,
     logs: Vec<String>,
+    connects: usize,
+    fired: usize,
 }
 impl H {
     fn new() -> Self {
+        Self::with_policy(PublicFeedPolicy::Direct)
+    }
+    fn with_policy(policy: PublicFeedPolicy) -> Self {
         let mut h = Self {
             e: Engine::new(Polymarket::new(Options {
                 public_data_only: true,
@@ -33,7 +39,10 @@ impl H {
             closed: vec![],
             done: vec![],
             logs: vec![],
+            connects: 0,
+            fired: 0,
         };
+        h.e.set_public_feed_policy(policy).unwrap();
         h.e.start(h.now);
         h.collect();
         h
@@ -47,6 +56,7 @@ impl H {
                 } => {
                     assert_eq!(channel, Some(safe_cex_engine::SocketChannel::Public));
                     self.socket = Some(socket);
+                    self.connects += 1;
                 }
                 Action::WsSend { text, .. } => self.sends.push(text),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -309,7 +319,7 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(1),
         from_ms: None,
         to_ms: None,
@@ -326,7 +336,7 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
     h.event(Event::Command(Command::FetchCandles {
         command: 8,
         symbol: "election-Yes".into(),
-        interval: "bad".into(),
+        interval: safe_cex_engine::model::Interval::S1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -369,7 +379,7 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: Some(100_500.0),
         to_ms: Some(102_000.0),
@@ -410,7 +420,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
         h.event(Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "election-Yes".into(),
-            interval: "5m".into(),
+            interval: safe_cex_engine::model::Interval::M5,
             limit: Some(2),
             from_ms: from,
             to_ms: to,
@@ -447,7 +457,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
     h.event(Event::Command(Command::FetchCandles {
         command: 8,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: Some(102000.0),
@@ -462,7 +472,7 @@ fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bou
             h.event(Event::Command(Command::FetchCandles {
                 command: 9,
                 symbol: "election-Yes".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: None,
                 from_ms: Some(from),
                 to_ms: to,
@@ -527,7 +537,7 @@ fn price_history_duplicate_timestamp_retains_last_sample() {
     h.event(Event::Command(Command::FetchCandles {
         command: 7,
         symbol: "election-Yes".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -857,4 +867,27 @@ fn new_market_interest_during_backoff_waits_and_restores_both_outcomes() {
             .iter()
             .any(|text| text.contains(TOKEN) && text.contains("\"2\""))
     );
+}
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = H::with_policy(PublicFeedPolicy::Shared);
+    h.load();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "election-Yes".into(),
+    }));
+    let until = h.now + 600_000.0;
+    while let Some(&(timer, at)) = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= until)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        h.timers.retain(|(t, _)| *t != timer);
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        h.fired += 1;
+    }
+    assert_eq!(h.connects, 0, "no public connects");
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(h.fired, 0, "no supervision timers fire");
 }

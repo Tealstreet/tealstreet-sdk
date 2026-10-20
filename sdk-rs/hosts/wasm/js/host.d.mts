@@ -1,4 +1,7 @@
 /** Runs a WasmEngine against a transport. See host.mjs. */
+import type { EngineCapabilities } from './wire.mjs';
+
+export type { EngineCapabilities };
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
 
 export interface Socket {
@@ -251,26 +254,6 @@ export interface EngineHealth {
   rateLimited: number;
   snapshotsDiscarded: number;
   rowsSkipped: number;
-}
-
-/** What a venue answers beyond the common commands (`safe_cex_engine::Capabilities`). */
-export interface EngineCapabilities {
-  account: 'unsupported' | 'query' | 'afterLoad';
-  clientOrderLookup: boolean;
-  fillHistory: boolean;
-  orderHistory: boolean;
-  incomeHistory: boolean;
-  fillsByOrderId: boolean;
-  cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
-  leverageQuery: 'settings' | 'onRead' | 'onMetadata';
-  maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
-  accountLeverage: boolean;
-  accountMarginType: boolean;
-  cancelWithSymbols: boolean;
-  amendWithSymbol: boolean;
-  orderBookQuery: boolean;
-  options: boolean;
-  accountTier: boolean;
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */

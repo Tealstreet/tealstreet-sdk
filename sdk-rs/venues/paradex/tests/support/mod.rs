@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketChannel,
+    SocketId, TimerId,
 };
 use safe_cex_venue_paradex::{Options, Paradex};
 pub const MARKETS: &str = r#"{"results":[{"symbol":"BTC-USD-PERP","base_currency":"BTC","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.00001","price_tick_size":"0.1","min_notional":"10","max_order_size":"100","delta1_cross_margin_params":{"imf_base":"0.02"}},{"symbol":"ETH-USD-PERP","base_currency":"ETH","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.01","min_notional":"10","max_order_size":"1000","initial_margin_fraction":"0.05"},{"symbol":"BTC-USD-250101-100000-C","asset_kind":"OPTION"},{"symbol":"USDC-USD-SPOT","asset_kind":"SPOT"},{"symbol":"OLD-USD-PERP","asset_kind":"PERP","status":"INACTIVE"}]}"#;
@@ -14,18 +15,24 @@ pub struct Harness {
     pub e: Engine<Paradex>,
     pub pending: Vec<HttpRequest>,
     pub actions: Vec<Action>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub receipt_trace: Vec<ReceiptTrace>,
     pub public: SocketId,
     pub now: f64,
 }
 impl Harness {
     pub fn empty(options: Options) -> Self {
+        Self::empty_with_policy(options, PublicFeedPolicy::Direct)
+    }
+    pub fn empty_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut e = Engine::new(Paradex::new(options));
+        e.set_public_feed_policy(policy).unwrap();
         e.start(1_700_000_000_000.);
         let mut h = Self {
             e,
             pending: vec![],
             actions: vec![],
+            failures: vec![],
             receipt_trace: vec![],
             public: SocketId(0),
             now: 1_700_000_000_000.,
@@ -68,10 +75,17 @@ impl Harness {
                     .push(ReceiptTrace::Progress(*command, receipts.clone())),
                 _ => {}
             }
-            if let Action::Http(r) = a {
-                self.pending.push(r);
-            } else {
-                self.actions.push(a);
+            match a {
+                Action::Http(r) => self.pending.push(r),
+                // Failures as the plain text the host renders.
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.actions.push(Action::Notice(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    }));
+                    self.failures.push(error);
+                }
+                a => self.actions.push(a),
             }
         }
     }
