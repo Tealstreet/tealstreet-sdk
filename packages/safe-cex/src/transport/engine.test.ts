@@ -1046,6 +1046,7 @@ describe('Workers derives GRVT protocol options from its account transport', () 
     let captured: Record<string, unknown> | undefined;
     let metadata: Transport['engineOptions'];
     const EngineObject = createEngineObject({
+      accountToken: () => 'account-fixture-token',
       loadEngine: async () => ({
         WasmEngine: class {
           constructor(_venue: string, json: string) { captured = JSON.parse(json); }
@@ -1062,6 +1063,7 @@ describe('Workers derives GRVT protocol options from its account transport', () 
     });
     const object = new EngineObject({ storage: { setAlarm() {} } });
     const client = { send() {} };
+    (object as unknown as { clients: Set<typeof client> }).clients.add(client);
     try {
       await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
         key: 'venue-key', secret: 'venue-secret', grvtTradingAccountId: '777', grvtSessionProxy: !proxied,

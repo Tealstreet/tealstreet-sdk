@@ -13,6 +13,7 @@
 // }
 
 const CHUNK_BYTES = 16 * 1024;
+const MAX_DECOMPRESSED_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 const commandTimeout = (value) => {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
@@ -169,9 +170,11 @@ export class EngineHost {
     this.commands = new Map();
     this.requests = new Map();
     this.signings = new Map();
+    this.socketFailures = new Map();
     this.nextCommand = 1;
     this.receiptSession = undefined;
     this.disposed = false;
+    this.started = false;
     this.deadError = undefined;
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
@@ -179,7 +182,8 @@ export class EngineHost {
   }
 
   start() {
-    if (this.disposed) return;
+    if (this.disposed || this.started) return;
+    this.started = true;
     this.run(this.invoke(this.engine.start, this.transport.now()));
   }
 
@@ -329,6 +333,7 @@ export class EngineHost {
     };
     for (const [id, pending] of this.commands) this.settleCommand(id, this.deadError
       ? new EngineDeadError(this.deadError.cause, pending.identity) : new EngineDisposedError(pending.identity, true), true);
+    for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
     for (const pending of this.signings.values()) {
@@ -365,9 +370,9 @@ export class EngineHost {
           }
         }
       }
-    } catch (error) {
+    } catch {
       if (this.disposed) return;
-      this.run(this.invoke(engine.httpFailed, id, String(error?.message ?? error), transport.now()));
+      this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
     if (this.disposed) return;
@@ -389,8 +394,8 @@ export class EngineHost {
         signal: controller.signal,
       });
       if (!this.disposed) await this.receive(id, response);
-    } catch (error) {
-      if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, String(error?.message ?? error), this.transport.now()));
+    } catch {
+      if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, 'HTTP transport request failed', this.transport.now()));
     } finally {
       this.requests.delete(id);
     }
@@ -415,7 +420,7 @@ export class EngineHost {
     this.signings.set(id, { controller, timer });
     Promise.resolve().then(() => {
       if (this.disposed || controller.signal.aborted) return;
-      if (!this.transport.signPayload) throw new Error('Payload signing is not configured');
+      if (!this.transport.signPayload) { finish(new Error('Payload signing is not configured')); return; }
       return this.transport.signPayload(action.payload, { signal: controller.signal });
     }).then((result) => {
       if (this.disposed || controller.signal.aborted) return;
@@ -433,7 +438,40 @@ export class EngineHost {
         return;
       }
       finish(undefined, { signature, headers: headers.map(([name, value]) => `${name}:${value}`).join('\n') });
-    }).catch((error) => finish(new Error(String(error?.message ?? error))));
+    }).catch(() => finish(new Error('Payload signing failed')));
+  }
+
+  clearSocketFailure(id) {
+    const pending = this.socketFailures.get(id);
+    if (!pending) return;
+    this.socketFailures.delete(id);
+    this.timers.delete(pending.key);
+    try { this.transport.clearTimeout(pending.handle); } catch { /* Its callback is revoked even if cancellation fails. */ }
+  }
+
+  socketFailed(id, message) {
+    const socket = this.sockets.get(id);
+    this.sockets.delete(id);
+    try { socket?.close(); } catch { /* The failed transport is already detached. */ }
+    if (this.disposed) return;
+    this.handlers.onLog?.('error', message);
+    if (this.disposed || this.sockets.has(id)) return;
+    this.clearSocketFailure(id);
+    const pending = { key: Symbol('socketFailure'), handle: undefined };
+    this.socketFailures.set(id, pending);
+    try {
+      // A broken provider cannot recursively reconnect venues without their own backoff.
+      pending.handle = this.transport.setTimeout(() => {
+        if (this.socketFailures.get(id) !== pending) return;
+        this.socketFailures.delete(id);
+        this.timers.delete(pending.key);
+        if (!this.disposed && !this.sockets.has(id)) this.run(this.invoke(this.engine.wsClose, id, 1006, this.transport.now()));
+      }, 1_000);
+      this.timers.set(pending.key, pending.handle);
+    } catch {
+      this.socketFailures.delete(id);
+      throw new Error('WebSocket failure reporting failed');
+    }
   }
 
   run(actionsJson) {
@@ -482,6 +520,7 @@ export class EngineHost {
         break;
       case 'wsConnect': {
         const id = action.socket;
+        this.clearSocketFailure(id);
         const wsMessageBytes = typeof engine.wsMessageBytes === 'function' ? engine.wsMessageBytes : undefined;
         const wsMessage = typeof engine.wsMessageActions === 'function' ? engine.wsMessageActions : engine.wsMessage;
         if (action.headers?.length && !transport.webSocketHeaders) {
@@ -493,57 +532,65 @@ export class EngineHost {
         }
         let connecting = true;
         let closed = false;
-        const socket = transport.connect(action.url, {
-          binary: action.binary === true,
-          channel: action.channel,
-          context: action.context,
-          headers: action.headers && Object.fromEntries(action.headers),
-          onOpen: () => { if (!this.disposed && !closed) this.run(this.invoke(engine.wsOpen, id, transport.now())); },
-          onMessage: (text) => {
-            if (this.disposed || closed) return;
-            if (!wsMessageBytes) {
-              this.run(this.invoke(wsMessage, id, text, transport.now()));
-              return;
-            }
-            // UTF-8 needs at most three bytes per UTF-16 unit, including lone
-            // surrogates. Keep one small buffer; large or reentrant messages own theirs.
-            const scratch = text.length <= 1365 && !this.wsScratchBusy;
-            if (scratch) this.wsScratchBusy = true;
-            let actions;
-            try {
-              const encoder = this.wsEncoder ??= new TextEncoder();
-              let bytes;
-              if (scratch && typeof encoder.encodeInto === 'function') {
-                const buffer = this.wsScratch ??= new Uint8Array(4096);
-                const { read, written } = encoder.encodeInto(text, buffer);
-                bytes = read === text.length ? buffer.subarray(0, written) : encoder.encode(text);
-              } else {
-                bytes = encoder.encode(text);
+        let socket;
+        try {
+          socket = transport.connect(action.url, {
+            binary: action.binary === true,
+            channel: action.channel,
+            context: action.context,
+            headers: action.headers && Object.fromEntries(action.headers),
+            onOpen: () => { if (!this.disposed && !closed && (connecting || this.sockets.get(id) === socket)) this.run(this.invoke(engine.wsOpen, id, transport.now())); },
+            onMessage: (text) => {
+              if (this.disposed || closed || (!connecting && this.sockets.get(id) !== socket)) return;
+              if (!wsMessageBytes) {
+                this.run(this.invoke(wsMessage, id, text, transport.now()));
+                return;
               }
-              actions = this.invoke(wsMessageBytes, id, bytes, transport.now());
-            } finally {
-              if (scratch) this.wsScratchBusy = false;
-            }
-            this.run(actions);
-          },
-          onBinary: (data) => {
-            if (this.disposed || closed || (!connecting && !this.sockets.has(id))) return;
-            if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
-            else {
+              // UTF-8 needs at most three bytes per UTF-16 unit, including lone
+              // surrogates. Keep one small buffer; large or reentrant messages own theirs.
+              const scratch = text.length <= 1365 && !this.wsScratchBusy;
+              if (scratch) this.wsScratchBusy = true;
+              let actions;
+              try {
+                const encoder = this.wsEncoder ??= new TextEncoder();
+                let bytes;
+                if (scratch && typeof encoder.encodeInto === 'function') {
+                  const buffer = this.wsScratch ??= new Uint8Array(4096);
+                  const { read, written } = encoder.encodeInto(text, buffer);
+                  bytes = read === text.length ? buffer.subarray(0, written) : encoder.encode(text);
+                } else {
+                  bytes = encoder.encode(text);
+                }
+                actions = this.invoke(wsMessageBytes, id, bytes, transport.now());
+              } finally {
+                if (scratch) this.wsScratchBusy = false;
+              }
+              this.run(actions);
+            },
+            onBinary: (data) => {
+              if (this.disposed || closed || (!connecting && this.sockets.get(id) !== socket)) return;
+              if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
+              else {
+                closed = true;
+                const active = this.sockets.get(id);
+                this.sockets.delete(id);
+                active?.close();
+                this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
+              }
+            },
+            onClose: (code) => {
+              if (this.disposed || closed || (!connecting && this.sockets.get(id) !== socket)) return;
               closed = true;
-              const active = this.sockets.get(id);
               this.sockets.delete(id);
-              active?.close();
-              this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
-            }
-          },
-          onClose: (code) => {
-            if (this.disposed || closed || (!connecting && !this.sockets.has(id))) return;
-            closed = true;
-            this.sockets.delete(id);
-            this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
-          },
-        });
+              this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
+            },
+          });
+        } catch {
+          connecting = false;
+          closed = true;
+          this.socketFailed(id, 'WebSocket transport connection failed');
+          break;
+        }
         connecting = false;
         // A synchronous transport may call onOpen before returning its socket.
         if (closed || this.disposed) {
@@ -553,9 +600,11 @@ export class EngineHost {
         break;
       }
       case 'wsSend':
-        this.sockets.get(action.socket)?.send(action.text);
+        try { this.sockets.get(action.socket)?.send(action.text); }
+        catch { this.socketFailed(action.socket, 'WebSocket transport send failed'); }
         break;
       case 'wsClose':
+        this.clearSocketFailure(action.socket);
         this.sockets.get(action.socket)?.close();
         this.sockets.delete(action.socket);
         break;
@@ -704,11 +753,11 @@ export const bindSocketMessages = (socket, { binary = false, onBinary, onMessage
       if (disposed || failed) return;
       if (typeof event.data === 'string') return onMessage(event.data);
       const blob = event.data instanceof Blob ? event.data : new Blob([event.data]);
-      if (binary && blob.size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+      if (binary && blob.size > MAX_DECOMPRESSED_BYTES) throw new Error('websocket message exceeds 16 MiB');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (disposed) return;
       if (binary) {
-        if (bytes.byteLength > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+        if (bytes.byteLength > MAX_DECOMPRESSED_BYTES) throw new Error('websocket message exceeds 16 MiB');
         onBinary?.(bytes);
         return;
       }
@@ -725,7 +774,7 @@ export const bindSocketMessages = (socket, { binary = false, onBinary, onMessage
           const { done, value } = await reader.read();
           if (done || disposed) break;
           size += value.byteLength;
-          if (size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+          if (size > MAX_DECOMPRESSED_BYTES) throw new Error('websocket message exceeds 16 MiB');
           text += decoder.decode(value, { stream: true });
         }
         if (!disposed) text += decoder.decode();
@@ -800,7 +849,7 @@ export const nativeTransport = () => {
   async request({ method, url, headers, body, signal, route, timeoutMs }) {
     if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
     const deadline = AbortSignal.timeout(Math.max(1,timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

@@ -101,3 +101,5 @@ mod tests {
         );
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);

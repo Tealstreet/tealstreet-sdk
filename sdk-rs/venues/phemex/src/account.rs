@@ -2,6 +2,7 @@
 pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -357,7 +358,7 @@ impl PhemexPerpetuals {
             0
         };
         let wait = if self.account.failed {
-            2_000. * 2f64.powi(self.account.failures.min(4) as i32 - 1)
+            Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures)
         } else {
             2_000.
         };
@@ -1338,7 +1339,7 @@ impl PhemexPerpetuals {
         if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
             entry.reading = false;
             entry.failures = entry.failures.saturating_add(1);
-            let wait = 2_000. * 2f64.powi(entry.failures.min(5) as i32 - 1);
+            let wait = Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures);
             entry.not_before = entry.not_before.max(cx.now + wait);
         }
         // Keep the cause, never the response body.

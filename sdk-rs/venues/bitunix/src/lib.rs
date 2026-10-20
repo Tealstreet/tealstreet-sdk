@@ -29,6 +29,13 @@ pub struct Options {
     pub key: Option<String>,
     pub secret: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
 
 pub enum Pending {
     Private(account::Read),
@@ -65,7 +72,7 @@ struct BookState {
 }
 
 pub struct BitunixFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
@@ -77,6 +84,7 @@ pub struct BitunixFutures {
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             credentials: if options.public_data_only {
                 None

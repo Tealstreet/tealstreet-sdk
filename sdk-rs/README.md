@@ -35,7 +35,12 @@ Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
 Explicit headless/direct options stay direct. `createEngineObject` accepts the
 same factory as `createTransport` for account-backed Workers deployments and
-refuses proxy/tunnel flags when no factory is configured. The returned
+refuses proxy/tunnel flags when no factory is configured. Deployments must also
+supply `accountToken(state, env)`, resolving a deployment-managed token unique to
+that object/account; upgrades require `Authorization: Bearer <token>` and fail
+closed when the resolver is absent. Never select an account or token from the
+first client’s start message. Clients sharing that token share account access;
+start cannot replace a running or pending engine. The returned
 transport's credential-free `engineOptions` carry protocol choices derived from
 those same routes. SDK and Workers constructors apply them after caller options;
 GRVT therefore uses first-frame session auth on its proxy and cookie upgrade

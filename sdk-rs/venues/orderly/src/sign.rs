@@ -1,6 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE};
 use safe_cex_engine::Method;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct Credentials {
     pub key: String,
@@ -27,9 +27,13 @@ impl Credentials {
         {
             return Err("Orderly public key must be 32 bytes".into());
         }
-        let seed = bs58::decode(secret)
-            .into_vec()
-            .map_err(|_| "Orderly secret must be base58")?
+        let decoded = Zeroizing::new(
+            bs58::decode(secret)
+                .into_vec()
+                .map_err(|_| "Orderly secret must be base58")?,
+        );
+        let seed = decoded
+            .as_slice()
             .try_into()
             .map_err(|_| "Orderly seed must be 32 bytes")?;
         Ok(Self {
@@ -73,9 +77,16 @@ impl Credentials {
     }
 }
 
+impl safe_cex_crypto::secrets::EraseSecrets for Credentials {
+    fn erase_secrets(&mut self) {
+        self.seed.zeroize();
+        self.key.zeroize();
+        self.account.zeroize();
+    }
+}
 impl Drop for Credentials {
     fn drop(&mut self) {
-        self.seed.zeroize();
+        safe_cex_crypto::secrets::EraseSecrets::erase_secrets(self);
     }
 }
 
@@ -136,5 +147,40 @@ mod tests {
         assert!(
             Credentials::new("bad\nheader", &bs58::encode([7; 32]).into_string(), "a").is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod security_erasure {
+    use super::*;
+    use safe_cex_crypto::secrets::EraseSecrets;
+    #[test]
+    fn stored_seed_and_original_options_are_both_scrubbed() {
+        let mut c = Credentials::new(
+            "11111111111111111111111111111111",
+            &bs58::encode([7u8; 32]).into_string(),
+            "account-id",
+        )
+        .unwrap();
+        assert_eq!(c.seed, [7; 32]);
+        c.erase_secrets();
+        assert_eq!(c.seed, [0; 32]);
+        assert!(c.key.is_empty() && c.account.is_empty());
+    }
+    #[test]
+    fn invalid_decoded_seed_lengths_fail_without_returning_secret_bytes() {
+        for length in [0, 1, 31, 33, 64] {
+            let encoded = bs58::encode(vec![7; length]).into_string();
+            let error = match Credentials::new(
+                "11111111111111111111111111111111",
+                &encoded,
+                "account-id",
+            ) {
+                Ok(_) => panic!("invalid seed accepted"),
+                Err(error) => error,
+            };
+            assert_eq!(error, "Orderly seed must be 32 bytes");
+            assert!(!error.contains(&format!("{encoded:?}")));
+        }
     }
 }

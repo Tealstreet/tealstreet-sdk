@@ -18,41 +18,17 @@ use tokio_tungstenite::tungstenite::{
     http::{HeaderName, HeaderValue},
 };
 
-const MAX_BINARY_BYTES: usize = 16 * 1024 * 1024;
-
-fn binary_text(bytes: &[u8]) -> Result<String, u16> {
-    let mut decoded = Vec::new();
-    let limit = MAX_BINARY_BYTES as u64 + 1;
-    if bytes.starts_with(&[0x1f, 0x8b]) {
-        flate2::read::GzDecoder::new(bytes)
-            .take(limit)
-            .read_to_end(&mut decoded)
-            .map_err(|_| 1007u16)?;
-    } else if bytes.first() == Some(&0x78)
-        && bytes
-            .get(1)
-            .is_some_and(|b| (0x7800 + u16::from(*b)).is_multiple_of(31))
-    {
-        flate2::read::ZlibDecoder::new(bytes)
-            .take(limit)
-            .read_to_end(&mut decoded)
-            .map_err(|_| 1007u16)?;
-    } else {
-        if bytes.len() > MAX_BINARY_BYTES {
-            return Err(1009);
-        }
-        decoded.extend_from_slice(bytes);
-    }
-    if decoded.len() > MAX_BINARY_BYTES {
-        return Err(1009);
-    }
-    String::from_utf8(decoded).map_err(|_| 1007)
-}
-
-#[derive(Debug)]
 pub struct PayloadSignerResult {
     pub signature: String,
     pub headers: Vec<(String, String)>,
+}
+impl std::fmt::Debug for PayloadSignerResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignerResult")
+            .field("signature", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .finish()
+    }
 }
 pub type PayloadSignerFuture =
     Pin<Box<dyn Future<Output = Result<PayloadSignerResult, String>> + Send>>;
@@ -155,6 +131,7 @@ impl NetworkTransport {
         Self {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
@@ -200,6 +177,32 @@ async fn open_socket(
         .map_err(|error| error.to_string())
 }
 
+const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
+
+fn decode_message(bytes: &[u8]) -> std::io::Result<String> {
+    let mut decoded = Vec::new();
+    let mut reader: Box<dyn Read + '_> = if bytes.starts_with(&[0x1f, 0x8b]) {
+        Box::new(flate2::read::GzDecoder::new(bytes))
+    } else if bytes.first() == Some(&0x78)
+        && bytes
+            .get(1)
+            .is_some_and(|b| (0x7800 + u16::from(*b)).is_multiple_of(31))
+    {
+        // A zlib header carries a checksum; plain text starting 'x' is not zlib.
+        Box::new(flate2::read::ZlibDecoder::new(bytes))
+    } else {
+        Box::new(bytes)
+    };
+    reader
+        .by_ref()
+        .take((MAX_DECOMPRESSED_BYTES + 1) as u64)
+        .read_to_end(&mut decoded)?;
+    if decoded.len() > MAX_DECOMPRESSED_BYTES {
+        return Err(std::io::Error::other("WebSocket message exceeds limit"));
+    }
+    String::from_utf8(decoded).map_err(std::io::Error::other)
+}
+
 impl Transport for NetworkTransport {
     fn sign_payload(
         &self,
@@ -213,7 +216,9 @@ impl Transport for NetworkTransport {
             let operation = async {
                 let signer =
                     signer.ok_or_else(|| "Payload signing is not configured".to_owned())?;
-                signer(payload).await
+                signer(payload)
+                    .await
+                    .map_err(|_| "Payload signing failed".to_owned())
             };
             let result = tokio::select! {
                 biased;
@@ -356,15 +361,12 @@ impl Transport for NetworkTransport {
                                 let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                             }
                             Some(Ok(Message::Binary(bytes))) if binary => {
-                                if bytes.len() > MAX_BINARY_BYTES { break 1009; }
+                                if bytes.len() > MAX_DECOMPRESSED_BYTES { break 1009; }
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
                             Some(Ok(Message::Binary(bytes))) => {
-                                let text = match binary_text(&bytes) {
-                                    Ok(text) => text,
-                                    Err(code) => break code,
-                                };
+                                let Ok(text) = decode_message(&bytes) else { break 1007 };
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
@@ -420,7 +422,9 @@ impl Transport for NetworkTransport {
                     }
                     route.alias_headers(&mut headers)?;
                     if route.authorize {
-                        let token = (routing.as_ref().unwrap().tokens)().await?;
+                        let token = (routing.as_ref().unwrap().tokens)()
+                            .await
+                            .map_err(|_| "Proxy authorization failed".to_owned())?;
                         if !token.is_empty() {
                             insert_header(
                                 &mut headers,
@@ -475,7 +479,10 @@ impl Transport for NetworkTransport {
                 if let Some(body) = request.body {
                     builder = builder.body(body);
                 }
-                let response = builder.send().await.map_err(|error| error.to_string())?;
+                let response = builder
+                    .send()
+                    .await
+                    .map_err(|error| error.without_url().to_string())?;
                 let headers = response
                     .headers()
                     .iter()
@@ -515,22 +522,49 @@ impl Transport for NetworkTransport {
 }
 
 #[cfg(test)]
-mod tests {
+mod security_tests {
     use super::*;
-    use flate2::{
-        Compression,
-        write::{GzEncoder, ZlibEncoder},
-    };
     use std::io::Write;
 
+    #[test]
+    fn delegated_signer_result_debug_redacts_signatures_and_headers() {
+        let result = PayloadSignerResult {
+            signature: "private-signature-sentinel".into(),
+            headers: vec![("Authorization".into(), "private-token-sentinel".into())],
+        };
+        let debug = format!("{result:?}");
+        assert!(!debug.contains("private-signature-sentinel"));
+        assert!(!debug.contains("private-token-sentinel"));
+    }
+
+    #[test]
+    fn compressed_messages_cannot_expand_past_limit() {
+        for gzip in [false, true] {
+            let data = vec![b'x'; MAX_DECOMPRESSED_BYTES + 1];
+            let compressed = if gzip {
+                let mut encoder =
+                    flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+                encoder.write_all(&data).unwrap();
+                encoder.finish().unwrap()
+            } else {
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+                encoder.write_all(&data).unwrap();
+                encoder.finish().unwrap()
+            };
+            assert!(decode_message(&compressed).is_err());
+        }
+        assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
+    }
+
     fn gzip(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder.write_all(bytes).unwrap();
         encoder.finish().unwrap()
     }
 
     fn zlib(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder.write_all(bytes).unwrap();
         encoder.finish().unwrap()
     }
@@ -543,8 +577,10 @@ mod tests {
             gzip(text.as_bytes()),
             zlib(text.as_bytes()),
         ] {
-            assert_eq!(binary_text(&bytes).unwrap(), text);
+            assert_eq!(decode_message(&bytes).unwrap(), text);
         }
+        // Plain text that merely starts with 'x' is not a zlib stream.
+        assert_eq!(decode_message(b"xyz").unwrap(), "xyz");
     }
 
     #[test]
@@ -553,16 +589,7 @@ mod tests {
         let crc = corrupted.len() - 8;
         corrupted[crc] ^= 1;
         for bytes in [corrupted, vec![0x1f, 0x8b, 0], vec![0xff], zlib(&[0xff])] {
-            assert_eq!(binary_text(&bytes), Err(1007));
+            assert!(decode_message(&bytes).is_err());
         }
-    }
-
-    #[test]
-    fn decoded_binary_limit_rejects_oversize_without_returning_a_prefix() {
-        let bytes = vec![b'a'; MAX_BINARY_BYTES + 1];
-        for encoded in [gzip(&bytes), zlib(&bytes)] {
-            assert_eq!(binary_text(&encoded), Err(1009));
-        }
-        assert_eq!(binary_text(&bytes), Err(1009));
     }
 }

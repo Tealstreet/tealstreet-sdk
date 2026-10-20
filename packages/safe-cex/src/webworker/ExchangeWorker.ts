@@ -716,18 +716,24 @@ export class ExchangeWorker {
    * Frame mode: venue state (markets, tickers, orders, positions, balance,
    * loaded flags) reaches main in frames. Rare query-derived leverage also
    * travels in store payloads when changed, including late-client snapshots.
+   * So does the balance when its `info` changes (Bybit wallet, Lighter tier):
+   * frames carry no `info`, and this balance already includes every frame sent.
    */
   private _lastFrameLeverage?: StoreData['fetchedLeverage'];
+  private _lastFrameBalanceInfo?: unknown;
 
   private _derivedStorePayload = (data: StoreData, force = false): StoreWorkerStorePayload => {
     const includeLeverage = force || data.fetchedLeverage !== this._lastFrameLeverage;
     this._lastFrameLeverage = data.fetchedLeverage;
+    const info = data.balance?.info;
+    const includeBalance = info !== undefined && (force || info !== this._lastFrameBalanceInfo);
+    this._lastFrameBalanceInfo = info;
     const {
       markets: _markets,
       tickers: _tickers,
       orders: _orders,
       positions: _positions,
-      balance: _balance,
+      balance,
       fetchedLeverage,
       loaded: _loaded,
       latency: _latency,
@@ -735,7 +741,11 @@ export class ExchangeWorker {
       updateIds: _updateIds,
       ...derived
     } = this._sanitizeForPostMessage(data);
-    return includeLeverage ? { ...derived, fetchedLeverage } : derived;
+    return {
+      ...derived,
+      ...(includeLeverage && { fetchedLeverage }),
+      ...(includeBalance && { balance }),
+    };
   };
 
   get store() {
