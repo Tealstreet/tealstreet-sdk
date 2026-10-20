@@ -15976,7 +15976,7 @@
           ]
         },
         {
-          "divergence": "INTX checkpoints 7-10 (t=11400-14900): native keeps canceled order 12 until its next full order census (gone at checkpoint 11, t=16600); TS removed it at its post-cancel census. Production-visible lag of one census. Every native row from 13 onward is one index lower than in TS (13, 30, 31, 50), so these id, parent, price, side, type, status and time-in-force paths compare different orders.",
+          "divergence": "INTX checkpoints 7-10 (t=11400-14900): native keeps canceled order 12 until its next full order census (gone at checkpoint 11, t=16600); TS removed it at its post-cancel census. Production-visible lag of one census. Native keeps 12 at row 0, so every native row from 13 onward is one index higher than in TS (13, 30, 31, 50), so these id, parent, price, side, type, status and time-in-force paths compare different orders.",
           "keys": [
             "checkpoint 10 account.orders[3].timeInForce",
             "checkpoint 9 account.orders[3].timeInForce",
@@ -16695,7 +16695,7 @@
           ]
         },
         {
-          "divergence": "INTX checkpoints 7-10 (t=11400-14900): native keeps canceled order 12 until its next full order census (gone at checkpoint 11, t=16600); TS removed it at its post-cancel census. Production-visible lag of one census. Every native row from 13 onward is one index lower than in TS (13, 30, 31, 50), so these id, parent, price, side, type, status and time-in-force paths compare different orders.",
+          "divergence": "INTX checkpoints 7-10 (t=11400-14900): native keeps canceled order 12 until its next full order census (gone at checkpoint 11, t=16600); TS removed it at its post-cancel census. Production-visible lag of one census. Native keeps 12 at row 0, so every native row from 13 onward is one index higher than in TS (13, 30, 31, 50), so these id, parent, price, side, type, status and time-in-force paths compare different orders.",
           "keys": [
             "checkpoint 10 account.orders[3].timeInForce",
             "checkpoint 7 account.orders[2].timeInForce",
