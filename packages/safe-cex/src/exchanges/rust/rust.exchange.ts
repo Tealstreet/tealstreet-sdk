@@ -55,7 +55,7 @@ import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementCli
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import { hasSharedTickerValues, RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -230,7 +230,7 @@ export class RustEngineExchange extends BaseExchange {
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
     if (this.options.publicFeed?.mode === 'shared') return 'shared';
-    return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : this.options.publicFeed?.mode ?? 'direct';
+    return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
   }
 
   override disablePublicWebsockets(): void {
@@ -240,10 +240,10 @@ export class RustEngineExchange extends BaseExchange {
   private sharedPublicFeed?: RustPublicFeedClient;
   private requestSharedSnapshot = false;
   private sharedPublicReady = false;
-  private readonly publicFeedObservers = new Set<{ updated(): void; closed(): void }>();
+  private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
   /** Public providers observe applied native ticker frames, without replacing onFrame. */
-  observePublicFeed(observer: { updated(): void; closed(): void }): () => void {
+  observePublicFeed(observer: { updated(catalogChanged: boolean): void; closed(): void }): () => void {
     this.publicFeedObservers.add(observer);
     return () => {
       this.publicFeedObservers.delete(observer);
@@ -379,6 +379,7 @@ export class RustEngineExchange extends BaseExchange {
       : Boolean(this.options.secret);
   }
   private updateTickerSymbols = () => {
+    this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
     if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
 
@@ -594,7 +595,11 @@ export class RustEngineExchange extends BaseExchange {
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
-          if (this.requestSharedSnapshot && update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol])) this.sharedPublicReady = true;
+          if (
+            this.requestSharedSnapshot &&
+            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && hasSharedTickerValues(ticker))
+          )
+            this.sharedPublicReady = true;
           this.host?.flush();
         },
         (error) => {
@@ -644,6 +649,14 @@ export class RustEngineExchange extends BaseExchange {
   /** The whole current state as one frame, for a consumer that starts late. */
   snapshotFrame = () => this.host?.snapshot();
 
+  /** A late shared subscriber receives the current native book without waiting for a trade. */
+  snapshotOrderBook = (symbol: string): OrderBook | undefined => {
+    const snapshot = this.snapshotFrame();
+    return snapshot
+      ? this.applier.books(new Frame(snapshot)).find((entry) => entry.symbol === symbol)?.orderbook
+      : undefined;
+  };
+
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
@@ -653,18 +666,22 @@ export class RustEngineExchange extends BaseExchange {
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);
     this.applier.apply(frame, !this.onFrame);
-    if (frame.tickers() || frame.tickerDeltas()) {
-      for (const observer of this.publicFeedObservers) observer.updated();
+    if (frame.markets() || frame.tickers() || frame.tickerDeltas()) {
+      for (const observer of this.publicFeedObservers) observer.updated(Boolean(frame.markets()));
     }
-    if (this.sharedPublicFeed && this.store.loaded.markets && !this.requestSharedSnapshot) {
-      try { this.sharedPublicFeed.validateMarkets(this.store.markets); }
-      catch (error) {
+    if (this.sharedPublicFeed && this.store.loaded.markets && (frame.markets() || !this.requestSharedSnapshot)) {
+      try {
+        this.sharedPublicFeed.validateMarkets(this.store.markets);
+      } catch (error) {
         this.startupFailure = error instanceof Error ? error : new Error(String(error));
+        this.emitAndLogError(this.startupFailure);
         this.dispose();
         return;
       }
-      this.requestSharedSnapshot = true;
-      this.sharedPublicFeed.send({ op: 'snapshot' });
+      if (!this.requestSharedSnapshot) {
+        this.requestSharedSnapshot = true;
+        this.sharedPublicFeed.send({ op: 'snapshot' });
+      }
     }
     for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
     if (!this.onFrame) {
@@ -1073,7 +1090,7 @@ export class RustEngineExchange extends BaseExchange {
       listeners = new Set();
       this.candleListeners.set(key, listeners);
       if (this.sharedPublicFeed)
-        this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval: opts.interval, subscribe: true });
+        this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: true });
       void this.command({ op: 'subscribeCandles', symbol: opts.symbol, interval });
     }
     listeners.add(callback);
@@ -1082,7 +1099,7 @@ export class RustEngineExchange extends BaseExchange {
       if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
         this.candleListeners.delete(key);
         if (this.sharedPublicFeed)
-          this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval: opts.interval, subscribe: false });
+          this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: false });
         void this.command({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
       }
     };

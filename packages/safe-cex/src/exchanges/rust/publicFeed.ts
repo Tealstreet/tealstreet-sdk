@@ -12,6 +12,7 @@ type FeedUpdate = {
 };
 type Request =
   | { op: 'hello'; identity: string }
+  | { op: 'tickerSymbols'; symbols: string[] }
   | { op: 'snapshot' | 'dispose' | 'ping' }
   | { op: 'book'; symbol: string; subscribe: boolean }
   | { op: 'candle'; symbol: string; interval: OHLCVOptions['interval']; subscribe: boolean };
@@ -44,6 +45,9 @@ const tickerFields = [
   'quoteVolume',
 ] as const;
 
+export const hasSharedTickerValues = (ticker: NonNullable<FeedUpdate['tickers']>[number]): boolean =>
+  tickerFields.some((field) => Number.isFinite(ticker[field]));
+
 /** Excludes credentials/account settings; includes all public-product selectors. */
 export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOptions) =>
   JSON.stringify([
@@ -58,22 +62,44 @@ export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOpti
   ]);
 
 /** A running public Rust engine owns parsing/subscriptions; ports carry public fields only. */
+const sourcesWithProvider = new WeakSet<RustEngineExchange>();
+
 export class RustPublicFeedProvider {
-  private readonly clients = new Map<MessagePort, { cleanup(): void }>();
+  private readonly clients = new Map<MessagePort, { cleanup(): void; expired(): boolean }>();
   private disposed = false;
+  private sweep?: ReturnType<typeof setInterval>;
+  private readonly tickerDemands = new Map<MessagePort, string[]>();
+  private readonly originalTickerSymbols: string[];
 
   constructor(private readonly source: RustEngineExchange) {
     if (!source.hasStarted || !source.store.loaded.markets || !source.store.loaded.tickers || source.isDisposed)
       throw new Error('Shared public feed requires a started, loaded Rust source');
+    if (!source.store.markets.length || !source.store.tickers.length)
+      throw new Error('Shared public feed source has no instruments or tickers');
     if (!source.isPublicDataOnly) throw new Error('Shared public feed requires a public-data-only Rust source');
     if (source.publicFeedMode !== 'direct')
       throw new Error('Shared public feed source must own its direct public feed');
+    if (sourcesWithProvider.has(source)) throw new Error('A Rust source already has a public feed provider');
+    sourcesWithProvider.add(source);
+    this.originalTickerSymbols = [...source.getActiveTickerSymbols()];
+  }
+
+  private updateTickerDemand() {
+    if (this.source.isDisposed) return;
+    const demands = [this.originalTickerSymbols, ...this.tickerDemands.values()];
+    this.source.setActiveTickerSymbols(
+      demands.some((symbols) => symbols.length === 0) ? [] : [...new Set(demands.flat())],
+    );
   }
 
   attach(port: MessagePort): () => void {
     if (this.disposed || this.source.isDisposed) throw new Error('Shared public feed provider disposed');
     if (this.clients.has(port)) throw new Error('Shared public feed port already attached');
     let ready = false;
+    let lastSeen = Date.now();
+    const catalog = () =>
+      JSON.stringify(this.source.store.markets.map(feedMarket).sort((a, b) => a.symbol.localeCompare(b.symbol)));
+    const initialCatalog = catalog();
     const subscriptions = new Map<string, () => void>();
     const send = (message: Reply) => {
       try {
@@ -92,7 +118,12 @@ export class RustPublicFeedProvider {
       send({ op: 'publicFeedUpdate', tickers });
     };
     const unsubscribe = this.source.observePublicFeed({
-      updated: seed,
+      updated: (catalogChanged) => {
+        if (catalogChanged && catalog() !== initialCatalog) {
+          send({ op: 'error', message: 'Shared public feed catalog changed; restart provider and accounts' });
+          cleanup();
+        } else seed();
+      },
       closed: () => {
         send({ op: 'error', message: 'Shared public feed source disposed' });
         cleanup();
@@ -100,7 +131,13 @@ export class RustPublicFeedProvider {
     });
     const cleanup = () => {
       if (!this.clients.delete(port)) return;
+      if (!this.clients.size) {
+        clearInterval(this.sweep);
+        this.sweep = undefined;
+      }
       unsubscribe();
+      this.tickerDemands.delete(port);
+      this.updateTickerDemand();
       for (const stop of subscriptions.values()) stop();
       subscriptions.clear();
       port.removeEventListener('message', onMessage);
@@ -111,6 +148,7 @@ export class RustPublicFeedProvider {
     const onMessage = (event: MessageEvent<Request>) => {
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+      lastSeen = Date.now();
       if (data.op === 'hello') {
         if (data.identity !== rustPublicFeedIdentity(this.source.name, this.source.options)) {
           send({ op: 'error', message: 'Shared public feed venue/network/product mismatch' });
@@ -121,14 +159,19 @@ export class RustPublicFeedProvider {
         send({ op: 'ready', markets: this.source.store.markets.map(feedMarket) });
         seed();
       } else if (data.op === 'dispose') cleanup();
-      else if (ready && data.op === 'ping') send({ op: 'pong' });
+      else if (ready && data.op === 'tickerSymbols') {
+        if (!Array.isArray(data.symbols) || data.symbols.some((symbol) => typeof symbol !== 'string')) return;
+        this.tickerDemands.set(port, data.symbols);
+        this.updateTickerDemand();
+      } else if (ready && data.op === 'ping') send({ op: 'pong' });
       else if (ready && data.op === 'snapshot') seed();
       else if (ready && (data.op === 'book' || data.op === 'candle')) {
         if (typeof data.symbol !== 'string' || !this.source.store.marketsBySymbol[data.symbol]) {
           send({ op: 'error', message: 'Shared public feed symbol unavailable' });
           return;
         }
-        const key = data.op === 'book' ? `book:${data.symbol}` : `candle:${data.symbol}:${data.interval}`;
+        const interval = data.op === 'candle' ? this.source.candleIntervalForFeed(data.interval) : '1m';
+        const key = data.op === 'book' ? `book:${data.symbol}` : `candle:${data.symbol}:${interval}`;
         if (!data.subscribe) {
           subscriptions.get(key)?.();
           subscriptions.delete(key);
@@ -137,23 +180,22 @@ export class RustPublicFeedProvider {
         if (subscriptions.has(key)) return;
         if (data.op === 'book') {
           const symbol = data.symbol;
-          subscriptions.set(
-            key,
-            this.source.listenOrderBook(symbol, (book: OrderBook) =>
-              send({
-                op: 'publicFeedUpdate',
-                books: [
-                  {
-                    symbol,
-                    bids: book.bids.map(({ price, amount }) => [price, amount]),
-                    asks: book.asks.map(({ price, amount }) => [price, amount]),
-                  },
-                ],
-              }),
-            ),
-          );
+          const forward = (book: OrderBook) =>
+            send({
+              op: 'publicFeedUpdate',
+              books: [
+                {
+                  symbol,
+                  bids: book.bids.map(({ price, amount }) => [price, amount]),
+                  asks: book.asks.map(({ price, amount }) => [price, amount]),
+                },
+              ],
+            });
+          subscriptions.set(key, this.source.listenOrderBook(symbol, forward));
+          const snapshot = this.source.snapshotOrderBook(symbol);
+          if (snapshot) forward(snapshot);
         } else {
-          const { symbol, interval } = data;
+          const { symbol } = data;
           subscriptions.set(
             key,
             this.source.listenOHLCV({ symbol, interval }, (candle) =>
@@ -177,7 +219,10 @@ export class RustPublicFeedProvider {
         }
       }
     };
-    this.clients.set(port, { cleanup });
+    this.clients.set(port, { cleanup, expired: () => Date.now() - lastSeen > (ready ? 20_000 : 10_000) });
+    this.sweep ??= setInterval(() => {
+      for (const client of this.clients.values()) if (client.expired()) client.cleanup();
+    }, 5_000);
     port.addEventListener('message', onMessage);
     port.addEventListener('messageerror', onError);
     port.start();
@@ -187,6 +232,7 @@ export class RustPublicFeedProvider {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    sourcesWithProvider.delete(this.source);
     for (const [port, client] of this.clients) {
       try {
         port.postMessage({ op: 'error', message: 'Shared public feed provider disposed' } satisfies Reply);
@@ -279,8 +325,12 @@ export class RustPublicFeedClient {
   }
   dispose() {
     if (this.disposed) return;
-    this.send({ op: 'dispose' });
     this.disposed = true;
+    try {
+      this.port.postMessage({ op: 'dispose' } satisfies Request);
+    } catch {
+      /* Already disconnected. */
+    }
     clearTimeout(this.timer);
     clearInterval(this.heartbeat);
     this.reject?.(new Error('Shared public feed disposed during startup'));
