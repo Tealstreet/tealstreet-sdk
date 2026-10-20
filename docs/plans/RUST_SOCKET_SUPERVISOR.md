@@ -293,3 +293,46 @@ independent scopes and malformed grammar are covered. All 700 harness tests
 pass (96 midpoint tests, 15 CLI tests, eight shared JSON tests included).
 Outputs and production mappings remain unchanged; final focused rereview is
 pending. Rust source has not changed since the latest landing merge.
+
+
+## CI CPU follow-up and final verification plan
+
+CI run `39434260840` on `59428c25a6` failed two unchanged public CPU
+checks: Hyro's steady CPU (both displayed 5.6 ms; strict comparison failed)
+and HyperliquidSpot main CPU (TS 66.3 ms, Rust 68.0 ms). All other jobs
+passed. These are recorded failures, not successful gates.
+
+Hyperliquid's numeric wire reader buffered each primitive through an untagged
+enum and tried a failing float alternative for numeric strings. `6e29557181`
+uses a direct numeric visitor. Five regressions preserve finite validation,
+f64 rounding, signed zero, escaped/owned strings, optional/default behavior
+and flattened contexts. Native tests and strict all-feature Clippy pass;
+independent correctness review found no production regression. Performance
+acceptance remains pending.
+
+Hyro already uses the numeric ticker and reusable book paths. One instrumented
+real-tape replay identified host ingress and Rust decoding as candidates;
+its timings include instrumentation and are not acceptance evidence. A fixed
+six-run comparison of the existing string and byte ingress APIs produced
+identical full logical state in all runs. String main CPU won all three pairs,
+but steady CPU lost two pairs (median bytes 9.355 ms, string 9.196 ms), so the
+host API choice stays unchanged. No acceptance rerun was used for this result.
+The narrower book decoder change replaces temporary owned-or-borrowed field
+keys with Serde field identifiers, preserving the existing value visitors,
+required fields, duplicate detection, ignored-value validation and complete
+JSON validation. Escaped keys, duplicate aliases and malformed ignored values
+have regression coverage. Its performance benefit is a hypothesis until the
+unchanged official gates run.
+
+`f09100c8ab` integrates landing `f895a98f26` (Paradex malformed-SBE,
+partial-placement and listener isolation fixes). A separate integration review
+checks that the Supervisor and native heartbeat paths remain intact. The final
+verification will use one new combined artifact, 19 standalone size selectors,
+86 replay cases (28 frozen public, 22 previously captured public, 36 scripted
+private), all workspace native/WASM checks, root checks and integrations.
+Seven new frozen/public and seven private cases cover all Bybit and Hyperliquid
+profiles touched by the CI repairs. Existing public tapes, thresholds and
+normalizers are unchanged. No fresh capture is claimed for those seven
+additional profiles. The earlier complete 72-case report remains historical;
+the interrupted v4 stage completed builds and integrations but no replay
+matrix. Merge still requires green CI on the reviewed head.
