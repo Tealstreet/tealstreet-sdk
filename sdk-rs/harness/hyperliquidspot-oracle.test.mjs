@@ -20,6 +20,8 @@ test('HyperliquidSpot TS oracle adds only the tape-declared open-order read', ()
 
 test('HyperliquidSpot TS oracle adds nothing without a declared read', () => {
   const records = buildHyperliquidSpotTape().filter((record) => !record.requestBody?.includes('frontendOpenOrders'));
+  // A bodiless /info record is skipped rather than parsed.
+  records.push({ t: 0, type: 'http', method: 'POST', url: 'https://api.hyperliquid.xyz/info', status: 200, body: '[]' });
   const ts = { requests: ['a'] };
   assert.deepEqual(fix(records, ts).errors, []);
   assert.deepEqual(ts.requests, ['a']);

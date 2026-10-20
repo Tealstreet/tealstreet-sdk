@@ -58,7 +58,8 @@ const KNOWN_TS_FIXES = {
     const callerIds = callerIdsOf(tapeRecords);
     const expected = new Set(ts.requests);
     for (const record of tapeRecords) {
-      if (record.type !== 'http' || record.method !== 'POST' || new URL(record.url).pathname !== '/info') continue;
+      if (record.type !== 'http' || record.method !== 'POST' || typeof record.requestBody !== 'string'
+        || new URL(record.url).pathname !== '/info') continue;
       if (parseRequestJson(record.requestBody)?.type !== 'frontendOpenOrders') continue;
       expected.add(requestKey(record.method, record.url, record.requestBody, callerIds, venue));
     }

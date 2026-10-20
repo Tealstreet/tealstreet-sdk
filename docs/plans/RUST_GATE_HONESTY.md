@@ -540,3 +540,12 @@ never retry an unchanged failed performance measurement to obtain a pass.
   118, BloFin 91 of 91, Backpack 164 of 164). TxFlow public newly fails on
   empty checkpoint-0 books after #1353 dropped TxFlow's `books()` time filter;
   that is a real regression routed to the landing auditor, not declared.
+- Landing `949bf75f18` integration (`9a84faaf0e`): landing's HyperliquidSpot fixer
+  removed reads from the Rust candidate; replaced by an add-only TS expectation
+  of tape-declared `frontendOpenOrders` reads. CI `39460207328`: HyperliquidSpot
+  private re-hash declares the same 7 paths. Bitrue private (tape gained l/L
+  executions) keeps its 50 order paths; 50 checkpoint fill paths are the TS
+  cumulative-delta defect `fixBitrue` corrects only in final state, each Rust
+  fill independently matched to a raw tape execution (overseer-approved); 4
+  checkpoint-11 order paths repeat checkpoint 10's declared divergence. TxFlow
+  public empty checkpoint-0 books remain a real regression with its owner.
