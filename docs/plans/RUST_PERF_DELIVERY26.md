@@ -893,3 +893,22 @@ original failed check. Size proof SHA
 `fac8acd15de47824d08df018608f2a5f9bb56328c0e84c9f4caf489dae4cb8ef`.
 The actual15-command integration suite is running once against frozen current
 inputs; the fixed40/64 performance collection has not started.
+
+All15 actual integration commands now pass, with22 successful tool/test receipts:
+SDK449 tests, host190, offline parity44, consumer20, MCP build and isolated
+packaged smoke. No retries, skipped tests or source/artifact drift. Proof SHA
+`21ab591c2a939decb24ae44e544bdea599361afdcc30734ed3dd612e6923942d`.
+Readiness verification passes, SHA
+`1639135bcdf4e24cadcdb7d42f1dd8e81252ee58bccbc1760c0d61e475f104e1`.
+`RUST_PERF_DELIVERY29_RELEASE_CHECKPOINT.json.gz` retains99 evidence files,
+including original failures, source/release/control audits and complete actual
+integration logs; SHA
+`341655e524338c548346357b1e71a4af0b420be9a31a6b6328df8655742794f7`.
+
+Next execute exactly one declared Node22 collection with the existing reviewed
+runner and immutable40-public/64-private roster. Keep20 AB and20 BA pairs with
+three public runs per arm, no numeric retries, unchanged output/CPU/memory/GC/
+timeout requirements, and independent-case continuation that preserves invalid
+results as unresolved. All build/test/profiler writers must be quiet. Freeze
+actual configuration, independently inspect its rows, then launch. Performance
+acceptance and green CI remain pending.
