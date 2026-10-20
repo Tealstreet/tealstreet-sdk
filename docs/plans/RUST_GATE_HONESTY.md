@@ -160,3 +160,10 @@ never retry an unchanged failed performance measurement to obtain a pass.
   to the mandatory matrix rather than ignoring its financial gate failures.
   CI combined web/Node artifacts: 12,172,412 bytes each, SHA256
   `9c36fc12f77b9766641b37ebf3599c1ee91b8c32ad6c274e99874cd7cbbaaede`.
+- Preserve generated lifecycle transport/cleanup proof separately from financial
+  certification: both actual implementations must complete every command and
+  audit. Freeze the sanitized scripted capture verbatim as an additional strict
+  Binance case (now 31 suites / 107 mandatory cases), SHA256
+  `710a58aa511ed26bfe55bad1fef6b67a2544e5a119178560763261675d8862bf`.
+  Its financial gate remains FAIL on 22 client-ID/TIF diagnostics, never ignored
+  by the integration test or exempted through a variable capture hash.

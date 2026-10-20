@@ -145,11 +145,14 @@ Implemented on the gate-honesty lane:
 - Binance/Bybit margin expectations come from taped native position/configuration
   fields. Isolated TS fixers cannot receive candidate output; AST and mutation
   controls reject circular fixes.
-- Compare TP/SL, conditional execution price, parent IDs, realized PnL and fill
+- Compare TP/SL and each leg's trigger source, conditional execution price,
+  parent IDs, open/flat-position realized PnL and fill
   price/fee/time/execution identity. Client IDs and fill prices default on; any
   exclusion requires an explicit venue/field/reason. Duplicate public symbols
   fail before filtering or map construction. Compare production receiver state
   at startup, tape quarters, commands and terminal checkpoints, before fixers.
+  Validate each runner's boundaries against the tape plan independently, with
+  required account/book sections; matching omissions cannot establish coverage.
 - Per-venue leaf permissions and structural rules constrain every fixer;
   overwritten-field counts are reported. No fixer rewrites candidate requests.
 - At least seven fresh interleaved performance pairs, alternating first runner;

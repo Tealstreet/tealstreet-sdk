@@ -7,9 +7,9 @@ import { expectedGateCases, gateCaseKey, GATE_SUITES, validateGateCoverage } fro
 const copy = (suite) => structuredClone(expectedGateCases(suite));
 
 test('suite registry preserves every primary, alias, profile and network replay', () => {
-  const exceptional = { binance: 8, bybit: 10, okx: 8, orderly: 15, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3 };
+  const exceptional = { binance: 9, bybit: 10, okx: 8, orderly: 15, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3 };
   assert.equal(GATE_SUITES.length, 31);
-  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 106);
+  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 107);
   for (const suite of GATE_SUITES) {
     const cases = expectedGateCases(suite);
     assert.equal(cases.length, exceptional[suite] ?? 2, suite);
@@ -24,6 +24,7 @@ test('family profiles pin their exact tape paths and private books', () => {
   assert.deepEqual(expectedGateCases('binance').find((item) => item.venue === 'binancepm' && item.books), {
     venue: 'binancepm', tape: 'sdk-rs/harness/fixtures/binance-public.jsonl.gz', books: 'BTCUSDT,ETHUSDT,SOLUSDT',
   });
+  assert(expectedGateCases('binance').some((item) => item.tape === 'sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl' && item.books === 'BTCUSDT'));
   assert.deepEqual(expectedGateCases('okx').filter((item) => item.books).map(({ venue, tape }) => [venue, tape]), [
     ['okx', 'sdk-rs/harness/fixtures/okx-public.jsonl.gz'],
     ['okx', 'sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz'],
