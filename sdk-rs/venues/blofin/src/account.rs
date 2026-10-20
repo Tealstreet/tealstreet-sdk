@@ -23,6 +23,16 @@ pub struct Source {
     pub tp_order_price: f64,
     pub sl_order_price: f64,
 }
+// BloFin reports cumulative quantities/value, not individual execution IDs.
+// Keep early observations until the first complete REST census proves a prefix.
+struct Execution {
+    fill: Fill,
+    qty: f64,
+    value: f64,
+    contract: f64,
+    updated: f64,
+}
+
 #[derive(Default)]
 pub(crate) struct Account {
     pub connection: Connection,
@@ -36,6 +46,8 @@ pub(crate) struct Account {
     startup_started: bool,
     session_started: f64,
     orders_seeded: bool,
+    reporting_started: f64,
+    startup_executions: VecDeque<Execution>,
     account_busy: bool,
     pub sources: HashMap<String, Source>,
     fills: HashMap<String, (f64, Option<f64>)>,
@@ -49,6 +61,21 @@ pub(crate) struct Account {
 }
 impl Account {
     fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
+        if !matches!(
+            execution_prefix(self.fills.get(id).copied(), qty, value),
+            Ok(true)
+        ) {
+            return;
+        }
+        self.store_execution_prefix(id, qty, value);
+    }
+    fn historical_execution_floor(&mut self, id: &str, qty: f64) {
+        if qty.is_finite() && qty > self.fills.get(id).map_or(0.0, |prefix| prefix.0) {
+            // Unpriceable pre-session quantity is history, never a live suffix.
+            self.store_execution_prefix(id, qty, None);
+        }
+    }
+    fn store_execution_prefix(&mut self, id: &str, qty: f64, value: Option<f64>) {
         self.fills.insert(id.to_owned(), (qty, value));
         self.fill_order.retain(|key| key != id);
         self.fill_order.push_back(id.to_owned());
@@ -116,6 +143,19 @@ pub enum Request {
     },
 }
 impl Blofin {
+    fn seed_execution_prefix(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        qty: f64,
+        value: Option<f64>,
+    ) {
+        match execution_prefix(self.account.fills.get(id).copied(), qty, value) {
+            Ok(true) => self.account.execution_progress(id, qty, value),
+            Ok(false) => {}
+            Err(error) => cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
+        }
+    }
     pub(crate) fn fetch_leverage(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -977,6 +1017,11 @@ impl Blofin {
                     );
                 } else {
                     self.account.orders_busy = false;
+                    if !self.account.orders_seeded {
+                        // Even when newer WS state rejects this store snapshot, its
+                        // complete cumulative rows still prove execution prefixes.
+                        self.seed_startup_executions(cx, &rows, &sources);
+                    }
                     if revision == self.account.orders_revision {
                         for order in cx.store.orders() {
                             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
@@ -1075,22 +1120,6 @@ impl Blofin {
                             }
                         }
                         rows.extend(extra);
-                        // Seed historical executions once, after every startup page succeeds.
-                        // Periodic REST progress must not consume delayed stream executions.
-                        if !self.account.orders_seeded {
-                            for order in &rows {
-                                if matches!(order.kind, OrderType::Limit | OrderType::Market)
-                                    && let Some(source) = sources.get(&order.id)
-                                    && !self.account.fills.contains_key(&order.id)
-                                {
-                                    let (qty, value) = source.execution_baseline;
-                                    if qty > 0.0 {
-                                        self.account.execution_progress(&order.id, qty, value);
-                                    }
-                                }
-                            }
-                            self.account.orders_seeded = true;
-                        }
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
                         cx.orders_reconciled(None);
@@ -1184,18 +1213,37 @@ impl Blofin {
                     row: OrderRow<'a>,
                     #[serde(rename = "updateTime", default)]
                     updated: Number,
+                    #[serde(rename = "createTime", default)]
+                    created: Number,
+                    #[serde(rename = "filledSize", default)]
+                    filled: Option<Number>,
                 }
                 if let Ok(Data { data: rows }) =
                     serde_json::from_str::<Data<Vec<StreamOrder<'_>>>>(text)
                 {
                     self.account.orders_revision += 1;
-                    for StreamOrder { row, updated } in rows {
+                    for StreamOrder {
+                        mut row,
+                        updated,
+                        created,
+                        filled,
+                    } in rows
+                    {
+                        if let Some(qty) = filled {
+                            row.filled_size = qty;
+                        }
                         let orders = self.map_orders(cx, &row);
+                        if filled.is_some_and(|qty| qty.0 == 0.0)
+                            && let Some(order) = orders.first()
+                            && matches!(order.kind, OrderType::Limit | OrderType::Market)
+                            && !self.account.fills.contains_key(&order.id)
+                        {
+                            self.account.execution_progress(&order.id, 0.0, Some(0.0));
+                        }
                         if matches!(row.state.as_ref(), "partially_filled" | "filled")
-                            && row.average_price.0 > 0.0
                             && !orders.is_empty()
                         {
-                            self.execution(cx, &row, &orders[0], updated.0);
+                            self.execution(cx, &row, &orders[0], updated.0, created.0);
                         }
                         let source = Self::source(&row);
                         for order in orders {
@@ -1274,6 +1322,7 @@ impl Blofin {
         row: &OrderRow<'_>,
         order: &Order,
         updated: f64,
+        created: f64,
     ) {
         let id = if row.order_id.is_empty() {
             &row.ord_id
@@ -1282,24 +1331,12 @@ impl Blofin {
         };
         let qty = row.filled_size.0;
         let value = qty * row.average_price.0;
-        let previous = self
-            .account
-            .fills
-            .get(id.as_ref())
-            .copied()
-            .unwrap_or((0.0, Some(0.0)));
-        if qty <= previous.0 {
-            if qty == previous.0 && previous.1.is_none() {
-                self.account.execution_progress(id, qty, Some(value));
+        if qty > 0.0 && (row.average_price.0 <= 0.0 || !value.is_finite() || value <= 0.0) {
+            if updated > 0.0 && updated < self.account.session_started {
+                self.account.historical_execution_floor(id, qty);
+            } else {
+                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: invalid cumulative quote value; retained proven execution baseline"));
             }
-            return;
-        }
-        let delta = decimal_difference(qty, previous.0);
-        let delta_value = previous
-            .1
-            .map(|previous| decimal_difference(value, previous));
-        self.account.execution_progress(id, qty, Some(value));
-        if updated > 0.0 && updated < self.account.session_started {
             return;
         }
         let contract = cx
@@ -1307,15 +1344,194 @@ impl Blofin {
             .market(&order.symbol)
             .and_then(|m| m.contract_size)
             .unwrap_or(1.0);
-        cx.fill(Fill {
-            order_id: id.to_string(),
-            symbol: order.symbol.clone(),
-            side: order.side,
-            price: delta_value
-                .filter(|value| *value > 0.0)
-                .map_or(row.average_price.0, |value| clean(value / delta)),
-            amount: clean(delta * contract),
-        });
+        let execution = Execution {
+            fill: Fill {
+                order_id: id.to_string(),
+                symbol: order.symbol.clone(),
+                side: order.side,
+                price: row.average_price.0,
+                amount: clean(qty * contract),
+            },
+            qty,
+            value,
+            contract,
+            updated,
+        };
+        let session_order = created > 0.0
+            && created >= self.account.session_started
+            && created <= cx.now
+            && (updated == 0.0 || created <= updated);
+        let known_prefix = self.account.fills.contains_key(id.as_ref());
+        if !session_order
+            && (!self.account.orders_seeded || !known_prefix)
+            && !(updated > 0.0 && updated < self.account.session_started)
+        {
+            if self.account.orders_seeded {
+                // A delayed terminal row absent from the startup open-order census
+                // cannot distinguish old fills from its unobserved startup suffix.
+                self.seed_execution_prefix(cx, id, qty, Some(execution.value));
+                cx.log(
+                    if updated == 0.0 || updated >= self.account.reporting_started {
+                        LogLevel::Error
+                    } else {
+                        LogLevel::Warning
+                    },
+                    format!("BloFin execution prefix unavailable for existing order {id}; cannot distinguish historical fills from live executions; refreshed cumulative baseline"),
+                );
+            } else {
+                let prefix = self
+                    .account
+                    .startup_executions
+                    .iter()
+                    .filter(|queued| queued.fill.order_id == id.as_ref())
+                    .fold(
+                        self.account.fills.get(id.as_ref()).copied(),
+                        |prefix, queued| {
+                            if matches!(
+                                execution_prefix(prefix, queued.qty, Some(queued.value)),
+                                Ok(true)
+                            ) {
+                                Some((queued.qty, Some(queued.value)))
+                            } else {
+                                prefix
+                            }
+                        },
+                    );
+                if let Err(error) = execution_prefix(prefix, qty, Some(execution.value)) {
+                    cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline"));
+                    return;
+                }
+                if self.account.startup_executions.len() == 500
+                    && let Some(old) = self.account.startup_executions.pop_front()
+                {
+                    // Bound startup memory; an evicted observation becomes a quiet
+                    // baseline, so later cumulative rows cannot replay its prefix.
+                    let previous = self
+                        .account
+                        .fills
+                        .get(&old.fill.order_id)
+                        .map_or(0.0, |p| p.0);
+                    if old.qty > previous {
+                        self.seed_execution_prefix(
+                            cx,
+                            &old.fill.order_id,
+                            old.qty,
+                            Some(old.value),
+                        );
+                    }
+                }
+                self.account.startup_executions.push_back(execution);
+            }
+            return;
+        }
+        self.emit_execution(cx, execution);
+    }
+    fn seed_startup_executions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: &[Order],
+        sources: &HashMap<String, Source>,
+    ) {
+        for order in rows {
+            if matches!(order.kind, OrderType::Limit | OrderType::Market)
+                && let Some(source) = sources.get(&order.id)
+                && !self.account.fills.contains_key(&order.id)
+            {
+                let (qty, value) = source.execution_baseline;
+                self.seed_execution_prefix(cx, &order.id, qty, value);
+            }
+        }
+        let pending = std::mem::take(&mut self.account.startup_executions);
+        let mut unknown = HashMap::<String, (f64, f64)>::new();
+        for execution in &pending {
+            if !self.account.fills.contains_key(&execution.fill.order_id) {
+                let previous = unknown
+                    .get(&execution.fill.order_id)
+                    .map(|&(qty, value)| (qty, Some(value)));
+                match execution_prefix(previous, execution.qty, Some(execution.value)) {
+                    Ok(true) => { unknown.insert(execution.fill.order_id.clone(), (execution.qty, execution.value)); }
+                    Ok(false) => {}
+                    Err(error) => cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: {error}; retained proven execution baseline", execution.fill.order_id)),
+                }
+            }
+        }
+        // An old order already terminal before the first census has no proven
+        // historical prefix. Start reporting after its last startup observation.
+        for (id, (qty, value)) in unknown {
+            self.seed_execution_prefix(cx, &id, qty, Some(value));
+        }
+        self.account.orders_seeded = true;
+        self.account.reporting_started = cx.now;
+        for execution in pending {
+            if !self.account.fills.contains_key(&execution.fill.order_id) {
+                // The bounded tracker may have evicted a queued order while
+                // seeding a large census. Never turn that eviction into a zero prefix.
+                if let Some(source) = sources.get(&execution.fill.order_id) {
+                    let (qty, value) = source.execution_baseline;
+                    self.seed_execution_prefix(cx, &execution.fill.order_id, qty, value);
+                } else {
+                    self.seed_execution_prefix(
+                        cx,
+                        &execution.fill.order_id,
+                        execution.qty,
+                        Some(execution.value),
+                    );
+                    continue;
+                }
+            }
+            self.emit_execution(cx, execution);
+        }
+    }
+    fn emit_execution(&mut self, cx: &mut Cx<'_, Pending>, execution: Execution) {
+        let Execution {
+            mut fill,
+            qty,
+            value,
+            contract,
+            updated,
+        } = execution;
+        let previous = self
+            .account
+            .fills
+            .get(&fill.order_id)
+            .copied()
+            .unwrap_or((0.0, Some(0.0)));
+        if qty <= previous.0 {
+            if qty == previous.0 && previous.1.is_none() {
+                self.account
+                    .execution_progress(&fill.order_id, qty, Some(value));
+            }
+            return;
+        }
+        let historical = updated > 0.0 && updated < self.account.session_started;
+        let delta = decimal_difference(qty, previous.0);
+        // Missing historical quote value cannot prove the suffix price. This
+        // observation supplies the quote baseline for subsequent live executions.
+        let Some(previous_value) = previous.1 else {
+            self.account
+                .execution_progress(&fill.order_id, qty, Some(value));
+            if !historical {
+                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: missing cumulative quote baseline; cannot recover execution price; refreshed execution baseline", fill.order_id));
+            }
+            return;
+        };
+        let delta_value = decimal_difference(value, previous_value);
+        if !delta_value.is_finite() || delta_value <= 0.0 {
+            if historical {
+                self.account.historical_execution_floor(&fill.order_id, qty);
+            } else {
+                cx.log(LogLevel::Error, format!("BloFin execution price unavailable for order {}: nonpositive cumulative quote interval; retained proven execution baseline", fill.order_id));
+            }
+            return;
+        }
+        self.account
+            .execution_progress(&fill.order_id, qty, Some(value));
+        if historical {
+            return;
+        }
+        fill.price = clean(delta_value / delta);
+        fill.amount = clean(delta * contract);
+        cx.fill(fill);
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.connection.socket != Some(socket) {
@@ -1412,4 +1628,31 @@ fn decimal_difference(a: f64, b: f64) -> f64 {
     let digits = num::decimals(a).max(num::decimals(b)).min(20);
     let factor = 10f64.powi(digits as i32);
     ((a - b) * factor).round() / factor
+}
+fn execution_prefix(
+    previous: Option<(f64, Option<f64>)>,
+    qty: f64,
+    value: Option<f64>,
+) -> Result<bool, &'static str> {
+    if !qty.is_finite()
+        || qty < 0.0
+        || value.is_some_and(|value| !value.is_finite() || value < 0.0 || qty > 0.0 && value == 0.0)
+    {
+        return Err("invalid cumulative quote value");
+    }
+    if let Some((previous_qty, previous_value)) = previous {
+        if qty <= previous_qty {
+            return Ok(qty == previous_qty && previous_value.is_none() && value.is_some());
+        }
+        if let Some(previous_value) = previous_value {
+            let Some(value) = value else {
+                return Err("missing cumulative quote value");
+            };
+            let interval = decimal_difference(value, previous_value);
+            if !interval.is_finite() || interval <= 0.0 {
+                return Err("nonpositive cumulative quote interval");
+            }
+        }
+    }
+    Ok(true)
 }
