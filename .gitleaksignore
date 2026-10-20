@@ -5,3 +5,18 @@
 # Synthetic Phemex websocket HMAC vector, independently generated from literal
 # test key "key" and secret "secret"; the flagged hex string is a signature.
 8b9da50d11d154e7ff999a0cf2823f4b7b49879f:sdk-rs/venues/phemex/tests/sign.rs:generic-api-key:52
+
+# Aster published V3 demonstration private key, copied only into signing fixtures
+# and their independent oracle/generator (never a funded account credential):
+# https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md
+# Exact historical occurrences only; production source and future changes stay scanned.
+076496fbb11bf2810d7209ba5bc98a536cf13ffb:sdk-rs/harness/asterdex-requests.mjs:generic-api-key:15
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/generate-signing.mjs:generic-api-key:8
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:6
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:31
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:56
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:80
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:104
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:125
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:146
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:164

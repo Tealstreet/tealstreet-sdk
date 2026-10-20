@@ -187,6 +187,9 @@ impl PhemexPerpetuals {
         }
         let mut seen = HashSet::new();
         for o in &orders {
+            if o.stp_mode.is_some() {
+                return Err("Phemex self-trade prevention is unsupported".into());
+            }
             if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
                 return Err("Phemex does not support Bybit execution controls".into());
             }
@@ -678,6 +681,7 @@ impl PhemexPerpetuals {
             },
             client_order_id: None,
             close: parent.close,
+            stp_mode: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
         };
@@ -788,6 +792,14 @@ impl PhemexPerpetuals {
         );
         let mut mode = None;
         let (id, planned) = match command {
+            Command::CancelOrdersWithSymbols { command, .. }
+            | Command::FetchStpMode { command }
+            | Command::SetStpMode { command, .. }
+            | Command::FetchAccount { command }
+            | Command::FetchOrderBook { command, .. }
+            | Command::FetchLeverage { command, .. } => {
+                (command, Err("Phemex command is unsupported".into()))
+            }
             Command::PlaceOrders { command, orders } => (command, self.place_plan(cx, orders)),
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
             Command::CancelSymbolOrders { command, symbol } => {

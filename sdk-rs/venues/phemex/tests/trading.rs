@@ -126,6 +126,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: (!id.is_empty()).then(|| id.into()),
         close: None,
+        stp_mode: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
     }
@@ -266,6 +267,77 @@ fn bybit_controls_reject_the_whole_batch_before_any_write() {
                 .unwrap_err()
                 .contains("Bybit execution controls")
         );
+    }
+}
+
+#[test]
+fn explicit_stp_rejects_the_whole_batch_before_any_io() {
+    use safe_cex_engine::model::StpMode;
+    for mode in [
+        StpMode::ExpireTaker,
+        StpMode::ExpireMaker,
+        StpMode::ExpireBoth,
+    ] {
+        let mut e = engine();
+        let mut invalid = opts("second");
+        invalid.stp_mode = Some(mode);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts("first"), invalid],
+            },
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("self-trade prevention is unsupported")
+        );
+        assert!(e.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn unsupported_shared_commands_complete_with_error_without_io() {
+    use safe_cex_engine::model::{CancelOrderRef, StpMode};
+    for unsupported in [
+        Command::CancelOrdersWithSymbols {
+            command: 1,
+            orders: vec![CancelOrderRef {
+                id: "unreconciled".into(),
+                symbol: "BTCUSDT".into(),
+            }],
+        },
+        Command::FetchStpMode { command: 1 },
+        Command::SetStpMode {
+            command: 1,
+            mode: StpMode::ExpireTaker,
+        },
+        Command::FetchAccount { command: 1 },
+        Command::FetchOrderBook {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            limit: Some(100),
+        },
+        Command::FetchLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        },
+    ] {
+        let mut e = engine();
+        let actions = command(&mut e, unsupported);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        assert!(done(&actions).unwrap_err().contains("unsupported"));
+        assert!(e.store().orders().is_empty());
     }
 }
 

@@ -111,6 +111,7 @@ fn order(symbol: &str, amount: f64) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: None,
         close: None,
+        stp_mode: None,
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,

@@ -1,0 +1,1216 @@
+//! Account reconciliation is split by state domain; failed or stale reads never clear it.
+use crate::sign::Query;
+use crate::{AsterDex, Pending};
+use safe_cex_engine::model::*;
+use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::{
+    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
+};
+use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent};
+use serde::Deserialize;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Default)]
+pub struct AccountState {
+    pub socket: Option<SocketId>,
+    open: bool,
+    last_received: f64,
+    watchdog: Option<TimerId>,
+    reconnect: Option<TimerId>,
+    keepalive: Option<TimerId>,
+    tick: Option<TimerId>,
+    positions_timer: Option<TimerId>,
+    orders_timer: Option<TimerId>,
+    balance_timer: Option<TimerId>,
+    last_positions: f64,
+    last_orders: f64,
+    last_balance: f64,
+    positions_in_flight: bool,
+    orders_in_flight: bool,
+    balance_in_flight: bool,
+    position_version: u64,
+    mode_version: u64,
+    balance_version: u64,
+    pub order_revision: u64,
+    last_event: f64,
+    executions: HashSet<(String, u64)>,
+    execution_order: VecDeque<(String, u64)>,
+    pub terminal: HashMap<String, (f64, Order)>,
+    canceled_ids: HashMap<String, f64>,
+    native_order_times: HashMap<String, f64>,
+    balances: HashMap<String, (f64, f64)>,
+    known_assets: HashSet<String>,
+    currencies: HashMap<String, Balance>,
+}
+
+pub enum Request {
+    Info {
+        command: u32,
+    },
+    ListenKey,
+    Keepalive,
+    Mode {
+        version: u64,
+    },
+    Balance {
+        version: u64,
+    },
+    Positions {
+        version: u64,
+        rows: Vec<Position>,
+        settings: Vec<(String, MarketSetting)>,
+        invalid: bool,
+    },
+    Orders {
+        version: u64,
+        rows: Vec<Order>,
+        invalid: bool,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OrderRow<'a> {
+    #[serde(flatten, borrow)]
+    pub row: OpenOrder<'a>,
+    #[serde(default = "new_status", borrow)]
+    pub status: Cow<'a, str>,
+    #[serde(default)]
+    pub time: f64,
+}
+fn new_status<'a>() -> Cow<'a, str> {
+    Cow::Borrowed("NEW")
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestPosition<'a> {
+    #[serde(flatten, borrow)]
+    row: wire::PositionRisk<'a>,
+    #[serde(default, borrow)]
+    margin_type: Cow<'a, str>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountResponse<'a> {
+    #[serde(default, borrow)]
+    assets: Vec<RestAsset<'a>>,
+    #[serde(borrow)]
+    total_wallet_balance: Cow<'a, str>,
+    #[serde(borrow)]
+    available_balance: Cow<'a, str>,
+    #[serde(borrow)]
+    total_initial_margin: Cow<'a, str>,
+    #[serde(borrow)]
+    total_open_order_initial_margin: Cow<'a, str>,
+    #[serde(borrow)]
+    total_unrealized_profit: Cow<'a, str>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestAsset<'a> {
+    #[serde(borrow)]
+    asset: Cow<'a, str>,
+    #[serde(default, borrow)]
+    wallet_balance: Option<Cow<'a, str>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mode {
+    dual_side_position: BoolValue,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BoolValue {
+    Bool(bool),
+    Text(String),
+}
+impl BoolValue {
+    fn value(self) -> Option<bool> {
+        match self {
+            Self::Bool(x) => Some(x),
+            Self::Text(x) if x == "true" => Some(true),
+            Self::Text(x) if x == "false" => Some(false),
+            _ => None,
+        }
+    }
+}
+
+pub fn order_type(text: &str) -> Option<OrderType> {
+    Some(match text {
+        "LIMIT" => OrderType::Limit,
+        "MARKET" => OrderType::Market,
+        "STOP" | "STOP_MARKET" => OrderType::StopLoss,
+        "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
+        "TRAILING_STOP" | "TRAILING_STOP_MARKET" => OrderType::TrailingStopLoss,
+        _ => return None,
+    })
+}
+pub fn order_side(text: &str) -> OrderSide {
+    if text == "SELL" {
+        OrderSide::Sell
+    } else {
+        OrderSide::Buy
+    }
+}
+pub fn time_in_force(text: &str) -> Option<TimeInForce> {
+    Some(match text {
+        "GTC" => TimeInForce::GoodTillCancel,
+        "IOC" => TimeInForce::ImmediateOrCancel,
+        "FOK" => TimeInForce::FillOrKill,
+        "GTX" => TimeInForce::PostOnly,
+        _ => return None,
+    })
+}
+pub fn position_id(symbol: &str, side: PositionSide, mode: PositionMode) -> String {
+    if mode == PositionMode::Oneway {
+        symbol.into()
+    } else {
+        format!(
+            "{symbol}:{}",
+            if side == PositionSide::Long {
+                "long"
+            } else {
+                "short"
+            }
+        )
+    }
+}
+fn side(ps: &str, amount: f64) -> PositionSide {
+    if ps == "SHORT" || (ps != "LONG" && amount < 0.0) {
+        PositionSide::Short
+    } else {
+        PositionSide::Long
+    }
+}
+fn status(text: &str) -> Option<OrderStatus> {
+    Some(match text {
+        "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
+        "FILLED" => OrderStatus::Closed,
+        "CANCELED" | "EXPIRED" | "REJECTED" | "EXPIRED_IN_MATCH" => OrderStatus::Canceled,
+        _ => return None,
+    })
+}
+fn finite(text: &str) -> Option<f64> {
+    let x = text.parse::<f64>().ok()?;
+    x.is_finite().then_some(x)
+}
+fn trigger(kind: OrderType, text: Option<&str>) -> Option<StopTriggerType> {
+    if !matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        return None;
+    }
+    match text {
+        Some("MARK_PRICE") => Some(StopTriggerType::MarkPrice),
+        Some("CONTRACT_PRICE") => Some(StopTriggerType::LastPrice),
+        _ => None,
+    }
+}
+pub(crate) fn order_from_wire(row: &OrderRow<'_>) -> Option<Order> {
+    let o = &row.row;
+    let kind = order_type(&o.kind)?;
+    let amount = finite(&o.orig_qty)?;
+    let filled = finite(&o.executed_qty)?;
+    let stop = o
+        .stop_price
+        .as_deref()
+        .and_then(finite)
+        .filter(|x| *x > 0.0);
+    Some(Order {
+        id: o.order_id.to_string(),
+        parent_id: None,
+        status: status(&row.status)?,
+        symbol: o.symbol.to_string(),
+        kind,
+        side: order_side(&o.side),
+        price: stop.unwrap_or(finite(&o.price)?),
+        amount,
+        filled,
+        remaining: (amount - filled).max(0.0),
+        reduce_only: o.close_position || o.reduce_only,
+        close: None,
+        client_order_id: o
+            .client_order_id
+            .as_deref()
+            .filter(|x| !x.is_empty())
+            .map(str::to_owned),
+        time_in_force: o.time_in_force.as_deref().and_then(time_in_force),
+        last_update: row.time,
+        trigger_type: trigger(kind, o.working_type.as_deref()),
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    })
+}
+pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
+    if let Ok(error) = serde_json::from_str::<wire::ErrorBody>(response.body)
+        && error.code < 0
+    {
+        let msg = if error.code == -5025
+            || error
+                .msg
+                .to_lowercase()
+                .contains("cannot found builder config")
+        {
+            "Aster builder attribution is not synced for this API key. Open your Aster API key settings, sync or enable the Tealstreet builder authorization, then reconnect the account and try again.".into()
+        } else {
+            error.msg.into_owned()
+        };
+        return Some((error.code, msg));
+    }
+    if (200..300).contains(&response.status) {
+        None
+    } else {
+        Some((0, format!("HTTP {}", response.status)))
+    }
+}
+
+impl AsterDex {
+    pub(crate) fn fetch_account_info(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
+        let path = if self.version == crate::sign::Version::V1 {
+            "/fapi/v4/account".into()
+        } else {
+            self.path("account")
+        };
+        self.signed(
+            cx,
+            Method::Get,
+            &path,
+            Query::new(),
+            Pending::Account(Request::Info { command }),
+        );
+    }
+    pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.refresh_balance(cx);
+        self.refresh_positions(cx);
+        self.request_refresh_orders(cx);
+        let path = self.path("positionSide/dual");
+        self.signed(
+            cx,
+            Method::Get,
+            &path,
+            Query::new(),
+            Pending::Account(Request::Mode {
+                version: self.account.mode_version,
+            }),
+        );
+        self.request_listen_key(cx);
+        self.account.tick = Some(cx.set_timer(3_000.0));
+    }
+    fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        let path = self.path("listenKey");
+        self.signed(
+            cx,
+            Method::Post,
+            &path,
+            Query::new(),
+            Pending::Account(Request::ListenKey),
+        );
+    }
+    /// A completed settings write invalidates older position/settings snapshots.
+    pub(crate) fn invalidate_position_settings(&mut self) {
+        self.account.position_version = self.account.position_version.wrapping_add(1);
+    }
+
+    pub(crate) fn on_mode_changed(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
+        cx.store.set_hedged(hedged);
+        self.account.mode_version = self.account.mode_version.wrapping_add(1);
+        self.account.position_version += 1;
+        self.refresh_positions(cx);
+    }
+    fn refresh_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.balance_in_flight {
+            return;
+        }
+        self.account.balance_in_flight = true;
+        let path = if self.version == crate::sign::Version::V1 {
+            "/fapi/v4/account".into()
+        } else {
+            self.path("account")
+        };
+        self.signed(
+            cx,
+            Method::Get,
+            &path,
+            Query::new(),
+            Pending::Account(Request::Balance {
+                version: self.account.balance_version,
+            }),
+        );
+    }
+    fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.positions_in_flight {
+            return;
+        }
+        self.account.positions_in_flight = true;
+        let path = self.path("positionRisk");
+        self.signed_streamed(
+            cx,
+            &path,
+            Query::new(),
+            Pending::Account(Request::Positions {
+                version: self.account.position_version,
+                rows: Vec::new(),
+                settings: Vec::new(),
+                invalid: false,
+            }),
+        );
+    }
+    pub(crate) fn request_refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_in_flight {
+            return;
+        }
+        self.account.orders_in_flight = true;
+        let path = self.path("openOrders");
+        self.signed_streamed(
+            cx,
+            &path,
+            Query::new(),
+            Pending::Account(Request::Orders {
+                version: self.account.order_revision,
+                rows: Vec::new(),
+                invalid: false,
+            }),
+        );
+    }
+    pub(crate) fn mark_order_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account.order_revision += 1;
+        self.account.canceled_ids.insert(id.into(), cx.now);
+        if cx
+            .store
+            .order(id)
+            .is_some_and(|o| o.status == OrderStatus::Closed)
+        {
+            return;
+        }
+        if let Some(mut order) = cx.store.order(id).cloned() {
+            order.status = OrderStatus::Canceled;
+            order.last_update = cx.now;
+            self.account
+                .terminal
+                .insert(id.into(), (cx.now, order.clone()));
+            cx.store.upsert_order(order);
+        }
+    }
+    pub(crate) fn on_account_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
+        match request {
+            Request::Orders { rows, invalid, .. } => match serde_json::from_str::<OrderRow>(item)
+                .ok()
+                .and_then(|o| order_from_wire(&o))
+            {
+                Some(o) => rows.push(o),
+                None => *invalid = true,
+            },
+            Request::Positions {
+                rows,
+                settings,
+                invalid,
+                ..
+            } => {
+                let Ok(p) = serde_json::from_str::<RestPosition>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                let r = p.row;
+                let values = [
+                    &*r.position_amt,
+                    &*r.entry_price,
+                    &*r.un_realized_profit,
+                    &*r.notional,
+                    &*r.liquidation_price,
+                ]
+                .map(finite);
+                let [
+                    Some(amount),
+                    Some(entry),
+                    Some(upnl),
+                    Some(notional),
+                    Some(liquidation),
+                ] = values
+                else {
+                    *invalid = true;
+                    return;
+                };
+                let leverage = r
+                    .leverage
+                    .filter(|x| x.is_finite() && *x > 0.0)
+                    .unwrap_or(0.0);
+                let margin = if p.margin_type.eq_ignore_ascii_case("isolated") {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                };
+                settings.push((
+                    r.symbol.to_string(),
+                    MarketSetting {
+                        leverage,
+                        margin_type: Some(margin),
+                        ..Default::default()
+                    },
+                ));
+                if amount == 0.0 {
+                    return;
+                }
+                let mode = if r.position_side == "BOTH" || r.position_side.is_empty() {
+                    PositionMode::Oneway
+                } else {
+                    PositionMode::Hedged
+                };
+                let side = side(&r.position_side, amount);
+                let id = position_id(&r.symbol, side, mode);
+                rows.push(Position {
+                    id: id.clone(),
+                    symbol: r.symbol.to_string(),
+                    side,
+                    entry_price: entry,
+                    notional,
+                    leverage: leverage.max(1.0),
+                    margin_type: Some(margin),
+                    position_mode: Some(mode),
+                    unrealized_pnl: upnl,
+                    realized_pnl: Some(
+                        cx.store
+                            .position(&id)
+                            .and_then(|p| p.realized_pnl)
+                            .unwrap_or(0.0),
+                    ),
+                    contracts: amount.abs(),
+                    liquidation_price: liquidation,
+                    margin_size: None,
+                    last_update: None,
+                });
+            }
+
+            _ => {}
+        }
+    }
+    pub(crate) fn on_account_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Result<Response<'_>, &str>,
+    ) {
+        let error = match &response {
+            Ok(r) => venue_error(r).map(|(_, m)| m),
+            Err(e) => Some((*e).into()),
+        };
+        let body = response.as_ref().map_or("", |r| r.body);
+        let valid = error.is_none();
+        match request {
+            Request::Info { command } => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Info {
+                    account_alias: Option<String>,
+                }
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Output {
+                    user_id: String,
+                }
+                let result = if let Some(error) = &error {
+                    Err(error.clone())
+                } else {
+                    serde_json::from_str::<Info>(body)
+                        .map_err(|e| e.to_string())
+                        .and_then(|info| {
+                            serde_json::to_string(&Output {
+                                user_id: info
+                                    .account_alias
+                                    .filter(|x| !x.is_empty())
+                                    .or_else(|| self.options.key.clone())
+                                    .unwrap_or_default(),
+                            })
+                            .map_err(|e| e.to_string())
+                        })
+                };
+                cx.done(command, result);
+            }
+            Request::ListenKey => {
+                if valid
+                    && let Ok(key) = serde_json::from_str::<ListenKey>(body)
+                    && !key.listen_key.is_empty()
+                {
+                    let base = if self.options.testnet {
+                        "wss://fstream5.asterdex-testnet.com"
+                    } else {
+                        "wss://fstream.asterdex.com"
+                    };
+                    if let Some(old) = self.account.socket.take() {
+                        cx.close(old);
+                    }
+                    self.account.socket = Some(cx.connect_channel(
+                        format!("{base}/ws/{}", key.listen_key),
+                        SocketChannel::Private,
+                    ));
+                    if let Some(t) = self.account.keepalive.take() {
+                        cx.clear_timer(t);
+                    }
+                    self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
+                } else {
+                    self.account.reconnect = Some(cx.set_timer(5_000.0));
+                }
+            }
+            Request::Keepalive => {
+                if valid {
+                    self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
+                } else {
+                    self.close_private(cx);
+                }
+            }
+            Request::Mode { version } => {
+                if valid
+                    && version == self.account.mode_version
+                    && let Ok(mode) = serde_json::from_str::<Mode>(body)
+                    && let Some(value) = mode.dual_side_position.value()
+                {
+                    cx.store.set_hedged(value);
+                }
+            }
+            Request::Balance { version } => {
+                self.account.balance_in_flight = false;
+                self.account.last_balance = cx.now;
+                if valid
+                    && version == self.account.balance_version
+                    && let Ok(r) = serde_json::from_str::<AccountResponse>(body)
+                {
+                    let values = [
+                        &*r.total_wallet_balance,
+                        &*r.available_balance,
+                        &*r.total_initial_margin,
+                        &*r.total_open_order_initial_margin,
+                        &*r.total_unrealized_profit,
+                    ]
+                    .map(finite);
+                    if let [
+                        Some(total),
+                        Some(free),
+                        Some(initial),
+                        Some(open),
+                        Some(upnl),
+                    ] = values
+                    {
+                        self.account.known_assets.extend(
+                            r.assets
+                                .iter()
+                                .filter(|a| {
+                                    a.wallet_balance
+                                        .as_deref()
+                                        .and_then(finite)
+                                        .is_some_and(|x| x != 0.0)
+                                })
+                                .map(|a| a.asset.to_string()),
+                        );
+                        cx.store.set_balance(Balance {
+                            total,
+                            free,
+                            used: initial + open,
+                            upnl,
+                        });
+                    }
+                }
+                if version != self.account.balance_version && self.account.balance_timer.is_none() {
+                    self.account.balance_timer = Some(cx.set_timer(1_000.0));
+                }
+            }
+            Request::Positions {
+                version,
+                rows,
+                settings,
+                invalid,
+            } => {
+                self.account.positions_in_flight = false;
+                self.account.last_positions = cx.now;
+                if valid && !invalid && version == self.account.position_version {
+                    cx.store.set_positions(rows);
+                    for (symbol, setting) in settings {
+                        cx.store.update_setting(&symbol, |s| *s = setting);
+                    }
+                } else if version != self.account.position_version
+                    && self.account.positions_timer.is_none()
+                {
+                    self.account.positions_timer = Some(cx.set_timer(1_000.0));
+                }
+            }
+            Request::Orders {
+                version,
+                mut rows,
+                invalid,
+            } => {
+                self.account.orders_in_flight = false;
+                self.account.last_orders = cx.now;
+                if valid && !invalid {
+                    if version != self.account.order_revision {
+                        // A snapshot predating a stream event cannot overwrite any order domain.
+                        if self.account.orders_timer.is_none() {
+                            self.account.orders_timer = Some(cx.set_timer(1_000.0));
+                        }
+                    } else {
+                        self.account
+                            .terminal
+                            .retain(|_, (at, _)| cx.now - *at < 60_000.0);
+                        self.account
+                            .canceled_ids
+                            .retain(|_, at| cx.now - *at < 60_000.0);
+                        rows.retain(|order| {
+                            order.status != OrderStatus::Open
+                                || !self.account.canceled_ids.contains_key(&order.id)
+                        });
+                        for (_, terminal) in self.account.terminal.values() {
+                            rows.retain(|o| o.id != terminal.id);
+                            rows.push(terminal.clone());
+                        }
+                        self.account
+                            .native_order_times
+                            .retain(|id, _| rows.iter().any(|o| &o.id == id));
+                        cx.store.set_orders(rows);
+                    }
+                }
+            }
+        }
+        if let Some(error) = error {
+            cx.log(LogLevel::Warning, format!("Aster account read: {error}"));
+        }
+    }
+    pub(crate) fn on_account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.open = true;
+        self.account.last_received = cx.now;
+        cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+        self.account.watchdog = Some(cx.set_timer(5_000.0));
+        self.request_refresh_orders(cx);
+        true
+    }
+    fn close_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(socket) = self.account.socket.take() {
+            cx.close(socket);
+        }
+        self.account.open = false;
+        if let Some(t) = self.account.watchdog.take() {
+            cx.clear_timer(t);
+        }
+        if self.account.reconnect.is_none() {
+            self.account.reconnect = Some(cx.set_timer(1_000.0));
+        }
+    }
+    pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.close_private(cx);
+        true
+    }
+    pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.reconnect == Some(timer) {
+            self.account.reconnect = None;
+            self.request_listen_key(cx);
+        } else if self.account.keepalive == Some(timer) {
+            self.account.keepalive = None;
+            let path = self.path("listenKey");
+            self.signed(
+                cx,
+                Method::Put,
+                &path,
+                Query::new(),
+                Pending::Account(Request::Keepalive),
+            );
+        } else if self.account.watchdog == Some(timer) {
+            self.account.watchdog = None;
+            if cx.now - self.account.last_received > 20_000.0 {
+                self.close_private(cx);
+            } else {
+                if let Some(socket) = self.account.socket {
+                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+                }
+                self.account.watchdog = Some(cx.set_timer(5_000.0));
+            }
+        } else if self.account.tick == Some(timer) {
+            self.account.tick = None;
+            if cx.now - self.account.last_balance >= 25_000.0 {
+                self.refresh_balance(cx);
+            }
+            if cx.now - self.account.last_positions >= 25_000.0 {
+                self.refresh_positions(cx);
+            }
+            if cx.now - self.account.last_orders >= 75_000.0 {
+                self.request_refresh_orders(cx);
+            }
+            self.account.tick = Some(cx.set_timer(3_000.0));
+        } else if self.account.positions_timer == Some(timer) {
+            self.account.positions_timer = None;
+            self.refresh_positions(cx);
+        } else if self.account.orders_timer == Some(timer) {
+            self.account.orders_timer = None;
+            self.request_refresh_orders(cx);
+        } else if self.account.balance_timer == Some(timer) {
+            self.account.balance_timer = None;
+            self.refresh_balance(cx);
+        } else {
+            return false;
+        }
+        true
+    }
+    pub(crate) fn on_account_message(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: SocketId,
+        text: &str,
+    ) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.last_received = cx.now;
+        #[derive(Deserialize)]
+        struct Head<'a> {
+            #[serde(borrow, default)]
+            e: Cow<'a, str>,
+        }
+        match serde_json::from_str::<Head>(text)
+            .ok()
+            .as_ref()
+            .map(|h| &*h.e)
+        {
+            Some("listenKeyExpired") => self.close_private(cx),
+            Some("ORDER_TRADE_UPDATE" | "executionReport") => self.on_order_event(cx, text),
+            Some("outboundAccountPosition") => self.on_legacy_balance(cx, text),
+            Some("ACCOUNT_UPDATE") => self.on_account_event(cx, text),
+            _ => {}
+        }
+        true
+    }
+    fn on_order_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        let o = if let Ok(event) = serde_json::from_str::<OrderUpdateEvent>(text) {
+            event.o
+        } else {
+            let Ok(event) = serde_json::from_str::<LegacyExecution>(text) else {
+                return;
+            };
+            wire::OrderUpdate {
+                i: event.i,
+                s: event.s,
+                side: event.side,
+                ot: None,
+                o: Some(event.kind),
+                status: event.status,
+                p: event.p,
+                sp: event.sp,
+                ap: None,
+                q: event.q,
+                z: event.z,
+                l: event.l,
+                last_price: event.last_price,
+                reduce_only: false,
+                close_position: false,
+                wt: None,
+                f: event.f,
+                c: event.c,
+                r: None,
+            }
+        };
+        let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type) else {
+            return;
+        };
+        let Some(status) = status(&o.status) else {
+            return;
+        };
+        let [Some(amount), Some(filled), Some(price)] = [&*o.q, &*o.z, &*o.p].map(finite) else {
+            return;
+        };
+        let id = o.i.to_string();
+        #[derive(Deserialize)]
+        struct TradeHead {
+            o: TradeIdentity,
+        }
+        #[derive(Deserialize)]
+        struct TradeIdentity {
+            #[serde(default)]
+            t: Option<u64>,
+        }
+        let execution = serde_json::from_str::<TradeHead>(text)
+            .ok()
+            .and_then(|h| h.o.t)
+            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
+        let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
+            .then(|| {
+                let qty = o.l.as_deref().and_then(finite).filter(|x| *x > 0.0)?;
+                let price = o
+                    .last_price
+                    .as_deref()
+                    .and_then(finite)
+                    .filter(|x| *x > 0.0)
+                    .or_else(|| o.ap.as_deref().and_then(finite).filter(|x| *x > 0.0))?;
+                Some((price, qty))
+            })
+            .flatten();
+        // Execution identity is independent of acceptance of its order-state update.
+        if let (Some(execution), Some((price, qty))) = (execution, fill) {
+            let key = (id.clone(), execution);
+            if self.account.executions.insert(key.clone()) {
+                self.account.execution_order.push_back(key);
+                while self.account.execution_order.len() > 10_000 {
+                    if let Some(old) = self.account.execution_order.pop_front() {
+                        self.account.executions.remove(&old);
+                    }
+                }
+                cx.fill(Fill {
+                    order_id: id.clone(),
+                    symbol: o.s.to_string(),
+                    side: order_side(&o.side),
+                    price,
+                    amount: qty,
+                });
+            }
+        }
+        if status == OrderStatus::Open
+            && (self.account.terminal.contains_key(&id)
+                || self.account.canceled_ids.contains_key(&id))
+        {
+            return;
+        }
+        #[derive(Deserialize)]
+        struct EventTime {
+            #[serde(rename = "E", default)]
+            time: Option<f64>,
+        }
+        let time = serde_json::from_str::<EventTime>(text)
+            .ok()
+            .and_then(|e| e.time)
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .unwrap_or(cx.now);
+        if self
+            .account
+            .native_order_times
+            .get(&id)
+            .is_some_and(|old| *old > time)
+        {
+            return;
+        }
+        let previous_filled = cx.store.order(&id).map_or(0.0, |prev| prev.filled);
+        if filled < previous_filled
+            || cx.store.order(&id).is_some_and(|prev| {
+                prev.status == OrderStatus::Closed && status != OrderStatus::Closed
+            })
+        {
+            return;
+        }
+        self.account.native_order_times.insert(id.clone(), time);
+        self.account.order_revision += 1;
+        let stop = o.sp.as_deref().and_then(finite).filter(|x| *x > 0.0);
+        let order = Order {
+            id: id.clone(),
+            parent_id: None,
+            status,
+            symbol: o.s.to_string(),
+            kind,
+            side: order_side(&o.side),
+            price: stop.unwrap_or(price),
+            amount,
+            filled,
+            remaining: (amount - filled).max(0.0),
+            reduce_only: o.reduce_only || o.close_position,
+            close: None,
+            client_order_id: o.c.as_deref().filter(|x| !x.is_empty()).map(str::to_owned),
+            time_in_force: o.f.as_deref().and_then(time_in_force),
+            last_update: time,
+            trigger_type: trigger(kind, o.wt.as_deref()),
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        if !self.account.terminal.contains_key(&id) || status != OrderStatus::Open {
+            cx.store.upsert_order(order.clone());
+        }
+        if status != OrderStatus::Open {
+            self.account.terminal.insert(id.clone(), (cx.now, order));
+        }
+        if execution.is_none()
+            && filled > previous_filled
+            && let Some((price, qty)) = fill
+        {
+            cx.fill(Fill {
+                order_id: id,
+                symbol: o.s.to_string(),
+                side: order_side(&o.side),
+                price,
+                amount: qty,
+            });
+        }
+        if let Some(t) = self.account.orders_timer.take() {
+            cx.clear_timer(t);
+        }
+        self.account.orders_timer = Some(cx.set_timer(10_000.0));
+    }
+    fn on_account_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        let Ok(event) = serde_json::from_str::<AccountEvent>(text) else {
+            return;
+        };
+        if !event.time.is_finite()
+            || event.time.fract() != 0.0
+            || event.time <= self.account.last_event
+            || event.time <= 0.0
+            || event.time > 9_007_199_254_740_991.0
+        {
+            return;
+        }
+        if event.a.positions.iter().any(|p| {
+            p.s.is_empty()
+                || [&*p.pa, &*p.ep, &*p.up, &*p.cr]
+                    .into_iter()
+                    .any(|x| finite(x).is_none())
+        }) || event.a.balances.iter().any(|b| {
+            b.a.is_empty()
+                || finite(&b.wb).is_none()
+                || finite(&b.cw).is_none()
+                || finite(&b.wb)
+                    .zip(finite(&b.cw))
+                    .is_some_and(|(total, free)| total < free)
+        }) {
+            return;
+        }
+        self.account.last_event = event.time;
+        self.account.balance_version += 1;
+        let mut delta = 0.0;
+        let mut asset_deltas = HashMap::<String, f64>::new();
+        let mut positions = cx.store.positions().to_vec();
+        if !event.a.positions.is_empty() {
+            self.account.position_version += 1;
+        }
+        for p in event.a.positions {
+            let amount = num::parse(&p.pa);
+            let side = side(&p.ps, amount);
+            let mode = if p.ps == "BOTH" {
+                PositionMode::Oneway
+            } else {
+                PositionMode::Hedged
+            };
+            let id = position_id(&p.s, side, mode);
+            let previous = positions.iter().find(|old| old.id == id).cloned();
+            let change =
+                num::parse(&p.up) - previous.as_ref().map_or(0.0, |old| old.unrealized_pnl);
+            let asset = self
+                .account
+                .currencies
+                .keys()
+                .find(|a| p.s.ends_with(a.as_str()))
+                .cloned()
+                .or_else(|| p.s.ends_with("USDT").then(|| "USDT".to_string()));
+            if let Some(asset) = asset {
+                *asset_deltas.entry(asset).or_default() += change;
+            }
+            if p.s.ends_with("USDT") {
+                delta += change;
+            }
+            positions.retain(|old| {
+                if mode == PositionMode::Oneway {
+                    old.symbol != p.s
+                } else {
+                    old.id != id
+                }
+            });
+            if amount != 0.0 {
+                let setting = cx.store.setting(&p.s).unwrap_or_default();
+                let entry = num::parse(&p.ep);
+                let mut next = previous.unwrap_or(Position {
+                    id,
+                    symbol: p.s.to_string(),
+                    side,
+                    entry_price: entry,
+                    notional: 0.0,
+                    leverage: setting.leverage,
+                    margin_type: setting.margin_type,
+                    position_mode: Some(mode),
+                    unrealized_pnl: 0.0,
+                    realized_pnl: Some(0.0),
+                    contracts: 0.0,
+                    liquidation_price: 0.0,
+                    margin_size: None,
+                    last_update: None,
+                });
+                next.side = side;
+                next.position_mode = Some(mode);
+                next.contracts = amount.abs();
+                next.entry_price = entry;
+                next.notional = amount.abs() * entry;
+                next.unrealized_pnl = num::parse(&p.up);
+                next.realized_pnl = Some(num::parse(&p.cr));
+                positions.push(next);
+            }
+        }
+        cx.store.set_positions(positions);
+        let multi = event.a.balances.iter().any(|b| b.a != "USDT")
+            || self.account.balances.keys().any(|a| a != "USDT")
+            || self.account.known_assets.iter().any(|a| a != "USDT");
+        let mut root = cx.store.balance().clone();
+        for b in event.a.balances {
+            let total = num::parse(&b.wb);
+            let free = num::parse(&b.cw);
+            self.account.balances.insert(b.a.to_string(), (total, free));
+            let bucket = self.account.currencies.entry(b.a.to_string()).or_default();
+            bucket.total = total;
+            bucket.free = free;
+            bucket.used = total - free;
+            bucket.upnl += asset_deltas.get(b.a.as_ref()).copied().unwrap_or(0.0);
+            if b.a == "USDT" && !multi {
+                root.total = total;
+                root.free = free;
+                root.used = total - free;
+            }
+        }
+        if !multi {
+            root.upnl += delta;
+            cx.store.set_balance(root);
+        }
+        self.commit_currencies(cx);
+        if multi && self.account.balance_timer.is_none() {
+            self.account.balance_timer = Some(cx.set_timer(1_000.0));
+        }
+        if self.account.positions_timer.is_none() {
+            self.account.positions_timer = Some(cx.set_timer(1_000.0));
+        }
+    }
+    fn commit_currencies(&self, cx: &mut Cx<'_, Pending>) {
+        let mut currencies = self
+            .account
+            .currencies
+            .iter()
+            .map(|(currency, balance)| CurrencyBalance {
+                currency: currency.clone(),
+                balance: balance.clone(),
+            })
+            .collect::<Vec<_>>();
+        currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
+        cx.store.set_currency_balances(currencies);
+    }
+    fn on_legacy_balance(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        let Ok(event) = serde_json::from_str::<LegacyBalances>(text) else {
+            return;
+        };
+        if event.balances.iter().any(|b| {
+            b.a.is_empty()
+                || finite(&b.f).is_none()
+                || finite(&b.l).is_none()
+                || finite(&b.l).is_some_and(|used| used < 0.0)
+        }) {
+            return;
+        }
+        self.account.balance_version += 1;
+        for b in event.balances {
+            let free = num::parse(&b.f);
+            let used = num::parse(&b.l);
+            let total = free + used;
+            self.account.balances.insert(b.a.to_string(), (total, free));
+            let bucket = self.account.currencies.entry(b.a.to_string()).or_default();
+            bucket.total = total;
+            bucket.free = free;
+            bucket.used = used;
+        }
+        self.commit_currencies(cx);
+        let multi = self
+            .account
+            .balances
+            .keys()
+            .chain(self.account.known_assets.iter())
+            .any(|a| a != "USDT");
+        if !multi && let Some((total, free)) = self.account.balances.get("USDT") {
+            let mut balance = cx.store.balance().clone();
+            balance.total = *total;
+            balance.free = *free;
+            balance.used = total - free;
+            cx.store.set_balance(balance);
+        }
+        if multi && self.account.balance_timer.is_none() {
+            self.account.balance_timer = Some(cx.set_timer(1000.0));
+        }
+    }
+}
+#[derive(Deserialize)]
+struct AccountEvent<'a> {
+    #[serde(rename = "E")]
+    time: f64,
+    #[serde(borrow)]
+    a: AccountDelta<'a>,
+}
+#[derive(Deserialize)]
+struct AccountDelta<'a> {
+    #[serde(rename = "B", borrow, default)]
+    balances: Vec<AssetDelta<'a>>,
+    #[serde(rename = "P", borrow, default)]
+    positions: Vec<PositionDelta<'a>>,
+}
+#[derive(Deserialize)]
+struct AssetDelta<'a> {
+    #[serde(borrow)]
+    a: Cow<'a, str>,
+    #[serde(borrow)]
+    wb: Cow<'a, str>,
+    #[serde(borrow)]
+    cw: Cow<'a, str>,
+}
+#[derive(Deserialize)]
+struct PositionDelta<'a> {
+    #[serde(borrow)]
+    s: Cow<'a, str>,
+    #[serde(borrow)]
+    pa: Cow<'a, str>,
+    #[serde(borrow)]
+    ep: Cow<'a, str>,
+    #[serde(borrow)]
+    up: Cow<'a, str>,
+    #[serde(borrow)]
+    ps: Cow<'a, str>,
+    #[serde(borrow, default = "zero")]
+    cr: Cow<'a, str>,
+}
+fn zero<'a>() -> Cow<'a, str> {
+    Cow::Borrowed("0")
+}
+
+#[derive(Deserialize)]
+struct LegacyExecution<'a> {
+    i: u64,
+    #[serde(borrow)]
+    s: Cow<'a, str>,
+    #[serde(rename = "S", borrow)]
+    side: Cow<'a, str>,
+    #[serde(rename = "o", borrow)]
+    kind: Cow<'a, str>,
+    #[serde(rename = "X", borrow)]
+    status: Cow<'a, str>,
+    #[serde(borrow)]
+    p: Cow<'a, str>,
+    #[serde(rename = "P", borrow, default)]
+    sp: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    q: Cow<'a, str>,
+    #[serde(borrow)]
+    z: Cow<'a, str>,
+    #[serde(borrow, default)]
+    l: Option<Cow<'a, str>>,
+    #[serde(rename = "L", borrow, default)]
+    last_price: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    f: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    c: Option<Cow<'a, str>>,
+}
+#[derive(Deserialize)]
+struct LegacyBalances<'a> {
+    #[serde(rename = "B", borrow)]
+    balances: Vec<LegacyAsset<'a>>,
+}
+#[derive(Deserialize)]
+struct LegacyAsset<'a> {
+    #[serde(borrow)]
+    a: Cow<'a, str>,
+    #[serde(borrow)]
+    f: Cow<'a, str>,
+    #[serde(borrow)]
+    l: Cow<'a, str>,
+}
