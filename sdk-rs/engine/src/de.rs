@@ -27,6 +27,12 @@ pub fn number_or_zero<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> 
     Ok(decode(d, Policy::OR_ZERO)?.unwrap_or(0.0))
 }
 
+/// Blank reads as 0 (TS `Number("")`); null and malformed are errors, so a
+/// public discovery row with a bad field is skipped rather than zeroed.
+pub fn number_or_blank_zero<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    decode(d, Policy::BLANK_ZERO)?.ok_or_else(|| D::Error::custom("missing number"))
+}
+
 /// Lenient: a blank or malformed string reads as 0, so one bad field never
 /// discards its row. Null is still an error.
 pub fn lenient_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -74,6 +80,10 @@ impl Policy {
     };
     const OR_ZERO: Self = Self {
         null: Ok(Some(0.0)),
+        blank: Ok(Some(0.0)),
+        ..Self::STRICT
+    };
+    const BLANK_ZERO: Self = Self {
         blank: Ok(Some(0.0)),
         ..Self::STRICT
     };
@@ -153,6 +163,8 @@ mod tests {
         or_blank: Option<f64>,
         #[serde(default, deserialize_with = "number_or_zero")]
         or_zero: f64,
+        #[serde(default, deserialize_with = "number_or_blank_zero")]
+        blank_zero: f64,
         #[serde(default, deserialize_with = "lenient_number")]
         lenient: f64,
         #[serde(default, deserialize_with = "lenient_optional_number")]
@@ -168,13 +180,14 @@ mod tests {
         for raw in ["1.5", "\"1.5\"", "\" 1.5 \"", "\"1.5e0\"", "\"+1.5\""] {
             let row: Row = serde_json::from_str(&format!(
                 "{{\"strict\":{raw},\"optional\":{raw},\"or_blank\":{raw},\"or_zero\":{raw},\
-                 \"lenient\":{raw},\"lenient_optional\":{raw}}}"
+                 \"blank_zero\":{raw},\"lenient\":{raw},\"lenient_optional\":{raw}}}"
             ))
             .unwrap();
             assert_eq!(row.strict, 1.5);
             assert_eq!(row.optional, Some(1.5));
             assert_eq!(row.or_blank, Some(1.5));
             assert_eq!(row.or_zero, 1.5);
+            assert_eq!(row.blank_zero, 1.5);
             assert_eq!(row.lenient, 1.5);
             assert_eq!(row.lenient_optional, Some(1.5));
         }
@@ -194,17 +207,19 @@ mod tests {
         let read = |row: Row, name: &str| match name {
             "strict" => Some(row.strict),
             "or_zero" => Some(row.or_zero),
+            "blank_zero" => Some(row.blank_zero),
             "lenient" => Some(row.lenient),
             "optional" => Some(row.optional.unwrap_or(f64::NAN)),
             "or_blank" => Some(row.or_blank.unwrap_or(f64::NAN)),
             _ => Some(row.lenient_optional.unwrap_or(f64::NAN)),
         };
         let absent = f64::NAN;
-        let cases: [Case; 6] = [
+        let cases: [Case; 7] = [
             ("strict", None, None, None),
             ("optional", Some(absent), None, None),
             ("or_blank", Some(absent), Some(absent), None),
             ("or_zero", Some(0.0), Some(0.0), None),
+            ("blank_zero", None, Some(0.0), None),
             ("lenient", None, Some(0.0), Some(0.0)),
             ("lenient_optional", Some(absent), Some(absent), Some(absent)),
         ];
@@ -230,7 +245,7 @@ mod tests {
 
     #[test]
     fn non_numeric_json_is_always_an_error() {
-        for name in ["strict", "lenient", "lenient_optional"] {
+        for name in ["strict", "blank_zero", "lenient", "lenient_optional"] {
             for raw in ["true", "[]", "{}"] {
                 assert!(field(name, raw).is_err(), "{name} {raw}");
             }

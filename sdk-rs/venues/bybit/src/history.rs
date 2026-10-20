@@ -80,7 +80,7 @@ struct Income {
     #[serde(skip_serializing_if = "Option::is_none")]
     trade_id: Option<String>,
     category: &'static str,
-    /// Native row identity: equal for page repeats, distinct for real legs.
+    /// Native row identity: equal for page repeats, distinct for hedge legs.
     #[serde(skip)]
     source: String,
 }
@@ -136,8 +136,8 @@ impl Rows {
             }
             Self::Income(rows) => {
                 rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
-                // Exact page repeats collapse; distinct native rows sharing an id
-                // (same-instant hedge funding legs) get their leg appended instead.
+                // Exact page repeats collapse. Hedge legs share TS's id (as TS emits
+                // them) but differ in `source`, so both survive.
                 let mut seen = HashSet::new();
                 rows.retain(|row| {
                     seen.insert((
@@ -147,19 +147,6 @@ impl Rows {
                         row.source.clone(),
                     ))
                 });
-                let mut sources: HashMap<&str, HashSet<&str>> = HashMap::new();
-                for row in rows.iter() {
-                    sources.entry(&row.tran_id).or_default().insert(&row.source);
-                }
-                let shared: HashSet<String> = sources
-                    .into_iter()
-                    .filter(|(_, legs)| legs.len() > 1)
-                    .map(|(id, _)| id.to_owned())
-                    .collect();
-                for row in rows.iter_mut().filter(|row| shared.contains(&row.tran_id)) {
-                    let (id, suffix) = row.tran_id.rsplit_once(':').unwrap_or((&row.tran_id, ""));
-                    row.tran_id = format!("{id}-{}:{suffix}", row.source.replace('|', "-"));
-                }
                 if cap > 0 {
                     rows.truncate(cap);
                 }
@@ -275,8 +262,8 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     let symbol = present(&row.symbol).unwrap_or_default();
     let asset = present(&row.currency).unwrap_or("USDT");
     let trade_id = present(&row.trade_id);
-    // TS's id shape, kept so stored records stay matched; `source` separates
-    // hedge legs that share it (see `Rows::json`).
+    // Exactly TS's id, so pre/post-cutover rows key identically; same-instant
+    // hedge legs share it there too; `source` tells them from page repeats.
     let base: Vec<&str> = [
         trade_id.or(present(&row.order_id)).unwrap_or_default(),
         symbol,

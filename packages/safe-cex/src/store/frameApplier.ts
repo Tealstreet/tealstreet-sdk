@@ -40,6 +40,21 @@ export class FrameApplier {
   private contractSizes: number[] = [];
   private readonly invalidMarketFrames = new WeakSet<Frame>();
   private marketsNeedSnapshot = false;
+  private appliedSections = 0;
+
+  /** STATUS flags cannot prove that a section survived frame decoding. */
+  get hasMarketIdentity(): boolean {
+    return !this.marketsNeedSnapshot && (this.appliedSections & LOADED_FLAG.MARKETS) !== 0;
+  }
+
+  get hasAccountState(): boolean {
+    const required = LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS;
+    return (this.appliedSections & required) === required;
+  }
+
+  get hasTickerState(): boolean {
+    return (this.appliedSections & LOADED_FLAG.TICKERS) !== 0;
+  }
 
   constructor(
     private readonly store: Store,
@@ -54,10 +69,11 @@ export class FrameApplier {
     const update: Writable<StoreUpdate> = {};
 
     const errors: unknown[] = [];
-    const attempt = (read: () => void) => {
+    const attempt = (read: () => void, section = 0) => {
       try {
         read();
       } catch (error) {
+        this.appliedSections &= ~section;
         errors.push(error);
       }
     };
@@ -69,7 +85,7 @@ export class FrameApplier {
     const resolveSymbol = (market: number, fallback?: string) => symbols[market] ?? fallback ?? '';
     attempt(() => {
       markets = frame.markets();
-    });
+    }, LOADED_FLAG.MARKETS);
     attempt(() => {
       if (markets) {
         const predictionMarkets = frame.predictionMarkets?.();
@@ -187,7 +203,7 @@ export class FrameApplier {
         ids = rows.map((row) => row.id);
         contractSizes = nextContractSizes;
       }
-    });
+    }, LOADED_FLAG.MARKETS);
 
     const marketsFailed = errors.length > 0 || (this.marketsNeedSnapshot && !update.markets);
     this.marketsNeedSnapshot = marketsFailed;
@@ -218,7 +234,7 @@ export class FrameApplier {
         }
         update.tickers = rows;
       }
-    });
+    }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
@@ -246,7 +262,7 @@ export class FrameApplier {
         }
         update.tickerDeltas = packed;
       }
-    });
+    }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
@@ -361,7 +377,7 @@ export class FrameApplier {
         }
         update.orders = rows;
       }
-    });
+    }, LOADED_FLAG.ORDERS);
 
     attempt(() => {
       if (marketsFailed) return;
@@ -450,12 +466,12 @@ export class FrameApplier {
         }
         update.positions = rows;
       }
-    });
+    }, LOADED_FLAG.POSITIONS);
 
     attempt(() => {
       const balance = frame.balance();
       if (balance) update.balance = { ...this.store.balance, ...balance };
-    });
+    }, LOADED_FLAG.BALANCE);
 
     attempt(() => {
       const status = frame.status();
@@ -511,6 +527,13 @@ export class FrameApplier {
     this.marketSymbols = symbols;
     this.marketIds = ids;
     this.contractSizes = contractSizes;
+    // Install proof before notifying startup waiters. Empty validated tables
+    // count; rejected sections leave independent accepted peers usable.
+    if (update.markets && !marketsFailed) this.appliedSections |= LOADED_FLAG.MARKETS;
+    if (update.orders) this.appliedSections |= LOADED_FLAG.ORDERS;
+    if (update.positions) this.appliedSections |= LOADED_FLAG.POSITIONS;
+    if (update.balance) this.appliedSections |= LOADED_FLAG.BALANCE;
+    if (update.tickers) this.appliedSections |= LOADED_FLAG.TICKERS;
 
     let changed = false;
     for (const _key in update) {
@@ -529,6 +552,7 @@ export class FrameApplier {
   }
 
   invalidateMarketIdentity(): void {
+    this.appliedSections &= ~(LOADED_FLAG.MARKETS | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS | LOADED_FLAG.TICKERS);
     this.marketsNeedSnapshot = true;
     this.bookStates.clear();
   }

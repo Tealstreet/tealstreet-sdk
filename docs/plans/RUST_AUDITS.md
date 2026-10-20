@@ -544,9 +544,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   fills (`history.rs:984,867`).~~ Forced-close suffixes and absent profit now map.
   One bad market row or a transient error halts startup with no retry
   (`lib.rs:552,684`) — left to the startup/broker lane.
-  ~~One unmappable row discards the positions/orders snapshot
-  (`account.rs:505,806`).~~ Typed rows skip/log independently; malformed reads
-  and wholly unmappable nonempty snapshots preserve known state.
+  One unmappable REST row still prevents good-peer positions/orders refresh
+  (`account.rs::account_item`). Public-startup integration restores the prior
+  whole scope because the incoming all-unmappable-only guard could delete owned
+  exposure/protection when another peer mapped. Identity-preserving row merges
+  remain pending in the private-row follow-up; valid private stream peers can
+  still apply independently.
 - Low: ~~zero-lot order rejects the whole batch; commands before the account probe
   rejected; sized stop silently becomes full-position; WS-triggered Classic
   refresh dropped while another is in flight; `"0"` leverage limits make `clamp`
@@ -665,8 +668,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   rows are skipped/logged while malformed identities retain prior snapshots.
 - Medium: ~~full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
   single order uses the batch path paced 1.5 s (`trading.rs:451`)~~;
-  startup halts on tickers/markets/position-mode/plan-list failures
-  (cross-venue startup lane; not changed by the venue-highs lane).
+  startup halts on tickers/markets/~~position-mode/plan-list~~ failures
+  (tickers/markets: public-startup PR). Reverified: mode and plan-list failures
+  retry every 2 s and a failed plan read publishes no normal-only list; a refused
+  key (602/401/402/406/70x or HTTP 401/403) now fails startup instead of retrying.
 - Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
   refused by the adapter.
 

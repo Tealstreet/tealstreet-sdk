@@ -236,10 +236,18 @@ fn private_connection_that_never_opens_is_closed_and_backed_off() {
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, support::MARKETS);
-    let request = support::requests(&mut e).remove(0);
+    // Private startup begins at markets, so its socket may connect before tickers.
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    let request = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/api/v1/contract/ticker") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
     support::response(&mut e, &request, support::TICKERS);
+    actions.extend(e.drain_actions());
     let now = 100.0;
-    let actions: Vec<_> = e.drain_actions().collect();
     let (index, socket) = actions
         .iter()
         .enumerate()

@@ -127,7 +127,8 @@ fn malformed_encoded_arrays_are_skipped_and_incomplete_page_is_atomic() {
     let mut h = H::new();
     h.response("/markets",200,r#"[{"conditionId":"x","slug":"bad","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\"]"}]"#);
     assert!(h.e.store().markets().is_empty());
-    assert!(h.e.store().loaded().markets);
+    // An entirely unusable catalogue retries instead of committing an empty one.
+    assert!(!h.e.store().loaded().markets);
 }
 #[test]
 fn malformed_gamma_rows_are_skipped_and_null_optional_fields_default() {
@@ -208,7 +209,7 @@ fn failed_midpoint_read_retries_the_same_batch_until_tickers_seed() {
     assert_eq!(h.e.store().markets().len(), 2);
 }
 #[test]
-fn market_retry_backoff_grows_by_a_second_and_caps_at_thirty() {
+fn market_retry_backoff_doubles_and_caps_at_thirty_seconds() {
     let mut h = H::new();
     let mut delays = vec![];
     for _ in 0..33 {
@@ -218,8 +219,12 @@ fn market_retry_backoff_grows_by_a_second_and_caps_at_thirty() {
         h.now = at_ms;
         h.event(Event::TimerFired { timer });
     }
-    assert_eq!(&delays[..3], &[1000.0, 2000.0, 3000.0]);
-    assert!(delays[29..].iter().all(|d| *d == 30000.0));
+    // Shared engine discovery backoff: doubling from one second, capped at thirty.
+    assert_eq!(
+        &delays[..6],
+        &[1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0]
+    );
+    assert!(delays[5..].iter().all(|d| *d == 30000.0));
     assert_eq!(h.http.len(), 1);
 }
 #[test]
@@ -570,6 +575,242 @@ fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_in
         e.start(0.0);
         assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
     }
+}
+
+#[test]
+fn rejected_midpoints_keep_prior_quotes_retry_and_allow_valid_peers() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    h.e.store_mut()
+        .set_tickers(vec![safe_cex_engine::model::Ticker {
+            id: TOKEN.into(),
+            symbol: "election-Yes".into(),
+            last: 0.4,
+            mark: 0.4,
+            ..Default::default()
+        }]);
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"bad","2":"0.6"}}"#),
+    );
+    assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
+    assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
+    let timer = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 1000.0)
+        .unwrap()
+        .0;
+    h.now += 1000.0;
+    h.event(Event::TimerFired { timer });
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"still bad","2":"also bad"}}"#),
+    );
+    assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.4);
+    assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.6);
+    let timer = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 2000.0)
+        .unwrap()
+        .0;
+    h.now += 2000.0;
+    h.event(Event::TimerFired { timer });
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"0.7","2":"0.3"}}"#),
+    );
+    assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.7);
+    assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.3);
+}
+
+#[test]
+fn late_midpoint_seeds_preserve_only_supplied_live_quote_fields() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    h.subscribe();
+    h.message(&format!(r#"{{"event_type":"price_change","timestamp":"101","price_changes":[{{"asset_id":"{TOKEN}","price":"0.4","size":"1","side":"BUY","best_bid":"0.4","best_ask":"0.8"}}]}}"#));
+    h.message(
+        r#"{"event_type":"last_trade_price","asset_id":"2","price":"0.9","timestamp":"102"}"#,
+    );
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"0.5","2":"bad"}}"#),
+    );
+    let yes = h.e.store().ticker("election-Yes").unwrap();
+    assert_eq!((yes.bid, yes.ask, yes.last), (0.4, 0.8, 0.5));
+    assert!((yes.mark - 0.6).abs() < 1e-12);
+    assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.9);
+    let timer = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 1000.)
+        .unwrap()
+        .0;
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer });
+    h.message(
+        r#"{"event_type":"last_trade_price","asset_id":"2","price":"0.8","timestamp":"103"}"#,
+    );
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"0.3","2":"0.7"}}"#),
+    );
+    let yes = h.e.store().ticker("election-Yes").unwrap();
+    assert_eq!((yes.bid, yes.ask, yes.last), (0.4, 0.8, 0.3));
+    assert!((yes.mark - 0.6).abs() < 1e-12);
+    let no = h.e.store().ticker("election-No").unwrap();
+    assert_eq!((no.last, no.mark), (0.8, 0.7));
+}
+
+#[test]
+fn failed_midpoint_batch_retries_without_blocking_or_repeating_later_batches() {
+    let mut h = H::new();
+    // One condition with 101 outcomes exercises the 100-token CLOB batch seam
+    // without introducing an unrelated Gamma pagination cursor.
+    let tokens: Vec<_> = (1..=101).map(|n| n.to_string()).collect();
+    let outcomes: Vec<_> = (1..=101).map(|n| format!("Outcome{n}")).collect();
+    let markets = serde_json::json!([{
+        "conditionId":"0xbatch", "slug":"batch", "question":"Batch?",
+        "clobTokenIds": serde_json::to_string(&tokens).unwrap(),
+        "outcomes": serde_json::to_string(&outcomes).unwrap(),
+        "orderPriceMinTickSize":0.01, "orderMinSize":5,
+        "active":true,"closed":false
+    }])
+    .to_string();
+    h.response("/markets", 200, &markets);
+    assert_eq!(h.e.store().markets().len(), 101);
+    let first = h
+        .http
+        .iter()
+        .find(|r| r.url.contains("/midpoints"))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(first.body.as_ref().unwrap())
+            .unwrap()
+            .len(),
+        100
+    );
+    h.response("/midpoints", 200, r#"{"1":"0.5","2":"bad","101":"0.99"}"#);
+    assert_eq!(h.e.store().ticker("batch-Outcome1").unwrap().last, 0.5);
+    assert!(h.e.store().ticker("batch-Outcome101").is_none());
+    let last = h
+        .http
+        .iter()
+        .find(|r| r.url.contains("/midpoints"))
+        .unwrap();
+    assert_eq!(last.body.as_deref(), Some(r#"[{"token_id":"101"}]"#));
+    h.response("/midpoints", 200, r#"{"101":"0.7"}"#);
+    assert_eq!(h.e.store().ticker("batch-Outcome101").unwrap().last, 0.7);
+    let timer = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 1000.)
+        .unwrap()
+        .0;
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer });
+    let retry = h
+        .http
+        .iter()
+        .find(|r| r.url.contains("/midpoints"))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(retry.body.as_ref().unwrap())
+            .unwrap()
+            .len(),
+        100
+    );
+    let recovered: serde_json::Map<_, _> = tokens[..100]
+        .iter()
+        .map(|id| (id.clone(), serde_json::json!("0.4")))
+        .collect();
+    h.response(
+        "/midpoints",
+        200,
+        &serde_json::to_string(&recovered).unwrap(),
+    );
+    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
+    assert_eq!(h.e.store().tickers().len(), 101);
+    assert_eq!(h.e.store().ticker("batch-Outcome1").unwrap().last, 0.4);
+    assert_eq!(h.e.store().ticker("batch-Outcome101").unwrap().last, 0.7);
+}
+
+#[test]
+fn omitted_midpoint_is_an_unseeded_token_not_a_failed_batch() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    // CLOB omits tokens without a book; the batch is still complete.
+    h.response("/midpoints", 200, &format!(r#"{{"{TOKEN}":"0.5"}}"#));
+    assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.5);
+    assert!(h.e.store().ticker("election-No").is_none());
+    assert!(h.e.store().loaded().tickers);
+    h.now += 60_000.;
+    let due: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= h.now)
+        .map(|(timer, _)| *timer)
+        .collect();
+    for timer in due {
+        h.event(Event::TimerFired { timer });
+    }
+    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
+}
+
+fn no_midpoint_retry_after(h: &mut H, ms: f64) {
+    h.now += ms;
+    let due: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= h.now)
+        .map(|(timer, _)| *timer)
+        .collect();
+    for timer in due {
+        h.event(Event::TimerFired { timer });
+    }
+    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
+}
+
+#[test]
+fn well_formed_empty_midpoint_batch_is_complete_not_retried() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    // Every token is book-less: a well-formed `{}` rejects nothing.
+    h.response("/midpoints", 200, "{}");
+    assert!(
+        h.e.store()
+            .ticker("election-Yes")
+            .is_none_or(|t| t.last == 0.0)
+    );
+    no_midpoint_retry_after(&mut h, 60_000.);
+}
+
+#[test]
+fn trailing_batch_of_bookless_tokens_finishes_startup_without_retrying() {
+    let mut h = H::new();
+    let tokens: Vec<_> = (1..=101).map(|n| n.to_string()).collect();
+    let outcomes: Vec<_> = (1..=101).map(|n| format!("Outcome{n}")).collect();
+    let markets = serde_json::json!([{
+        "conditionId":"0xbatch", "slug":"batch", "question":"Batch?",
+        "clobTokenIds": serde_json::to_string(&tokens).unwrap(),
+        "outcomes": serde_json::to_string(&outcomes).unwrap(),
+        "orderPriceMinTickSize":0.01, "orderMinSize":5,
+        "active":true,"closed":false
+    }])
+    .to_string();
+    h.response("/markets", 200, &markets);
+    h.response("/midpoints", 200, r#"{"1":"0.5"}"#);
+    h.response("/midpoints", 200, "{}");
+    assert_eq!(h.e.store().ticker("batch-Outcome1").unwrap().last, 0.5);
+    assert!(h.e.store().loaded().tickers);
+    no_midpoint_retry_after(&mut h, 60_000.);
 }
 
 #[path = "support/socket.rs"]
