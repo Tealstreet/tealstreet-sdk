@@ -1,7 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
-use crate::json::{ArrayAt, ArraySplitter};
+use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -494,7 +494,7 @@ struct Io<P> {
     public_feed_policy: PublicFeedPolicy,
     pending: HashMap<RequestId, P>,
     signatures: Vec<(RequestId, PendingSignature)>,
-    streams: HashMap<RequestId, ArrayAt>,
+    streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     next_id: u32,
@@ -784,13 +784,22 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> RequestId {
         let id = self.request(method, url, headers, body, pending);
-        self.io.streams.insert(id, at);
+        self.io.streams.insert(id, (at, ItemCheck::Splitter));
         id
     }
 
     /// Stream the response of an already-issued request, including signed POST reads.
     pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
-        self.io.streams.insert(request, at);
+        self.io.streams.insert(request, (at, ItemCheck::Splitter));
+    }
+
+    /// Skip the splitter's per-element syntax pass for a streamed request
+    /// whose venue deserializes every element with serde_json and fails the
+    /// request on any error.
+    pub fn venue_parses_items(&mut self, request: RequestId) {
+        if let Some((_, check)) = self.io.streams.get_mut(&request) {
+            *check = ItemCheck::Venue;
+        }
     }
 
     /// Set host policy on an outbound action before the host drains it.
@@ -1490,10 +1499,10 @@ impl<V: Venue> Engine<V> {
         if !self.io.pending.contains_key(&request) {
             return;
         }
-        let at = self.io.streams.remove(&request);
-        let splitter = at
+        let stream = self.io.streams.remove(&request);
+        let splitter = stream
             .filter(|_| (200..300).contains(&status))
-            .map(ArraySplitter::new);
+            .map(|(at, check)| ArraySplitter::with_item_check(at, check));
         self.io.incoming.insert(
             request,
             Incoming {
