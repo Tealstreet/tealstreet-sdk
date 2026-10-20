@@ -1,5 +1,6 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Query,
     model::{OrderStatus, OrderType},
@@ -179,18 +180,6 @@ fn position_side(value: &str) -> &'static str {
 }
 fn nonzero(value: f64) -> Option<f64> {
     (value != 0.0).then_some(value)
-}
-fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            use std::fmt::Write;
-            write!(&mut out, "%{b:02X}").unwrap();
-        }
-    }
-    out
 }
 impl Blofin {
     pub(crate) fn start_query(

@@ -1,6 +1,6 @@
 //! DXtrade writes have no transport retry. A placement batch is sequential;
 //! cancellation waits for every result in each bounded group of ten.
-use crate::{BreakoutProp, Operation, Pending, wire};
+use crate::{BreakoutProp, Operation, Pending};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
@@ -637,7 +637,7 @@ impl BreakoutProp {
                 self.on_trade_failed_step(cx, id, "DXtrade account is not initialized".into());
                 continue;
             };
-            let base = format!("/accounts/{}/orders", wire::path_segment(account));
+            let base = format!("/accounts/{}/orders", safe_cex_engine::url::encode(account));
             let request = match &step {
                 Step::Place { order, code } => match order.body(code) {
                     Ok(body) => Request {
@@ -655,7 +655,7 @@ impl BreakoutProp {
                 Step::Cancel { code, .. } => Request {
                     command: id,
                     method: Method::Delete,
-                    path: format!("{base}/{}", wire::path_segment(code)),
+                    path: format!("{base}/{}", safe_cex_engine::url::encode(code)),
                     body: None,
                     step,
                 },
@@ -664,7 +664,7 @@ impl BreakoutProp {
                     method: Method::Get,
                     path: format!(
                         "{base}/history?with-order-id={}&limit=2",
-                        wire::path_segment(native_id)
+                        safe_cex_engine::url::encode(native_id)
                     ),
                     body: None,
                     step,

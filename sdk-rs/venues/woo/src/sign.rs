@@ -1,19 +1,8 @@
 //! Route-specific signing over exactly the bytes sent to WOO.
 use safe_cex_crypto::{Encoding, hmac_sha256};
+pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 
-pub fn encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-            out.push(b as char);
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{b:02X}").unwrap();
-        }
-    }
-    out
-}
 pub fn query(params: &[(String, String)], sorted: bool) -> String {
     let mut rows: Vec<_> = params.iter().collect();
     if sorted {

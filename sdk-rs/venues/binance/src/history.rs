@@ -1,7 +1,7 @@
 //! Rare request/response reads. Results go back as JSON in the command's
 //! completion and never enter the flush frame.
 use crate::account::{order_side, order_type, venue_error};
-use crate::sign::Query;
+use crate::sign::{Query, Signed};
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::model::{Order, OrderStatus};

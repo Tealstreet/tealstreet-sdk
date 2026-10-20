@@ -712,7 +712,10 @@ impl Venue for KrakenSpot {
                         .pairs
                         .get(&symbol)
                         .map_or(symbol.as_str(), String::as_str);
-                    let mut p = format!("?pair={}&interval={i}", sign::encode_uri(pair));
+                    let mut p = format!(
+                        "?pair={}&interval={i}",
+                        safe_cex_engine::url::encode_component(pair)
+                    );
                     if let Some(s) = from_ms {
                         p.push_str(&format!("&since={}", (s / 1000.).floor()));
                     }

@@ -6,6 +6,7 @@ use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, RequestId, Response, Store, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -221,17 +222,6 @@ struct Maker<'a> {
     side: &'a str,
     matched_amount: Number,
     price: Number,
-}
-fn encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char)
-        } else {
-            out.push_str(&format!("%{b:02X}"))
-        }
-    }
-    out
 }
 
 impl Polymarket {

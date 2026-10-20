@@ -1216,7 +1216,7 @@ impl Coinbase {
             Step::CancelSymbol { .. } => unreachable!(),
             Step::Confirm { id, .. } => (
                 Method::Get,
-                format!("{ROOT}/historical/{}", url_segment(id)),
+                format!("{ROOT}/historical/{}", safe_cex_engine::url::encode(id)),
                 None,
             ),
         };
@@ -1480,16 +1480,4 @@ fn cancel_steps(ids: Vec<String>) -> Result<VecDeque<Step>, String> {
         .chunks(100)
         .map(|ids| Step::Cancel { ids: ids.to_vec() })
         .collect())
-}
-fn url_segment(value: &str) -> String {
-    use std::fmt::Write;
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-            out.push(char::from(byte));
-        } else {
-            write!(out, "%{byte:02X}").unwrap();
-        }
-    }
-    out
 }

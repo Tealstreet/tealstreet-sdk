@@ -702,7 +702,7 @@ impl BinanceFutures {
                     } else {
                         "?listenKey="
                     });
-                    url.push_str(&crate::sign::encode(&key.listen_key));
+                    url.push_str(&safe_cex_engine::url::encode(&key.listen_key));
                     self.connect_url(cx, Channel::Private, &url);
                 }
                 Err(error) => {

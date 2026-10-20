@@ -1,6 +1,7 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -155,17 +156,6 @@ fn safe_id(s: &str) -> bool {
         && s.len() <= 200
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-}
-fn quote(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }
 pub(crate) fn order_status(s: &str) -> Result<OrderStatus, String> {
     match s {
@@ -806,7 +796,7 @@ impl Coinbase {
                 let cursor = if s.cursor.is_empty() {
                     String::new()
                 } else {
-                    format!("&cursor={}", quote(&s.cursor))
+                    format!("&cursor={}", encode(&s.cursor))
                 };
                 (
                     format!(

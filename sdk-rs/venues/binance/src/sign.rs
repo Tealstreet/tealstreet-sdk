@@ -1,7 +1,6 @@
 //! Signed REST requests: Binance HMACs the query string and takes every
 //! parameter, including POST/PUT/DELETE data, in the query.
 use safe_cex_crypto::{Encoding, hmac_sha256};
-use safe_cex_engine::num;
 
 pub const RECV_WINDOW_MS: u32 = 20_000;
 
@@ -11,54 +10,19 @@ pub struct Credentials {
     pub secret: String,
 }
 
-/// A query string under construction, percent-encoded as it is built.
-#[derive(Default)]
-pub struct Query(String);
+pub use safe_cex_engine::url::Query;
 
-impl Query {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn str(mut self, name: &str, value: &str) -> Self {
-        if !self.0.is_empty() {
-            self.0.push('&');
-        }
-        self.0.push_str(name);
-        self.0.push('=');
-        encode_into(&mut self.0, value);
-        self
-    }
-
-    pub fn num(self, name: &str, value: f64) -> Self {
-        self.str(name, &num::format(value))
-    }
-
-    pub fn opt_str(self, name: &str, value: Option<&str>) -> Self {
-        match value {
-            Some(value) => self.str(name, value),
-            None => self,
-        }
-    }
-
-    pub fn opt_num(self, name: &str, value: Option<f64>) -> Self {
-        match value {
-            Some(value) => self.num(name, value),
-            None => self,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
+pub trait Signed {
     /// Append `timestamp`, `recvWindow` and the HMAC-SHA256 `signature`.
-    pub fn signed(self, credentials: &Credentials, now_ms: f64) -> String {
+    fn signed(self, credentials: &Credentials, now_ms: f64) -> String;
+}
+
+impl Signed for Query {
+    fn signed(self, credentials: &Credentials, now_ms: f64) -> String {
         let mut query = self
             .num("timestamp", now_ms.floor())
             .num("recvWindow", f64::from(RECV_WINDOW_MS))
-            .0;
+            .into_string();
         let signature = hmac_sha256(
             credentials.secret.as_bytes(),
             query.as_bytes(),
@@ -67,27 +31,6 @@ impl Query {
         query.push_str("&signature=");
         query.push_str(&signature);
         query
-    }
-}
-
-/// Percent-encode one query value.
-pub fn encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    encode_into(&mut out, value);
-    out
-}
-
-/// RFC 3986: everything but unreserved characters is escaped.
-fn encode_into(out: &mut String, value: &str) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 0xf) as usize] as char);
-        }
     }
 }
 

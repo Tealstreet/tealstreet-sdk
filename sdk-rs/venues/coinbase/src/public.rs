@@ -306,14 +306,7 @@ impl Coinbase {
         }
         if let Some(cursor) = cursor {
             path.push_str("&cursor=");
-            for byte in cursor.bytes() {
-                if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-                    path.push(char::from(byte));
-                } else {
-                    use std::fmt::Write;
-                    write!(path, "%{byte:02X}").unwrap();
-                }
-            }
+            safe_cex_engine::url::encode_into(&mut path, cursor);
         }
         if let Err(error) = self.request(
             cx,

@@ -2,6 +2,7 @@
 use crate::{Lighter, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -847,16 +848,4 @@ fn millis(time: f64) -> f64 {
 }
 fn within(request: &Request, time: f64) -> bool {
     request.from.is_none_or(|from| time >= from) && request.to.is_none_or(|to| time <= to)
-}
-fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{b:02X}").unwrap();
-        }
-    }
-    out
 }

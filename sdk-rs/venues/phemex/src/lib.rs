@@ -246,7 +246,7 @@ impl PhemexPerpetuals {
             "/md/v2/fullbook",
             &format!(
                 "symbol={}&limit=1000",
-                url_encode(self.native_symbol(symbol))
+                safe_cex_engine::url::encode(self.native_symbol(symbol))
             ),
             None,
             Pending::Depth {
@@ -786,7 +786,7 @@ impl Venue for PhemexPerpetuals {
                     "/exchange/public/md/v2/kline/list",
                     &format!(
                         "symbol={}&resolution={n}&from={:.0}&to={:.0}",
-                        url_encode(self.native_symbol(&symbol)),
+                        safe_cex_engine::url::encode(self.native_symbol(&symbol)),
                         (from / 1000.).floor(),
                         (to / 1000.).ceil()
                     ),

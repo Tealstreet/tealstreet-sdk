@@ -616,7 +616,9 @@ impl Kraken {
                         "/derivatives/api/v3/batchorder",
                         format!(
                             "json={}",
-                            sign::encode_uri(&serde_json::to_string(&body).unwrap())
+                            safe_cex_engine::url::encode_component(
+                                &serde_json::to_string(&body).unwrap()
+                            )
                         ),
                     )
                 }

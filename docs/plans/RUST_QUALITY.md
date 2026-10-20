@@ -100,9 +100,10 @@ Low risk, do first:
    diverge (Binance malformed to 0, Hyperliquid trims, Kraken/WEEX/Coinbase
    reject blanks). Named strict and lenient variants; pin current behaviour
    per venue, then migrate in batches.
-2. `engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
+2. ~~`engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
-   settle it.
+   settle it.~~ Done: `engine::url` dialects and `Query`; Kraken's form
+   spelling and AsterDEX's raw-value query stay venue-specific.
 3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
    Migrate with constants unchanged, then jitter, then one startup-retry policy
    (fixes startup fail-closed on OKX, BloFin, Bitget).

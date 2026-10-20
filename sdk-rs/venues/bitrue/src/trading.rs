@@ -2,6 +2,7 @@
 use crate::wire::{Number, Str, Text, check};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::model::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -187,18 +188,6 @@ fn caller_id(value: &str) -> bool {
         && !value
             .chars()
             .any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
-}
-fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            use std::fmt::Write;
-            write!(&mut out, "%{byte:02X}").expect("String write");
-        }
-    }
-    out
 }
 impl Target {
     fn lookup(&self, effect: Effect) -> Step {

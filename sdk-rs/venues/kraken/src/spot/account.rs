@@ -1,5 +1,6 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::url;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*,
 };
@@ -187,21 +188,9 @@ fn order(
     }
 }
 pub(super) fn form(params: &[(&str, String)]) -> String {
-    fn encode(s: &str) -> String {
-        let mut out = String::new();
-        for b in s.bytes() {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                out.push(b as char)
-            } else {
-                use std::fmt::Write;
-                write!(out, "%{b:02X}").unwrap();
-            }
-        }
-        out
-    }
     params
         .iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
+        .map(|(k, v)| format!("{}={}", url::encode(k), url::encode(v)))
         .collect::<Vec<_>>()
         .join("&")
 }

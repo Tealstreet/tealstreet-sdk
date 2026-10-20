@@ -1,6 +1,7 @@
 //! MEXC signs the exact POST body, or the sorted GET query, in REST headers.
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::num;
+use safe_cex_engine::url::encode;
 use std::collections::BTreeMap;
 
 pub struct Credentials {
@@ -30,21 +31,9 @@ pub fn query(params: impl IntoIterator<Item = (&'static str, String)>) -> String
         .into_iter()
         .collect::<BTreeMap<_, _>>()
         .into_iter()
-        .map(|(k, v)| format!("{k}={}", escape(&v)))
+        .map(|(k, v)| format!("{k}={}", encode(&v)))
         .collect::<Vec<_>>()
         .join("&")
-}
-fn escape(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 #[cfg(test)]
 mod tests {

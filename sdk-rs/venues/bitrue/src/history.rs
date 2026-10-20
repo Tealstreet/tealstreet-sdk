@@ -94,19 +94,6 @@ fn time_ms(value: f64) -> f64 {
     if value < 1e12 { value * 1000.0 } else { value }
 }
 
-pub(crate) fn query_component(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            out.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{byte:02X}").unwrap();
-        }
-    }
-    out
-}
-
 // Bitrue has served qty in both base and contract units. The reported quote
 // amount disambiguates them; retain the raw quantity when neither agrees.
 fn fill_qty(qty: f64, amount: f64, price: f64, multiplier: f64) -> f64 {
@@ -174,7 +161,7 @@ impl Bitrue {
         let limit = limit.unwrap_or(200).clamp(1, 1000) as usize;
         let mut path = format!(
             "/fapi/v2/myTrades?contractName={}&limit={limit}",
-            query_component(&market.id)
+            safe_cex_engine::url::encode(&market.id)
         );
         if let Some(from) = from_ms {
             path.push_str(&format!("&startTime={}", num::format(from.floor())));

@@ -1,4 +1,5 @@
-use safe_cex_venue_kraken::sign::{Signer, encode_uri, form};
+use safe_cex_engine::url::encode_component;
+use safe_cex_venue_kraken::sign::{Signer, form};
 #[test]
 fn independent_hashlib_vectors_cover_challenge_and_both_path_families() {
     // Independent Python hashlib.sha256 + hmac.new(..., hashlib.sha512), secret b"secret".
@@ -60,12 +61,12 @@ fn independent_hashlib_vectors_cover_challenge_and_both_path_families() {
 #[test]
 fn batch_special_encoding_matches_encode_uri_component() {
     let s = Signer::new("c2VjcmV0").unwrap();
-    let batch = format!("json={}", encode_uri(r#"{"batchOrder":[]}"#));
+    let batch = format!("json={}", encode_component(r#"{"batchOrder":[]}"#));
     assert_eq!(
         s.signature(&batch, "1700000000000002", "/derivatives/api/v3/batchorder")
             .unwrap(),
         "P76LoYBT5+qIs1XyRVLF84NEZlqejLZXIiy5v+6g+kcvrdb7FnyrcYc/2+/SsEMedQL/FHxSj5Cp02VL4KgnIg=="
     );
-    assert_eq!(encode_uri("a b()!'*+"), "a%20b()!'*%2B");
+    assert_eq!(encode_component("a b()!'*+"), "a%20b()!'*%2B");
     assert_eq!(form(&[("s", "a b()!'*+".into())]), "s=a+b()%21%27%2A%2B");
 }

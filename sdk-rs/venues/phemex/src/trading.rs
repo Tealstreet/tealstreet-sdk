@@ -5,6 +5,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -101,18 +102,6 @@ enum CancelResult {
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
     cx.log(LogLevel::Error, &error);
     cx.done(command, Err(error));
-}
-pub(crate) fn encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            out.push(b as char);
-        } else {
-            use std::fmt::Write;
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
 }
 fn query(pairs: Vec<(&str, String)>) -> String {
     pairs

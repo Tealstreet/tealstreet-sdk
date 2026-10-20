@@ -1,5 +1,6 @@
 //! WEEX signs the exact bytes sent; callers construct sorted, encoded queries.
 use safe_cex_crypto::{Encoding, hmac_sha256};
+pub use safe_cex_engine::url::encode;
 
 pub struct Credentials {
     pub key: String,
@@ -39,21 +40,6 @@ impl Credentials {
         let payload = format!("{timestamp}/v3/ws/private");
         self.auth(timestamp, payload)
     }
-}
-/// RFC 3986 query component encoding, with spaces represented by `%20`.
-pub fn encode(value: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut out = String::new();
-    for c in value.bytes() {
-        if c.is_ascii_alphanumeric() || b"-._~".contains(&c) {
-            out.push(c as char);
-        } else {
-            out.push('%');
-            out.push(HEX[(c >> 4) as usize] as char);
-            out.push(HEX[(c & 15) as usize] as char);
-        }
-    }
-    out
 }
 #[cfg(test)]
 mod tests {

@@ -271,20 +271,6 @@ pub fn resolution(i: &str) -> Option<u32> {
     })
 }
 
-/// Encode venue-native symbols without letting a command add query parameters.
-pub fn url_encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-            out.push(b as char)
-        } else {
-            use std::fmt::Write;
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
-}
-
 pub fn snapshot_sides(text: &str) -> bool {
     #[derive(Deserialize)]
     struct Sides<'a> {

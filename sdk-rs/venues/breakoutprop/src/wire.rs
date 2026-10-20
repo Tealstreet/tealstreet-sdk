@@ -172,36 +172,3 @@ pub(crate) fn synthetic_interval_seconds(value: &str) -> Option<f64> {
         _ => interval(value).map(|(_, seconds)| seconds),
     }
 }
-
-pub(crate) fn path_segment(value: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut output = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            output.push(char::from(byte));
-        } else {
-            output.push('%');
-            output.push(char::from(HEX[usize::from(byte >> 4)]));
-            output.push(char::from(HEX[usize::from(byte & 15)]));
-        }
-    }
-    output
-}
-
-#[cfg(test)]
-mod tests {
-    use super::path_segment;
-
-    #[test]
-    fn path_segments_preserve_unreserved_and_escape_utf8_bytes_once() {
-        assert_eq!(path_segment("AZaz09-._~"), "AZaz09-._~");
-        assert_eq!(path_segment("default:00002"), "default%3A00002");
-        assert_eq!(
-            path_segment(" /?#[]@!$&'()*+,;=%\\\r\n\0"),
-            "%20%2F%3F%23%5B%5D%40%21%24%26%27%28%29%2A%2B%2C%3B%3D%25%5C%0D%0A%00"
-        );
-        assert_eq!(path_segment("café/東京"), "caf%C3%A9%2F%E6%9D%B1%E4%BA%AC");
-        assert_eq!(path_segment("%3A"), "%253A");
-        assert_eq!(path_segment(""), "");
-    }
-}
