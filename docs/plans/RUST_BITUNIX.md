@@ -2786,3 +2786,22 @@ without removing the private-readiness or accepted-provider-price assertions.
 Initial full native log is retained; a fresh full workspace run must finish
 before release gates. Combined release build is already complete; compiled
 consumer suite is running on that fresh artifact.
+
+
+Cold-account regression correction is test-only and independently reviewed PASS.
+Leave real fee/dex discovery unanswered and assert the atomic native catalog is
+still unpublished; seed an explicit synthetic typed public catalog through
+store_mut to exercise the shared-price hook before any private snapshot. Both
+!loaded.balance assertions and actual provider-price110 assertion remain.
+Removing the on_public_feed loaded-balance guard would call live_balance for
+the valid private identity and fail final readiness, so the regression retains
+its intended protection. Production account_start and default initialization
+are untouched. The fresh workspace run passes all three Hyperliquid public-feed
+controls and thirty spot controls; full workspace tail/WASM check finishing.
+
+Fresh combined validation COMPLETE on Node22/Bun1.4.3:452compiledSDKcases/
+16files,97hostcontrols,16productchecks, framewire/native-session adapter,
+11serverconsumer,5MCPconsumer,2CLIconsumer,2mobileloader, MCPbuild/isolated
+packagedsmoke and all9scriptedlifecycle cases PASS. Logs are under
+/tmp/bitunix-fc809-*.log. Old failed attempts remain preserved. Fresh module
+gates and exact reviewed-head CI remain mandatory before landing.

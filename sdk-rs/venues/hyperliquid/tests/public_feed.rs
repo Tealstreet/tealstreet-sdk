@@ -204,16 +204,43 @@ fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
     reply(&mut engine, &mode, 200, r#""disabled""#);
     let metadata = engine.wait_http(|request| kind(request) == "metaAndAssetCtxs");
     reply(&mut engine, &metadata, 200, META);
-    let fees = engine.wait_http(|request| kind(request) == "userFees");
-    reply(
-        &mut engine,
-        &fees,
-        200,
-        r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
-    );
-    let dexes = engine.wait_http(|request| kind(request) == "perpDexs");
-    reply(&mut engine, &dexes, 200, "[null]");
-    // Finish the atomic public catalog without replying to any private state read.
+    assert!(!engine.store().loaded().markets);
+    // Keep real fee/dex discovery pending, so account_start has not installed
+    // even its default private balance. Seed only a typed cached public catalog
+    // to exercise the shared-price hook against a genuinely cold account.
+    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+    engine.store_mut().set_markets(vec![Market {
+        id: "BTC".into(),
+        symbol: "BTC-PERP".into(),
+        pretty_symbol: None,
+        base: "BTC".into(),
+        quote: "USDC".into(),
+        active: true,
+        precision: Precision {
+            amount: 0.00001,
+            price: 1.,
+        },
+        limits: Limits {
+            amount: MinMax { min: 0., max: 1e9 },
+            leverage: MinMax { min: 1., max: 50. },
+            price: None,
+        },
+        contract_size: Some(1.),
+        is_expiring: None,
+        is_inverse: Some(false),
+        is_spot: Some(false),
+        is_perpetual: Some(true),
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }]);
+    engine.store_mut().set_tickers(vec![Ticker {
+        id: "BTC".into(),
+        symbol: "BTC-PERP".into(),
+        last: 100.,
+        mark: 100.,
+        ..Default::default()
+    }]);
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().balance);
     let HostInput::PublicFeedUpdate(update) = decode_host_input(
