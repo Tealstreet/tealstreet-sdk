@@ -200,3 +200,16 @@ consumer adoption remain explicit blockers.
   late-snapshot case. Scoped helper lint and safe-cex typecheck pass;
   independent helper/inventory review has no findings. Earlier checkpoint
   counts and gate results above describe their original heads.
+
+- Hyperliquid/Kraken spot acceptance ([PR #1339](https://github.com/Tealstreet/tealstreet-sdk/pull/1339))
+  extends existing crates and retains TS venues/defaults. After the latest
+  Lighter/GRVT landing sync the inventory is 49 names / 47 Rust aliases / nine
+  defaults / 38 opt-in / two absent products. All ten spot/parent/Binance
+  replay gates pass with live public and documented private inputs. Combined
+  WASM passes 418 SDK tests including every native worker/late-consumer alias,
+  68 host tests and eight compiled spot controls; native touched crates pass
+  218 tests, integrated harness 571, and root typecheck/lint/test pass (7,482
+  safe-cex tests). Three independent PR correctness reviews are posted and
+  their three findings are fixed and independently closed. Exact measurements,
+  scope and credential limits: [spot ledger](RUST_SPOT_PRODUCTS.md). CI and
+  merge status are recorded on the PR; no TS/default cutover is implied.

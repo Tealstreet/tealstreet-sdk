@@ -40,7 +40,6 @@ import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFro
 import { validateWalletAndPrivateKey } from '../../utils/ethereum/validateWalletAndPrivateKey';
 import { v } from '../../utils/get-key';
 import { loop } from '../../utils/loop';
-import { omitUndefined } from '../../utils/omitUndefined';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './hyperliquid.api';
@@ -186,7 +185,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
     }
 
     // Prime spot balances via REST to avoid blank spot margin module while
-    // waiting for websocket delivery of spotClearinghouseState.
+    // waiting for websocket delivery of spotState.
     await this.refreshSpotBalance(true);
 
     this.log(`Ready to watch public data on Hyperliquid Spot`);
@@ -227,18 +226,22 @@ export class HyperliquidSpotExchange extends BaseExchange {
 
     const markets: Market[] = [];
     const tickers: Ticker[] = [];
+    const positionalContexts = assets.length === meta.universe.length && assets.every((asset) => !asset.coin);
 
     for (let i = 0; i < meta.universe.length; i++) {
       const sourceMarket = meta.universe[i];
-      const sourceTicker = assets.find((asset: any) => asset.coin === sourceMarket.name);
+      // The documented contexts array is positional and may omit `coin`.
+      const sourceTicker = assets.find((asset: any) => asset.coin === sourceMarket.name) ??
+        (positionalContexts ? assets[i] : undefined);
       const token = meta.tokens.find((token) => token.index === meta.universe[i].tokens[0]);
+      const quoteToken = meta.tokens.find((token) => token.index === sourceMarket.tokens[1]);
 
-      if (!token) {
+      if (!token || !quoteToken) {
         continue;
       }
 
       const baseAsset = v(sourceMarket, 'name');
-      const quoteAsset = 'USDC';
+      const quoteAsset = quoteToken.name;
 
       const amountPrecisionStr = safeString(token, 'szDecimals');
       const amountPrecision = parseInt(amountPrecisionStr as string);
@@ -308,10 +311,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         ask: 0,
         last: midPx,
         mark: markPx,
-        index: parseFloat(v(sourceTicker, 'oraclePx')),
+        index: parseFloat(v(sourceTicker, 'oraclePx')) || 0,
         midPrice: midPx,
         percentage: prevDayPx > 0 ? ((markPx - prevDayPx) / prevDayPx) * 100 : 0,
-        fundingRate: parseFloat(v(sourceTicker, 'funding')),
+        fundingRate: parseFloat(v(sourceTicker, 'funding')) || 0,
         fundingTime: 0,
         volume,
         quoteVolume,
@@ -324,34 +327,28 @@ export class HyperliquidSpotExchange extends BaseExchange {
   };
 
   private getSpotCoinMarkPrice = (coin: string, tokenIndex?: number): number => {
-    const normalizedCoin = `${coin || ''}`.trim();
-    if (!normalizedCoin) return 0;
-
-    const upperCoin = normalizedCoin.toUpperCase();
-    if (upperCoin === 'USDC' || upperCoin === 'USDT' || upperCoin === 'USD' || upperCoin === 'USDH') {
-      return 1;
-    }
-
-    const candidateKeys = [normalizedCoin, upperCoin, `${normalizedCoin}/USDC`, `${upperCoin}/USDC`];
-    for (const key of candidateKeys) {
-      const ticker = this.store.tickersById[key] || this.store.tickersBySymbol[key];
-      const price = Number(ticker?.mark ?? ticker?.last ?? ticker?.index ?? ticker?.midPrice);
-      if (Number.isFinite(price) && price > 0) {
-        return price;
+    const resolve = (name: string, index: number | undefined, visited: Set<string>, depth: number): number => {
+      const canonical = index === undefined ? this.store.marketsById[name]?.base :
+        this.store.markets.find((market) => market.info?.tokens?.[0] === index)?.base;
+      const key = (canonical ?? name).trim().toUpperCase();
+      if (['USDC', 'USDT', 'USD', 'USDH'].includes(key)) return 1;
+      if (!key || visited.has(key) || depth >= 3) return 0;
+      const seen = new Set(visited).add(key);
+      const matches = this.store.markets.filter((candidate) => candidate.base?.toUpperCase() === key ||
+        candidate.id?.toUpperCase() === key || (index !== undefined && candidate.info?.tokens?.[0] === index));
+      // Prefer a direct USD source over an earlier pair quoted in another token.
+      matches.sort((a, b) => Number(b.quote === 'USDC') - Number(a.quote === 'USDC'));
+      for (const market of matches) {
+        const ticker = this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
+        const price = Number(ticker?.mark) > 0 ? Number(ticker?.mark) : Number(ticker?.last);
+        if (!Number.isFinite(price) || price <= 0) continue;
+        const quoteUsd = resolve(market.quote, undefined, seen, depth + 1);
+        const usd = price * quoteUsd;
+        if (Number.isFinite(usd) && usd > 0) return usd;
       }
-    }
-
-    const market = this.store.markets.find((candidate) => {
-      if (candidate.base?.toUpperCase() === upperCoin) return true;
-      if (candidate.id?.toUpperCase() === upperCoin) return true;
-      if (candidate.symbol?.toUpperCase() === `${upperCoin}/USDC`) return true;
-      return tokenIndex !== undefined && candidate.info?.tokens?.[0] === tokenIndex;
-    });
-    if (!market) return 0;
-
-    const ticker = this.store.tickersById[market.id] || this.store.tickersBySymbol[market.symbol];
-    const price = Number(ticker?.mark ?? ticker?.last ?? ticker?.index ?? ticker?.midPrice);
-    return Number.isFinite(price) && price > 0 ? price : 0;
+      return 0;
+    };
+    return resolve(`${coin || ''}`, tokenIndex, new Set(), 0);
   };
 
   private buildSpotBalance = (balances: Array<{ coin: string; hold: string; total: string; token?: number }>): Balance => {
@@ -787,7 +784,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
       });
       this.requestSpotBalanceRefresh(true);
-      return omitUndefined(data.response.data.statuses.map((status: any) => status?.resting?.oid));
+      return data.response.data.statuses.flatMap((status: any) => {
+        const oid = status?.resting?.oid ?? status?.filled?.oid;
+        return oid === undefined || oid === null ? [] : [String(oid)];
+      });
     } else if (opts.type === OrderType.Limit) {
       // Limit with TP & SL
       //   {
@@ -1010,7 +1010,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
       });
       this.requestSpotBalanceRefresh(true);
-      return omitUndefined(data.response.data.statuses.map((status: any) => status?.resting?.oid));
+      return data.response.data.statuses.flatMap((status: any) => {
+        const oid = status?.resting?.oid ?? status?.filled?.oid;
+        return oid === undefined || oid === null ? [] : [String(oid)];
+      });
     } else if (opts.type === OrderType.TakeProfit || opts.type === OrderType.StopLoss) {
       // Position TP/SL
       //   {
