@@ -177,7 +177,12 @@ function correctBalances(account, records) {
     (r) => successful(r) && r.method === 'GET' && /^\/api\/v3\/brokerage\/portfolios\//.test(route(r)),
   );
   if (!breakdown || !account.balance?.currencies) return;
-  for (const asset of parse(breakdown.body).breakdown.spot_positions ?? []) {
+  const portfolio = parse(breakdown.body).breakdown;
+  // Portfolio access probes also return spot_positions for INTX accounts.
+  // Only the selected non-INTX portfolio feeds fetchSpotCurrencies; CFM still
+  // supports spot currencies and must retain the held-total correction.
+  if (portfolio.portfolio?.type === 'INTX') return;
+  for (const asset of portfolio.spot_positions ?? []) {
     const row = account.balance.currencies[asset.asset];
     assert.ok(row, 'missing Coinbase held currency oracle');
     sameOrChange(

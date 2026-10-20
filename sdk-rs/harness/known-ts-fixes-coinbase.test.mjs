@@ -553,3 +553,37 @@ test('symbol-free CFM queries read both exact future and spot families', () => {
   assert.deepEqual(new Set(ts.commands[0].ok.map((r) => r.id)), new Set(['future', 't1']));
   assert.equal(ts.requests.length, 2);
 });
+
+test('incidental INTX portfolio spot rows do not become a held-currency balance oracle', () => {
+  const records = [
+    {...meta,profile:'intx'},
+    http('/products?product_type=FUTURE&contract_expiry_type=PERPETUAL',{products:[]}),
+    http('/portfolios/test',{breakdown:{portfolio:{uuid:'test',type:'INTX'},spot_positions:[{asset:'BTC',total_balance_crypto:1.5,available_to_trade_crypto:1}]}}),
+  ];
+  const a=account();
+  a.balance={used:200,free:800,total:1000,upnl:20,currencies:{}};
+  const before=structuredClone(a.balance);
+  assert.doesNotThrow(()=>fixCoinbase({account:a},records));
+  assert.deepEqual(a.balance,before);
+});
+
+test('spot and mixed CFM profiles retain strict held-currency rows and exact correction', () => {
+  for(const profile of ['spot','cfm']) {
+    const records=[
+      {...meta,profile},http('/products',{products:[market]}),
+      http('/portfolios/test',{breakdown:{portfolio:{uuid:'test',type:'DEFAULT'},spot_positions:[{asset:'BTC',total_balance_crypto:1.5,available_to_trade_crypto:1}]}}),
+    ];
+    const missing=account(); missing.balance.currencies={};
+    assert.throws(()=>fixCoinbase({account:missing},records),/missing Coinbase held currency oracle/);
+    if(profile==='cfm') {
+      const futureOnly=structuredClone(records);
+      futureOnly[1].body=JSON.stringify({products:[]});
+      assert.throws(()=>fixCoinbase({account:missing},futureOnly),/missing Coinbase held currency oracle/);
+    }
+    const present=account(); present.balance.currencies={BTC:{total:1,free:1,used:0.5,upnl:0}};
+    fixCoinbase({account:present},records);
+    assert.deepEqual(present.balance.currencies.BTC,{total:1.5,free:1,used:0.5,upnl:0});
+    present.balance.currencies.BTC.total=999;
+    assert.throws(()=>fixCoinbase({account:present},records),/unexpected TS/);
+  }
+});

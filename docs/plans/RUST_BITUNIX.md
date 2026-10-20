@@ -1544,3 +1544,16 @@ breakdown contains spot_positions but selected portfolio is INTX, for which
 TS never publishes spot currencies. Fix only input-proven INTX exclusion;
 CFM remains strict, including futures-only metadata and empty output. No gate
 rerun until failed-before/passed-after oracle tests and independent audit.
+
+INTX oracle fix implemented using only recorded breakdown.portfolio.type;
+no profile, product-list or empty-output shortcut.23 focused tests and full611
+helpers PASS. Actual regression failed before; CFM missing-row negative remains
+strict even with zero SPOT products. After correction, the original frozen
+failed TS/Rust pair matches all10 state/book/request fields, and all8 saved TS
+private profiles pass the input oracle offline. Independent bounded review
+pending before commit/resume. Public Coinbase path and all native source are
+unchanged, so preserve its already green three-run gate and rerun private only.
+
+Independent oracle audit PASS,23/23 tests independently rechecked. No Rust
+input, balance overwrite or comparison waiver; exact TS portfolio-mode
+behavior confirmed from frozen source. Commit and resume private gates now.
