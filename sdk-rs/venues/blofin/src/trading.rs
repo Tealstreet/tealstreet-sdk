@@ -1,6 +1,7 @@
 //! Preflighted command jobs. A lost write response is never retried.
 use super::*;
 use safe_cex_engine::model::*;
+use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 const BROKER: &str = "b3cdedc0a20880ba";
@@ -15,7 +16,9 @@ pub(crate) struct Trading {
 struct Joined {
     job: Job,
     remaining: u8,
-    error: Option<String>,
+    error: Option<VenueError>,
+    /// A leg took effect, so the other leg's refusal cannot mean nothing happened.
+    succeeded: bool,
 }
 pub struct Request {
     job: Job,
@@ -30,6 +33,8 @@ struct Job {
     affected: Vec<String>,
     replacement_targets: Vec<Target>,
     commit: Commit,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -259,6 +264,7 @@ impl Job {
             affected: vec![],
             replacement_targets: vec![],
             commit: Commit::None,
+            effective: false,
         }
     }
 }
@@ -907,7 +913,7 @@ impl Blofin {
                 self.trading.queue.push_back(command);
                 self.trade_next(cx);
             }
-            Err(e) => cx.done(id, Err(e)),
+            Err(e) => cx.fail(id, not_sent(e).kind(ErrorKind::InvalidInput)),
         }
     }
     fn plan_trade(
@@ -1162,7 +1168,7 @@ impl Blofin {
             let job = match plan {
                 Ok(job) => job,
                 Err(e) => {
-                    cx.done(id, Err(e));
+                    cx.fail(id, not_sent(e).kind(ErrorKind::InvalidInput));
                     self.trade_next(cx);
                     return;
                 }
@@ -1192,7 +1198,7 @@ impl Blofin {
                                 step,
                                 joined: false,
                             },
-                            &e,
+                            not_sent(e),
                         );
                         return;
                     }
@@ -1203,6 +1209,7 @@ impl Blofin {
                 job,
                 remaining: 2,
                 error: None,
+                succeeded: false,
             });
             for (step, headers) in prepared {
                 cx.request(
@@ -1286,7 +1293,7 @@ impl Blofin {
                     step,
                     joined: false,
                 },
-                "BloFin replacement aborted after execution progress",
+                "BloFin replacement aborted after execution progress".into(),
             );
             return;
         }
@@ -1311,7 +1318,7 @@ impl Blofin {
                         step,
                         joined: false,
                     },
-                    &e,
+                    not_sent(e),
                 );
                 return;
             }
@@ -1342,16 +1349,27 @@ impl Blofin {
             }
         }
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
         if matches!(request.step.effect, Effect::Place { .. }) {
             self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
         }
         if request.joined {
-            self.finish_join(cx, Some(error.to_owned()));
+            self.finish_join(cx, Some(error));
             return;
         }
+        // A later refusal after a step took effect cannot mean nothing happened.
+        if request.job.effective
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
+            error.outcome = None;
+        }
         self.cleanup_job(cx, &request.job);
-        cx.done(request.job.command, Err(error.to_owned()));
+        cx.fail(request.job.command, error);
         self.trading.busy = false;
         self.trade_next(cx);
     }
@@ -1362,11 +1380,8 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) {
-            self.trade_failed(
-                cx,
-                request,
-                &format!("BloFin HTTP {}: {}", response.status, response.body),
-            );
+            let error = http_failure(response.status, response.body);
+            self.trade_failed(cx, request, error);
             return;
         }
         if let Effect::Verify(target) = &request.step.effect {
@@ -1394,7 +1409,7 @@ impl Blofin {
                 self.trade_failed(
                     cx,
                     request,
-                    "BloFin replacement final order verification failed",
+                    "BloFin replacement final order verification failed".into(),
                 );
             } else {
                 self.trade_step(cx, request.job);
@@ -1404,12 +1419,14 @@ impl Blofin {
         let reply = match serde_json::from_str::<Reply<'_>>(response.body) {
             Ok(r) => r,
             Err(e) => {
-                self.trade_failed(cx, request, &e.to_string());
+                self.trade_failed(cx, request, unknown(e.to_string()));
                 return;
             }
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
         let mut error = None;
+        // Unproven acknowledgements are unknown.
+        let mut unproven = false;
         match &request.step.effect {
             Effect::Place {
                 family,
@@ -1417,6 +1434,7 @@ impl Blofin {
                 inst_id,
             } => {
                 if reply.code != "0" || rows.len() != *count {
+                    unproven |= rows.len() != *count;
                     error = Some(format!("BloFin placement {}: {}", reply.code, reply.msg));
                 }
                 let mut seen = HashSet::new();
@@ -1427,11 +1445,11 @@ impl Blofin {
                         _ => row.algo_id,
                     };
                     let message = row.msg.trim().to_ascii_lowercase();
-                    if id.is_empty()
-                        || !seen.insert(id.to_string())
-                        || (!row.code.is_empty() && row.code != "0")
-                        || !matches!(message.as_str(), "" | "success" | "order placed")
-                    {
+                    // Only a non-zero row code refuses; an unexpected success message is unproven.
+                    let refused = !row.code.is_empty() && row.code != "0";
+                    let odd = !matches!(message.as_str(), "" | "success" | "order placed");
+                    if id.is_empty() || !seen.insert(id.to_string()) || refused || odd {
+                        unproven |= !refused;
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
                         let id = id.into_owned();
@@ -1455,6 +1473,7 @@ impl Blofin {
             Effect::Cancel(targets) => {
                 let mut seen = HashSet::new();
                 if rows.len() != targets.len() {
+                    unproven = true;
                     error = Some("BloFin cancellation response count mismatch".into());
                 }
                 for row in rows {
@@ -1464,10 +1483,12 @@ impl Blofin {
                         _ => row.algo_id == t.id,
                     });
                     let Some(target) = found else {
+                        unproven = true;
                         error = Some("BloFin cancellation returned an unrelated identity".into());
                         continue;
                     };
                     if !seen.insert(target.id.clone()) {
+                        unproven = true;
                         error = Some("BloFin cancellation returned duplicate identities".into());
                         continue;
                     }
@@ -1521,9 +1542,15 @@ impl Blofin {
             }
         }
         if let Some(e) = error {
-            self.trade_failed(cx, request, &e);
+            // BloFin row and setting codes are undocumented, so explicit refusals stay
+            // unclassified; unproven acknowledgements are unknown.
+            let outcome = unproven.then_some(Outcome::Unknown);
+            let mut error = VenueError::new(e);
+            error.outcome = outcome;
+            self.trade_failed(cx, request, error);
             return;
         }
+        request.job.effective = true;
         if request.joined {
             self.finish_join(cx, None);
             return;
@@ -1534,21 +1561,34 @@ impl Blofin {
             self.trade_step(cx, request.job);
         }
     }
-    fn finish_join(&mut self, cx: &mut Cx<'_, Pending>, error: Option<String>) {
+    fn finish_join(&mut self, cx: &mut Cx<'_, Pending>, error: Option<VenueError>) {
         let Some(joined) = &mut self.trading.joined else {
             return;
         };
-        if error.is_some() {
-            joined.error = error;
+        if let Some(mut error) = error {
+            // Any unproven leg keeps the joined command unknown.
+            if joined
+                .error
+                .as_ref()
+                .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
+            {
+                error.outcome = Some(Outcome::Unknown);
+            }
+            joined.error = Some(error);
+        } else {
+            joined.succeeded = true;
         }
         joined.remaining -= 1;
         if joined.remaining != 0 {
             return;
         }
         let joined = self.trading.joined.take().unwrap();
-        if let Some(error) = joined.error {
+        if let Some(mut error) = joined.error {
+            if joined.succeeded && error.outcome == Some(Outcome::Rejected) {
+                error.outcome = None;
+            }
             self.cleanup_job(cx, &joined.job);
-            cx.done(joined.job.command, Err(error));
+            cx.fail(joined.job.command, error);
             self.trading.busy = false;
             self.refresh_account(cx);
             self.trade_next(cx);
@@ -1570,4 +1610,34 @@ impl Blofin {
             false
         }
     }
+}
+
+/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+fn http_failure(status: u16, body: &str) -> VenueError {
+    let message = format!("BloFin HTTP {status}: {body}");
+    match status {
+        408 | 500.. => unknown(message),
+        401 => VenueError::new(message)
+            .kind(ErrorKind::AuthInvalid)
+            .outcome(Outcome::Rejected),
+        403 => VenueError::new(message)
+            .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        429 => VenueError::new(message)
+            .kind(ErrorKind::RateLimited)
+            .outcome(Outcome::Rejected),
+        _ => VenueError::new(message)
+            .kind(ErrorKind::Rejected)
+            .outcome(Outcome::Rejected),
+    }
+}
+
+/// The write may have executed; reconcile before resending.
+pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
