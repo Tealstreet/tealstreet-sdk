@@ -291,3 +291,15 @@ Wasm feature defaults retain incoming multiline form; build aliases and imports
 include both. Preserve incoming request/lot/generation contracts alongside the
 Kraken sticky protocol oracle, ticker corrections and ACK progress fixes.
 Independent integration code-correctness review and all affected gates follow.
+
+KuCoin integration review accepted with no findings; independent harness 258/258
+passes. Final merged-source local gates all PASS: 92 Kraken / 1,460 workspace
+tests, 258 harness, 76 real-Wasm and 45 host tests; bans, formatting, workspace
+all-target Clippy, Wasm Clippy; root 44 typecheck / 28 lint / 27 test tasks
+(safe-cex 6,972 tests per task). Kraken public CPU 1,741.7/354.6 ms (4.91x),
+steady 1,284.3/211.5 ms (6.07x), retained 18.3/2.1 MB (8.77x); same live fixture
+and 858,567-byte browser Wasm. Kraken private PASS on single and combined builds.
+Binance public CPU 288.1/142.0 ms (2.03x), retained 19.0/3.0 MB (6.25x), private
+correctness PASS. No Kraken implementation changes in this landing merge.
+All phase, PR and integration code-correctness reviews accepted and posted.
+Only hosted CI acceptance/merge/fresh-branch actions remain.
