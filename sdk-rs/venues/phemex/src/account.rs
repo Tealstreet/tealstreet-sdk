@@ -401,7 +401,8 @@ impl PhemexPerpetuals {
             }
             let upnl = currency_upnl(cx, currency);
             self.account.slices[currency].balance = Balance {
-                total: envelope.data.account.total,
+                // Account pushes use the same raw field and subtract this currency's UPnL.
+                total: envelope.data.account.total - upnl,
                 used: envelope.data.account.used,
                 free: envelope.data.account.total - envelope.data.account.used,
                 upnl,

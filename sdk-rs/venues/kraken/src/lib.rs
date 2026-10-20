@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use wire::*;
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -71,6 +72,7 @@ struct CandleState {
 pub struct Kraken {
     options: Options,
     signer: Option<sign::Signer>,
+    read_signer: Option<sign::Signer>,
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
@@ -95,8 +97,13 @@ impl Kraken {
             } else {
                 None
             };
+        let read_signer = options
+            .read_credentials
+            .as_ref()
+            .and_then(|r| sign::Signer::new(&r.secret).ok());
         Self {
             options,
+            read_signer,
             signer,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -389,6 +396,12 @@ fn interval_spec(interval: &str) -> (&str, f64) {
 impl Venue for Kraken {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if !self.options.public_data_only
             && self
                 .options
@@ -402,6 +415,13 @@ impl Venue for Kraken {
                 LogLevel::Error,
                 "Kraken secret must be nonempty valid base64",
             );
+        }
+        if self.options.read_credentials.is_some() && self.read_signer.is_none() {
+            cx.log(
+                LogLevel::Error,
+                "Kraken secondary secret must be nonempty valid base64",
+            );
+            return;
         }
         self.markets_request(cx);
         self.poll = Some(cx.set_timer(5_000.0));
@@ -917,3 +937,6 @@ impl Venue for Kraken {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

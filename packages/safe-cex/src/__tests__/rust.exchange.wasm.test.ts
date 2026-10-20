@@ -82,6 +82,8 @@ const recordedOkxTransport = () => {
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const instrument = {
     instId: 'BTC-USDT-SWAP',
+    instType: 'SWAP',
+    uly: 'BTC-USDT',
     ctType: 'linear',
     ctVal: '0.01',
     ctValCcy: 'BTC',
@@ -97,6 +99,17 @@ const recordedOkxTransport = () => {
     maxStopSz: '1000',
     maxTriggerSz: '1000',
     maxTwapSz: '1000',
+  };
+  const xperp = {
+    ...instrument,
+    instId: 'BTC-USD_UM_XPERP-310822',
+    instType: 'FUTURES',
+    ruleType: 'xperp',
+    uly: 'BTC-USD',
+    ctVal: '0.0001',
+    settleCcy: 'USD',
+    lotSz: '1',
+    minSz: '1',
   };
   const responses: Record<string, unknown[]> = {
     instruments: [instrument],
@@ -158,13 +171,27 @@ const recordedOkxTransport = () => {
       requests.push(request);
       const url = new URL(request.url);
       const name = url.pathname.split('/').pop()!;
-      // This scripted account owns one SWAP and no EU X-Perps. Answer the
-      // additional native catalog/seed scope without replaying a SWAP as FUTURES.
-      const data =
-        ['instruments', 'tickers', 'positions', 'orders-pending', 'orders-algo-pending'].includes(name) &&
-        url.searchParams.get('instType') === 'FUTURES'
-          ? []
-          : responses[name];
+      const futures = url.searchParams.get('instType') === 'FUTURES';
+      // EEA public/account discovery and private snapshots are separate product domains.
+      const data = !futures
+        ? responses[name]
+        : name === 'instruments'
+          ? [xperp]
+          : name === 'tickers'
+            ? [
+                {
+                  instId: xperp.instId,
+                  last: '',
+                  open24h: '',
+                  bidPx: '0',
+                  askPx: '0',
+                  volCcy24h: '0',
+                  vol24h: '0',
+                },
+              ]
+            : ['positions', 'orders-pending', 'orders-algo-pending'].includes(name)
+              ? []
+              : responses[name];
       return {
         status: data ? 200 : 404,
         headers: '',
@@ -464,12 +491,43 @@ describe('RustEngineExchange', () => {
     expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/business');
   });
 
-  it('rejects secondary signing keys before transport creation or engine startup', async () => {
-    let transports = 0;
-    setRustEngineTransport(() => {
-      transports++;
-      return recordedTransport().transport;
-    });
+  it('signs secondary reads and primary writes and definitive lookup with their actual account identities', async () => {
+    const tape = recordedTransport();
+    const outgoing: Array<Parameters<Transport['request']>[0]> = [];
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => ({
+      ...tape.transport,
+      request: async (request) => {
+        outgoing.push(request);
+        const url = new URL(request.url);
+        if (request.method === 'GET' && url.pathname.endsWith('/order')) {
+          return {
+            status: 200,
+            body: new TextEncoder().encode(
+              JSON.stringify({
+                orderId: 4243,
+                symbol: 'BTCUSDT',
+                clientOrderId: 'LostResponse1',
+                status: 'FILLED',
+                type: 'LIMIT',
+                origType: 'LIMIT',
+                side: 'BUY',
+                positionSide: 'BOTH',
+                reduceOnly: false,
+                price: '90000',
+                avgPrice: '90000',
+                origQty: '0.012',
+                executedQty: '0.012',
+                time: 1700000000000,
+                updateTime: 1700000000123,
+                timeInForce: 'GTC',
+              }),
+            ),
+          };
+        }
+        return tape.transport.request(request);
+      },
+    }));
     exchange = new RustEngineExchange(
       'binance',
       {
@@ -477,10 +535,71 @@ describe('RustEngineExchange', () => {
         secret: 'primary-secret',
         secondary_key: 'read-key',
         secondary_secret: 'read-secret',
+        secondaryProxyUrl: 'https://read-proxy.example/egress',
+        tealstreetProxy: false,
+        tealstreetTunnel: false,
       },
       new DefaultStore(),
     );
-    await expect(exchange.start()).rejects.toThrow('secondary signing keys are unsupported');
+    await exchange.start();
+    const reads = outgoing.filter((r) => r.method === 'GET' && r.url.includes('signature='));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const request of reads) {
+      expect(request.url).toMatch(/^https:\/\/read-proxy\.example\/egress\/https:\/\/fapi\.binance\.com\//);
+      expect(request.headers['X-MBX-APIKEY']).toBe('read-key');
+      const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
+      expect(signature).toBe(createHmac('sha256', 'read-secret').update(query).digest('hex'));
+    }
+    const publicRead = outgoing.find((r) => r.url.includes('/exchangeInfo'))!;
+    expect(publicRead.url).toBe('https://fapi.binance.com/fapi/v1/exchangeInfo');
+    expect(publicRead.headers['X-MBX-APIKEY']).toBeUndefined();
+    const listenKey = outgoing.find((r) => r.method === 'POST' && r.url.endsWith('/listenKey'))!;
+    expect(listenKey.headers['X-MBX-APIKEY']).toBe('primary-key');
+    expect(listenKey.url).not.toContain('read-proxy');
+
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 0.012,
+        price: 90000,
+      }),
+    ).resolves.toEqual(['4242']);
+    await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'LostResponse1')).resolves.toMatchObject({
+      found: true,
+      order: { id: '4243', clientOrderId: 'LostResponse1', status: OrderStatus.Closed },
+    });
+    const primaryOrders = outgoing.filter((r) => new URL(r.url).pathname.endsWith('/order'));
+    expect(primaryOrders.map((r) => r.method)).toEqual(['POST', 'GET']);
+    for (const request of primaryOrders) {
+      expect(request.url).toMatch(/^https:\/\/fapi\.binance\.com\/fapi\/v1\/order\?/);
+      expect(request.headers['X-MBX-APIKEY']).toBe('primary-key');
+      const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
+      expect(signature).toBe(createHmac('sha256', 'primary-secret').update(query).digest('hex'));
+    }
+    expect(
+      outgoing.filter((r) => r.method === 'GET' && r.url.includes('origClientOrderId=LostResponse1')),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    { secondary_key: 'read-key' },
+    { secondary_secret: 'read-secret' },
+    { secondary_key: '', secondary_secret: 'read-secret' },
+  ])('rejects incomplete secondary signing keys before transport creation: %o', async (secondary) => {
+    let transports = 0;
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => {
+      transports++;
+      return recordedTransport().transport;
+    });
+    exchange = new RustEngineExchange(
+      'binance',
+      { key: 'primary-key', secret: 'primary-secret', ...secondary },
+      new DefaultStore(),
+    );
+    await expect(exchange.start()).rejects.toThrow('secondary signing keys require a nonempty key and secret');
     expect(transports).toBe(0);
   });
 
@@ -681,8 +800,28 @@ describe('RustEngineExchange', () => {
       const tape = recordedOkxTransport();
       setWasmEngineLoader(loadNodeEngine);
       setRustEngineTransport(() => tape.transport);
-      exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
+      const store = new DefaultStore();
+      exchange = new RustEngineExchange(venue, { key: 'k', secret: 's', passphrase: 'p' }, store);
       await exchange.start();
+      const eea = venue === 'okxeu' || venue === 'okxeudemo';
+      expect(store.markets.map((m) => m.id)).toEqual(
+        eea ? ['BTC-USDT-SWAP', 'BTC-USD_UM_XPERP-310822'] : ['BTC-USDT-SWAP'],
+      );
+      expect(
+        tape.requests
+          .filter((r) => new URL(r.url).pathname.endsWith('/instruments'))
+          .map((r) => new URL(r.url).searchParams.get('instType')),
+      ).toEqual(eea ? ['SWAP', 'FUTURES'] : ['SWAP']);
+      for (const endpoint of ['positions', 'orders-pending']) {
+        // Socket authentication can refresh the snapshot more than once.
+        const scopes = tape.requests
+          .filter((r) => new URL(r.url).pathname.endsWith(`/${endpoint}`))
+          .map((r) => new URL(r.url).searchParams.get('instType'));
+        expect([...new Set(scopes)]).toEqual(eea ? ['SWAP', 'FUTURES'] : ['SWAP']);
+      }
+      if (eea) {
+        expect(store.tickersBySymbol.BTCUSD_UM_XPERP310822).toMatchObject({ last: 0, bid: 0, ask: 0, percentage: 0 });
+      }
       const order = {
         symbol: 'BTCUSDT',
         type: OrderType.Limit,

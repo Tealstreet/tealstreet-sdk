@@ -1440,8 +1440,9 @@ export class BaseExchange implements Exchange {
   applyWorkerFrame(buffer: ArrayBuffer) {
     this.workerFrameApplier ??= new FrameApplier(
       this.store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
+      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
       this.name === 'bitgetinverse',
+      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
       this.name === 'binanceinverse',
     );
     const frame = new Frame(buffer);

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CrossTradeManager } from '../../crossTrade/runtime/CrossTradeManager';
 import { BaseExchange } from '../../exchanges/base';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 
@@ -15,7 +16,7 @@ type OrderRow = { id: string; parentId?: string; amount: number; filled: number;
 
 // Independent encoder of the documented format-1 layout. The optional native
 // tail must not change offsets in the original seven-column ORDERS table.
-const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN } = {}) => {
+const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN, positionPnl = 0.002 } = {}) => {
   const strings = ['BTCUSD', 'BTC', 'USD', ...orders.flatMap((row) => [row.id, ...(row.parentId ? [row.parentId] : [])])];
   const ref = (s: string | undefined) => s === undefined ? 0xffffffff : strings.indexOf(s);
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
@@ -35,14 +36,14 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
     orders.map(() => 54321), orders.map((o) => o.amount), orders.map((o) => o.filled),
     orders.map((o) => o.remaining), orders.map(() => 1234), orders.map(() => NaN), orders.map(() => NaN),
   ];
-  if (native) columns.push(orders.map((o) => o.native ?? NaN));
+  if (native || orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.native ?? NaN));
   if (orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.filledNative ?? NaN));
   table(7, [
     orders.length,
     ...orders.flatMap((o) => [ref(o.id), 0xffffffff, ref(o.parentId)]),
     ...orders.map(() => 0), ...orders.map((o) => o.enums ?? 256),
   ], columns);
-  if (positions) table(8, [1, 0, (2 << 8) | (2 << 16)], [49000, 1000, 10, 0.002, 0.001, 0.02, 40000, 100, 1234].map((n) => [n]));
+  if (positions) table(8, [1, 0, (2 << 8) | (2 << 16)], [49000, 1000, 10, positionPnl, 0.001, 0.02, 40000, 100, 1234].map((n) => [n]));
   const encoded = strings.map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + encoded.reduce((n, s) => n + s.length, 0)));
   const view = new DataView(bytes.buffer);
@@ -76,6 +77,7 @@ describe('Rust frames preserve inverse native units', () => {
       contractSize: 100,
       native: true,
       positions: true,
+      positionPnl: 100,
       orders: [{ id: 'inverse-okx', amount: 7, filled: 0.004321, remaining: 0.008765, native: 5, filledNative: 2 }],
     });
     expect(value.orders()!.filledInPlacementUnits![0]).toBe(2);
@@ -87,6 +89,7 @@ describe('Rust frames preserve inverse native units', () => {
     for (const store of [worker, main]) {
       expect(store.orders[0]).toMatchObject({ amount: 7, extra: { remainingNative: 5, remainingNotional: 500, filledInPlacementUnits: 2 } });
       expect(store.positions[0].extra).toEqual({ contractsNative: 10 });
+      expect(store.positions[0].unrealizedPnl).toBe(100);
     }
     exchange.dispose();
   });
@@ -99,7 +102,7 @@ describe('Rust frames preserve inverse native units', () => {
       orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
     });
     const workerStore = new DefaultStore();
-    const applier = new FrameApplier(workerStore, false, false, true);
+    const applier = new FrameApplier(workerStore, false, false, false, true);
     applier.apply(value);
     applier.apply(
       fixture({
@@ -203,5 +206,44 @@ describe('Rust frames preserve inverse native units', () => {
         exchange.dispose();
       }
     }
+  });
+});
+
+describe('OKX native contract count bridge', () => {
+  it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s preserves native copier and chaser counts through worker frames', (name) => {
+    const store = new DefaultStore();
+    const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
+    const workerStore = new DefaultStore();
+    const worker = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, workerStore);
+    const frame = fixture({ contractSize: 100, native: true, positions: true, positionPnl: 100, orders: [
+      { id: 'entry', amount: 10, filled: 0.004, remaining: 0.016, native: 8 },
+      { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, filledNative: 2, enums: 3 << 8 },
+    ] });
+    exchange.applyWorkerFrame(frame.buffer);
+    (worker as unknown as { applier: FrameApplier }).applier.apply(frame);
+    for (const receiver of [store, workerStore]) {
+      expect(receiver.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
+      expect(receiver.orders[0].extra?.remainingNotional).toBe(800);
+      expect(receiver.orders[1].extra).toEqual({ remainingNative: 10, remainingNotional: 1000, filledInPlacementUnits: 2 });
+      expect(receiver.positions[0].extra).toEqual({ contractsNative: 10 });
+      expect(receiver.positions[0].unrealizedPnl).toBe(100);
+    }
+    worker.dispose();
+    exchange.dispose();
+  });
+  it('retains linear native placement counts separately from displayed base size', () => {
+    const store = new DefaultStore();
+    new FrameApplier(store, false, false, true).apply(fixture({ inverse: false, contractSize: 0.001, positions: true, orders: [
+      { id: 'linear', amount: 10, filled: 0.002, remaining: 0.008 },
+    ] }));
+    expect(store.orders[0].extra).toEqual({ remainingNative: 8, filledInPlacementUnits: 2 });
+    expect(store.positions[0].extra).toEqual({ contractsNative: 20 });
+  });
+  it('cannot infer exact inverse order leaves from a legacy base-sized remainder', () => {
+    const store = new DefaultStore();
+    new FrameApplier(store, false, false, true).apply(fixture({ contractSize: 100, orders: [
+      { id: 'legacy', amount: 10, filled: 0.004, remaining: 0.016 },
+    ] }));
+    expect(store.orders[0].extra).toBeUndefined();
   });
 });

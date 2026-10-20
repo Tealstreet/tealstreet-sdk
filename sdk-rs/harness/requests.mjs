@@ -241,8 +241,12 @@ export const subscriptionMessage = (message) => {
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
-  try { message = typeof text === 'string' ? JSON.parse(text) : text; }
-  catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  if (options.rust === 'grvt' && (text === 'ping' || text === 'pong')) return undefined;
+  try {
+    message = typeof text === 'string' ? JSON.parse(text) : text;
+  } catch {
+    return `WS ${canonicalUrl(url, callerIds, options)} ${text}`;
+  }
   if (options.socketMessage) {
     message = options.socketMessage(message);
     if (message === undefined) return undefined;
@@ -332,12 +336,15 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }
-  const key = subscriptionKey(url, message, callerIds, options);
+  // A quoted JSON string is not a bare GRVT heartbeat frame.
+  const input = options.rust === 'grvt' && typeof text === 'string' && typeof message === 'string' ? text : message;
+  const key = subscriptionKey(url, input, callerIds, options);
   return key === undefined ? [] : [key];
 };
 
 export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
-  if (['Ping', 'Pong', 'ping', 'pong'].includes(text)) return [];
+  if (options.rust === 'grvt') return fullSubscriptionKeys(url, text, callerIds, options);
+  if (['Ping', 'Pong'].includes(text)) return [];
   if (typeof text === 'string') { try { const m = JSON.parse(text); if (m?.ping !== undefined || m?.pong !== undefined) return []; } catch {} }
   const legacy = legacySubscriptionKeys(url, typeof text === 'string' ? text : JSON.stringify(text));
   return options.cryptoProtocol || options.bingxProtocol || options.mexcProtocol || options.blofinProtocol ||

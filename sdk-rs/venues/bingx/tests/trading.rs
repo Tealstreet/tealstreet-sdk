@@ -86,6 +86,7 @@ impl Harness {
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
             acknowledgements: Vec::new(),
             credentials: Credentials {
+                read: None,
                 key: "key".into(),
                 secret: "secret".into(),
             },

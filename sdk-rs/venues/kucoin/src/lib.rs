@@ -24,6 +24,7 @@ const SNAPSHOT_SHARD: usize = 380;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -679,6 +680,14 @@ impl Kucoin {
 impl Venue for Kucoin {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read
+                .validate()
+                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if self.options.testnet {
             cx.log(LogLevel::Error, "KuCoin Futures testnet is unsupported");
             return;
@@ -1172,3 +1181,6 @@ impl Venue for Kucoin {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

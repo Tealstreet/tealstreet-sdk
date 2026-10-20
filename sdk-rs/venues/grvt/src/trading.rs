@@ -3,16 +3,18 @@ use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET, BuilderState, decode_orde
 use crate::sign;
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
+use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, CommandId, Cx, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const CREATE: &str = "/lite/v1/create_order";
 const CANCEL: &str = "/lite/v1/cancel_order";
 const CANCEL_ALL: &str = "/lite/v1/cancel_all_orders";
 const GET: &str = "/lite/v1/order";
+const OPEN: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
 
 #[derive(Default)]
@@ -26,7 +28,25 @@ pub struct Request {
 }
 impl Request {
     pub(crate) fn is_read(&self) -> bool {
-        matches!(self.step.effect, Effect::Inspect(_) | Effect::Verify(_))
+        matches!(
+            self.step.effect,
+            Effect::Inspect(_) | Effect::Verify(_) | Effect::ReadSymbol(_)
+        )
+    }
+    pub(crate) fn is_symbol_read(&self) -> bool {
+        matches!(self.step.effect, Effect::ReadSymbol(_))
+    }
+    pub(crate) fn array_at(&self) -> Option<ArrayAt> {
+        self.is_symbol_read()
+            .then_some(ArrayAt::Envelope(&[&["r"], &["result"]]))
+    }
+    pub(crate) fn reset(&mut self) {
+        if let Effect::ReadSymbol(read) = &mut self.step.effect {
+            read.targets.clear();
+            read.native_ids.clear();
+            read.client_ids.clear();
+            read.failed = None;
+        }
     }
 }
 struct Plan {
@@ -35,6 +55,8 @@ struct Plan {
     created: Vec<String>,
     affected: Vec<String>,
     guard: Option<Target>,
+    scope: Option<CancelScope>,
+    cancel_attempts: Vec<String>,
 }
 impl Plan {
     fn new(command: CommandId) -> Self {
@@ -44,6 +66,8 @@ impl Plan {
             created: vec![],
             affected: vec![],
             guard: None,
+            scope: None,
+            cancel_attempts: vec![],
         }
     }
 }
@@ -56,9 +80,89 @@ enum Effect {
     Place(Box<Order>),
     Cancel(String),
     CancelSymbol(String),
+    ReadSymbol(Box<CancelRead>),
+    CancelExact(Target),
     Inspect(Box<Amend>),
     Verify(Target),
     Leverage { symbol: String, leverage: f64 },
+}
+struct CancelScope {
+    instrument: String,
+    account: String,
+    account_id: String,
+    revision: u64,
+    executions: u64,
+    evidence: HashMap<String, (Option<String>, Option<u64>)>,
+}
+#[derive(Default)]
+struct CancelRead {
+    targets: Vec<Target>,
+    native_ids: HashSet<u128>,
+    client_ids: HashSet<u64>,
+    failed: Option<String>,
+    instrument: String,
+    account: String,
+    account_id: Option<String>,
+    revision: u64,
+    executions: u64,
+    evidence: HashMap<String, (Option<String>, Option<u64>)>,
+}
+
+// open_orders is an authoritative complete snapshot, with no cursor/limit API.
+// Unknown envelope fields can signal truncation; destructive reads fail closed.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenSnapshot<'a> {
+    #[serde(rename = "r", alias = "result")]
+    _rows: [serde::de::IgnoredAny; 0],
+    #[serde(borrow, rename = "ri", alias = "request_id", default)]
+    _request_id: Option<Text<'a>>,
+}
+#[derive(Deserialize)]
+struct ScopedOrder<'a> {
+    #[serde(
+        rename = "a",
+        alias = "ack",
+        default,
+        deserialize_with = "field_present"
+    )]
+    has_ack: bool,
+    #[serde(
+        rename = "e",
+        alias = "error",
+        default,
+        deserialize_with = "field_present"
+    )]
+    error: bool,
+    #[serde(
+        rename = "c",
+        alias = "code",
+        default,
+        deserialize_with = "field_present"
+    )]
+    code: bool,
+    #[serde(borrow, rename = "sa", alias = "sub_account_id")]
+    account: Str<'a>,
+    #[serde(borrow, rename = "oi", alias = "order_id", default)]
+    native: Option<Str<'a>>,
+    #[serde(borrow, rename = "l", alias = "legs")]
+    legs: Vec<ScopedLeg<'a>>,
+    #[serde(borrow, rename = "m", alias = "metadata", default)]
+    metadata: Option<ScopedMetadata<'a>>,
+}
+fn field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(true)
+}
+#[derive(Deserialize)]
+struct ScopedLeg<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+}
+#[derive(Deserialize)]
+struct ScopedMetadata<'a> {
+    #[serde(borrow, rename = "co", alias = "client_order_id", default)]
+    client: Option<Str<'a>>,
 }
 #[derive(Clone)]
 struct Target {
@@ -145,6 +249,14 @@ struct Reply<'a> {
     result: &'a RawValue,
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancellationReply<'a> {
+    #[serde(borrow, rename = "r", alias = "result")]
+    result: &'a RawValue,
+    #[serde(borrow, rename = "ri", alias = "request_id", default)]
+    _request_id: Option<Text<'a>>,
+}
+#[derive(Deserialize)]
 struct Created<'a> {
     #[serde(borrow, rename = "oi", alias = "order_id", default)]
     id: Text<'a>,
@@ -169,6 +281,7 @@ impl Truth<'_> {
     }
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Ack<'a> {
     #[serde(borrow, rename = "a", alias = "ack")]
     ack: Truth<'a>,
@@ -247,6 +360,31 @@ fn command_id(command: &Command) -> Option<CommandId> {
 fn terminal(status: OrderStatus) -> bool {
     matches!(status, OrderStatus::Closed | OrderStatus::Canceled)
 }
+fn native_identity(text: &str) -> Result<Option<u128>, String> {
+    if text == "0" {
+        return Ok(None);
+    }
+    let digits = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .filter(|digits| {
+            !digits.is_empty()
+                && digits.len() <= 32
+                && digits.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .ok_or("Invalid GRVT cancellation native identity")?;
+    let value = u128::from_str_radix(digits, 16)
+        .map_err(|_| "Invalid GRVT cancellation native identity")?;
+    Ok((value > 0).then_some(value))
+}
+fn client_identity(text: &str) -> Result<Option<u64>, String> {
+    let value = text
+        .parse::<u64>()
+        .ok()
+        .filter(|v| v.to_string() == text)
+        .ok_or("Invalid GRVT cancellation client identity")?;
+    Ok((value > 0).then_some(value))
+}
 fn trigger_by(kind: Option<StopTriggerType>) -> &'static str {
     match kind.unwrap_or(StopTriggerType::LastPrice) {
         StopTriggerType::LastPrice => "LAST",
@@ -255,6 +393,248 @@ fn trigger_by(kind: Option<StopTriggerType>) -> &'static str {
     }
 }
 impl Grvt {
+    fn exact_cancel_ack(
+        &self,
+        cx: &Cx<'_, Pending>,
+        plan: &Plan,
+        target: &Target,
+        response: &Response<'_>,
+    ) -> Result<(), String> {
+        if response.status != 200 {
+            return Err("Incomplete GRVT cancellation acknowledgement".into());
+        }
+        let reply: CancellationReply<'_> = serde_json::from_str(response.body)
+            .map_err(|_| "Malformed GRVT cancellation acknowledgement")?;
+        if let Ok(ack) = serde_json::from_str::<Ack<'_>>(reply.result.get()) {
+            return if ack.ack.yes() {
+                Ok(())
+            } else {
+                Err("GRVT cancellation was not acknowledged".into())
+            };
+        }
+        // The official API also returns the affected Order. It proves identity,
+        // not finality: keep local cancellation pending until reconciliation.
+        let scope = plan
+            .scope
+            .as_ref()
+            .ok_or("Missing GRVT cancellation scope")?;
+        let proof: ScopedOrder<'_> = serde_json::from_str(reply.result.get())
+            .map_err(|_| "Missing GRVT cancellation acknowledgement")?;
+        if proof.has_ack
+            || proof.error
+            || proof.code
+            || proof.account != scope.account
+            || proof.legs.len() != 1
+            || proof.legs[0].instrument != scope.instrument
+        {
+            return Err("GRVT cancellation proof has a different account or instrument".into());
+        }
+        let decoded = decode_order(reply.result.get(), cx.store, cx.now)?;
+        let returned_native = proof
+            .native
+            .as_deref()
+            .map(native_identity)
+            .transpose()?
+            .flatten();
+        let returned_client = proof
+            .metadata
+            .as_ref()
+            .and_then(|m| m.client.as_deref())
+            .map(client_identity)
+            .transpose()?
+            .flatten();
+        if target
+            .native
+            .as_deref()
+            .is_some_and(|id| native_identity(id).ok().flatten() != returned_native)
+            || (target.native.is_none()
+                && target
+                    .client
+                    .as_deref()
+                    .and_then(|id| id.parse::<u64>().ok())
+                    != returned_client)
+            || target
+                .client
+                .as_deref()
+                .zip(returned_client)
+                .is_some_and(|(id, value)| id.parse::<u64>().ok() != Some(value))
+            || target
+                .created_ns
+                .is_some_and(|created| decoded.created_ns > 0 && decoded.created_ns != created)
+        {
+            return Err("GRVT cancellation proof returned a different order identity".into());
+        }
+        Ok(())
+    }
+    pub(crate) fn trade_item(&self, cx: &Cx<'_, Pending>, request: &mut Request, item: &str) {
+        if let Effect::ReadSymbol(read) = &mut request.step.effect
+            && read.failed.is_none()
+            && let Err(error) = self.cancel_snapshot_item(cx, read, item)
+        {
+            read.failed = Some(error);
+        }
+    }
+    fn cancel_snapshot_item(
+        &self,
+        cx: &Cx<'_, Pending>,
+        read: &mut CancelRead,
+        item: &str,
+    ) -> Result<(), String> {
+        let scoped: ScopedOrder<'_> =
+            serde_json::from_str(item).map_err(|_| "Malformed GRVT cancellation order scope")?;
+        if scoped.has_ack
+            || scoped.account != read.account
+            || scoped.error
+            || scoped.code
+            || scoped.legs.len() != 1
+            || scoped.legs[0].instrument.is_empty()
+        {
+            return Err("Invalid GRVT cancellation account or instrument scope".into());
+        }
+        let native = scoped
+            .native
+            .as_deref()
+            .map(native_identity)
+            .transpose()?
+            .flatten();
+        let client = scoped
+            .metadata
+            .as_ref()
+            .and_then(|m| m.client.as_deref())
+            .map(client_identity)
+            .transpose()?
+            .flatten();
+        if (native.is_none() && client.is_none())
+            || native.is_some_and(|id| !read.native_ids.insert(id))
+            || client.is_some_and(|id| !read.client_ids.insert(id))
+        {
+            return Err("Missing or duplicate GRVT cancellation identity".into());
+        }
+        let decoded = decode_order(item, cx.store, cx.now)?;
+        if scoped.legs[0].instrument != read.instrument || terminal(decoded.order.status) {
+            return Ok(());
+        }
+        read.targets.push(Target {
+            id: decoded.order.id,
+            native: native.and_then(|_| scoped.native.map(|s| s.into_owned())),
+            client: client.map(|id| id.to_string()),
+            filled: decoded.order.filled,
+            amount: decoded.order.amount,
+            created_ns: (decoded.created_ns > 0).then_some(decoded.created_ns),
+            execution_revision: self.account.execution_revision,
+            inspected_updated_ns: decoded.updated_ns,
+        });
+        Ok(())
+    }
+    fn cancel_snapshot(
+        &self,
+        read: &CancelRead,
+        response: &Response<'_>,
+    ) -> Result<(CancelScope, Vec<Step>, Vec<String>), String> {
+        if response.status != 200
+            || self.trade_account()? != read.account
+            || read.account_id.as_deref().is_some_and(|expected| {
+                self.account
+                    .session
+                    .as_ref()
+                    .is_none_or(|s| s.account_id != expected)
+            })
+        {
+            return Err("Incomplete GRVT cancellation snapshot or changed account".into());
+        }
+        let _: OpenSnapshot<'_> = serde_json::from_str(response.body)
+            .map_err(|_| "Incomplete or malformed GRVT cancellation snapshot")?;
+        if let Some(error) = &read.failed {
+            return Err(error.clone());
+        }
+        let mut steps = Vec::new();
+        let mut affected = Vec::new();
+        for target in &read.targets {
+            affected.push(target.id.clone());
+            steps.push(Step {
+                path: CANCEL,
+                body: self.identity(target)?,
+                effect: Effect::CancelExact(target.clone()),
+            });
+        }
+        Ok((
+            CancelScope {
+                instrument: read.instrument.clone(),
+                account: read.account.clone(),
+                account_id: self
+                    .account
+                    .session
+                    .as_ref()
+                    .ok_or("GRVT cancellation session is unavailable")?
+                    .account_id
+                    .clone(),
+                revision: read.revision,
+                executions: read.executions,
+                evidence: read.evidence.clone(),
+            },
+            steps,
+            affected,
+        ))
+    }
+    fn guard_exact_cancel(
+        &self,
+        cx: &Cx<'_, Pending>,
+        plan: &Plan,
+        target: &Target,
+    ) -> Result<(), String> {
+        let scope = plan
+            .scope
+            .as_ref()
+            .ok_or("Missing GRVT cancellation scope")?;
+        if self.trade_account()? != scope.account
+            || self.account.session.as_ref().map(|s| &s.account_id) != Some(&scope.account_id)
+        {
+            return Err("GRVT cancellation account changed".into());
+        }
+        if target.native.is_none() {
+            let expected = scope.evidence.get(&target.id).cloned().unwrap_or_default();
+            let current = (
+                self.account.native_ids.get(&target.id).cloned(),
+                self.account.order_created(&target.id),
+            );
+            if self.account.orders_revision != scope.revision
+                || self.account.execution_revision != scope.executions
+                || current != expected
+            {
+                return Err(
+                    "GRVT client cancellation identity changed during snapshot or authentication"
+                        .into(),
+                );
+            }
+        }
+        if let Some(progress) = self.account.order_progress(&target.id)
+            && (terminal(progress.status)
+                || target.created_ns.is_some_and(|created| {
+                    progress.created_ns > 0 && created != progress.created_ns
+                })
+                || target
+                    .native
+                    .as_deref()
+                    .zip(progress.native_id.as_deref())
+                    .is_some_and(|(wanted, actual)| {
+                        native_identity(wanted).ok() != native_identity(actual).ok()
+                    }))
+        {
+            return Err(
+                "GRVT cancellation target lifecycle changed; reconcile before retrying".into(),
+            );
+        }
+        if cx.store.order(&target.id).is_some_and(|o| {
+            terminal(o.status)
+                || cx
+                    .store
+                    .market_by_id(&scope.instrument)
+                    .is_none_or(|m| m.symbol != o.symbol)
+        }) {
+            return Err("GRVT cancellation target became terminal".into());
+        }
+        Ok(())
+    }
     fn trade_account(&self) -> Result<&str, String> {
         if self.options.public_data_only {
             return Err("GRVT trading requires a private account".into());
@@ -328,6 +708,7 @@ impl Grvt {
         request: &Request,
     ) -> Result<(), String> {
         match &request.step.effect {
+            Effect::CancelExact(target) => self.guard_exact_cancel(cx, &request.plan, target),
             Effect::Inspect(amend) => self.guard_amend(cx, &amend.target),
             Effect::Place(_) | Effect::Verify(_) => request
                 .plan
@@ -702,46 +1083,42 @@ impl Grvt {
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
-                let market = if symbol.is_empty() {
-                    None
-                } else {
-                    Some(
-                        cx.store
-                            .market(&symbol)
-                            .ok_or("Unknown GRVT cancellation market")?,
-                    )
-                };
                 #[derive(Serialize)]
-                struct Filter<'a> {
+                struct Account<'a> {
                     sa: &'a str,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    k: Option<[&'static str; 1]>,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    b: Option<[&'a str; 1]>,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    q: Option<[&'a str; 1]>,
                 }
-                let body = serde_json::to_string(&Filter {
+                let body = serde_json::to_string(&Account {
                     sa: self.trade_account()?,
-                    k: market.map(|_| ["PERPETUAL"]),
-                    b: market.map(|m| [m.base.as_str()]),
-                    q: market.map(|m| [m.quote.as_str()]),
                 })
                 .map_err(|e| e.to_string())?;
-                plan.affected.extend(
-                    cx.store
-                        .orders()
-                        .iter()
-                        .filter(|o| {
-                            (symbol.is_empty() || o.symbol == symbol) && !terminal(o.status)
-                        })
-                        .map(|o| o.id.clone()),
-                );
-                plan.steps.push_back(Step {
-                    path: CANCEL_ALL,
-                    body,
-                    effect: Effect::CancelSymbol(symbol),
-                });
+                if symbol.is_empty() {
+                    plan.affected.extend(
+                        cx.store
+                            .orders()
+                            .iter()
+                            .filter(|o| !terminal(o.status))
+                            .map(|o| o.id.clone()),
+                    );
+                    plan.steps.push_back(Step {
+                        path: CANCEL_ALL,
+                        body,
+                        effect: Effect::CancelSymbol(symbol),
+                    });
+                } else {
+                    let market = cx
+                        .store
+                        .market(&symbol)
+                        .ok_or("Unknown GRVT cancellation market")?;
+                    plan.steps.push_back(Step {
+                        path: OPEN,
+                        body,
+                        effect: Effect::ReadSymbol(Box::new(CancelRead {
+                            instrument: market.id.clone(),
+                            account: self.trade_account()?.to_owned(),
+                            ..CancelRead::default()
+                        })),
+                    });
+                }
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -875,7 +1252,7 @@ impl Grvt {
         }
     }
     fn trade_step(&mut self, cx: &mut Cx<'_, Pending>, mut plan: Plan) {
-        let Some(step) = plan.steps.pop_front() else {
+        let Some(mut step) = plan.steps.pop_front() else {
             self.trade_finish(cx, plan, None);
             return;
         };
@@ -886,7 +1263,24 @@ impl Grvt {
             self.trade_finish(cx, plan, Some(error));
             return;
         }
+        if let Effect::CancelExact(target) = &step.effect
+            && let Err(error) = self.guard_exact_cancel(cx, &plan, target)
+        {
+            self.trade_finish(cx, plan, Some(error));
+            return;
+        }
+        if let Effect::ReadSymbol(read) = &mut step.effect {
+            read.account_id = self.account.session.as_ref().map(|s| s.account_id.clone());
+            read.revision = self.account.orders_revision;
+            read.executions = self.account.execution_revision;
+            read.evidence = self.account.cancellation_evidence();
+        }
         match &step.effect {
+            Effect::CancelExact(target) => {
+                plan.cancel_attempts.push(target.id.clone());
+                cx.store
+                    .set_order_status(&target.id, OrderStatus::Canceling);
+            }
             Effect::Place(order) => {
                 self.account
                     .record_identity(&order.id, None, order.last_update);
@@ -921,6 +1315,7 @@ impl Grvt {
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<String>) {
         for id in &plan.affected {
             if error.is_some()
+                && plan.scope.is_none()
                 && cx
                     .store
                     .order(id)
@@ -937,6 +1332,10 @@ impl Grvt {
                 Some(error) if !plan.created.is_empty() => Err(format!(
                     "{error}; already created GRVT order IDs: {}",
                     plan.created.join(",")
+                )),
+                Some(error) if !plan.cancel_attempts.is_empty() => Err(format!(
+                    "{error}; reconcile GRVT cancellation identities: {}",
+                    plan.cancel_attempts.join(",")
                 )),
                 Some(error) => Err(error),
                 None => Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
@@ -969,6 +1368,35 @@ impl Grvt {
         }
         let result = (|| -> Result<(), String> {
             match &request.step.effect {
+                Effect::ReadSymbol(read) => {
+                    let (scope, steps, affected) = self.cancel_snapshot(read, &response)?;
+                    request.plan.scope = Some(scope);
+                    request.plan.affected = affected;
+                    // Every row is validated before any new step can be dispatched.
+                    for step in &steps {
+                        if let Effect::CancelExact(target) = &step.effect {
+                            self.guard_exact_cancel(cx, &request.plan, target)?;
+                        }
+                    }
+                    request.plan.steps.extend(steps);
+                }
+                Effect::CancelExact(target) => {
+                    if let Err(error) = self.exact_cancel_ack(cx, &request.plan, target, &response)
+                    {
+                        if error == "GRVT cancellation was not acknowledged"
+                            && cx
+                                .store
+                                .order(&target.id)
+                                .is_some_and(|o| o.status == OrderStatus::Canceling)
+                        {
+                            cx.store.set_order_status(&target.id, OrderStatus::Open);
+                        }
+                        return Err(error);
+                    }
+                    if let Some(scope) = &mut request.plan.scope {
+                        scope.revision += 1;
+                    }
+                }
                 Effect::Place(order) => {
                     let reply: Reply<'_> = serde_json::from_str(response.body)
                         .map_err(|_| "Malformed GRVT create response")?;

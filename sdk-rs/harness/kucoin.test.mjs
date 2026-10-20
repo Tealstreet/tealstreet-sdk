@@ -74,7 +74,7 @@ test('KuCoin public replay waits for reads queued before the rate limiter', asyn
 
 test('KuCoin queued recovery drains under the deterministic replay clock', async () => {
   const { ReplayClock } = await import('./tape.mjs');
-  const clock = new ReplayClock(1700000000000);
+  const clock = new ReplayClock(1700000000000, true);
   clock.install();
   try {
     clock.beginStartup();

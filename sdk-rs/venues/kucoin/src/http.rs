@@ -43,9 +43,27 @@ impl Kucoin {
     }
 
     fn dispatch_http(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+        // Select credentials only when the queued request actually dispatches;
+        // both the request signature and broker headers use this dispatch time.
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| request.method == Method::Get && request.authenticated)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.options.passphrase.clone())
+                    .unwrap_or_default(),
+                broker: self.options.broker.clone(),
+            });
         let headers = if request.authenticated {
-            self.credentials
+            read_credentials
                 .as_ref()
+                .or(self.credentials.as_ref())
                 .map_or_else(Vec::new, |credentials| {
                     sign::headers(
                         credentials,
@@ -184,18 +202,25 @@ mod tests {
         }
     }
     fn engine(requests: Vec<Request>) -> Engine<Probe> {
-        let mut venue = Kucoin::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            broker: Some(BrokerOptions {
-                partner: "partner".into(),
-                broker_key: "broker-key".into(),
-                broker_name: "broker".into(),
-                verify: None,
-            }),
-            ..Default::default()
-        });
+        engine_with_options(
+            requests,
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                broker: Some(BrokerOptions {
+                    partner: "partner".into(),
+                    broker_key: "broker-key".into(),
+                    broker_name: "broker".into(),
+                    verify: None,
+                }),
+                ..Default::default()
+            },
+        )
+    }
+
+    fn engine_with_options(requests: Vec<Request>, options: Options) -> Engine<Probe> {
+        let mut venue = Kucoin::new(options);
         venue.books.insert(
             "BTCUSDT".into(),
             BookState {
@@ -231,6 +256,87 @@ mod tests {
                 }
             })
             .unwrap()
+    }
+
+    #[test]
+    fn queued_secondary_read_signs_at_dispatch_and_streams_all_items() {
+        let mut queued = request(4, Method::Get, "/secondary?symbol=BTC+USDT");
+        queued.stream = Some(ArrayAt::Path(&["data", "items"]));
+        let mut e = engine_with_options(
+            vec![
+                request(1, Method::Get, "/one"),
+                request(2, Method::Get, "/two"),
+                request(3, Method::Get, "/three"),
+                queued,
+                request(5, Method::Post, "/api/v1/orders"),
+            ],
+            Options {
+                key: Some("primary-key".into()),
+                secret: Some("primary-secret".into()),
+                passphrase: Some("primary-pass".into()),
+                read_credentials: Some(safe_cex_engine::ReadCredentials {
+                    key: "read-key".into(),
+                    secret: "read-secret".into(),
+                    passphrase: None,
+                }),
+                broker: Some(BrokerOptions {
+                    partner: "partner".into(),
+                    broker_key: "broker-key".into(),
+                    broker_name: "broker".into(),
+                    verify: None,
+                }),
+                ..Options::default()
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(http(&actions).len(), 4);
+        assert!(
+            http(&actions)
+                .iter()
+                .take(3)
+                .all(|r| r.headers.contains(&("KC-API-KEY", "read-key".into())))
+        );
+        assert!(
+            http(&actions)[3]
+                .headers
+                .contains(&("KC-API-KEY", "primary-key".into()))
+        );
+        let (reset, at) = timer(&actions);
+        e.handle(at, Event::TimerFired { timer: reset });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let requests = http(&actions);
+        assert_eq!(requests.len(), 1);
+        let credentials = sign::Credentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: "primary-pass".into(),
+            broker: e.venue().venue.options.broker.clone(),
+        };
+        assert_eq!(
+            requests[0].headers,
+            sign::headers(
+                &credentials,
+                Method::Get,
+                "/secondary?symbol=BTC+USDT",
+                "",
+                at
+            )
+        );
+        assert!(requests[0].url.ends_with("/secondary?symbol=BTC%2BUSDT"));
+        let id = requests[0].id;
+        e.handle(
+            at,
+            Event::HttpStart {
+                request: id,
+                status: 200,
+                headers: "",
+            },
+        );
+        for data in br#"{"data":{"items":[1,2]}}"#.chunks(3) {
+            e.handle(at, Event::HttpChunk { request: id, data });
+        }
+        e.handle(at, Event::HttpEnd { request: id });
+        assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command:4, result:Ok(value) }) if value=="1,2")));
     }
 
     #[test]

@@ -1,11 +1,45 @@
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response, TimerId};
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 use serde::Deserialize;
 
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab","orderID":"fcdfeafa-ed68-45d4-b2bd-7bc27f2b2b0b"}"#;
 const ORDER: &str = r#"{"actionTimeNs":1667562110213260743,"transactTimeNs":1667562110221077395,"orderId":"743fc923-cb01-4261-88d1-b35dba2cdac0","symbol":"BTCUSDT","side":"Buy","ordType":"Market","ordStatus":"Filled","priceRp":"21206.7","orderQtyRq":"0.001","cumQtyRq":"0.001","reduceOnly":false}"#;
-fn engine(private: bool) -> Engine<PhemexPerpetuals> {
+// Keep the real protocol timers while tests consume HTTP/result actions.
+// A queued history page may dispatch only after its registered quota timer.
+struct Fixture {
+    engine: Engine<PhemexPerpetuals>,
+    timers: Vec<(TimerId, f64)>,
+    now: f64,
+}
+impl Fixture {
+    fn new(engine: Engine<PhemexPerpetuals>) -> Self {
+        Self {
+            engine,
+            timers: vec![],
+            now: 0.,
+        }
+    }
+    fn handle(&mut self, now: f64, event: Event<'_>) {
+        self.now = self.now.max(now);
+        if let Event::TimerFired { timer } = &event {
+            self.timers.retain(|(id, _)| id != timer);
+        }
+        self.engine.handle(self.now, event);
+    }
+}
+impl std::ops::Deref for Fixture {
+    type Target = Engine<PhemexPerpetuals>;
+    fn deref(&self) -> &Self::Target {
+        &self.engine
+    }
+}
+impl std::ops::DerefMut for Fixture {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.engine
+    }
+}
+fn engine(private: bool) -> Fixture {
     let mut e = Engine::new(PhemexPerpetuals::new(Options {
         key: private.then(|| "key".into()),
         secret: private.then(|| "secret".into()),
@@ -42,12 +76,36 @@ fn engine(private: bool) -> Engine<PhemexPerpetuals> {
         taker_fee: None,
         maker_fee: None,
     }]);
-    e
+    Fixture::new(e)
 }
-fn actions(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
-    e.drain_actions().collect()
+fn actions(e: &mut Fixture) -> Vec<Action> {
+    for _ in 0..100 {
+        let output: Vec<_> = e.drain_actions().collect();
+        for action in &output {
+            match action {
+                Action::SetTimer { timer, at_ms } => e.timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => e.timers.retain(|(id, _)| id != timer),
+                _ => {}
+            }
+        }
+        if !output.is_empty() {
+            return output;
+        }
+        let next = e
+            .timers
+            .iter()
+            .enumerate()
+            .min_by(|(a, (_, at_a)), (b, (_, at_b))| at_a.total_cmp(at_b).then(a.cmp(b)))
+            .map(|(index, _)| index);
+        let Some(index) = next else {
+            return output;
+        };
+        let (timer, at) = e.timers.remove(index);
+        e.handle(at, Event::TimerFired { timer });
+    }
+    panic!("bounded protocol timer advancement must settle");
 }
-fn query(e: &mut Engine<PhemexPerpetuals>, query: Query) -> Action {
+fn query(e: &mut Fixture, query: Query) -> Action {
     e.handle(
         1_710_000_000_000.0,
         Event::Command(Command::Query { command: 10, query }),
@@ -66,7 +124,7 @@ fn fills() -> Query {
         limit: None,
     }
 }
-fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
+fn result(e: &mut Fixture) -> Result<String, String> {
     actions(e)
         .into_iter()
         .find_map(|a| match a {
@@ -78,7 +136,7 @@ fn result(e: &mut Engine<PhemexPerpetuals>) -> Result<String, String> {
         })
         .expect("completion")
 }
-fn respond(e: &mut Engine<PhemexPerpetuals>, request: &Action, body: &str, streamed: bool) {
+fn respond(e: &mut Fixture, request: &Action, body: &str, streamed: bool) {
     let Action::Http(r) = request else {
         panic!("HTTP")
     };
@@ -291,15 +349,8 @@ fn unsupported_or_invalid_queries_never_issue_io() {
         (false, fills()),
         (
             true,
-            Query::OrderByClientId {
-                symbol: "BTCUSDT".into(),
-                client_order_id: "caller-id".into(),
-            },
-        ),
-        (
-            true,
             Query::Income {
-                symbol: None,
+                symbol: Some("BTCUSDT".into()),
                 kind: None,
                 from_ms: None,
                 to_ms: None,
@@ -391,12 +442,12 @@ fn private_history_rejects_rows_beyond_the_documented_page_maximum() {
 #[test]
 fn public_only_mode_refuses_private_history_even_with_credentials() {
     let market = engine(true).store().markets()[0].clone();
-    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+    let mut e = Fixture::new(Engine::new(PhemexPerpetuals::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         public_data_only: true,
         ..Options::default()
-    }));
+    })));
     e.store_mut().set_markets(vec![market]);
     e.handle(
         1.0,
@@ -501,4 +552,404 @@ fn trailing_history_requires_a_known_trigger_and_keeps_its_type() {
         true,
     );
     assert!(result(&mut e).is_err());
+}
+
+fn lookup(id: &str) -> Query {
+    Query::OrderByClientId {
+        symbol: "BTCUSDT".into(),
+        client_order_id: id.into(),
+    }
+}
+#[test]
+fn direct_client_id_lookup_covers_closed_orders_without_mutating_store() {
+    #[derive(Deserialize)]
+    struct Lookup {
+        found: bool,
+        order: FoundOrder,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FoundOrder {
+        client_order_id: Option<String>,
+        status: String,
+    }
+    for streamed in [false, true] {
+        for (native, status) in [
+            ("Filled", "closed"),
+            ("Canceled", "canceled"),
+            ("Triggered", "closed"),
+            ("New", "open"),
+        ] {
+            let mut e = engine(true);
+            let id = "caller /?🌊";
+            let a = query(&mut e, lookup(id));
+            let Action::Http(r) = &a else { unreachable!() };
+            assert!(r.url.ends_with("/api-data/g-futures/orders/by-order-id?symbol=BTCUSDT&clOrdID=caller%20%2F%3F%F0%9F%8C%8A"));
+            let row = ORDER
+                .replace("Filled", native)
+                .replace("\"symbol\"", "\"clOrdId\":\"caller /?🌊\",\"symbol\"");
+            respond(&mut e, &a, &format!("[{row}]"), streamed);
+            let result: Lookup = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+            assert!(result.found);
+            assert_eq!(result.order.client_order_id.as_deref(), Some(id));
+            assert_eq!(result.order.status, status);
+            assert!(e.store().orders().is_empty());
+        }
+    }
+}
+#[test]
+fn only_successful_exact_client_id_search_can_report_definitive_absence() {
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let a = query(&mut e, lookup("caller"));
+        respond(&mut e, &a, "[]", streamed);
+        assert_eq!(
+            result(&mut e).unwrap(),
+            r#"{"found":false,"definitive":true}"#
+        );
+        for body in [
+            format!("[{ORDER}]"),
+            format!(
+                "[{}]",
+                ORDER.replace("\"symbol\"", "\"clOrdId\":\"wrong\",\"symbol\"")
+            ),
+            format!(
+                "[{}]",
+                ORDER
+                    .replace("BTCUSDT", "ETHUSDT")
+                    .replace("\"symbol\"", "\"clOrdId\":\"caller\",\"symbol\"")
+            ),
+            "null".into(),
+            r#"{"code":10001,"msg":"denied"}"#.into(),
+        ] {
+            let a = query(&mut e, lookup("caller"));
+            respond(&mut e, &a, &body, streamed);
+            assert!(result(&mut e).is_err(), "{body}");
+        }
+    }
+}
+fn income(from: f64, to: f64, kind: Option<&str>) -> Query {
+    Query::Income {
+        symbol: None,
+        kind: kind.map(str::to_owned),
+        from_ms: Some(from),
+        to_ms: Some(to),
+        limit: None,
+    }
+}
+fn ledger(time: u64, amount: &str, balance: &str, kind: &str, currency: &str) -> String {
+    format!(
+        r#"{{"typeDesc":"{kind}","amountRv":"{amount}","balanceRv":"{balance}","createTime":{time},"currency":"{currency}"}}"#
+    )
+}
+fn next_http(e: &mut Fixture) -> Action {
+    actions(e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .expect("next page")
+}
+fn finish_empty_probes(e: &mut Fixture) -> Result<String, String> {
+    for _ in 0..100 {
+        let output = actions(e);
+        for action in &output {
+            if let Action::Notice(Notice::CommandDone { result, .. }) = action {
+                return result.clone();
+            }
+        }
+        let a = output
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("remaining span probe");
+        respond(e, &a, "[]", true);
+    }
+    panic!("bounded span probes must terminate");
+}
+#[test]
+fn income_uses_shared_span_walk_across_short_pages_and_both_settlements() {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Income {
+        income: f64,
+        asset: String,
+        income_type: String,
+        category: String,
+        tran_id: String,
+    }
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let first = ledger(1100, "-0.01", "99.99", "REALIZED_PNL", "USDT");
+        let second = ledger(1200, "2", "101.99", "TRANSFER", "USDT");
+        let third = ledger(1300, "0.5", "102.49", "NEW_BIZ_TYPE", "USDT");
+        let fourth = ledger(1150, "-1", "99", "REALIZED_PNL", "USDC");
+        let a = query(&mut e, income(1000., 2000., None));
+        let Action::Http(r) = &a else { unreachable!() };
+        assert!(r.url.ends_with("/api-data/futures/v2/tradeAccountDetail?currency=USDT&start=1000&end=2000&offset=0&limit=200"));
+        respond(&mut e, &a, &format!("[{first},{second}]"), streamed);
+        let a = next_http(&mut e);
+        let Action::Http(r) = &a else { unreachable!() };
+        assert!(r.url.contains("start=1200&end=2000"));
+        respond(&mut e, &a, &format!("[{second},{third}]"), streamed);
+        let a = next_http(&mut e);
+        respond(&mut e, &a, &format!("[{third}]"), streamed);
+        let a = next_http(&mut e);
+        let Action::Http(r) = &a else { unreachable!() };
+        assert!(r.url.contains("currency=USDC&start=1000&end=2000"));
+        respond(&mut e, &a, &format!("[{fourth}]"), streamed);
+        let a = next_http(&mut e);
+        respond(&mut e, &a, &format!("[{fourth}]"), streamed);
+        let rows: Vec<Income> =
+            serde_json::from_str(&finish_empty_probes(&mut e).unwrap()).unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].income, 0.5);
+        assert_eq!(rows[0].income_type, "NEW_BIZ_TYPE");
+        assert_eq!(rows[0].category, "other");
+        assert_eq!(rows[1].category, "transfer");
+        assert_eq!(rows[2].asset, "USDC");
+        assert_eq!(rows[3].income, -0.01);
+        assert!(rows.iter().all(|row| !row.tran_id.is_empty()));
+        assert_eq!(e.store().balance().total, 0.);
+    }
+}
+#[test]
+fn income_keeps_distinct_equal_time_postings_and_filters_after_coverage() {
+    let mut e = engine(true);
+    let a = query(&mut e, income(1000., 2000., Some("REALIZED_PNL")));
+    let x = ledger(1100, "1", "100", "REALIZED_PNL", "USDT");
+    let y = ledger(1100, "1", "101", "REALIZED_PNL", "USDT");
+    let z = ledger(1100, "0", "101", "OTHER", "USDT");
+    let body = format!("[{x},{y},{z},{z}]");
+    respond(&mut e, &a, &body, true);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, &body, true);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, "[]", true);
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Income {
+        tran_id: String,
+    }
+    let rows: Vec<Income> = serde_json::from_str(&finish_empty_probes(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0].tran_id, rows[1].tran_id);
+}
+#[test]
+fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success() {
+    let mut e = engine(true);
+    let a = query(&mut e, income(1000., 2000., None));
+    let x = ledger(1100, "1", "100", "REALIZED_PNL", "USDT");
+    respond(&mut e, &a, &format!("[{x}]"), false);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, &format!("[{x}]"), false);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, r#"{"code":10001,"msg":"denied"}"#, false);
+    assert!(result(&mut e).is_err());
+
+    let mut e = engine(true);
+    let mut a = query(&mut e, income(1000., 2000., None));
+    let body = format!("[{}]", vec![x; 200].join(","));
+    respond(&mut e, &a, &body, true);
+    a = next_http(&mut e);
+    respond(&mut e, &a, &body, true);
+    // A full duplicate-only timestamp is ambiguous. The shared pager marks
+    // incomplete and probes the remaining span, then completion must fail.
+    for _ in 0..60 {
+        let output = actions(&mut e);
+        if let Some(result) = output.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            _ => None,
+        }) {
+            assert!(result.is_err());
+            return;
+        }
+        let a = output
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("coverage probe");
+        respond(&mut e, &a, "[]", true);
+    }
+    panic!("must terminate visibly incomplete");
+}
+#[test]
+fn income_single_millisecond_window_and_unsupported_filters_fail_closed() {
+    let mut e = engine(true);
+    let a = query(&mut e, income(1100., 1100., None));
+    let x = ledger(1100, "-0.01", "99.99", "REALIZED_PNL", "USDT");
+    respond(&mut e, &a, &format!("[{x}]"), false);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, &format!("[{x}]"), false);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, "[]", false);
+    assert!(finish_empty_probes(&mut e).unwrap().contains("-0.01"));
+    for bad in [
+        income(f64::NAN, 2000., None),
+        income(2001., 2000., None),
+        lookup(""),
+    ] {
+        e.handle(
+            1.,
+            Event::Command(Command::Query {
+                command: 10,
+                query: bad,
+            }),
+        );
+        let output = actions(&mut e);
+        assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
+        assert!(output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        )));
+    }
+}
+
+#[test]
+fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
+    let market = engine(true).store().markets()[0].clone();
+    let mut e = Fixture::new(Engine::new(PhemexPerpetuals::new(Options {
+        key: Some("primary-key".into()),
+        secret: Some("primary-secret".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: None,
+        }),
+        ..Options::default()
+    })));
+    e.store_mut().set_markets(vec![market]);
+    let a = query(&mut e, fills());
+    let Action::Http(r) = &a else { unreachable!() };
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("x-phemex-access-token") && v == "read-key")
+    );
+    assert!(r.route.is_none());
+    respond(&mut e, &a, "[]", false);
+    assert_eq!(result(&mut e).unwrap(), "[]");
+    // Exhaust the shared quota, then prove lookup cannot bypass it or borrow
+    // the ordinary-read identity when its actual dispatch is delayed.
+    for _ in 0..2 {
+        let a = query(&mut e, fills());
+        respond(&mut e, &a, "[]", false);
+        assert_eq!(result(&mut e).unwrap(), "[]");
+    }
+    let queued_at = e.now;
+    e.handle(
+        queued_at,
+        Event::Command(Command::Query {
+            command: 10,
+            query: lookup("caller"),
+        }),
+    );
+    assert!(
+        e.drain_actions().next().is_none(),
+        "lookup must await the quota callback"
+    );
+    let a = next_http(&mut e);
+    assert_eq!(e.now, queued_at + 1000.);
+    let Action::Http(r) = &a else { unreachable!() };
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("x-phemex-access-token") && v == "primary-key")
+    );
+    assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+    let expiry = r
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-phemex-request-expiry"))
+        .unwrap()
+        .1
+        .as_str();
+    assert_eq!(
+        expiry,
+        (((e.now + 60_000.) / 1000. + 0.5).floor() as u64).to_string()
+    );
+    let payload =
+        format!("/api-data/g-futures/orders/by-order-idsymbol=BTCUSDT&clOrdID=caller{expiry}");
+    let signature = safe_cex_crypto::hmac_sha256(
+        b"primary-secret",
+        payload.as_bytes(),
+        safe_cex_crypto::Encoding::Hex,
+    );
+    assert!(
+        r.headers
+            .contains(&("X-PHEMEX-REQUEST-SIGNATURE", signature))
+    );
+
+    respond(&mut e, &a, "[]", false);
+    assert_eq!(
+        result(&mut e).unwrap(),
+        r#"{"found":false,"definitive":true}"#
+    );
+}
+#[test]
+fn income_rejects_bad_rows_and_unknown_currency_instead_of_empty_ledger() {
+    let x = ledger(1100, "1", "100", "REALIZED_PNL", "USDT");
+    for bad in [
+        x.replace("USDT", "BTC"),
+        x.replace("\"amountRv\":\"1\"", "\"amountRv\":\"NaN\""),
+        x.replace("\"balanceRv\":\"100\"", "\"balanceRv\":\"Infinity\""),
+        x.replace("1100", "9007199254740992"),
+        x.replace("REALIZED_PNL", ""),
+    ] {
+        for streamed in [true, false] {
+            let mut e = engine(true);
+            let a = query(&mut e, income(1000., 2000., None));
+            respond(&mut e, &a, &format!("[{bad}]"), streamed);
+            assert!(result(&mut e).is_err(), "{bad}");
+        }
+    }
+}
+
+#[test]
+fn unknown_lookup_market_is_nondefinitive_without_io_even_without_credentials() {
+    for private in [false, true] {
+        let mut e = engine(private);
+        e.handle(
+            1.,
+            Event::Command(Command::Query {
+                command: 10,
+                query: Query::OrderByClientId {
+                    symbol: "UNKNOWN".into(),
+                    client_order_id: "caller".into(),
+                },
+            }),
+        );
+        let output = actions(&mut e);
+        assert!(output.iter().all(|a| !matches!(a, Action::Http(_))));
+        assert!(output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(body), .. }) if body == r#"{"found":false,"definitive":false}"#)));
+    }
+}
+
+#[test]
+fn ledger_identity_preserves_money_digits_beyond_binary_float_precision() {
+    let mut e = engine(true);
+    let a = query(&mut e, income(1000., 2000., None));
+    let x = ledger(
+        1100,
+        "0.000000001",
+        "10000000000000000.000000001",
+        "REALIZED_PNL",
+        "USDT",
+    );
+    let y = ledger(
+        1100,
+        "0.000000001",
+        "10000000000000000.000000002",
+        "REALIZED_PNL",
+        "USDT",
+    );
+    let body = format!("[{x},{y}]");
+    respond(&mut e, &a, &body, true);
+    let a = next_http(&mut e);
+    respond(&mut e, &a, &body, true);
+    let result = finish_empty_probes(&mut e).unwrap();
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Income {
+        tran_id: String,
+    }
+    let rows: Vec<Income> = serde_json::from_str(&result).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0].tran_id, rows[1].tran_id);
 }

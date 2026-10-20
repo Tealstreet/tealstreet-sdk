@@ -23,15 +23,15 @@ const types = {
   ],
 };
 let client = 10000;
-async function signed() {
+async function signed(instrument = 'BTC_USDT_Perp', hash = '0x030501') {
   const now = BigInt(Date.now()) * 1000000n;
   const message = { subAccountID: '777', isMarket: false, timeInForce: 1, postOnly: false, reduceOnly: false,
-    legs: [{ assetID: '0x030501', contractSize: '4000000', limitPrice: '90000000000', isBuyingContract: true }],
+    legs: [{ assetID: hash, contractSize: '4000000', limitPrice: '90000000000', isBuyingContract: true }],
     builder: '0xee8f3559f298fffa79b8253437969d15b5dccff3', builderFee: 300, nonce: 123,
     expiration: String(now + 3600000000000n) };
   const signature = Signature.from(await wallet.signTypedData({ name: 'GRVT Exchange', version: '0', chainId: 325 }, types, message));
   return { o: { sa: '777', im: false, ti: 'GOOD_TILL_TIME', po: false, ro: false,
-    l: [{ i: 'BTC_USDT_Perp', s: '0.004', lp: '90', ib: true }],
+    l: [{ i: instrument, s: '0.004', lp: '90', ib: true }],
     b: message.builder, bf: '0.03', m: { co: String(++client), ct: String(now) },
     s: { s: wallet.address, r: signature.r, s1: signature.s, v: signature.v, e: message.expiration, n: 123, ci: '325' },
   } };

@@ -17,6 +17,7 @@ use wire::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -179,6 +180,13 @@ impl Woo {
         if self.options.public_data_only || key.is_empty() || secret.is_empty() {
             return Err("WOO private requests require credentials".into());
         }
+        let read = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get);
+        let key = read.map_or(key.as_str(), |r| r.key.as_str());
+        let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
         let request = sign::request(key, secret, cx.now, method, path, &params, body);
         let url = if request.path.starts_with("https://") {
             request.path
@@ -569,7 +577,7 @@ impl Woo {
                 url.push_str(&format!("&end_time={}", num::format(v)));
             }
         }
-        cx.request_streamed(
+        let id = cx.request_streamed(
             Method::Get,
             url,
             vec![],
@@ -580,12 +588,21 @@ impl Woo {
                 bad: false,
             },
         );
+        if !recent {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        }
     }
 }
 
 impl Venue for Woo {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.seed(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1141,3 +1158,6 @@ impl Venue for Woo {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

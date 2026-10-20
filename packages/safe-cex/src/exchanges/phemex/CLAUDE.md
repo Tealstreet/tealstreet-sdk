@@ -87,6 +87,12 @@ The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 ### Tick Loop
 
+- REST and `accounts_p` pushes use the same balance convention: each currency's
+  `total = accountBalanceRv - position UPnL`, `free = accountBalanceRv - totalUsedBalanceRv`,
+  and `used = totalUsedBalanceRv`. Aggregate `total`, `free`, and `used` sum those
+  independent currency fields; free must not be derived from normalized total.
+  This keeps a fresh REST poll from changing total solely because it followed a
+  WebSocket update, including when UPnL is negative.
 - `tick()` runs on a configurable interval via `options.extra.tickInterval`
 - Each tick calls `fetchPositionsAndBalance()`, which fetches both `currency=USDT` and `currency=USDC`, merges their positions and balances, then returns one complete snapshot for the full store write. If one settlement-account request fails or returns an invalid payload, a successful sibling snapshot still refreshes and the failed currency's last-known balance/positions are retained until its next successful poll. With no prior slice, the unavailable currency is represented as zero so per-market margin lookup fails closed rather than falling back to the sibling aggregate.
 - Position row mapping intentionally does not require a populated `marketsBySymbol` index. Full account snapshots filter to known markets before committing the store, while symbol-scoped recovery may need to preserve a valid nonzero REST row during hosted startup or stale-index windows.
@@ -613,3 +619,32 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - The Rust wrapper uses the same rule and `Tealstreet_…` mint format. Both paths
   share `BROKER_ID` from `phemex.types.ts`; `phemex.api.ts` re-exports it for
   existing callers.
+
+
+## Rust income and client-ID reads
+
+The Rust engine adds reported account income through the documented
+`/api-data/futures/v2/tradeAccountDetail` route. It preserves `amountRv` signs
+and `typeDesc` verbatim; it does not derive gross PnL, funding, fees or closed
+positions from the running balance. Both USDT and USDC are walked with the
+shared span pager. Unknown types remain `other`. A failed sibling currency,
+malformed row, oversized page or incomplete coverage is an error, never an
+empty/partial success. These documented schema fixtures are not live account
+validation and do not remove the ingestion/tunnel canary restriction above.
+
+Ledger rows have no documented symbol or transaction ID. Symbol filtering
+therefore fails explicitly. Returned `tranId` is a stable composite of currency,
+creation time, type, amount, running balance and duplicate occurrence. The
+default range is the last 30 days; explicit inclusive bounds use milliseconds.
+
+Rust definitive lookup uses
+`/api-data/g-futures/orders/by-order-id?symbol=...&clOrdID=...`, which includes
+closed orders. Only a successful exact-ID empty result is definitive; failures
+propagate and mismatched/malformed rows fail. Unknown markets return a
+non-definitive miss without I/O. The primary key and primary egress always
+perform this lookup even when ordinary GETs use secondary read credentials.
+`Triggered` still maps to Closed without becoming a terminal store tombstone.
+
+TS still has inert income/order-history fallbacks and a non-definitive lookup
+fallback. Its implemented fill history is a symbol-scoped latest page capped
+at 200, so this sweep does not claim unbounded Phemex TS history.

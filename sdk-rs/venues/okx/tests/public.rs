@@ -260,14 +260,14 @@ fn variants_use_entity_hosts_and_demo_header() {
         reply(&mut e, &request, &envelope(MARKET), 1.0);
         if eea {
             let request = actions(&mut e).remove(0);
-            assert!(matches!(&request, Action::Http(r) if r.url.ends_with("instType=FUTURES")));
+            assert!(is_get(&request, "instruments?instType=FUTURES"));
             reply(&mut e, &request, &envelope(""), 1.5);
         }
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(TICKER), 2.0);
         if eea {
             let request = actions(&mut e).remove(0);
-            assert!(matches!(&request, Action::Http(r) if r.url.ends_with("instType=FUTURES")));
+            assert!(is_get(&request, "tickers?instType=FUTURES"));
             reply(&mut e, &request, &envelope(""), 2.5);
         }
         assert_eq!(actions(&mut e).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}:8443/")))).count(), 2);
@@ -417,4 +417,78 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
     })
     .collect();
     assert_eq!(topics, expected);
+}
+
+#[test]
+fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
+    let mut e = Engine::new(Okx::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    let eth = MARKET
+        .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
+        .replace(r#""ctValCcy":"BTC""#, r#""ctValCcy":"ETH""#);
+    let alias = MARKET.replace("BTC-USDT-SWAP", "BTCUSDT-SWAP");
+    let missing = MARKET.replace("BTC-USDT-SWAP", "SOL-USDT-SWAP");
+    reply(
+        &mut e,
+        &request,
+        &envelope(&[MARKET, &eth, &alias, &missing].join(",")),
+        1.0,
+    );
+    let request = actions(&mut e).remove(0);
+    let eth_ticker = TICKER.replace("BTC-USDT-SWAP", "ETH-USDT-SWAP");
+    let alias_ticker = TICKER.replace("BTC-USDT-SWAP", "BTCUSDT-SWAP");
+    reply(
+        &mut e,
+        &request,
+        &envelope(&[eth_ticker.as_str(), alias_ticker.as_str(), TICKER].join(",")),
+        2.0,
+    );
+    let socket = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3.0, Event::WsOpened { socket });
+    actions(&mut e);
+    for message in [
+        r#"{"arg":{"channel":"tickers"},"data":[{"instId":"BTC-USDT-SWAP","bidPx":"11","askPx":"13","last":"12","open24h":"8","volCcy24h":"4","vol24h":"5"}]}"#,
+        r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":"14"}]}"#,
+        r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTCUSDT-SWAP","markPx":"15"},{"instId":"ETH-USDT-SWAP","markPx":"88"},{"instId":"SOL-USDT-SWAP","markPx":"99"},{"instId":"UNKNOWN-SWAP","markPx":"1"}]}"#,
+        r#"{"arg":{"channel":"index-tickers"},"data":[{"instId":"BTC-USDT","idxPx":"16"}]}"#,
+        r#"{"arg":{"channel":"open-interest"},"data":[{"instId":"BTCUSDT-SWAP","oiCcy":"17"}]}"#,
+        r#"{"arg":{"channel":"funding-rate"},"data":[{"instId":"BTC-USDT-SWAP","fundingRate":"0.002","fundingTime":"1800"}]}"#,
+    ] {
+        ws(&mut e, socket, message);
+    }
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(
+        (&*t.id, t.bid, t.ask, t.last, t.percentage),
+        ("BTC-USDT-SWAP", 11.0, 13.0, 12.0, 50.0)
+    );
+    assert_eq!(
+        (
+            t.mark,
+            t.index,
+            t.open_interest,
+            t.funding_rate,
+            t.funding_time,
+            t.volume,
+            t.quote_volume
+        ),
+        (15.0, 16.0, 17.0, 0.002, 1800.0, 4.0, 5.0)
+    );
+    assert_eq!(e.store().tickers().len(), 3);
+    assert_eq!(
+        e.store().tickers()[1].mark,
+        40000.0,
+        "earlier duplicate ticker must remain untouched"
+    );
+    assert_eq!(e.store().ticker("ETHUSDT").unwrap().mark, 88.0);
+    assert!(e.store().ticker("SOLUSDT").is_none());
 }

@@ -55,9 +55,15 @@ impl PhemexPerpetuals {
     }
 
     fn dispatch_http(&self, cx: &mut Cx<'_, Pending>, request: Request) {
-        let headers = self
-            .credentials
-            .as_ref()
+        // Definitive lookup always targets the identity that placed the order.
+        // Select and sign at dispatch, after the shared read quota permits it.
+        let primary = matches!(&request.pending, Pending::History(request) if request.is_lookup());
+        let credentials = if request.method == Method::Get && !primary {
+            self.read_credentials.as_ref().or(self.credentials.as_ref())
+        } else {
+            self.credentials.as_ref()
+        };
+        let headers = credentials
             .map(|c| {
                 c.headers(
                     &request.path,
@@ -77,7 +83,7 @@ impl PhemexPerpetuals {
                 format!("?{}", request.query)
             }
         );
-        if let Some(at) = request.stream {
+        let id = if let Some(at) = request.stream {
             cx.request_streamed_body(
                 request.method,
                 url,
@@ -85,9 +91,12 @@ impl PhemexPerpetuals {
                 request.body,
                 at,
                 request.pending,
-            );
+            )
         } else {
-            cx.request(request.method, url, headers, request.body, request.pending);
+            cx.request(request.method, url, headers, request.body, request.pending)
+        };
+        if primary {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
     }
 
@@ -224,11 +233,18 @@ mod tests {
         }
     }
     fn engine(requests: Vec<Request>) -> Engine<Probe> {
-        let mut venue = PhemexPerpetuals::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            ..Default::default()
-        });
+        engine_with_options(
+            requests,
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                ..Default::default()
+            },
+        )
+    }
+
+    fn engine_with_options(requests: Vec<Request>, options: Options) -> Engine<Probe> {
+        let mut venue = PhemexPerpetuals::new(options);
         let mut book = BookState::new(1);
         book.fetching = true;
         venue.books.insert("BTCUSDT".into(), book);
@@ -260,6 +276,59 @@ mod tests {
                 }
             })
             .unwrap()
+    }
+
+    #[test]
+    fn queued_secondary_reads_and_unlimited_primary_writes_keep_dispatch_signatures() {
+        let mut e = engine_with_options(
+            vec![
+                request(1, Method::Get, "/one"),
+                request(2, Method::Get, "/two"),
+                request(3, Method::Get, "/three"),
+                request(4, Method::Get, "/four"),
+                request(5, Method::Put, "/g-orders/create"),
+            ],
+            Options {
+                key: Some("primary-key".into()),
+                secret: Some("primary-secret".into()),
+                read_credentials: Some(safe_cex_engine::ReadCredentials {
+                    key: "read-key".into(),
+                    secret: "read-secret".into(),
+                    passphrase: None,
+                }),
+                ..Options::default()
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let initial = http(&actions);
+        assert_eq!(initial.len(), 4);
+        assert!(initial.iter().take(3).all(|r| {
+            r.headers
+                .contains(&("X-PHEMEX-ACCESS-TOKEN", "read-key".into()))
+        }));
+        assert!(
+            initial[3]
+                .headers
+                .contains(&("X-PHEMEX-ACCESS-TOKEN", "primary-key".into()))
+        );
+        let (reset, at) = timer(&actions);
+        e.handle(at, Event::TimerFired { timer: reset });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let requests = http(&actions);
+        assert_eq!(requests.len(), 1);
+        let credentials = crate::sign::Credentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+        };
+        assert_eq!(
+            requests[0].headers,
+            credentials.headers("/four", "symbol=BTC%2BUSDT&flag=false", "", at)
+        );
+        assert_ne!(
+            requests[0].headers,
+            credentials.headers("/four", "symbol=BTC%2BUSDT&flag=false", "", 50.)
+        );
+        assert!(requests[0].route.is_none());
     }
 
     #[test]

@@ -17,6 +17,7 @@ const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
 #[derive(Clone, Debug)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
@@ -25,6 +26,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            read_credentials: None,
             public_data_only: false,
             key: None,
             secret: None,
@@ -275,6 +277,7 @@ impl Bitrue {
     }
     fn issue(&self, cx: &mut Cx<'_, Pending>, pending: Pending) {
         let r = &pending.request;
+        let primary_read = r.method == Method::Get && matches!(&pending.job, Job::Markets { .. });
         let path = if r.path.starts_with("https://") {
             r.path
                 .split_once(".com")
@@ -292,8 +295,15 @@ impl Bitrue {
             ("X-Referer", "Tealstreet".to_owned()),
         ];
         if let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) {
+            let read = self
+                .options
+                .read_credentials
+                .as_ref()
+                .filter(|_| r.method == Method::Get && !primary_read);
+            let key = read.map_or(key.as_str(), |r| r.key.as_str());
+            let secret = read.map_or(secret.as_str(), |r| r.secret.as_str());
             headers.extend([
-                ("X-CH-APIKEY", key.clone()),
+                ("X-CH-APIKEY", key.to_owned()),
                 ("X-CH-TS", r.timestamp.to_string()),
                 ("recvWindow", self.options.recv_window.to_string()),
                 (
@@ -310,6 +320,9 @@ impl Bitrue {
         }
         let (method, body, at) = (r.method, r.body.clone(), r.at);
         let id = cx.request(method, url, headers, body, pending);
+        if primary_read {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        }
         if let Some(at) = at {
             cx.stream_response(id, at);
         }
@@ -530,6 +543,12 @@ impl Bitrue {
 impl Venue for Bitrue {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.markets(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1048,3 +1067,6 @@ impl Venue for Bitrue {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

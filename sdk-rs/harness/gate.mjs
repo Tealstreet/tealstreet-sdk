@@ -116,6 +116,14 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 //    Rust amends the existing native order ID.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
+// Paired production fixes compare outputs without answer normalization:
+// Binance EXPIRED_IN_MATCH is canceled, like EXPIRED. Binance/OKX client-ID
+// lookups bypass secondary-account caches and query the primary account;
+// a secondary account's absence cannot prove the primary order was not placed.
+// GRVT retains mixed-product identities and validates raw open orders before
+// exact-instrument cancellations; ambiguous ACKs cannot retarget a client ID.
+// Phemex REST totals exclude position UPnL, matching its stream totals, while
+// authoritative revision fences preserve newer private state.
 const fixBackpack = (ts) => {
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
@@ -518,6 +526,7 @@ KNOWN_TS_FIXES.bitget = {
 
 KNOWN_TS_FIXES.okx = [
   'full books retain levels past a stale last trade',
+  'paired TS/Rust fix: untraded X-Perp blank quote fields seed and stream finite zeros and zero-open percentage stays zero; one unpriced ticker cannot abort the whole catalog',
   'public trades implement the inherited Not implemented method',
   'candle calendar bounds use UTC independently of host timezone',
   'fill window filtering retains native milliseconds before output seconds are truncated',
@@ -529,7 +538,7 @@ KNOWN_TS_FIXES.okx = [
   'positive protective dust cannot round into a close-entire-position order',
   'standalone protective limit amendment fails before cancel if execution price cannot be retained',
   'standalone cancellation continues remaining batches after per-row failures',
-  'new account equity survives delayed snapshots and local balance ticks',
+  'account totalEq stays separate from real USD currency equity; delta currencies, live-order margin and revision fences survive delayed reads and local ticks',
   'acknowledged leverage survives failed post-write snapshots',
   // Position pushes carry a slice, not whole-account maintenance margin.
   'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',

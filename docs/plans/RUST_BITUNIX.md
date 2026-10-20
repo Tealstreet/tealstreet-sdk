@@ -2135,3 +2135,35 @@ ColdBybitphasegates PASSall10familyprofiles; module1127141<1258291. NewHyropubli
 ExactBreakoutdiagnosticnamedmoduleallnoncustomsectionsBYTEIDENTICAL (originalSHAe71cb7096ef03ed8c4409d8805c0945e626506df9af6e1c665a035b60eb23b0b,namedSHAa58bb6583b51df13ba98be4ccc50d0cd95a60c46f92b695d20b735455810c020), originalnodeassetsrestoredandSHAverified. CPUprofile/tmp/bitunix-5e-breakout-rust.cpuprofile samplesSession::select_account0.292msinclusive andtimeout_ms0.208msself; no sampledRfc3339 targetsoleavealltimestampcodealone. Boundednative-onlystartupallocationplan: replace3cardinality/filterVecs withiterators preservingfullyparsedJSON,exactdomain/status/account/subaccount/ambiguity/errorprecedence andmutateonlysuccess; parseexact3nonemptyASCIIdigit timeoutcomponents withnofourth viaiterator,sameu64/ranges/positiveyearbound,withoutVec. Nativeownerimplementation plusindependentplan/finalreview; all106oldcases retained andstrictchecks/compiled4parity/freshunchangedpublic/privategate required. NoTSslowdown, warmup/deadline/hash/oracle/tape/budget changes.
 
 Breakoutnativeallocationphase sourcefreeze/reviewPASS: onlysession.rs changes; all108tests(original106+2contractguards) andstrictall-targetClippy/fmt/diffcheck PASS. Independent exact-sourceaudit confirmsfullparse/errorprecedence/uniquecardinality/singleaccount behavior/ranges andsuccessfulmutation unchanged. NoTS/timestamp/protocol/harness/tape changes. Verifiednativeunion now2712; freshunchangedBreakoutpublic/private+compiled4parity andremainingunexecutedbatch next. PreviousBybit/OKX/Paradex isolatedproduction unaffected, retainpassinggates; no unchangedreruns.
+
+
+Resume after usage reset: PR #1309 remains open against feat/rust-rewrite.
+The worktree was clean at dc2ca1fe66; fetched landing df2d6a4a03 adds the
+parity sweep. Required merge is in progress. Resolve conflicts by retaining
+both queued native HTTP budgets and secondary read credentials/primary lookup
+routing; retain strict typed harness matching and incoming OKX product fixtures.
+The relay decoder keeps bindSocketMessages, its close/dispose fences and binary
+protocol handling, alongside incoming egress policy. Independent native and
+harness resolution reviews run before committing the merge. No stash, rebase,
+force push, master edits or upstream access.
+
+Breakout gates after the allocation fix pass public/private and four compiled
+parity controls. Hyperliquid parent public/private and spot private pass, but
+spot public fails main CPU (TS 46.4/Rust 47.6 ms) and retained memory (rounded
+2.0/2.0 MB, ratio 0.98). Preserve this failure; do not retry unchanged.
+An identical-code named WASM diagnostic profile attributes 3.375 ms inclusive
+to the untagged numeric decoder through ContentDeserializer, including failed
+serde alternatives. The original release assets were restored and SHA verified.
+
+The audited bounded correction replaces only that numeric helper with a typed
+serde visitor, preserving trimmed numeric strings, finite checks, optional/null
+behavior, signed zero and integer conversion. After complete spot context
+validation, reserve exact output capacity using the smaller universe/context
+length as a hint, without truncation or schema changes. Keep all 104 native
+controls, add numeric and late-invalid-envelope contract coverage, run strict
+checks and an independent source review, then rebuild and run all four parent/
+spot gates. No fixture, oracle, deadline, warmup, threshold or hash changes.
+After merge and correction, refresh affected global checks and actual compiled
+consumers; run the remaining venue and Binance/Bitunix control gates, push,
+post adversarial review findings, fix them, and merge only the reviewed head
+with green CI. CI now includes two additional OKX public fixture invocations.

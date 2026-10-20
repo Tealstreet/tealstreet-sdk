@@ -1,12 +1,34 @@
 //! Private streams and atomic REST reconciliation, guarded against newer pushes.
 use crate::wire::*;
-use crate::{Okx, Pending, Topic, contracts_to_base, scaled, usd};
+use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
 const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order_stop"];
+
+// Match the SDK's decimal arithmetic without reducing native coin precision.
+fn decimal_result(a: f64, b: f64, result: f64) -> f64 {
+    let factor = 10f64.powi(num::decimals(a).max(num::decimals(b)) as i32);
+    let scaled = result * factor;
+    let floor = scaled.floor();
+    // Adding 0.5 first can change an already-integral f64 above 2^52.
+    let rounded = if scaled - floor < 0.5 {
+        floor
+    } else {
+        floor + 1.0
+    };
+    rounded / factor
+}
+
+fn add(a: f64, b: f64) -> f64 {
+    decimal_result(a, b, a + b)
+}
+
+fn subtract(a: f64, b: f64) -> f64 {
+    decimal_result(a, b, a - b)
+}
 
 fn reserve_leverage(value: &str) -> f64 {
     // Unproven leverage must reserve the full notional; infinity would erase it.
@@ -37,10 +59,10 @@ pub enum Request {
     Orders {
         generation: u64,
         version: u64,
-        product: usize,
         kind: usize,
+        product: usize,
         rows: Vec<Order>,
-        margins: HashMap<String, f64>,
+        margins: HashMap<String, (f64, String)>,
         page_count: usize,
         cursor: String,
         cursors: HashSet<String>,
@@ -48,10 +70,13 @@ pub enum Request {
     },
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct RiskValues {
     imr: f64,
     upl: f64,
+    currency: String,
+    native_imr: f64,
+    native_upl: f64,
 }
 struct Join {
     generation: u64,
@@ -64,6 +89,8 @@ struct Join {
 #[derive(Default)]
 pub struct AccountState {
     pub ready: bool,
+    configured: bool,
+    account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
     order_versions: HashMap<String, (u64, f64, bool)>,
@@ -74,8 +101,9 @@ pub struct AccountState {
     orders_generation: u64,
     authenticated_once: [bool; 3],
     risk: HashMap<String, RiskValues>,
-    order_leverage: HashMap<String, f64>,
+    order_leverage: HashMap<String, (f64, String)>,
     equity: Vec<(String, f64)>,
+    total_equity: Option<f64>,
     equity_loaded: bool,
     fills: HashMap<String, f64>,
     tick: Option<TimerId>,
@@ -168,8 +196,8 @@ impl Okx {
                 Request::Orders {
                     generation,
                     version: self.account.revision,
-                    product: 0,
                     kind: 0,
+                    product: 0,
                     rows: Vec::new(),
                     margins: HashMap::new(),
                     page_count: 0,
@@ -183,28 +211,25 @@ impl Okx {
 
     fn orders_page(&self, cx: &mut Cx<'_, Pending>, request: Request) {
         let Request::Orders {
-            product,
             kind,
+            product,
             cursor,
             ..
         } = &request
         else {
             return;
         };
-        let inst_type = if *product == 0 { "SWAP" } else { "FUTURES" };
+        let instrument_type = self.instrument_types()[*product].as_str();
         let mut path = if *kind == 0 {
-            format!("/api/v5/trade/orders-pending?instType={inst_type}")
+            format!("/api/v5/trade/orders-pending?instType={instrument_type}")
         } else {
             format!(
-                "/api/v5/trade/orders-algo-pending?instType={inst_type}&ordType={}",
+                "/api/v5/trade/orders-algo-pending?instType={instrument_type}&ordType={}",
                 ORDER_KINDS[*kind]
             )
         };
         if !cursor.is_empty() {
-            path.push_str(&format!(
-                "{}after={cursor}",
-                if path.contains('?') { "&" } else { "?" }
-            ));
+            path.push_str(&format!("&after={cursor}"));
         }
         self.list(cx, &path, true, Pending::Account(request));
     }
@@ -240,49 +265,25 @@ impl Okx {
     }
 
     pub(crate) fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        let mut args = if channel == PRIVATE {
-            vec![
-                Topic {
-                    channel: "account",
-                    inst_id: None,
-                    inst_type: None,
-                },
-                Topic {
-                    channel: "positions",
-                    inst_id: None,
-                    inst_type: Some("SWAP"),
-                },
-                Topic {
-                    channel: "orders",
-                    inst_id: None,
-                    inst_type: Some("SWAP"),
-                },
-            ]
-        } else {
-            vec![
-                Topic {
-                    channel: "orders-algo",
-                    inst_id: None,
-                    inst_type: Some("SWAP"),
-                },
-                Topic {
-                    channel: "algo-advance",
-                    inst_id: None,
-                    inst_type: Some("SWAP"),
-                },
-            ]
-        };
-        if self.options.eea {
+        let mut args = Vec::new();
+        if channel == PRIVATE {
+            args.push(Topic {
+                channel: "account",
+                inst_id: None,
+                inst_type: None,
+            });
+        }
+        for kind in self.instrument_types() {
             let channels: &[&str] = if channel == PRIVATE {
                 &["positions", "orders"]
             } else {
                 &["orders-algo", "algo-advance"]
             };
-            for &channel in channels {
+            for name in channels {
                 args.push(Topic {
-                    channel,
+                    channel: name,
                     inst_id: None,
-                    inst_type: Some("FUTURES"),
+                    inst_type: Some(kind.as_str()),
                 });
             }
         }
@@ -302,12 +303,23 @@ impl Okx {
     }
 
     fn account_scope(&self, product: usize, inst_id: &str, supplied_type: &str) -> bool {
-        let expected = if product == 0 { "SWAP" } else { "FUTURES" };
+        let expected = self.instrument_types()[product].as_str();
         (supplied_type.is_empty() || supplied_type == expected)
             && self
-                .instruments
+                .products
                 .get(inst_id)
-                .is_none_or(|instrument| instrument.inst_type == expected)
+                .is_none_or(|instrument| instrument.kind.as_str() == expected)
+    }
+
+    fn order_margin_currency(&self, row: &OrderRow<'_>) -> String {
+        if row.ccy.is_empty() {
+            self.products
+                .get(row.inst_id)
+                .map_or("", |instrument| instrument.settle_ccy.as_str())
+                .into()
+        } else {
+            row.ccy.into()
+        }
     }
 
     pub(crate) fn account_item(
@@ -388,7 +400,10 @@ impl Okx {
                         return;
                     }
                     for order in self.orders(cx, &o) {
-                        margins.insert(order.id.clone(), reserve_leverage(o.lever));
+                        margins.insert(
+                            order.id.clone(),
+                            (reserve_leverage(o.lever), self.order_margin_currency(&o)),
+                        );
                         rows.push(order);
                     }
                 }
@@ -428,7 +443,8 @@ impl Okx {
                     return;
                 };
                 cx.store.set_hedged(config.pos_mode == "long_short_mode");
-                self.account.ready = true;
+                self.account.account_level = config.acct_lv.parse().unwrap_or(2);
+                self.account.configured = true;
                 self.connect(cx, PRIVATE);
                 self.account_refresh(cx);
                 if self.account.tick.is_none() {
@@ -457,15 +473,16 @@ impl Okx {
                 rows,
                 invalid: false,
             } => {
-                if self.options.eea && product == 0 {
+                let product = product + 1;
+                if let Some(kind) = self.instrument_types().get(product) {
                     self.list(
                         cx,
-                        "/api/v5/account/positions?instType=FUTURES",
+                        &format!("/api/v5/account/positions?instType={}", kind.as_str()),
                         true,
                         Pending::Account(Request::Positions {
                             generation,
                             version,
-                            product: 1,
+                            product,
                             rows,
                             invalid: false,
                         }),
@@ -483,8 +500,8 @@ impl Okx {
             Request::Orders {
                 generation,
                 version,
-                product,
                 mut kind,
+                mut product,
                 rows,
                 margins,
                 page_count,
@@ -508,8 +525,8 @@ impl Okx {
                         Request::Orders {
                             generation,
                             version,
-                            product,
                             kind,
+                            product,
                             rows,
                             margins,
                             page_count: 0,
@@ -521,32 +538,18 @@ impl Okx {
                     return;
                 }
                 kind += 1;
-                if kind < ORDER_KINDS.len() {
-                    self.orders_page(
-                        cx,
-                        Request::Orders {
-                            generation,
-                            version,
-                            product,
-                            kind,
-                            rows,
-                            margins,
-                            page_count: 0,
-                            cursor: String::new(),
-                            cursors: HashSet::new(),
-                            invalid: false,
-                        },
-                    );
-                    return;
+                if kind == ORDER_KINDS.len() {
+                    product += 1;
+                    kind = 0;
                 }
-                if self.options.eea && product == 0 {
+                if product < self.instrument_types().len() {
                     self.orders_page(
                         cx,
                         Request::Orders {
                             generation,
                             version,
-                            product: 1,
-                            kind: 0,
+                            kind,
+                            product,
                             rows,
                             margins,
                             page_count: 0,
@@ -591,6 +594,7 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
+                self.account.ready = cx.store.loaded().positions && cx.store.loaded().balance;
                 let ids: HashSet<_> = cx.store.orders().iter().map(|o| o.id.as_str()).collect();
                 self.account
                     .order_leverage
@@ -644,9 +648,11 @@ impl Okx {
         cx.store.set_positions(positions);
         if self.account.balance_version <= join.balance_version {
             self.account.equity = join.equity.expect("equity ready");
+            self.account.total_equity = None;
         }
         self.account.equity_loaded = true;
         self.recalculate(cx);
+        self.account.ready = cx.store.loaded().orders;
     }
 
     pub(crate) fn account_failed(
@@ -690,7 +696,7 @@ impl Okx {
         }
         if self.account.retry == Some(timer) {
             self.account.retry = None;
-            if self.account.ready {
+            if self.account.configured {
                 self.account_refresh(cx);
             } else {
                 self.account_start(cx);
@@ -711,23 +717,27 @@ impl Okx {
         if !self.account.equity_loaded {
             return;
         }
-        let collateral = usd(self
-            .account
-            .equity
-            .iter()
-            .map(|(ccy, eq)| {
-                let mark = if matches!(ccy.as_str(), "USDT" | "USDC" | "USD") {
-                    1.0
-                } else {
-                    cx.store
+        let collateral = usd(self.account.total_equity.unwrap_or_else(|| {
+            self.account
+                .equity
+                .iter()
+                .map(|(ccy, eq)| {
+                    let candidates = [
+                        format!("{ccy}-USDT-SWAP"),
+                        format!("{ccy}-USD-SWAP"),
+                        format!("{ccy}USDT"),
+                        format!("{ccy}USD"),
+                    ];
+                    let mark = cx
+                        .store
                         .tickers()
                         .iter()
-                        .find(|t| cx.store.market(&t.symbol).is_some_and(|m| &m.base == ccy))
-                        .map_or(0.0, |t| t.mark)
-                };
-                eq * mark
-            })
-            .sum());
+                        .find(|t| candidates.contains(&t.id) || candidates.contains(&t.symbol))
+                        .map_or(1.0, |t| t.mark);
+                    eq * mark
+                })
+                .sum()
+        }));
         let used = usd(self.account.risk.values().map(|p| p.imr).sum());
         let upnl = usd(self.account.risk.values().map(|p| p.upl).sum());
         let orders = usd(cx
@@ -743,7 +753,7 @@ impl Okx {
                         .account
                         .order_leverage
                         .get(&o.id)
-                        .copied()
+                        .map(|(leverage, _)| *leverage)
                         .unwrap_or(1.0)
             })
             .sum::<f64>()
@@ -754,6 +764,59 @@ impl Okx {
             total: usd(collateral - upnl),
             upnl,
         });
+        let currencies = if self.account.account_level == 2 {
+            self.account
+                .equity
+                .iter()
+                .map(|(currency, equity)| {
+                    let risks = || {
+                        cx.store
+                            .positions()
+                            .iter()
+                            .filter_map(|p| self.account.risk.get(&p.id))
+                            .filter(|p| &p.currency == currency)
+                    };
+                    let native_used = risks().map(|p| p.native_imr).fold(0.0, add);
+                    let native_upnl = risks().map(|p| p.native_upl).fold(0.0, add);
+                    let native_used = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|o| {
+                            o.status == OrderStatus::Open
+                                && o.kind == OrderType::Limit
+                                && !o.reduce_only
+                        })
+                        .filter_map(|o| {
+                            let m = cx.store.market(&o.symbol)?;
+                            let (leverage, margin_currency) =
+                                self.account.order_leverage.get(&o.id)?;
+                            if margin_currency != currency {
+                                return None;
+                            }
+                            let mut used = o.remaining * o.price / leverage * 1.1;
+                            if m.is_inverse == Some(true) {
+                                let px = self.reference_price(cx, m, o.price);
+                                used = if px > 0.0 { used / px } else { 0.0 };
+                            }
+                            Some(used)
+                        })
+                        .fold(native_used, add);
+                    CurrencyBalance {
+                        currency: currency.clone(),
+                        balance: Balance {
+                            used: native_used,
+                            free: subtract(*equity, native_used),
+                            total: subtract(*equity, native_upnl),
+                            upnl: native_upnl,
+                        },
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        cx.store.set_currency_balances(currencies);
     }
 
     fn execution(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
@@ -769,7 +832,7 @@ impl Okx {
         let Some(m) = cx.store.market_by_id(row.inst_id) else {
             return;
         };
-        let amount = contracts_to_base(m, size, price);
+        let amount = self.contracts_to_base(cx, m, size, price);
         if !amount.is_finite() || amount <= 0.0 {
             return;
         }
@@ -815,7 +878,7 @@ impl Okx {
                 self.connections[channel].auth_deadline = None;
                 self.subscribe_private(cx, channel);
                 self.subscribe(cx, channel);
-                if self.account.ready {
+                if self.account.configured {
                     if reopened {
                         self.account.join = None;
                         self.account.generation += 1;
@@ -896,9 +959,13 @@ impl Okx {
                         } else if triggered {
                             cx.store.remove_orders(&[&order.id]);
                         } else if matches!(row.state, "live" | "partially_filled" | "pause") {
-                            self.account
-                                .order_leverage
-                                .insert(order.id.clone(), reserve_leverage(row.lever));
+                            self.account.order_leverage.insert(
+                                order.id.clone(),
+                                (
+                                    reserve_leverage(row.lever),
+                                    self.order_margin_currency(&row),
+                                ),
+                            );
                             cx.store.upsert_order(order);
                         }
                     }
@@ -929,22 +996,55 @@ impl Okx {
             }
             "account" => {
                 let mut equity = 0.0;
-                let mut valid = false;
-                let _ = json::each::<AccountPush<'_>>(data.get(), |row| {
-                    if let Ok(total) = row.total_eq.parse::<f64>()
-                        && total.is_finite()
-                    {
-                        equity += total;
-                        valid = true;
+                let mut count = 0;
+                let mut details: Vec<(String, f64)> = Vec::new();
+                let mut invalid = false;
+                let decoded = json::each::<AccountPush<'_>>(data.get(), |row| {
+                    let Ok(total) = row.total_eq.parse::<f64>() else {
+                        invalid = true;
+                        return;
+                    };
+                    if !total.is_finite() {
+                        invalid = true;
+                        return;
+                    }
+                    equity += total;
+                    count += 1;
+                    for detail in row.details {
+                        let Ok(value) = detail.eq.parse::<f64>() else {
+                            invalid = true;
+                            continue;
+                        };
+                        if !value.is_finite()
+                            || detail.ccy.is_empty()
+                            || details.iter().any(|(ccy, _)| ccy == detail.ccy)
+                        {
+                            invalid = true;
+                            continue;
+                        }
+                        details.push((detail.ccy.into(), value));
                     }
                 });
-                if valid {
-                    self.account.revision += 1;
-                    self.account.balance_version = self.account.revision;
-                    self.account.equity = vec![("USD".into(), equity)];
-                    self.account.equity_loaded = true;
-                    self.recalculate(cx);
+                if decoded.is_err() || invalid || count == 0 || !equity.is_finite() {
+                    return;
                 }
+                for (ccy, equity) in details {
+                    if let Some((_, current)) = self
+                        .account
+                        .equity
+                        .iter_mut()
+                        .find(|(currency, _)| currency == &ccy)
+                    {
+                        *current = equity;
+                    } else {
+                        self.account.equity.push((ccy, equity));
+                    }
+                }
+                self.account.revision += 1;
+                self.account.balance_version = self.account.revision;
+                self.account.total_equity = Some(equity);
+                self.account.equity_loaded = true;
+                self.recalculate(cx);
             }
             _ => {}
         }
@@ -1001,12 +1101,12 @@ impl Okx {
         } else {
             num::parse(p.avg_px)
         };
-        let contracts = contracts_to_base(m, pos.abs(), reference);
+        let contracts = self.contracts_to_base(cx, m, pos.abs(), reference);
         if pos != 0.0 && contracts <= 0.0 {
             return None;
         }
         let margin_currency = if p.ccy.is_empty() {
-            self.instruments
+            self.products
                 .get(&m.id)
                 .map_or("", |i| i.settle_ccy.as_str())
         } else {
@@ -1018,6 +1118,8 @@ impl Okx {
             } else {
                 1.0
             };
+        let native_imr = initial_margin;
+        let native_upl = unrealized;
         let initial_margin = if pos == 0.0 {
             0.0
         } else {
@@ -1076,6 +1178,9 @@ impl Okx {
             RiskValues {
                 imr: initial_margin,
                 upl: unrealized,
+                currency: margin_currency.into(),
+                native_imr,
+                native_upl,
             },
         ))
     }
@@ -1222,9 +1327,9 @@ impl Okx {
                     filled: if algo {
                         0.0
                     } else {
-                        contracts_to_base(m, filled, reference)
+                        self.contracts_to_base(cx, m, filled, reference)
                     },
-                    remaining: contracts_to_base(m, remaining_native, reference),
+                    remaining: self.contracts_to_base(cx, m, remaining_native, reference),
                     reduce_only: trailing || o.reduce_only,
                     close: None,
                     client_order_id: if algo {
