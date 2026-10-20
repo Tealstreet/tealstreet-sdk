@@ -274,8 +274,6 @@ struct Body<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     i: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    k: Option<[&'static str; 1]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     b: Option<[&'a str; 1]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     q: Option<[&'a str; 1]>,
@@ -482,7 +480,6 @@ impl Grvt {
                 } else {
                     None
                 },
-                k: (!public).then_some(["PERPETUAL"]),
                 b: if public {
                     None
                 } else {

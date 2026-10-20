@@ -1,4 +1,4 @@
-//! GRVT perpetuals: deterministic market, account and order state machines.
+//! GRVT derivatives: deterministic market, account and order state machines.
 mod account;
 mod history;
 mod sign;
@@ -23,8 +23,29 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProductKind {
+    Perpetual,
+    StablePerpetual,
+    Future,
+    Call,
+    Put,
+}
+impl ProductKind {
+    fn parse(kind: &str) -> Option<Self> {
+        Some(match kind {
+            "PERPETUAL" => Self::Perpetual,
+            "STABLE_PERP" => Self::StablePerpetual,
+            "FUTURE" => Self::Future,
+            "CALL" => Self::Call,
+            "PUT" => Self::Put,
+            _ => return None,
+        })
+    }
+}
 #[derive(Clone)]
 pub struct InstrumentInfo {
+    pub kind: ProductKind,
     pub hash: String,
     pub base_decimals: Option<i32>,
     pub quote_decimals: Option<i32>,
@@ -727,9 +748,9 @@ impl Venue for Grvt {
                     *failed = true;
                     return;
                 };
-                if i.kind != "PERPETUAL" {
+                let Some(kind) = ProductKind::parse(&i.kind) else {
                     return;
-                }
+                };
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
                     *failed = true;
                     return;
@@ -737,6 +758,7 @@ impl Venue for Grvt {
                 metadata.insert(
                     i.id.to_string(),
                     InstrumentInfo {
+                        kind,
                         hash: i.hash.into_owned(),
                         base_decimals: i.base_decimals,
                         quote_decimals: i.quote_decimals,
@@ -765,7 +787,7 @@ impl Venue for Grvt {
                     is_expiring: None,
                     is_inverse: None,
                     is_spot: Some(false),
-                    is_perpetual: Some(true),
+                    is_perpetual: Some(kind == ProductKind::Perpetual),
                     is_read_only: None,
                     taker_fee: None,
                     maker_fee: None,

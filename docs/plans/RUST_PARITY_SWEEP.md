@@ -220,3 +220,13 @@ Native GRVT and paired TS/harness work have disjoint owners and cross-review;
 commit at stable phases. No gate normalization, raised budget or broad-copy TS
 method bodies. The census/PR body must reflect the closed product gap rather
 than treating the original port boundary as a waiver.
+
+### GRVT public/private checkpoint
+
+- Product-kind metadata now admits PERPETUAL, STABLE_PERP, FUTURE, CALL and PUT
+  with exact native instrument identities; `isPerpetual` matches TS exactly.
+  Private snapshots and fills preserve mixed-product account state without an
+  implicit perpetual-only filter. Atomic metadata/read safeguards remain.
+- Six new mixed-product tests and the complete GRVT91/91 suite PASS; strict
+  all-target Clippy PASS. Independent phase review PASS with no findings
+  (`/tmp/parity-grvt-phase-a-review.md`). Trading changes follow separately.
