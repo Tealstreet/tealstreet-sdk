@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "description": "Strict replay gates retain FAIL. CI accepts only the exact venue, tape hash and diagnostic keys declared here; new failures fail verification. Entries record divergences, never parity passes.",
+  "failures": []
+}

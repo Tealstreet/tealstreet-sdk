@@ -45,6 +45,12 @@ mkdirSync(outDir, { recursive: true });
 console.log(`Replay output: ${outDir}`);
 const artifacts = [];
 const fixerReports = [];
+class CommandReplayTimeout extends Error {
+  constructor(impl, command, stderrPath) {
+    super(`${impl} replay: command ${command} did not complete`);
+    this.failure = { kind: 'command-timeout', impl, command, stderrPath };
+  }
+}
 
 const replay = (impl, run, performanceRun = false) => {
   const out = `${outDir}/${impl}-${performanceRun ? "perf" : "audit"}-${run}.json`;
@@ -71,8 +77,15 @@ const replay = (impl, run, performanceRun = false) => {
     timeout: 125000,
     env: { ...process.env, ESBUILD_WORKER_THREADS: '0' },
   });
-  if (result.status !== 0)
+  if (result.status !== 0) {
+    const timeout = /^ReplayTimeout \[Error\]: replay timeout: command ([A-Za-z][A-Za-z0-9]*)$/m.exec(result.stderr ?? '');
+    if (result.status === 1 && !performanceRun && timeout && tapeRecords.some((record) => record.type === 'command' && record.op === timeout[1])) {
+      const stderrPath = `${out}.stderr`;
+      writeFileSync(stderrPath, result.stderr);
+      throw new CommandReplayTimeout(impl, timeout[1], stderrPath);
+    }
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
+  }
   const output = JSON.parse(readFileSync(out, 'utf8'));
   if (smokeResult && (!Array.isArray(output.commands) || output.commands.length !== smokeResult.commands.length ||
       output.commands.some((result) => !result || !Object.hasOwn(result, 'ok') || Object.hasOwn(result, 'error'))))
@@ -101,12 +114,27 @@ const isPrivate =
 const runs = replayRunCount(values.runs, isPrivate);
 const correctnessRuns = isPrivate ? runs : 1;
 const results = { ts: [], rust: [] };
+const performanceResults = { ts: [], rust: [] };
+try {
 for (let run = 0; run < correctnessRuns; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
-const performanceResults = { ts: [], rust: [] };
 if (!isPrivate) for (let run = 0; run < runs; run++) {
   for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+}
+} catch (error) {
+  if (!(error instanceof CommandReplayTimeout)) throw error;
+  // A declared venue command that never settles is a strict failure with no
+  // completed parity/performance evidence, distinct from a runner crash.
+  writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
+    schema: 1, venue: values.venue, tape: values.tape, books: values.books,
+    tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
+    private: isPrivate, status: 'FAIL', failures: [error.message], replayFailure: error.failure,
+    coverage: { correctness: 'incomplete', performance: 'not-run' },
+    runs: 0, correctnessRuns, artifacts, fixers: [], samples: { ts: [], rust: [] },
+  }, null, 2) + '\n');
+  console.log(`FAIL (incomplete replay)\n  ${error.message}`);
+  process.exit(1);
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };

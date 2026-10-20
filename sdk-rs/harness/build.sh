@@ -5,11 +5,12 @@ set -euo pipefail
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue breakoutprop|asterdex|binance|kucoin|kucoinspot|bybit|hyperliquid|hyperliquidspot|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|lighter-robinhood|apexomni|kraken|krakenspot|orderly|paradex|coinbase|polymarket]" >&2
+    echo "Usage: $0 [--venue breakoutprop|asterdex|binance|kucoin|kucoinspot|bybit|hyperliquid|hyperliquidspot|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitgetusdc|bitrue|phemex|woo|lighter|lighter-robinhood|apexomni|kraken|krakenspot|orderly|paradex|coinbase|polymarket]" >&2
     exit 2
   fi
   case "$2" in
     breakoutprop|asterdex|binance|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket) build_args+=(--no-default-features --features "$2") ;;
+    bitgetusdc) build_args+=(--no-default-features --features bitget) ;;
     lighter-robinhood) build_args+=(--no-default-features --features lighter) ;;
     hyperliquidspot) build_args+=(--no-default-features --features hyperliquid) ;;
     krakenspot) build_args+=(--no-default-features --features kraken) ;;

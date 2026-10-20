@@ -8,7 +8,11 @@ export const comparesField = (venue, field) => {
     throw new Error(`Comparison exclusion ${venue}.${field} must declare a reason`);
   return false;
 };
-const finiteOrNull = (value) => Number.isFinite(value) ? value : null;
+const finiteOrNull = (value) => {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
 
 // OrderFillEvent.id is an ORDER id, not an execution id. Missing production
 // metadata stays null: replay must never reconstruct candidate fields from tape.

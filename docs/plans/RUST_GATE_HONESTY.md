@@ -77,3 +77,19 @@ never retry an unchanged failed performance measurement to obtain a pass.
   (`/tmp/gate-honesty-phase4-all-tests.log`). Real Bitrue functional controls:
   3,238 frames in each mode/implementation, five audited checkpoints and no
   performance checkpoints; no performance-pass claim from these single pairs.
+- Phase 5 integration checkpoint (not ready to land): CI now records every
+  strict result and mandates a separate verifier of all 31 suites / 106 exact
+  venue/tape/book cases. The one known-failure manifest is intentionally empty
+  until full matrix evidence is collected. Candidate/fixer integrity and
+  performance-versus-own-audit workload failures cannot become exemptions.
+  Exact private command timeouts can be declared incomplete failures without
+  claiming completed parity or performance evidence.
+  Added authored Bitget USDC public/private fixtures: public 36 frames and five
+  checkpoints match; canonical private preserves a Rust `getAccount` timeout.
+  Synthetic provenance and diagnostic-prefix limitations accompany the fixture.
+  Combined standard web/Node build currently measures 11,948,833 bytes, SHA256
+  `b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039`,
+  below the new fixed 12,582,912-byte ceiling; standalone remains 1,258,291.
+  Landing advanced while working; merge its consumer/public-feed changes before
+  taking final measurements. Legacy fill oracle compatibility with widened
+  metadata is under review; never erase actual TS fee/time/execution evidence.

@@ -60,6 +60,7 @@ const gate = (venue, isPrivate = false, defect) => {
   }
   if (['orderly-missing-result', 'coinbase-missing-result'].includes(defect))
     records.push({ type: 'command', op: 'fetchFills' });
+  if (['command-timeout', 'runner-crash'].includes(defect)) records.push({ type: 'command', op: 'getAccount' });
   if (defect?.startsWith('impl-plans')) {
     for (const [impl, filters] of [
       ['ts', [undefined]],
@@ -103,6 +104,8 @@ const gate = (venue, isPrivate = false, defect) => {
       spawned.add(impl);
       calls.push([args.includes('--performance') ? 'performance' : 'correctness', impl]);
       const rust = impl === 'rust';
+      if (rust && defect === 'command-timeout') return { status: 1, stderr: 'ReplayTimeout [Error]: replay timeout: command getAccount\\n' };
+      if (rust && defect === 'runner-crash') return { status: 1, stderr: 'Error: loader failure\\n' };
       const output = {
         frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
         invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [], requests: [], writes: [], writeCount: 0,
@@ -240,6 +243,17 @@ test('gate CLI independently enforces process CPU, ten percent margin and every 
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stdout, message);
   }
+});
+
+test('gate CLI reports command timeouts as incomplete failures and keeps runner crashes fatal', () => {
+  const timeout = gate('bybitinverse', true, 'command-timeout');
+  assert.equal(timeout.status, 1);
+  assert.match(timeout.stdout, /FAIL \(incomplete replay\)/);
+  assert.match(timeout.stdout, /command getAccount did not complete/);
+  const crash = gate('bybitinverse', true, 'runner-crash');
+  assert.equal(crash.status, 1);
+  assert.match(crash.stderr, /rust replay failed/);
+  assert.doesNotMatch(crash.stdout, /incomplete replay/);
 });
 
 test('gate CLI retains the strict Orderly command count oracle', () => {

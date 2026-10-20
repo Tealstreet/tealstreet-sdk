@@ -56,6 +56,12 @@ test('missing fill metadata stays null and order identity is never an execution 
   assert.equal(zero.fee, 0);
   assert.equal(zero.timestamp, 0);
   assert.equal(zero.price, 0);
+  const strings = projectFill({ price: '100.25', fee: '-0.01', timestamp: '123' }, 'example');
+  assert.equal(strings.price, 100.25);
+  assert.equal(strings.fee, -0.01);
+  assert.equal(strings.timestamp, 123);
+  for (const value of ['', ' ', null, undefined, 'NaN', 'Infinity'])
+    assert.equal(projectFill({ price: value }, 'example').price, null);
   const missing = account();
   delete missing.positions[0].realizedPnl;
   delete missing.orders[0].takeProfit;
