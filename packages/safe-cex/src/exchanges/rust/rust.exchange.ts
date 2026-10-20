@@ -18,6 +18,7 @@ import type {
   Order,
   OrderBook,
   OrderHistoryOptions,
+  PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
   ValidateAccountResult,
@@ -35,7 +36,8 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
-import { LogSeverity } from '../../types';
+import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
+import { nativePositionSize } from '../../utils/nativePositionSize';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -1116,6 +1118,59 @@ export class RustEngineExchange extends BaseExchange {
     for (const symbol of symbols) {
       if (this.isDisposed) break;
       await this.cancelSymbolOrders(symbol);
+    }
+  };
+
+  nuke = async (_tries = 0) => this.runNativeNuke(true);
+
+  nukePositions = async (_tries = 0) => this.runNativeNuke(false);
+
+  private runNativeNuke = async (cancelOrders: boolean): Promise<void> => {
+    this.assertEngineAlive();
+    if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
+    this.isNuking = true;
+    let failed = false;
+    let failure: unknown;
+    try {
+      try {
+        const orders: PlaceOrderOpts[] = [];
+        for (const position of await this.fetchPositions()) {
+          const quantities = [position.contracts, position.notional ?? 0, position.extra?.contractsNative ?? 0];
+          if (!quantities.every(Number.isFinite)) this.rejectPreflight(`Invalid close size for ${position.symbol}`);
+          if (quantities.every((value) => value === 0)) continue;
+          const market = this.store.marketsBySymbol[position.symbol];
+          if (!market) this.rejectPreflight(`Market not found for symbol: ${position.symbol}`);
+          if (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
+            this.rejectPreflight(`Invalid contract size for ${position.symbol}`);
+          const amount = nativePositionSize(position, market);
+          if (!Number.isFinite(amount) || amount < 0) this.rejectPreflight(`Invalid close size for ${position.symbol}`);
+          if (amount > 0) orders.push({
+            symbol: position.symbol,
+            side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+            type: OrderType.Market,
+            amount,
+            reduceOnly: true,
+          });
+        }
+        // One batch retains native partial/unknown outcomes without replaying
+        // a close against positions that have not yet reconciled.
+        if (orders.length) await this.placeOrders(orders);
+      } catch (error) {
+        this.reportCommandError(error);
+        failed = true;
+        failure = error;
+      }
+      if (cancelOrders) {
+        try {
+          await this.cancelAllOrders();
+        } catch (error) {
+          this.reportCommandError(error);
+          if (!failed) throw error;
+        }
+      }
+      if (failed) throw failure;
+    } finally {
+      this.isNuking = false;
     }
   };
 

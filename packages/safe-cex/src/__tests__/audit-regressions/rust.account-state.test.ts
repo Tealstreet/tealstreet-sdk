@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeName, Market, Order, Position, StoreData } from '../../types';
+import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, StoreData } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -103,7 +103,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
   let catalogDirty = true;
   let eventsPending = false;
   let readHook = (): void => {};
-  const commands: Array<{ op: string; command?: number; symbol?: string }> = [];
+  const commands: Array<{ op: string; command?: number; symbol?: string; orders?: PlaceOrderOpts[] }> = [];
   const idle = () => '[]';
   const fullFrame = () =>
     consumerFrame(
@@ -475,4 +475,92 @@ describe('Rust native current-account reads', () => {
       expect(r.native.accountSnapshotFrame).not.toHaveBeenCalled();
     },
   );
+
+  it('closes one native preflush snapshot with native linear quantities and separate hedge legs', async () => {
+    const r = fixture('mexc');
+    await r.start();
+    r.store.update({ positions: [{ ...position(), contracts: 9999 }] });
+    r.update({ positions: [
+      { ...position(), id: 'BTCUSDT-long' },
+      { ...position(), id: 'BTCUSDT-short', side: PositionSide.Short, contracts: 3 },
+    ], options: { isHedged: true } });
+    await r.exchange.nukePositions(3);
+    expect(r.commands.filter((c) => c.op === 'placeOrders').map((c) => c.orders)).toEqual([[
+      { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 20, reduceOnly: true },
+      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 30, reduceOnly: true },
+    ]]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('uses inverse notional even when the published base quantity is zero', async () => {
+    const r = fixture('binanceinverse');
+    await r.start();
+    r.update({
+      markets: markets.map((m) => ({ ...m, contractSize: 100, isInverse: true })),
+      positions: [{ ...position(), contracts: 0, notional: 40 }],
+    });
+    await r.exchange.nukePositions();
+    expect(r.commands.find((c) => c.op === 'placeOrders')?.orders).toEqual([
+      { symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 0.4, reduceOnly: true },
+    ]);
+  });
+
+  it('does not invent a close for empty native positions despite a stale JS row', async () => {
+    const r = fixture();
+    await r.start();
+    r.store.update({ positions: [position()] });
+    await r.exchange.nukePositions(3);
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
+  });
+
+  it.each(['partial', 'unknown'] as const)('preserves an original %s rejection and cancels orders without retrying closes', async (kind) => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()], orders: [order()] });
+    const failure = Object.freeze(Object.assign(new Error('Close interrupted'), kind === 'unknown'
+      ? { outcome: 'unknown', clientOrderId: 'close-request', actualClientOrderIds: ['native-close'] }
+      : { partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2 }));
+    const place = vi.spyOn(r.exchange, 'placeOrders').mockRejectedValue(failure);
+    const error = vi.fn();
+    r.exchange.on('error', error);
+    await expect(r.exchange.nuke(3)).rejects.toBe(failure);
+    expect(place).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledOnce();
+    expect(r.commands.filter((c) => c.op === 'cancelSymbolOrders')).toHaveLength(1);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('keeps the first nuke lock when a concurrent caller is rejected', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [position()] });
+    let finish!: (ids: string[]) => void;
+    vi.spyOn(r.exchange, 'placeOrders').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const first = r.exchange.nukePositions();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(r.exchange.nukePositions()).rejects.toThrow('already in progress');
+    expect(r.exchange.isNuking).toBe(true);
+    finish(['accepted']);
+    await first;
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('rejects a missing market before any close dispatch', async () => {
+    const r = fixture();
+    await r.start();
+    r.store.update({ markets: [] });
+    r.update({ positions: [position()] });
+    await expect(r.exchange.nukePositions()).rejects.toThrow('Market not found');
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
+
+  it('rejects nonfinite native sizing inputs before any close dispatch', async () => {
+    const r = fixture();
+    await r.start();
+    r.update({ positions: [{ ...position(), contracts: NaN }] });
+    await expect(r.exchange.nukePositions()).rejects.toThrow('Invalid close size');
+    expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
+    expect(r.exchange.isNuking).toBe(false);
+  });
 });

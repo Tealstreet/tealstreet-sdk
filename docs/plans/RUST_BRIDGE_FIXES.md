@@ -930,3 +930,21 @@ including 24 new controls. Strict Clippy, fmt, bans and diff checks PASS.
 Independent correctness review PASS. Logs: /tmp/bridge-identity-final-*.log.
 This completes the planned native identity batches, not SDK dispatch or the
 final combined-WASM identity acceptance gate.
+
+## Phase 4a native bulk-close checkpoint
+
+Rust nukePositions now reads one native snapshot and validates the full batch
+before submitting reduce-only market closes in venue units, preserving hedge
+legs and inverse notional sizing. It never retries a close automatically after
+partial/unknown outcome. Nuke also attempts native cancel-all after close failure
+and rethrows the original close failure. Concurrent nukes reject and ownership
+clears on every exit. The existing sizing implementation moved unchanged to a
+safe-cex utility leaf; script-api-core re-exports it without a dependency cycle.
+
+33 account-state controls PASS, including eight new nuke controls. Seven shared
+sizing-policy tests and 32 CLI preparation/account-state tests PASS. SDK,
+script-api-core and CLI-core typechecks PASS. Independent plan and implementation
+reviews PASS; strict scoped lint PASS with ignored tests explicitly included. Initial fixture collisions were corrected to represent distinct hedge
+legs; no production assertion was weakened. Logs: /tmp/bridge-phase4a-nuke-*.log
+and /tmp/bridge-phase4a-sizing-policy-tests.log. This is current engine state,
+not proof of network resynchronization or a new unknown-outcome classifier.

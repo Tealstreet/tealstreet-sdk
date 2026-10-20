@@ -104,6 +104,12 @@ an explicit frame marker so both worker and main preserve observation freshness
 counters; ordinary stream frames still advance them. Recursive notification
 readers reuse the already-applied state rather than publishing another snapshot.
 
+Rust `nukePositions` sizes one current native position snapshot with the shared
+native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
+market batch and propagates partial or unknown outcomes without automatic retry.
+`nuke` also attempts the venue's cancel-all operation after a close failure;
+the original close failure remains the result. Concurrent nukes are rejected.
+
 ## Rust engine failure
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
@@ -406,7 +412,7 @@ position". If neither exists, the honest code path is a refusal.
 
 ### The inverse rule — and what is NOT true about it
 
-Inverse handling belongs in SIZING. `order/positionSizing.ts:nativePositionSize`
+Inverse handling belongs in SIZING. `safe-cex/src/utils/nativePositionSize.ts`
 branches on `isInverse` because an inverse contract is a fixed QUOTE amount, so
 its count comes from the notional.
 
@@ -475,9 +481,10 @@ only defined on linear markets.
 
 ### 3. Native position sizing — converged, and the proof it works
 
-`script-api-core/src/order/positionSizing.ts:nativePositionSize` is the single
-definition; web's `getPositionNativeSize` and the CLI's `nativeCloseSize` are
-both thin wrappers over it. Its own comment records that the copies HAD drifted
+`safe-cex/src/utils/nativePositionSize.ts` is the single definition;
+`script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
+Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
+use it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 
