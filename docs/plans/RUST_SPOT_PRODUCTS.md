@@ -110,3 +110,26 @@ documented positive relative distance; ambiguous edits fail before writes.
   repaired without enabling credentialed spot smoke profiles. All 562 harness
   tests and the 332-test SDK/registry/transport/readiness subset pass.
   Integrated default WASM strict Clippy, all-workspace formatting and bans pass.
+- Full safe-cex suite passes: 513 files / 7,427 tests before the final three
+  decimal-step regressions; the subsequent affected 43-test subset passes.
+
+## Accepted Kraken gates
+
+Integrated source `3fc4c20aa0` plus paired canonical-decimal fix `4a2dfa8477`:
+fresh live public capture has two books, zero rejected subscriptions and
+successful DOGE/USD, DOGE/USDC and DOGE/USDT ticker feeds. Committed fixture
+contains 6,169 trimmed records. Four compiled host tests pass.
+
+| Gate | Frames | TS / Rust main CPU ms | TS / Rust steady CPU ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Kraken spot public, three runs | 6,166 | 282.8 / 144.4 | 222.7 / 83.4 | 16.4 / 4.3 |
+| Kraken spot private, one run | 19 | 56.5 / 45.2 | 27.5 / 22.8 | 14.3 / 1.0 |
+| Kraken futures public, three runs | 9,641 | 1234.0 / 243.3 | 865.5 / 142.9 | 16.7 / 2.7 |
+| Kraken futures private, one run | 49 | 110.7 / 60.0 | informational | 16.4 / 1.1 |
+
+All four gates PASS. Private performance is informational; private correctness,
+requests, authentication, token rotation and command/query results are exact.
+Selected browser and Node WASM are both 1,051,446 bytes, below 1,258,291.
+The TS book-readiness predicate waits for the startup-created socket after
+ticker seeding, preserving listeners across startup; the live replay exercises
+this lifecycle. Hyperliquid and Binance final gates remain pending.

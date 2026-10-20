@@ -99,5 +99,8 @@ export const krakenspot = {
   requestBody: krakenSpotRequestBody,
   commandResult: krakenSpotCommandResult,
   isWrite: (method, url) => method !== 'GET' && !/\/(Balance|OpenOrders|GetWebSocketsToken)$/.test(new URL(url).pathname),
+  // start() creates its final public socket only after the ticker seed. Earlier
+  // book listeners would attach to the lazy socket that startup replaces.
+  tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),
   tsBooksSubscribed: (exchange, count) => Object.values(exchange.publicWebsocket?.orderBookHandlers ?? {}).filter((v) => v.length).length >= count,
 };
