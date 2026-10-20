@@ -175,7 +175,21 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // even when ordinary GETs use a secondary key; a different account's 51603
 // cannot establish that the primary order was never placed. Regression tests
 // exercise routing directly; no replay result is rewritten for this fix.
+// Binance/OKX also bypass cached client-ID hits with secondary credentials:
+// that cache may contain another account's orders. TS and Rust both query
+// the primary account; native tests retain PM's canonical client-ID identity.
 const KNOWN_TS_FIXES = {
+  // TxFlow previously rejected start as a scaffold. Its new TS reference and
+  // Rust implementation both fence stale reads, deduplicate executions, reject
+  // uncertain write acknowledgements and revalidate queued amendments.
+  // Preserve sparse-context volumes, authoritative hedge settings/mode fences,
+  // and delisted history identities in both implementations as well.
+  // Compare both outputs directly; no TxFlow-specific normalization is permitted.
+  // The production wrapper also rejects order-history ID/status filters that
+  // the native query cannot represent, instead of silently discarding them.
+  // Both implementations pace subscription bursts and recover dropped gateway
+  // subscriptions; the live fixture confirms every ticker acknowledgement.
+  txflow: [],
   breakoutprop: {
     // Public polling, duplicate quote levels and the cancellation precondition
     // are fixed in the TS reference. Native tests pin safety corrections; no
@@ -237,6 +251,8 @@ const KNOWN_TS_FIXES = {
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {
+    // Paired TS authority fences now protect REST reads across private pushes,
+    // socket generations and other REST commits; compare balances unchanged.
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
     // Phemex zero-open ticker changes remain finite.
@@ -727,6 +743,7 @@ const KNOWN_TS_FIXES = {
 };
 
 for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
+KNOWN_TS_FIXES['lighter-robinhood'] = KNOWN_TS_FIXES.lighter;
 
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
@@ -886,7 +903,7 @@ for (let run = 0; run < runs; run++) {
       }
       ts.subscriptions = [...feeds].sort();
     }
-    if (values.venue === 'lighter') {
+    if (['lighter', 'lighter-robinhood'].includes(values.venue)) {
       KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }

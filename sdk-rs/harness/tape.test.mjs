@@ -143,6 +143,22 @@ test('public timers advance by recorded time with cancellation and repeated inte
   }
 });
 
+test('private replay can freeze startup timestamps while startup timers still run', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch, true);
+  clock.install();
+  try {
+    assert.equal(Date.now(), epoch);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(Date.now(), epoch);
+    clock.start();
+    let observed;
+    setTimeout(() => { observed = Date.now(); }, 100);
+    await clock.advance(100);
+    assert.equal(observed, epoch + 100);
+  } finally { clock.restore(); }
+});
+
 test('the replay epoch begins after account startup and before its first command', async () => {
   const tape = new Tape([{ type: 'command', t: 0, op: 'example' }], { isPrivate: true });
   const seen = [];

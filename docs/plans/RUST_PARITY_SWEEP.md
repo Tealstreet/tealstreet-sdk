@@ -435,3 +435,35 @@ than treating the original port boundary as a waiver.
   change or review finding. Next: normal push, PR into feat/rust-rewrite,
   independent adversarial reviews posted to PR, exact-head green CI, merge and
   fresh follow-up branch. No live-key or separate phase9 gap is claimed closed.
+
+### PR1340 adversarial review and advanced landing union
+
+- Opened PR1340 into feat/rust-rewrite after all original local gates passed.
+  Three independent reviewers covered queries/finance, transport/GRVT and
+  SDK/harness; findings are posted as PR comments. Two reviewers independently
+  found cached secondary-account orders bypassing primary lookups. Binance/OKX
+  now bypass that cache whenever secondary credentials are configured, in Rust
+  and paired TS, without mutating the cache or changing primary-only shortcuts.
+- Finance review also found PM lookup returning native IDs where cancellation
+  expects canonical client IDs. Preserve the PM client ID and native info ID;
+  USD-M retains native IDs. Regression controls distinguish numeric caller and
+  native IDs and verify cancellation against reconciled canonical store rows.
+- Red controls reproduce both findings; focused TS16/16 and native201/201
+  affected-crate tests PASS. Independent repair re-review and final union
+  verification follow; no review finding is waived by the original gate run.
+- Landing advanced to86ed5e3d2e while original gates ran: merge TxFlow1329,
+  server adapter1334, replay/performance1335 and Lighter variants1336. Only
+  textual conflict combines GRVT derivative-signature and index-equivalence
+  regressions. Independent SDK/harness union review PASS.
+- Incoming deterministic KuCoin harness control scheduled20ms before clock
+  startup and could lose time to real scheduler delay. Use explicit frozen
+  startup for that test, preserving its full20ms assertion and runtime clocks.
+  Initial564/565 failure is retained; final565/565 harness PASS. Correct stale
+  Lighter Rust alias/remote-only documentation from the incoming port.
+- Rebuild combined artifacts and rerun root/native/WASM quality. Shared replay
+  finalization changed, so repeat affected gates with the expanded manifest:
+  123steps,58child replays plus primaryOKX7=65planned local gates; extra combined
+  GRVT remains separate66th proof. Budget now covers26unique venue features
+  (27profile builds including the Lighter alias) at unchanged1,258,291bytes.
+  Incoming CI config97replays (36public/61private),32Rustjobs. Prior counts and
+  measurements remain historical until this merged-source sequence passes.

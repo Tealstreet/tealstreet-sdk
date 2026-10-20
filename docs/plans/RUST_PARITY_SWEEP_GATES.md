@@ -1,5 +1,9 @@
 # Parity sweep final local evidence
 
+This records the completed pre-`86ed5e3d2e` landing-integration sequence.
+The later landing union and PR-review repairs require fresh affected checks;
+the progress plan records that follow-up without erasing these receipts.
+
 Frozen runtime: `680bdfcbb016b0515030232c53a75e5f6b574a5a` (the final documentation commit changes no runtime).
 Source fingerprint over1,595 relevant files: `f4a3b16b3b21ac879b404c75caa08893fb2c42d8a534778e85a380ec0466db84`.
 Workflow fingerprint: `7247a7ab4e5ccc1159d8bb9d9c4617b6208182c70365602e89fa2e3ca9aed2bd`.

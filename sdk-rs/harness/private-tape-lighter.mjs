@@ -3,10 +3,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-const {values}=parseArgs({options:{out:{type:'string',default:'sdk-rs/harness/tapes/lighter-private.jsonl'}}});
-const REST='https://mainnet.zklighter.elliot.ai', WS='wss://mainnet.zklighter.elliot.ai/stream';
+const {values}=parseArgs({options:{venue:{type:'string',default:'lighter'},testnet:{type:'boolean',default:false},out:{type:'string'}}});
+if (!['lighter','lighter-robinhood'].includes(values.venue)) throw new Error('Expected lighter or lighter-robinhood');
+const robinhood=values.venue==='lighter-robinhood';
+const REST=robinhood ? `https://api.rh${values.testnet?'-testnet':''}.lighter.xyz` : values.testnet?'https://testnet-api.lighter.xyz':'https://mainnet.zklighter.elliot.ai';
+const WS=robinhood?REST.replace('https:','wss:')+'/stream':values.testnet?'wss://testnet.zklighter.elliot.ai/stream':'wss://mainnet.zklighter.elliot.ai/stream';
+const out=values.out??`sdk-rs/harness/tapes/${values.venue}${values.testnet?'-testnet':''}-private.jsonl`;
+const attributed=!robinhood&&!values.testnet;
 const EPOCH=1792454400000;
-const records=[{t:0,type:'meta',venue:'lighter',private:true,epoch:EPOCH},{t:0,type:'config',private:true,options:{key:'',secret:'01'+'00'.repeat(39),applicationId:'42',apiKeyIndex:'3'}}];
+const records=[{t:0,type:'meta',venue:values.venue,private:true,epoch:EPOCH},{t:0,type:'config',private:true,options:{testnet:values.testnet,key:'',secret:'01'+'00'.repeat(39),applicationId:'42',apiKeyIndex:'3'}}];
 let time=0;
 const http=(method,path,body,requestBody,extra={})=>records.push({t:0,type:'http',method,url:REST+path,status:200,body:JSON.stringify(body),...(requestBody===undefined?{}:{requestBody}),...extra});
 const ws=(socket,message,t)=>{time=t??time+400;records.push({t:time,type:'ws',socket,url:WS,text:JSON.stringify(message)});};
@@ -23,7 +28,7 @@ http('GET','/api/v1/nextNonce?account_index=42&api_key_index=3',{code:200,nonce:
 const row=(id,extra={})=>({order_index:String(id),order_id:String(id),client_order_index:id,market_id:1,symbol:'ETH',status:'open',type:'limit',time_in_force:1,is_ask:false,initial_base_amount:'0.25',filled_base_amount:'0',remaining_base_amount:'0.25',price:'90',reduce_only:false,updated_at:EPOCH+time,...extra});
 const open=(orders,afterCommand=0,availableAt=0)=>http('GET','/api/v1/accountActiveOrders?account_index=42&market_id=255',{code:200,orders},undefined,{afterCommand,availableAt});
 open([row(7001)]);
-const orderInfo=(price,amount,type=0,tif=1,ask=0,reduce=0,trigger=0)=>({AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,ClientOrderIndex:123,BaseAmount:amount,Price:price,IsAsk:ask,Type:type,TimeInForce:tif,ReduceOnly:reduce,TriggerPrice:trigger,OrderExpiry:1,ExpiredAt:1,Nonce:0,Sig:'placeholder',L2TxAttributes:{1:158385,2:250,3:0}});
+const orderInfo=(price,amount,type=0,tif=1,ask=0,reduce=0,trigger=0)=>({AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,ClientOrderIndex:123,BaseAmount:amount,Price:price,IsAsk:ask,Type:type,TimeInForce:tif,ReduceOnly:reduce,TriggerPrice:trigger,OrderExpiry:1,ExpiredAt:1,Nonce:0,Sig:'placeholder',...(attributed?{L2TxAttributes:{1:158385,2:250,3:0}}:{})});
 const write=(type,info,nonce)=>http('POST','/api/v1/sendTx',{code:200,tx_hash:'offline-tx-'+nonce},new URLSearchParams({tx_type:String(type),tx_info:JSON.stringify({...info,Nonce:nonce})}).toString());
 const cancel=(id,nonce)=>write(15,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,Index:id,ExpiredAt:1,Sig:'placeholder'},nonce);
 const setting=(fraction,mode,nonce)=>write(20,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,InitialMarginFraction:fraction,MarginMode:mode,ExpiredAt:1,Sig:'placeholder'},nonce);
@@ -46,5 +51,5 @@ http('POST','/api/v1/sendTxBatch',{code:200,tx_hash:['offline-tx-16','offline-tx
 // Rust accepts the execution once; the independent gate oracle removes the TS duplicate.
 const filled=row(8001,{status:'filled',price:'100',initial_base_amount:'0.25',filled_base_amount:'0.25',remaining_base_amount:'0',updated_at:EPOCH+6500});
 ws(1,{type:'update/account_all',channel:'account_all:42',data:{orders:[filled],fills:[{fillId:'execution-1',orderId:'8001',symbol:'ETH',side:'BUY',price:'100',size:'0.25',timestamp:EPOCH+6500}]}},6500);
-mkdirSync(dirname(values.out),{recursive:true});writeFileSync(values.out,records.map(r=>JSON.stringify(r)).join('\n')+'\n');
-console.log(JSON.stringify({out:values.out,events:records.filter(r=>['ws','command'].includes(r.type)).length,commands:records.filter(r=>r.type==='command').length}));
+mkdirSync(dirname(out),{recursive:true});writeFileSync(out,records.map(r=>JSON.stringify(r)).join('\n')+'\n');
+console.log(JSON.stringify({out,events:records.filter(r=>['ws','command'].includes(r.type)).length,commands:records.filter(r=>r.type==='command').length}));

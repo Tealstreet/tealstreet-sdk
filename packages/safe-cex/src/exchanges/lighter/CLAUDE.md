@@ -793,12 +793,15 @@ This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeO
 
 ## Rust engine
 
-`engine: 'rust'` selects `sdk-rs/venues/lighter` for `lighter` perpetuals.
-`lighter-robinhood` continues using its own TS deployment. The Rust host forwards
-Application ID, API key index, integrator index (as exact decimal text), and
-`extra.lighterStopSlippagePct`. Missing local secret or API key index starts
-public-only data. Caller client order IDs are refused on every shape and across
-the entire batch before any engine command/write.
+`engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and
+`lighter-robinhood` perpetuals, preserving their deployment profiles. The Rust
+host forwards Application ID, API key index, integrator index (as exact decimal
+text), and `extra.lighterStopSlippagePct`. Missing API key index, or neither a
+local secret nor `remoteSigner`, starts public-only data. A remote signer without
+a local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Caller client order IDs are
+refused on every shape and across the entire batch before any engine
+command/write.
 
 Both sockets use engine timers for handshake, idle and reconnect watchdogs.
 Private fills come exclusively from execution records, deduplicated by native

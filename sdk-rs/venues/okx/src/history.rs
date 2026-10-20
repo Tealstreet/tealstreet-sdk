@@ -479,9 +479,13 @@ impl Okx {
             cx.done(command, Ok(UNKNOWN.into()));
             return;
         };
-        if let Some(order) = cx.store.orders().iter().find(|order| {
-            order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
-        }) {
+        // Secondary GET snapshots may belong to another account. Their cached
+        // client IDs cannot establish primary placement identity.
+        if self.options.read_credentials.is_none()
+            && let Some(order) = cx.store.orders().iter().find(|order| {
+                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+            })
+        {
             cx.done(command, found(order.clone(), None));
             return;
         }

@@ -128,7 +128,8 @@ export class OKXExchange extends BaseExchange {
     const inStore = this.store.orders.find(
       (order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId),
     );
-    if (inStore) return { found: true, order: inStore };
+    // Secondary GET snapshots may belong to another account; their cache cannot prove primary identity.
+    if (inStore && !this.options.secondary_key) return { found: true, order: inStore };
     const market = this.store.marketsBySymbol[symbol];
     if (!market) return { found: false, definitive: false };
 

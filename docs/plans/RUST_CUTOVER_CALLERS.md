@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **43**.
-The two registries currently default **8 names** to `RustEngineExchange`:
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **45**.
+The two registries currently default **9 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
-`salsadex`, `what`, `woofi`. They default the other **41 names** to TypeScript,
-including **35 names with an available Rust adapter**. Registration in
+`salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
+including **36 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -28,6 +28,7 @@ of saved accounts.
 | --- | --- | --- |
 | Coinbase: `coinbase`, `coinbasespot` | Both | Rust default; active CFM/spot and saved spot-only. Legacy INTX fixtures remain compatibility coverage for retired Advanced Trade routes. Frozen TS reference remains a harness dependency. Inert Starbase code is not an enabled product. |
 | Orderly: `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | All six | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
+| `txflow` | Yes | Rust default, testnet USDC perpetuals only; mainnet rejects before I/O and production/preview availability stays disabled. Retain `__tests__/reference/txflow` for independent public/private replay and audits, plus the production `exchanges/txflow/txflow.client-id.ts` helper used by the Rust wrapper. The former Phase-0 scaffold has been replaced; preserve [exact signing, account, order/query scope and measurement gates](TXFLOW_RUST_PORT.md). |
 | Binance: `binance`, `binancepm` | Both | TS default; preserve USD-M and PM protocol/account/query scope and regression gates while switching both registries after consumer/routing/key-mode evidence. All four Binance Rust profiles now exist; shared TS implementation/reference files still have callers until each profile defaults/migrates. |
 | Binance Spot: `binancespot` | Yes | TS default; signed WebSocket API user-data subscription with ACK/subscription-ID/liveness checks, native per-asset currency balances and USD totals; no derivative positions/settings. Native client-order-ID identity and supported regular/protective/order-list paths retain whole-batch preflight and final-fill-aware cancel/replace; unsupported derivative flags/STP/trailing or conditional parameters reject. Private history/fills/income retain the existing TS empty-result contract; public-trades/client-lookup queries unsupported. Preserve exact scope, live public versus documented private evidence and USD-M/PM controls in [BINANCE_VARIANTS_PORT.md](BINANCE_VARIANTS_PORT.md). |
 | Binance COIN-M: `binanceinverse` | Yes | TS default; native contract order/placement amounts, USD-per-contract multiplier, base position contracts, coin-denominated PnL/margin and USD-valued aggregate balances with unpriced coin detail retained. Worker/main bridges preserve native count versus quote notional. Regular/stops/trailing endpoints and cancel/replace retain identity/terminal/final-fill proof; caller client IDs reject before batch writes. Public trades implemented; private history/fills/income retain TS empty results and client lookup unsupported. Preserve one-way/hedged/account sizing/routing evidence, and shared USD-M/PM regressions; [exact profile scope](BINANCE_VARIANTS_PORT.md). |
@@ -47,8 +48,8 @@ of saved accounts.
 | `hyperliquidspot` | No | TS required; perps coverage cannot substitute for saved spot accounts. |
 | `kraken` | Yes | TS default; futures adapter. |
 | `krakenspot` | No | TS required; Kraken futures signing/protocol does not cover Kraken spot. |
-| `lighter` | Yes | TS default; keep wallet approval/account-tier helpers and prove all current credential/remote-signing modes. |
-| `lighter-robinhood` | No | TS required; it loads `LighterExchange`, but the Rust alias/config is not registered. Must prove broker config and add an explicit alias before cutover. |
+| `lighter` | Yes | TS default; local signing on main/test chains 304/300. Remote-only account snapshot polling, payload-only public startup and mixed local/callback behavior match the current TS startup contract; no supported remote transaction signer in TS. Keep wallet approval/account-tier helpers, the wrapper's API-key-index parser and TS oracle; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
+| `lighter-robinhood` | Yes | TS default; explicit Rust alias with Robinhood main/test URLs, USDG, signing chains 466324/300 and no default zkLighter integrator attribution. Same credential modes and retained helper/oracle requirements as `lighter`; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
 | `mexc` | Yes | TS default; conditional/trailing and native-unit proofs still required when removing reference coverage. |
 | `paradex` | Yes | TS default; retain binary/text feed and Starknet account mode checks. |
 | `phemex` | Yes | TS default; retain native account identity and shared broker constants. |
@@ -57,10 +58,10 @@ of saved accounts.
 | `polymarket` | Yes | TS default, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage; generic algorithm fixtures do not enable venue features. Prediction CLOB V2 outcome shares with typed prediction/holding metadata; native local-wallet signature types 0/1/2/3 and supplied/derived L2 credentials. Limit/GTC only; no client IDs, market/conditional/bracket/reduce-only orders, or generic fills/order-history/income/public-trades query claims. Preserve authoritative final-fill-safe cancel-replace and bounded sampled price history. Read [venue-ports/POLYMARKET.md](venue-ports/POLYMARKET.md) for exact auth/product/query scope; private tests use documented fixtures, not live-key proof. |
 | `grvt` | Yes | TS default; perpetual-only Rust catalog, with local EIP-712 signing (chains 325/326), API-key/session login, routed/direct private auth, subaccount discovery and mandatory builder authorization. Canonical caller IDs are decimal 1..2^63-1; limit/market/protective/bracket commands and final-fill-safe cancel-replace, one-way positions, real leverage reads/updates; margin-mode mutation unsupported. Bounded fills/history/funding/public-trade queries and definitive client-ID lookup, including the chaser fill-verification hook. Preserve public browser builder-authorization exports and signing/session routing. TS maps non-perpetual instrument kinds: resolve that product gap explicitly before deletion; no future/options claim. Exact scope/evidence: [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
-| `bitunix`, `txflow` | None | TS required. Bitunix roster work-in-progress is not a registered Rust adapter. TxFlow is explicitly a Phase-0 scaffold, not a completed venue. Each needs an explicit port or an explicit supported-product retirement decision. |
+| `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
 
-The 6 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
-`krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow`.
+The 4 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
+`krakenspot`, `kucoinspot`.
 Do not silently route them through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
@@ -113,7 +114,7 @@ future requirements. Passing the baseline conformance matrix does not close them
 | `packages/safe-cex/src/webworker/ExchangeWorker.ts`; `exchanges/base.ts` (`isPrivateOnly`, `disablePublicWebsockets`); `exchanges/rust/rust.exchange.ts` (`createHost`, `startEngine`), all relative to `packages/safe-cex/src/` | `privateOnly` suppresses legacy public socket objects by patching their `connectAndSubscribe`. Rust has no such objects, forwards no `privateOnly` option, and starts the engine's public channels anyway. Shared-public accounts open duplicate public feeds instead of honoring their configured mode. | Add an explicit engine/host public-feed policy and feed shared markets/tickers into the private engine with stable identity; suppress only public I/O while preserving required private market metadata. Verify private startup/order sizing and zero public connects for `privateOnly`, including reconnects and every feed role. Do not equate keyless `publicDataOnly` with `privateOnly`. |
 | `packages/safe-cex/src/exchanges/base.ts` (`initExternalPublicData`); `exchanges/external-public-data.ts`, `exchanges/in-process-public-data.ts`; `exchanges/rust/rust.exchange.ts` (`startEngine`, `listenOrderBook`, `listenOHLCV`) | Rust's start override never initializes `externalPublicData`; its book/candle overrides subscribe through engine commands instead of the inherited external provider. Gateway and in-process source configuration is ignored, and the Rust public streams run instead. Existing account-specific shared-market overlays are also not established by this startup path. | Implement the same external-provider lifecycle, public-feed suppression, book/candle subscription routing, loaded-state gating and account market overlay for Rust, or migrate these callers to an explicitly equivalent engine feed-input API. Test both gateway and in-process variants, initial state, reconnect, disposal and account overlays before changing defaults. |
 | `sdk-rs/venues/bybit/src/lib.rs` (`market_from_wire`), `sdk-rs/engine/src/model.rs`, `sdk-rs/engine/src/wire.rs`, `packages/safe-cex/src/store/frameApplier.ts`; `packages/safe-cex/src/instrument-class/bybit.instrumentClass.ts`; `packages/cli-core/src/order/prepareCliOrder.ts`, `commands/session/CheckCommand.ts` | Rust markets/frames do not preserve the Bybit instrument `symbolType`, `marketRegion` and `underlyingTicker` consumed through `Market.info`. The classifier returns `unknown` rather than a positive equity/ETF/commodity/FX classification. `prepareCliOrder` refuses only a positively classified non-crypto instrument, so the existing TradFi refusal silently stops firing for Rust accounts. The CLI `check` result also loses classification. | Add typed classification metadata to Rust discovery and the frame schema, reconstruct the documented minimal `Market.info` fields (or migrate all classification readers to an equivalent typed field), and prove actual stock/ETF/commodity/FX rows still refuse through `prepareCliOrder`. Preserve the distinction between absent `symbolType`, an explicitly empty crypto value, `innovation` crypto and an unknown new venue value. The generic numeric market fixture cannot prove this. |
-| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts` (`getOrCreateHandle`, `refreshMarketsForCurrentBucket`); `packages/safe-cex/src/exchanges/rust/rust.exchange.ts` (`fetchMarkets`) | The public factory constructs an exchange without calling `start`, then calls `fetchMarkets` for a cold cache or forced refresh. Rust's override only returns `store.markets`; it neither starts discovery nor requests a fresh snapshot. A cold Rust default (already Coinbase/Orderly) can therefore return/cache an empty list, and a forced refresh can return old cached rows without any venue fetch. | Provide a lazy, disposal-safe real market-read command in the Rust adapter, or explicitly start/discover at factory creation and add a separate fresh-fetch command for forced refresh. Preserve cache/lock/stale-fallback semantics. Prove cold uncached fetch, warm cache, changed venue markets on force refresh, errors retaining last-known-good state, and disposal. Merely calling `start` once does not fix forced refresh. |
+| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts` (`getOrCreateHandle`, `refreshMarketsForCurrentBucket`); `packages/safe-cex/src/exchanges/rust/rust.exchange.ts` (`fetchMarkets`) | The public factory constructs an exchange without calling `start`, then calls `fetchMarkets` for a cold cache or forced refresh. Rust's override only returns `store.markets`; it neither starts discovery nor requests a fresh snapshot. A cold Rust default (already Coinbase/Orderly/TxFlow) can therefore return/cache an empty list, and a forced refresh can return old cached rows without any venue fetch. | Provide a lazy, disposal-safe real market-read command in the Rust adapter, or explicitly start/discover at factory creation and add a separate fresh-fetch command for forced refresh. Preserve cache/lock/stale-fallback semantics. Prove cold uncached fetch, warm cache, changed venue markets on force refresh, errors retaining last-known-good state, and disposal. Merely calling `start` once does not fix forced refresh. |
 | `sdk-rs/venues/okx/src/lib.rs` (`on_item` for `Pending::Markets`); `packages/safe-cex/src/exchanges/okx/okx.exchange.ts` (`fetchMarkets` inverse mapping) | Rust explicitly filters `ctType != linear` and settlement currencies outside USDT/USDC, and emits `is_inverse: false`. TS maps `ctType: inverse` swaps into markets and native inverse sizing. The four OKX Rust aliases therefore do not replace the full product surface of their TS counterparts. | Port OKX inverse discovery, tickers, accounts, native quantity/PnL/margin sizing, subscriptions, commands and history under the same account/host profiles, with real typed inverse fixtures and consumer sizing proofs. Keep the TS inverse path until its protocol and consumer gates pass. |
 | `packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts` (`enableOptionMarkets`, `enableInverseMarkets` helpers); `packages/safe-cex/src/exchanges/rust/rust.exchange.ts` (`createHost` options JSON); `sdk-rs/venues/bybit/src/lib.rs` (single variant/category) | TS linear accounts can opt into combined inverse and option products. The wrapper does not forward either flag, and Rust selects one variant/category. The separate `bybitinverse` registration supplies an inverse-only account, not the enabled combined account; no Rust option market/Greeks surface is supplied. Saved product flags would silently lose those products on a default cutover. | Forward and implement combined categories with independent feed identities, private/public routing, product/Greeks metadata and native sizing; prove account/store/CLI/order behavior for each enabled combination. Until implemented, explicitly reject unsupported flags at Rust construction so callers cannot mistake a narrower account for parity, and retain the TS mode. Rejection prevents silent loss but does not make the TS implementation deletable. |
 | `sdk-rs/venues/grvt/src/lib.rs` (`on_item` catalog filter); `packages/safe-cex/src/exchanges/grvt/grvt.exchange.ts` (`fetchMarkets` catalog mapping), `packages/safe-cex/src/exchanges/grvt/CLAUDE.md` | Rust keeps only `kind: PERPETUAL`; TS maps the instrument catalog without the same kind filter, and its documented contract includes Future/Call/Put kinds. The registered Rust alias and perpetual-only fixtures therefore do not prove replacement of those TS catalog/product paths. | Resolve non-perpetual product scope explicitly before default cutover or deletion: implement any retained Future/Call/Put contracts, typed market/option metadata, signing, account/position/query and consumer semantics with appropriate documented fixtures, or make an explicit supported-product retirement decision. Do not silently drop non-perpetual rows or infer options support from perpetual registration. |
@@ -211,7 +212,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    corpus. Keep absence of optional data distinct from an authoritative empty
    snapshot, updateId bumps, native units, terminal fences and serialize/stub
    parity. Run integration/build/replay controls as applicable.
-2. **Close unsupported aliases/products.** Port the 6 missing names or obtain an
+2. **Close unsupported aliases/products.** Port the 4 missing names or obtain an
    explicit supported-product retirement decision in a separate change. A
    perps port never retires a saved spot/inverse account implicitly. Audit
    all credential/signing modes, proxy/tunnel/region, secondary keys, product
@@ -232,7 +233,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    without changing consumer APIs. Keep `DefaultStore`/FrameApplier as the
    compatibility seam until their consumers have replacements.
 5. **Delete implementations in dependency order, with fresh evidence per PR.**
-   Coinbase/Orderly production implementation is already replaced and their
+   Coinbase/Orderly/TxFlow production implementation is already replaced and their
    frozen references remain. Next choose independent ready families (Backpack,
    BingX, Crypto.com, MEXC, BloFin, Bitrue, Phemex, WEEX, WOO, ApeX, Paradex,
    Aster, Polymarket, GRVT, Breakout legacy) after defaults and helper extraction. Delete
@@ -248,7 +249,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
 6. **Retire each old oracle deliberately.** Rewrite useful deterministic venue
    regressions to drive Rust using independent documented fixtures. The replay
    harness dynamically loads TS classes from production paths; freeze/move the
-   intended oracle before removing those paths, following Coinbase/Orderly's
+   intended oracle before removing those paths, following Coinbase/Orderly/TxFlow's
    test-only reference pattern. Keep a fixed baseline/performance oracle or
    explicitly replace that gate with a reviewed absolute budget. Never turn a
    TS-vs-Rust gate into Rust-vs-itself.
@@ -425,13 +426,11 @@ These callers remain until their family is migrated. `base` consumers switch to 
 | `packages/safe-cex/src/exchanges/polymarket/polymarket.exchange.ts` | `base` |
 | `packages/safe-cex/src/exchanges/polymarket/polymarket.ws-private.ts` | `polymarket/polymarket.exchange` |
 | `packages/safe-cex/src/exchanges/polymarket/polymarket.ws-public.ts` | `polymarket/polymarket.exchange` |
-| `packages/safe-cex/src/exchanges/registry.native.ts` | `apexomni/apexomni.exchange`, `asterdex/asterdex.exchange`, `backpack/backpack.exchange`, `base`, `binance/binance.exchange`, `binance/binanceinverse.exchange`, `binance/binancepm.exchange`, `binance/binancespot.exchange`, `bingx/bingx.exchange`, `bitget/bitget.exchange`, `bitget/bitgetinverse.exchange`, `bitget/bitgetusdc.exchange`, `bitrue/bitrue.exchange`, `bitunix/bitunix.exchange`, `blofin/blofin.exchange`, `breakoutprop/breakoutprop.exchange`, `bybit/bybit.exchange`, `bybit/bybitdemo.exchange`, `bybit/bybitinverse.exchange`, `bybit/bybitspot.exchange`, `bybit/hyrotrader.exchange`, `cryptocom/cryptocom.exchange`, `grvt/grvt.exchange`, `hyperliquid/hyperliquid.exchange`, `hyperliquid/hyperliquidspot.exchange`, `kraken/kraken.exchange`, `kraken/krakenspot.exchange`, `kucoin/kucoin.exchange`, `kucoin/kucoinspot.exchange`, `lighter/lighter.exchange`, `mexc/mexc.exchange`, `okx/okx.exchange`, `okx/okxdemo.exchange`, `okx/okxeu.exchange`, `okx/okxeudemo.exchange`, `paradex/paradex.exchange`, `phemex/phemex.exchange`, `polymarket/polymarket.exchange`, `rust/rust.exchange`, `txflow/txflow.exchange`, `weex/weex.exchange`, `woo/woo.exchange` |
-| `packages/safe-cex/src/exchanges/registry.ts` | `apexomni/apexomni.exchange`, `asterdex/asterdex.exchange`, `backpack/backpack.exchange`, `base`, `binance/binance.exchange`, `binance/binanceinverse.exchange`, `binance/binancepm.exchange`, `binance/binancespot.exchange`, `bingx/bingx.exchange`, `bitget/bitget.exchange`, `bitget/bitgetinverse.exchange`, `bitget/bitgetusdc.exchange`, `bitrue/bitrue.exchange`, `bitunix/bitunix.exchange`, `blofin/blofin.exchange`, `breakoutprop/breakoutprop.exchange`, `bybit/bybit.exchange`, `bybit/bybitdemo.exchange`, `bybit/bybitinverse.exchange`, `bybit/bybitspot.exchange`, `bybit/hyrotrader.exchange`, `cryptocom/cryptocom.exchange`, `grvt/grvt.exchange`, `hyperliquid/hyperliquid.exchange`, `hyperliquid/hyperliquidspot.exchange`, `kraken/kraken.exchange`, `kraken/krakenspot.exchange`, `kucoin/kucoin.exchange`, `kucoin/kucoinspot.exchange`, `lighter/lighter.exchange`, `mexc/mexc.exchange`, `okx/okx.exchange`, `okx/okxdemo.exchange`, `okx/okxeu.exchange`, `okx/okxeudemo.exchange`, `paradex/paradex.exchange`, `phemex/phemex.exchange`, `polymarket/polymarket.exchange`, `rust/rust.exchange`, `txflow/txflow.exchange`, `weex/weex.exchange`, `woo/woo.exchange` |
+| `packages/safe-cex/src/exchanges/registry.native.ts` | `apexomni/apexomni.exchange`, `asterdex/asterdex.exchange`, `backpack/backpack.exchange`, `base`, `binance/binance.exchange`, `binance/binanceinverse.exchange`, `binance/binancepm.exchange`, `binance/binancespot.exchange`, `bingx/bingx.exchange`, `bitget/bitget.exchange`, `bitget/bitgetinverse.exchange`, `bitget/bitgetusdc.exchange`, `bitrue/bitrue.exchange`, `bitunix/bitunix.exchange`, `blofin/blofin.exchange`, `breakoutprop/breakoutprop.exchange`, `bybit/bybit.exchange`, `bybit/bybitdemo.exchange`, `bybit/bybitinverse.exchange`, `bybit/bybitspot.exchange`, `bybit/hyrotrader.exchange`, `cryptocom/cryptocom.exchange`, `grvt/grvt.exchange`, `hyperliquid/hyperliquid.exchange`, `hyperliquid/hyperliquidspot.exchange`, `kraken/kraken.exchange`, `kraken/krakenspot.exchange`, `kucoin/kucoin.exchange`, `kucoin/kucoinspot.exchange`, `lighter/lighter.exchange`, `mexc/mexc.exchange`, `okx/okx.exchange`, `okx/okxdemo.exchange`, `okx/okxeu.exchange`, `okx/okxeudemo.exchange`, `paradex/paradex.exchange`, `phemex/phemex.exchange`, `polymarket/polymarket.exchange`, `rust/rust.exchange`, `weex/weex.exchange`, `woo/woo.exchange` |
+| `packages/safe-cex/src/exchanges/registry.ts` | `apexomni/apexomni.exchange`, `asterdex/asterdex.exchange`, `backpack/backpack.exchange`, `base`, `binance/binance.exchange`, `binance/binanceinverse.exchange`, `binance/binancepm.exchange`, `binance/binancespot.exchange`, `bingx/bingx.exchange`, `bitget/bitget.exchange`, `bitget/bitgetinverse.exchange`, `bitget/bitgetusdc.exchange`, `bitrue/bitrue.exchange`, `bitunix/bitunix.exchange`, `blofin/blofin.exchange`, `breakoutprop/breakoutprop.exchange`, `bybit/bybit.exchange`, `bybit/bybitdemo.exchange`, `bybit/bybitinverse.exchange`, `bybit/bybitspot.exchange`, `bybit/hyrotrader.exchange`, `cryptocom/cryptocom.exchange`, `grvt/grvt.exchange`, `hyperliquid/hyperliquid.exchange`, `hyperliquid/hyperliquidspot.exchange`, `kraken/kraken.exchange`, `kraken/krakenspot.exchange`, `kucoin/kucoin.exchange`, `kucoin/kucoinspot.exchange`, `lighter/lighter.exchange`, `mexc/mexc.exchange`, `okx/okx.exchange`, `okx/okxdemo.exchange`, `okx/okxeu.exchange`, `okx/okxeudemo.exchange`, `paradex/paradex.exchange`, `phemex/phemex.exchange`, `polymarket/polymarket.exchange`, `rust/rust.exchange`, `weex/weex.exchange`, `woo/woo.exchange` |
 | `packages/safe-cex/src/exchanges/rust/loadNodeEngine.ts` | `rust/rust.exchange` |
 | `packages/safe-cex/src/exchanges/rust/loadWebEngine.ts` | `rust/rust.exchange` |
 | `packages/safe-cex/src/exchanges/rust/rust.exchange.ts` | `base` |
-| `packages/safe-cex/src/exchanges/txflow/txflow.api.ts` | `base` |
-| `packages/safe-cex/src/exchanges/txflow/txflow.exchange.ts` | `base` |
 | `packages/safe-cex/src/exchanges/weex/weex.api.ts` | `base` |
 | `packages/safe-cex/src/exchanges/weex/weex.exchange.ts` | `base` |
 | `packages/safe-cex/src/exchanges/weex/weex.ws-private.ts` | `weex/weex.exchange` |
@@ -760,17 +759,17 @@ These are all direct base/concrete-class/registry callers in test source at the 
 
 ## Appendix C: frozen oracle dependencies and their replacement policy
 
-Resolving the frozen root finds **32 direct class-importing caller files**:
+At the Coinbase/Orderly audit checkpoint, resolving the frozen root found **32 direct class-importing caller files**:
 11 Coinbase audit files (including the two client-ID suites already listed in
 Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts; the runtime registration totals remain 49 names / 43 Rust aliases.
+source counts for that checkpoint; the current runtime totals are 49 names / 45 Rust aliases.
 
-The complete frozen-module graph below additionally includes signing/API/type/
+That checkpoint's Coinbase/Orderly frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review
-checkpoint. Full target paths avoid confusing frozen classes with removed
+checkpoint. TxFlow's later frozen-reference additions are recorded separately below. Full target paths avoid confusing frozen classes with removed
 production implementations. Each row remains test-only. Keep these fixed
 oracles while the replay and audit tests need them; their replacement is a
 reviewed Rust-backed test using independent documented inputs, or deliberate
@@ -834,3 +833,43 @@ moves. `packages/script-api-core/src/adapter/orderEntryPoints.test.ts` also
 names the frozen Coinbase class path to verify that test/reference code is
 classified as test source. These source-policy assertions survive independently
 of runtime venue deletion.
+
+
+## Appendix D: TxFlow frozen reference and retained helper
+
+TxFlow now defaults to Rust in both production registries. The removed
+`src/exchanges/txflow/txflow.api.ts` and `txflow.exchange.ts` paths are not
+production callers. The implemented test oracle lives in
+`src/__tests__/reference/txflow`; `sdk-rs/harness/venues.mjs` dynamically loads
+its `txflow.exchange.ts` for independent replay. Keep that reference until its
+oracle and audits have an explicitly reviewed replacement, without changing
+TS-vs-Rust comparisons into Rust-vs-itself.
+
+The current TxFlow-only static frozen-module graph has **27 distinct module
+edges in 13 caller files** (type imports included):
+
+| Exact caller path | Frozen reference targets (repository-relative) |
+| --- | --- |
+| `packages/safe-cex/src/__tests__/audit-regressions/client-order-id.fail-closed.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.account.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.account.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.history.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.history.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.public.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.public.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.public.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.rust-wrapper.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.signing.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.signing.ts` |
+| `packages/safe-cex/src/__tests__/audit-regressions/txflow.socket-pacing.test.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.ws-public.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.api.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.account.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.api.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.history.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.public.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.trading.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.ws-public.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.history.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.public.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.trading.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.signing.ts` |
+| `packages/safe-cex/src/__tests__/reference/txflow/txflow.ws-public.ts` | `packages/safe-cex/src/__tests__/reference/txflow/txflow.exchange.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.public.ts`, `packages/safe-cex/src/__tests__/reference/txflow/txflow.types.ts` |
+
+`src/exchanges/rust/rust.exchange.ts` imports the production
+`src/exchanges/txflow/txflow.client-id.ts` rule; the frozen
+`txflow.trading.ts` also imports/re-exports that helper. It is an active
+shared dependency, not a deleted venue implementation. The frozen
+`txflow.signing.ts` imports Hyperliquid's TS action-preimage helper, so preserve
+or deliberately extract that helper before deleting the Hyperliquid TS tree.
+The reference also retains its normal BaseExchange/BaseWebSocket, API-factory
+and transport dependencies. Generic consumer fixtures do not authorize deleting
+those oracle dependencies or enabling measurement-gated order controls.

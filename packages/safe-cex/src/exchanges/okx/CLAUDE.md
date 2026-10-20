@@ -1108,6 +1108,9 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+- With secondary GET credentials, cached client-ID hits cannot prove primary
+  identity and are bypassed in both TS and Rust. The primary response determines
+  success, absence or failure without changing the cached secondary snapshot.
 - Definitive client-ID lookup always uses the primary REST client that placed
   the order. A secondary read key can belong to another account; its not-found
   response cannot establish absence from the primary account. Rust also tags

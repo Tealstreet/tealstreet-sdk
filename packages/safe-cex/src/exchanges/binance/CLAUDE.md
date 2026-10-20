@@ -1140,6 +1140,13 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 ## Rust definitive client-ID lookup
 
+When secondary GET credentials are configured, TS and Rust bypass cached
+client-ID matches: that cache may contain another account's orders. Primary
+HTTP success, absence or failure determines the result without changing the
+cache. Without secondary credentials the existing cache shortcut is retained.
+PM lookup keeps `clientOrderId` as canonical `Order.id`, matching live orders
+and cancellation; the native numeric ID remains in `info.orderId`.
+
 USD-M and PM engine lookups query the primary placement account through the
 correct fapi/papi order endpoint, even when ordinary GET reads use secondary
 credentials. Only the venue's explicit order-not-found code on an accepted

@@ -65,6 +65,123 @@ fn result(h: &mut Harness) -> Result<Lookup, String> {
     let (_, value) = h.done.pop().expect("query completes");
     value.map(|text| serde_json::from_str(&text).unwrap())
 }
+fn cached_order(id: &str, client_order_id: &str) -> safe_cex_engine::model::Order {
+    safe_cex_engine::model::Order {
+        id: id.into(),
+        parent_id: None,
+        status: safe_cex_engine::model::OrderStatus::Open,
+        symbol: "BTCUSDT".into(),
+        kind: safe_cex_engine::model::OrderType::Limit,
+        side: safe_cex_engine::model::OrderSide::Buy,
+        price: 100.0,
+        amount: 9.0,
+        filled: 0.0,
+        remaining: 9.0,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some(client_order_id.into()),
+        time_in_force: None,
+        last_update: 123.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    }
+}
+
+#[test]
+fn secondary_account_cache_never_answers_primary_lookup() {
+    for pm in [false, true] {
+        for outcome in ["found", "absent", "auth", "network"] {
+            let mut h = ready(pm);
+            // A successful secondary-account snapshot can contain the same
+            // account-scoped client ID as the primary placement account.
+            h.engine.store_mut().set_orders(vec![cached_order(
+                if pm { "caller:/1" } else { "secondary-order" },
+                "caller:/1",
+            )]);
+            let before = h.engine.snapshot_frame(42.0).to_vec();
+            query(&mut h, "BTCUSDT", "caller:/1");
+            assert_eq!(h.requests.len(), 1, "{pm}/{outcome}");
+            let r = h.requests.pop().unwrap();
+            assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+            assert!(
+                r.headers
+                    .iter()
+                    .any(|(k, v)| *k == "X-MBX-APIKEY" && v == "lookup-key")
+            );
+            let (_, signed) = r.url.split_once('?').unwrap();
+            let (payload, signature) = signed.rsplit_once("&signature=").unwrap();
+            assert_eq!(
+                signature,
+                safe_cex_crypto::hmac_sha256(
+                    b"lookup-secret",
+                    payload.as_bytes(),
+                    safe_cex_crypto::Encoding::Hex,
+                )
+            );
+            match outcome {
+                "found" => h.reply(r.id, 200, "", ROW),
+                "absent" => h.reply(r.id, 400, "", r#"{"code":-2013,"msg":"missing"}"#),
+                "auth" => h.reply(r.id, 401, "", r#"{"code":-2015,"msg":"bad key"}"#),
+                _ => h.event(Event::HttpFailed {
+                    request: r.id,
+                    error: "network unavailable",
+                }),
+            }
+            let lookup = result(&mut h);
+            match outcome {
+                "found" => {
+                    let order = lookup.unwrap().order.unwrap();
+                    assert_eq!(order.amount, 2.0);
+                    assert_eq!(order.info.order_id, 9_007_199_254_740_993);
+                }
+                "absent" => {
+                    let lookup = lookup.unwrap();
+                    assert!(!lookup.found);
+                    assert_eq!(lookup.definitive, Some(true));
+                    assert!(lookup.order.is_none());
+                }
+                _ => assert!(lookup.is_err()),
+            }
+            assert!(h.requests.is_empty());
+            assert!(h.sent.is_empty());
+            assert_eq!(before, h.engine.snapshot_frame(42.0));
+        }
+    }
+}
+
+#[test]
+fn numeric_client_id_lookup_keeps_pm_canonical_identity_usable_after_reconciliation() {
+    for pm in [false, true] {
+        let mut h = ready(pm);
+        query(&mut h, "BTCUSDT", "12345");
+        let r = h.requests.pop().unwrap();
+        h.reply(r.id, 200, "", &ROW.replace("caller:/1", "12345"));
+        let recovered = result(&mut h).unwrap().order.unwrap();
+        let canonical_id = if pm { "12345" } else { "9007199254740993" };
+        assert_eq!(recovered.id, canonical_id);
+        assert_eq!(recovered.client_order_id, "12345");
+        assert_eq!(recovered.info.order_id, 9_007_199_254_740_993);
+        // The ordinary snapshot uses the canonical ID; cancellation by the
+        // recovered ID must find that row and preserve the venue's identity axis.
+        h.engine
+            .store_mut()
+            .set_orders(vec![cached_order(canonical_id, "12345")]);
+        h.event(Event::Command(Command::CancelOrders {
+            command: 992,
+            ids: vec![recovered.id],
+        }));
+        assert_eq!(h.requests.len(), 1);
+        let r = h.requests.pop().unwrap();
+        assert_eq!(r.method, Method::Delete);
+        assert!(r.url.contains(if pm {
+            "origClientOrderId=12345&"
+        } else {
+            "orderId=9007199254740993&"
+        }));
+    }
+}
 #[test]
 fn lookup_routes_signed_primary_usdm_and_pm_and_keeps_native_identity() {
     for pm in [false, true] {
@@ -97,7 +214,7 @@ fn lookup_routes_signed_primary_usdm_and_pm_and_keeps_native_identity() {
         assert!(result.found);
         assert_eq!(result.definitive, None);
         let o = result.order.unwrap();
-        assert_eq!(o.id, "9007199254740993");
+        assert_eq!(o.id, if pm { "caller:/1" } else { "9007199254740993" });
         assert_eq!(o.info.order_id, 9_007_199_254_740_993);
         assert_eq!(o.symbol, "BTCUSDT");
         assert_eq!(o.client_order_id, "caller:/1");

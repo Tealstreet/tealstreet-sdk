@@ -348,9 +348,13 @@ impl BinanceFutures {
             cx.done(command, Ok(UNKNOWN.into()));
             return;
         }
-        if let Some(order) = cx.store.orders().iter().find(|order| {
-            order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
-        }) {
+        // Secondary GET snapshots may belong to another account. Their cached
+        // client IDs cannot establish primary placement identity.
+        if self.options.read_credentials.is_none()
+            && let Some(order) = cx.store.orders().iter().find(|order| {
+                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+            })
+        {
             cx.done(command, found(order.clone(), None));
             return;
         }
@@ -456,7 +460,11 @@ impl BinanceFutures {
                 .or_else(|| order_type(&row.kind))
                 .ok_or_else(|| "Invalid Binance lookup type".to_owned())?;
             let order = Order {
-                id: row.order_id.to_string(),
+                id: if self.options.portfolio_margin {
+                    client_order_id.clone()
+                } else {
+                    row.order_id.to_string()
+                },
                 parent_id: None,
                 status,
                 symbol,

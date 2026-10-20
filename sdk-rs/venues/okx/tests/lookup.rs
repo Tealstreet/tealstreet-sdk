@@ -330,7 +330,11 @@ fn transport_failure_is_never_a_definitive_miss() {
 
 #[test]
 fn cached_order_lookup_stays_read_only_without_private_credentials() {
-    let mut e = ready(false, false, false);
+    // This local-only shortcut is safe when no secondary account can have
+    // populated the cache.
+    let markets = ready(false, false, false).store().markets().to_vec();
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.store_mut().set_markets(markets);
     e.store_mut()
         .set_orders(vec![safe_cex_engine::model::Order {
             id: "cached".into(),
@@ -378,4 +382,97 @@ fn cached_order_lookup_stays_read_only_without_private_credentials() {
     assert_eq!(result.order.id, "cached");
     assert_eq!(result.order.status, "closed");
     assert_eq!(before, e.snapshot_frame(42.0));
+}
+
+#[test]
+fn secondary_account_cache_never_answers_primary_lookup() {
+    for outcome in ["found", "absent", "auth", "network"] {
+        let mut e = ready(false, false, true);
+        e.store_mut()
+            .set_orders(vec![safe_cex_engine::model::Order {
+                id: "secondary-order".into(),
+                parent_id: None,
+                status: safe_cex_engine::model::OrderStatus::Open,
+                symbol: "BTCUSDT".into(),
+                kind: safe_cex_engine::model::OrderType::Limit,
+                side: safe_cex_engine::model::OrderSide::Buy,
+                price: 100.0,
+                amount: 9.0,
+                filled: 0.0,
+                remaining: 0.09,
+                reduce_only: false,
+                close: None,
+                client_order_id: Some("caller1".into()),
+                time_in_force: None,
+                last_update: 123.0,
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: None,
+            }]);
+        let before = e.snapshot_frame(42.0).to_vec();
+        let r = request(query(&mut e, "BTCUSDT", "caller1"));
+        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| *k == "OK-ACCESS-KEY" && v == "lookup-key")
+        );
+        let ts = &r
+            .headers
+            .iter()
+            .find(|(k, _)| *k == "OK-ACCESS-TIMESTAMP")
+            .unwrap()
+            .1;
+        let signature = safe_cex_crypto::hmac_sha256(
+            b"lookup-secret",
+            format!("{ts}GET/api/v5/trade/order?instId=BTC-USDT-SWAP&clOrdId=caller1").as_bytes(),
+            safe_cex_crypto::Encoding::Base64,
+        );
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| *k == "OK-ACCESS-SIGN" && v == &signature)
+        );
+        let lookup = match outcome {
+            "found" => complete(&mut e, &r, 200, &envelope(ROW)),
+            "absent" => complete(
+                &mut e,
+                &r,
+                200,
+                r#"{"code":"51603","msg":"missing","data":[]}"#,
+            ),
+            "auth" => complete(
+                &mut e,
+                &r,
+                401,
+                r#"{"code":"50113","msg":"bad signature","data":[]}"#,
+            ),
+            _ => {
+                e.handle(
+                    1_710_000_000_101.0,
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "network unavailable",
+                    },
+                );
+                done(actions(&mut e))
+            }
+        };
+        match outcome {
+            "found" => {
+                let order = lookup.unwrap().order.unwrap();
+                assert_eq!(order.id, "9007199254740993");
+                assert_eq!(order.amount, 3.0);
+            }
+            "absent" => {
+                let lookup = lookup.unwrap();
+                assert!(!lookup.found);
+                assert_eq!(lookup.definitive, Some(true));
+                assert!(lookup.order.is_none());
+            }
+            _ => assert!(lookup.is_err()),
+        }
+        assert_eq!(before, e.snapshot_frame(42.0));
+    }
 }

@@ -1,13 +1,15 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mapBinanceHistoricalOrder } from '../../exchanges/binance/binance.order-history';
+import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 const exchanges: RustEngineExchange[] = [];
 const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
@@ -134,6 +136,59 @@ describe('OKX primary account lookup', () => {
     } finally {
       exchange.dispose();
     }
+  });
+});
+
+describe('primary lookup with a colliding secondary-account cache', () => {
+  const setup = (name: 'binance' | 'okx', secondary: boolean) => {
+    const cached: Order = {
+      id: 'secondary-order', clientOrderId: 'caller', symbol: 'BTCUSDT', status: OrderStatus.Open,
+      side: OrderSide.Buy, type: OrderType.Limit, price: 77, amount: 2, filled: 0, remaining: 2,
+      reduceOnly: false, lastUpdate: 1710000000000,
+    };
+    const store = new DefaultStore();
+    store.update({ orders: [cached], markets: [{
+      id: name === 'okx' ? 'BTC-USDT-SWAP' : 'BTC/USDT:USDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT',
+      active: true, contractSize: 1, precision: { price: 0.1, amount: 1 },
+      limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 100 } }, info: {},
+    }] });
+    const options = { key: 'primary', secret: 'secret', passphrase: 'pass',
+      ...(secondary ? { secondary_key: 'secondary', secondary_secret: 'secondary-secret' } : {}),
+    };
+    const exchange = name === 'okx' ? new OKXExchange(name, options, store) : new BinanceExchange(name, options, store);
+    const primary = vi.fn();
+    const read = vi.fn();
+    exchange._primaryXhr = { get: primary } as unknown as typeof exchange.xhr;
+    exchange.xhr = { get: read } as unknown as typeof exchange.xhr;
+    return { exchange, store, cached, primary, read };
+  };
+  it.each(['binance', 'okx'] as const)('%s asks the primary account for absence, found and errors without changing the cache', async (name) => {
+    const { exchange, store, cached, primary, read } = setup(name, true);
+    try {
+      primary.mockRejectedValueOnce({ response: { data: { code: name === 'okx' ? '51603' : -2013 } } });
+      await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'caller')).resolves.toEqual({ found: false, definitive: true });
+      const row = name === 'okx'
+        ? { instId: 'BTC-USDT-SWAP', ordId: '333', clOrdId: 'caller', state: 'live', side: 'buy', ordType: 'limit',
+          px: '100', sz: '1', accFillSz: '0', avgPx: '', reduceOnly: 'false', cTime: '1710000000000', uTime: '1710000000001' }
+        : { orderId: 333, symbol: 'BTCUSDT', clientOrderId: 'caller', status: 'NEW', side: 'BUY', type: 'LIMIT',
+          price: '100', origQty: '1', executedQty: '0', time: 1710000000000, updateTime: 1710000000001 };
+      primary.mockResolvedValueOnce({ data: name === 'okx' ? { data: [row] } : row });
+      await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'caller')).resolves.toMatchObject({ found: true, order: { id: '333', price: 100 } });
+      const error = new Error('primary unavailable');
+      primary.mockRejectedValueOnce(error);
+      await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'caller')).rejects.toBe(error);
+      expect(primary).toHaveBeenCalledTimes(3);
+      expect(read).not.toHaveBeenCalled();
+      expect(store.orders).toEqual([cached]);
+    } finally { exchange.dispose(); }
+  });
+  it.each(['binance', 'okx'] as const)('%s retains the known primary cache without secondary credentials', async (name) => {
+    const { exchange, primary, read, cached } = setup(name, false);
+    try {
+      await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'caller')).resolves.toEqual({ found: true, order: cached });
+      expect(primary).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
   });
 });
 
