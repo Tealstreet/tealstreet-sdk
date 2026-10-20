@@ -46,10 +46,11 @@ export class UiStateHandler extends BaseHandler {
         true,
       );
 
-      // A frame may confirm leverage while the fetch is in flight; only our own placeholder may be cleared.
+      // A frame may confirm leverage while the fetch is in flight; clear only a still-pending
+      // placeholder (frame recovery may have copied it, so identity cannot be relied on).
       const clearPlaceholder = () => {
         const { [activeMarginSymbol]: current, ...rest } = this._exchange.store.fetchedLeverage;
-        if (current === placeholder) this._exchange.store.update({ fetchedLeverage: rest }, true);
+        if (current?.isFetching) this._exchange.store.update({ fetchedLeverage: rest }, true);
       };
 
       this._exchange

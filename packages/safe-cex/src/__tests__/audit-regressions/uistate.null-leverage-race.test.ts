@@ -72,6 +72,16 @@ describe('UiStateHandler active-margin leverage fetch', () => {
     expect(state.fetchedLeverage.BTCUSDT).toEqual(confirmed);
   });
 
+  it('clears a placeholder that frame recovery copied while the fetch was in flight', async () => {
+    const { state, settle } = setup();
+
+    state.fetchedLeverage = { BTCUSDT: { ...state.fetchedLeverage.BTCUSDT } };
+    settle.resolve(null);
+    await flush();
+
+    expect(state.fetchedLeverage).not.toHaveProperty('BTCUSDT');
+  });
+
   it('clears its own placeholder when nothing confirmed leverage', async () => {
     const { state, settle } = setup();
 
