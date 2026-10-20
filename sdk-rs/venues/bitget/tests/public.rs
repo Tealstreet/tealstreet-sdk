@@ -266,6 +266,164 @@ fn ticker_row_storage_preserves_empty_and_multiple_rows_and_escaped_envelopes() 
 }
 
 #[test]
+fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates() {
+    use safe_cex_engine::{Action, Cx, Engine, Response, SocketId, TimerId};
+    use safe_cex_venue_bitget::{BitgetFutures, Pending};
+
+    // Drive additional REST seed cycles through the production response handlers.
+    struct Reloadable(BitgetFutures);
+    impl Venue for Reloadable {
+        type Pending = Pending;
+        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            self.0.start(cx);
+        }
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+            self.0.start(cx);
+        }
+        fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+            self.0.on_open(cx, socket);
+        }
+        fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+            self.0.on_message(cx, socket, text);
+        }
+        fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
+            self.0.on_close(cx, socket, code);
+        }
+        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, r: Response<'_>) {
+            self.0.on_response(cx, pending, r);
+        }
+        fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+            self.0.on_item(cx, pending, item);
+        }
+        fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+            self.0.on_request_failed(cx, pending, error);
+        }
+        fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+            self.0.on_timer(cx, timer);
+        }
+        fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
+            self.0.book(symbol)
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            self.0.books()
+        }
+    }
+    fn reply(engine: &mut Engine<Reloadable>, actions: Vec<Action>, path: &str, body: &str) {
+        let request = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.contains(path) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            1_000_000.0,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    fn message(engine: &mut Engine<Reloadable>, socket: SocketId, text: &str) {
+        engine.handle(1_000_000.0, Event::WsMessage { socket, text });
+    }
+    let btc: serde_json::Value = serde_json::from_str(CONTRACTS).unwrap();
+    let btc = &btc["data"][0];
+    let eth =
+        serde_json::from_str::<serde_json::Value>(&btc.to_string().replace("BTC", "ETH")).unwrap();
+    let mut engine = Engine::new(Reloadable(BitgetFutures::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    })));
+    engine.start(1_000_000.0);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    reply(
+        &mut engine,
+        actions,
+        "/contracts",
+        &serde_json::json!({"code":"00000","data":[btc,eth]}).to_string(),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut engine,
+        actions,
+        "/tickers",
+        r#"{"code":"00000","data":[{"symbol":"ETHUSDT","lastPr":"200"},{"symbol":"BTCUSDT","lastPr":"100"},{"symbol":"BTCUSDT","lastPr":"110"}]}"#,
+    );
+    engine.drain_actions();
+    message(
+        &mut engine,
+        socket,
+        r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"111"},{"symbol":"ETHUSDT","lastPr":"201"},{"instId":"UNKNOWN","lastPr":"999"}]}"#,
+    );
+    assert_eq!(
+        engine
+            .store()
+            .tickers()
+            .iter()
+            .map(|t| t.last)
+            .collect::<Vec<_>>(),
+        [201.0, 100.0, 111.0]
+    );
+
+    engine.handle(
+        1_000_000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "reload".into(),
+        }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    reply(
+        &mut engine,
+        actions,
+        "/contracts",
+        &serde_json::json!({"code":"00000","data":[eth,btc]}).to_string(),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    // Markets have changed order while the previous ticker table is still live.
+    message(
+        &mut engine,
+        socket,
+        r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"112"}]}"#,
+    );
+    assert_eq!(engine.store().tickers()[2].last, 112.0);
+    assert_eq!(engine.store().tickers()[0].last, 201.0);
+    reply(
+        &mut engine,
+        actions,
+        "/tickers",
+        r#"{"code":"00000","data":[{"symbol":"BTCUSDT","lastPr":"300"}]}"#,
+    );
+    engine.drain_actions();
+    message(
+        &mut engine,
+        socket,
+        r#"{"arg":{"channel":"ticker"},"data":[{"instId":"ETHUSDT","lastPr":"999"},{"instId":"UNKNOWN","lastPr":"999"},{"symbol":"BTCUSDT","lastPr":"301"}]}"#,
+    );
+    assert_eq!(engine.store().tickers().len(), 1);
+    assert_eq!(engine.store().tickers()[0].symbol, "BTCUSDT");
+    assert_eq!(engine.store().tickers()[0].last, 301.0);
+}
+
+#[test]
 fn inverse_public_contracts_keep_native_precision_and_coin_product() {
     // https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market
     for (testnet, product) in [(false, "coin-futures"), (true, "scoin-futures")] {

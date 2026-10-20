@@ -12,7 +12,7 @@ import { BaseExchange } from '../base';
 import { BASE_URL } from './phemex.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 
-export const BROKER_ID = 'Tealstreet';
+export { BROKER_ID } from './phemex.types';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];

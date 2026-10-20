@@ -220,7 +220,8 @@ async function runRust() {
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
-    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessageActions', 'wsMessageBytes', 'takeFrame']) {
+      if (typeof engine[method] !== 'function') continue;
       const original = engine[method].bind(engine);
       engine[method] = (...args) => {
         const result = original(...args);
@@ -613,7 +614,7 @@ async function runTs() {
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -631,7 +632,7 @@ async function runTs() {
     },
     async (accountReady) => {
       await (accountReady ? Promise.all([started, subscribed]) : subscribed);
-      venue.prepareTsReady?.(exchange, { isPrivate });
+      await venue.prepareTsReady?.(exchange, { isPrivate });
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
       const loaded = () =>
         accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
@@ -642,6 +643,7 @@ async function runTs() {
     clock,
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
+  if (venue.tsReplaySettled) await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
   tape.assertWritesConsumed();
