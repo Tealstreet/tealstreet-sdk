@@ -252,3 +252,28 @@ The independent account/trading review passes. Two other reviewers found:
 The Spot oracle compares every numeric currency field independently; it removes
 only TS's opaque per-currency `info`. These are Rust/integration findings, not
 new historical TS bug claims. Rebuilt gates and current-head CI remain required.
+
+
+### Final strengthened replay evidence
+
+Final integrated source `adc42a35d9` includes KuCoin, AsterDEX and Kraken. All twelve replay gates PASS; no thresholds or measurement intervals changed. Public values are three-run medians.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 170.903/75.524 | 88.525/24.004 | 19.043/2.639 |
+| PM | 873 | 162.738/76.628 | 88.490/24.766 | 18.525/2.639 |
+| Spot | 7045 | 916.850/716.338 | 499.611/340.458 | 26.590/7.535 |
+| COIN-M | 202 | 162.036/59.818 | 107.091/32.302 | 15.676/1.490 |
+
+Private frames: USD-M 14, PM 6, Spot 8, COIN-M 6. Native currency slices are now compared for Spot as well as coin amounts and aggregate USD balances. Every replay has zero unserved requests, missing writes, bad signatures or protocol errors.
+
+Binance-only WASM **915,481 bytes**, budget **1,258,291**. SHA-256 `7c67cb6398deddebd899f4c675200d47cb5e8e275495ea5f07516f97997fdf23`.
+
+Other checks: 99 Binance and 99 Aster native tests; fmt/bans and strict crate/default WASM Clippy; 286 harness helpers; root typecheck 44/lint 28 tasks; 27 focused tests after Kraken integration. Earlier full root checks passed all 27 tasks (7,011 safe-cex cases per script). Final combined WASM suite: PENDING.
+
+Fresh Hyro public (160 frames): TS/Rust main 21.012/15.227ms, steady 3.732/2.561ms, retained 16.281/0.819MB. Private (13 frames): main 35.890/28.608ms, steady 16.918/14.476ms. All pass; no Hyro metric misses. Baseline Bybit public (8,743) and private (18) frames also pass. The Bybit artifact hash matches the earlier fresh passing artifact exactly. Earlier tiny misses did not reproduce across unchanged-baseline and fresh-build runs. Diagnostic sampling identified shared harness URL/scheduling overhead without establishing a genuine production regression. No Hyro production optimization or relaxed gate; machine isolation and live Hyro connectivity are not claimed.
+
+Final combined WASM suite passes81/81 across six files, including all five
+Binance boundary cases and worker/main native currency assertions. Host/wire
+51/51 passes. Both independent correctness and harness review closures pass;
+current-head PR CI is the remaining landing requirement.
