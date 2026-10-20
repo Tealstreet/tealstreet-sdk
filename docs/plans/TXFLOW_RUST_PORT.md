@@ -5,6 +5,11 @@ Branch: `feat/rust-txflow`, based on `origin/feat/rust-rewrite` at
 Mainnet, preview and production availability remain disabled. Do not stash,
 rebase, force-push, or target master.
 
+Status: production registries select Rust, all local gates and independent
+phase reviews pass. Open the PR into `feat/rust-rewrite`, post fresh independent
+code-correctness reviews, fix/review as needed, wait for green exact-head CI,
+merge, then create a fresh follow-up branch. Measurements are below.
+
 ## Initial audit and verification constraint
 
 Read the TxFlow `CLAUDE.md` before the implementation. At the initial audit,
@@ -361,3 +366,31 @@ wallet/agent credentials, markets/tickers/account loading, flat-account leverage
 7 bridged independently of positions, wallet subscriptions on correctly tagged
 native sockets, required headers/public routing, and mainnet rejection before
 I/O. Full merged-state checks and final combined replay follow.
+
+### Final local acceptance (Coinbase landing included)
+
+- Bans, workspace formatting/Clippy/tests: PASS, 2,047 native tests.
+- Combined and isolated TxFlow Wasm Clippy: PASS.
+- Root typecheck/lint/tests: PASS, 44/28/27 tasks; safe-cex 7,264 tests.
+- Package typecheck including the new Wasm proof: PASS.
+- Harness 375/375, host 63/63, Wasm wrapper 85/85: PASS.
+- Credential scan across the feature commits: PASS, no leaks.
+- Combined TxFlow public: PASS, 125 frames, 78 markets/tickers, two books;
+  TS/Rust CPU 98.7/78.8 ms (1.25x), memory 14.1/2.0 MB (7.10x).
+- Combined TxFlow private: PASS, 35 frames, 15 commands, eight signed writes,
+  one execution; caller IDs/time-in-force, both leverage rails and queries exact.
+- Binance public/private regressions: PASS; public 873 frames, CPU 196.3/99.1
+  ms (1.98x), memory 19.2/3.3 MB (5.89x); private 14 frames.
+- Final isolated TxFlow bundle: 875,675 bytes (budget 1,258,291).
+- Final isolated public (three runs): PASS, CPU 89.8/65.2 ms (1.38x), steady
+  CPU 13.2/7.8 ms (1.69x), memory 14.1/1.3 MB (11.25x), linear Wasm 0.5 MB.
+- Final isolated private: PASS, all 35 frames; no output normalization.
+
+No live authenticated writes were performed. The original TS scaffold had no
+functional behavior to compare; the new documented-payload reference is frozen
+under tests. Paired stale-read, fill-deduplication and uncertain-ACK protections
+are documented in `KNOWN_TS_FIXES.txflow` without rewriting either result.
+Mainnet/preview remain disabled. Unmeasured reduce-only, conditional/bracket,
+notional-margin and protective semantics remain rejected, and undocumented REST
+public-trade history remains explicitly unavailable. These limits are documented
+in the venue CLAUDE and are not enabled by this port.
