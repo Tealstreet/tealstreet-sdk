@@ -2282,3 +2282,18 @@ and lint 28/28 pass again after the paired TS fix; full root tests are running.
 Rebuild all four Binance profiles and rerun public/private gates next, then
 resume unexecuted integration checks. No output, fixture or gate changes in
 this native correction.
+
+
+Native guard replay correctly exposes the paired USD-M TS version of the same
+status bug: /tmp/bitunix-df2-terminalfix-binance-private.log retains fully filled
+ETH order 1001 as Closed in Rust, but TS symbol cancellation changes it to
+Canceled. No other output differs. The stricter comparison stays unchanged.
+The PM and USD-M native guards have four fail-before controls; TS PM already
+has the proper captured-ID/current-status guard. Independent plan review
+approves applying it to USD-M's existing two-family allSettled cancellation,
+retaining partial-failure/error order and adding preclosed/racing fill/later-ID
+source coverage. Native production, fixtures and gate logic stay unchanged.
+After source tests/types/lint and independent final review, resume rebuilt
+four-mode Binance gates and all remaining selected checks. Root source checks
+just passed 44/28/27 tasks and 7,711 SDK tests per target before this final
+paired USD-M correction; refresh affected validation before final landing.
