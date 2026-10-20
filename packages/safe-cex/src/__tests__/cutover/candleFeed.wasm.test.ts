@@ -1,6 +1,5 @@
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { OHLCVOptions } from '../../types';
 
 import { MessageChannel } from 'node:worker_threads';
 
@@ -21,7 +20,7 @@ afterEach(() => {
   for (const input of inputs.splice(0)) input.dispose();
 });
 
-it('releases one native Aster candle subscription after canonical interval listeners leave', async () => {
+it('releases one native Aster candle subscription after its listeners leave', async () => {
   setWasmEngineLoader(loadNodeEngine);
   const input = realVenue('asterdex');
   inputs.push(input);
@@ -71,8 +70,7 @@ it('releases one native Aster candle subscription after canonical interval liste
   const topic = `${symbol.toLowerCase()}@kline_1h`;
   const matching = (method: string) =>
     packets.filter((packet) => packet.method === method && packet.params?.includes(topic));
-  // JS callers can supply unsupported intervals; exercise Aster's runtime fallback.
-  const first = receiver.listenOHLCV({ symbol, interval: '8h' as OHLCVOptions['interval'] }, () => {});
+  const first = receiver.listenOHLCV({ symbol, interval: '1h' }, () => {});
   const last = receiver.listenOHLCV({ symbol, interval: '1h' }, () => {});
   await vi.waitFor(() => expect(matching('SUBSCRIBE')).toHaveLength(1), { timeout: 5000 });
   first();

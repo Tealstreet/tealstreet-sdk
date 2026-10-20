@@ -355,3 +355,55 @@ fn every_positions_404_preserves_the_last_successful_snapshot() {
         assert_eq!(e.store().positions()[0].contracts, 5.0);
     }
 }
+
+#[test]
+fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let collateral = |actions: &[Action]| {
+        actions.iter().find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/collateral") => Some(r.clone()),
+            _ => None,
+        })
+    };
+    let mut read = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/collateral"))
+        .unwrap();
+    for step in 1..=3u32 {
+        let now = 1000.0 + f64::from(step) * 1000.0;
+        let fill = format!(
+            r#"{{"stream":"account.orderUpdate","data":{{"e":"orderFill","i":"123","c":42,"E":{},"X":"PartiallyFilled","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"{step}","l":"1","L":"139.5","t":{step},"f":"GTC"}}}}"#,
+            now * 1000.0
+        );
+        e.handle(
+            now,
+            Event::WsMessage {
+                socket,
+                text: &fill,
+            },
+        );
+        let next = collateral(&e.drain_actions().collect::<Vec<_>>()).unwrap();
+        let body = BALANCE.replace("1005", &(2000 + step).to_string());
+        e.handle(
+            now + 1.0,
+            Event::HttpResponse {
+                request: read.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let reread = collateral(&e.drain_actions().collect::<Vec<_>>());
+        if step <= 2 {
+            assert_eq!(e.store().balance().total, 1005.0, "step {step}");
+            assert!(reread.is_none(), "step {step}");
+        } else {
+            assert_eq!(e.store().balance().total, 2003.0);
+            assert!(reread.is_some(), "an admitted stale read is re-read");
+        }
+        read = next;
+    }
+}
