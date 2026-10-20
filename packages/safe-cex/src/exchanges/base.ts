@@ -15,6 +15,7 @@ import { TinyEmitter } from 'tiny-emitter';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
+import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
 import {
   AccountGreeks,
@@ -412,6 +413,7 @@ export class BaseExchange implements Exchange {
   private _lastHttpFailure?: HttpFailureRecord;
   private remoteSignerAvailabilityCleanups = new Set<() => void>();
   private readonly unsubscribeFromStore: () => void;
+  private applyingWorkerChaserTags = false;
 
   on: TinyEmitter['on'];
   once: TinyEmitter['once'];
@@ -458,6 +460,20 @@ export class BaseExchange implements Exchange {
     this.off = this.emitter.off.bind(this.emitter);
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
+      // Frames carry native orders; chaser tags arrive independently with the
+      // worker's derived fields. Reapply on either notification order.
+      if (this.workerFrameApplier && !this.applyingWorkerChaserTags) {
+        const orders = chaserOrderUpdates(data);
+        if (orders.length) {
+          this.applyingWorkerChaserTags = true;
+          try {
+            this.store.addOrUpdateOrders(orders.map(({ order, extra }) => ({ ...order, extra })));
+          } finally {
+            this.applyingWorkerChaserTags = false;
+          }
+          return;
+        }
+      }
       this.emitter.emit('update', data);
     });
   }

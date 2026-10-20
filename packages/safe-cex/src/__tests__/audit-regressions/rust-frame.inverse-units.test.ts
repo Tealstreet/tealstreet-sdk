@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CrossTradeManager } from '../../crossTrade/runtime/CrossTradeManager';
 import { BaseExchange } from '../../exchanges/base';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 
@@ -189,15 +190,22 @@ describe('OKX native contract count bridge', () => {
   it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s preserves native copier and chaser counts through worker frames', (name) => {
     const store = new DefaultStore();
     const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
-    exchange.applyWorkerFrame(fixture({ contractSize: 100, native: true, positions: true, orders: [
+    const workerStore = new DefaultStore();
+    const worker = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, workerStore);
+    const frame = fixture({ contractSize: 100, native: true, positions: true, orders: [
       { id: 'entry', amount: 10, filled: 0.004, remaining: 0.016, native: 8 },
       { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, enums: 3 << 8 },
-    ] }).buffer);
-    expect(store.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
-    expect(store.orders[0].extra).not.toHaveProperty('remainingNotional');
-    expect(store.orders[1].extra).toEqual({ remainingNative: 10 });
-    expect(store.positions[0].extra).toEqual({ contractsNative: 10 });
-    expect(store.positions[0].unrealizedPnl).toBe(0.002);
+    ] });
+    exchange.applyWorkerFrame(frame.buffer);
+    (worker as unknown as { applier: FrameApplier }).applier.apply(frame);
+    for (const receiver of [store, workerStore]) {
+      expect(receiver.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
+      expect(receiver.orders[0].extra).not.toHaveProperty('remainingNotional');
+      expect(receiver.orders[1].extra).toEqual({ remainingNative: 10 });
+      expect(receiver.positions[0].extra).toEqual({ contractsNative: 10 });
+      expect(receiver.positions[0].unrealizedPnl).toBe(0.002);
+    }
+    worker.dispose();
     exchange.dispose();
   });
   it('retains linear native placement counts separately from displayed base size', () => {

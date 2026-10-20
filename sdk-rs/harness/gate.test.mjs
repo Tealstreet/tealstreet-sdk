@@ -12,6 +12,13 @@ const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const records = [{ type: 'meta', private: isPrivate }];
+  if (defect?.startsWith('live-smoke')) {
+    records[0].liveSmoke = true;
+    const commands = ['placeOrders', 'amendOrder', 'cancelOrders', 'cancelSymbolOrders', 'setLeverage'];
+    records.push(...commands.map((op) => ({ type: 'command', op })),
+      { type: 'live-smoke-verification', ok: true },
+      { type: 'live-smoke-result', ok: true, cleanupComplete: true, authoritative: true, stage: 'complete', symbol: 'BTCUSDT', commands });
+  }
   if (['orderly-missing-result', 'coinbase-missing-result'].includes(defect))
     records.push({ type: 'command', op: 'fetchFills' });
   if (defect?.startsWith('impl-plans')) {
@@ -81,6 +88,11 @@ const gate = (venue, isPrivate = false, defect) => {
         } } : {}),
       };
       if (['orderly-extra-result', 'coinbase-extra-result'].includes(defect)) output.commands.push({ ok: [] });
+      if (defect?.startsWith('live-smoke')) {
+        output.commands = Array.from({ length: 5 }, () => ({ ok: [] }));
+        if (defect === 'live-smoke-identical-errors') output.commands[0] = { error: 'identical placement rejection' };
+        if (defect === 'live-smoke-missing-result') output.commands.pop();
+      }
       if (rust && defect === 'comparisons') {
         output.markets[0].precision.price = 0.2;
         output.tickers[0].last = 101;
@@ -195,4 +207,13 @@ test('gate CLI validates retained deltas against absolute memory samples', () =>
   const result = gate('bybitinverse', true, 'memory-arithmetic');
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /inconsistent heapRetainedBytes/);
+});
+
+test('live smoke gates every replay command success even when both engines fail identically', () => {
+  assert.equal(gate('binance', true, 'live-smoke-good').status, 0);
+  for (const defect of ['live-smoke-identical-errors', 'live-smoke-missing-result']) {
+    const result = gate('binance', true, defect);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /did not successfully complete every lifecycle command/);
+  }
 });

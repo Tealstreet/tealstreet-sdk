@@ -342,3 +342,24 @@ than treating the original port boundary as a waiver.
   and adds no WASM payload/engine field.
 - Runtime is frozen at47f68ce883. Final root44/28/27 checks and combined25-venue
   release build started; no public CPU scoring overlaps this quality work.
+
+### Landing integration: consumer cutover, frame server and scripted smoke
+
+- Merge landing0063068241 (#1330/#1332/#1333), retaining both shared command
+  decoding and secondary credentials modules. Independent core/native and SDK
+  merge reviews PASS; incoming default/deletion work remains separate phase9.
+- Semantic merge review caught OKX being enabled in two sizing policies. Keep
+  the exact native-contract policy in both constructors; the generic policy
+  must not overwrite inverse native filled quantities. Independent regression
+  now drives all four actual RustEngineExchange constructors and main-thread
+  BaseExchange readers with the same inverse frame. Independent review PASS.
+- Incoming cutover fixture uses actual BTC-USDT-SWAP IDs for OKX aliases;
+  financial assertions remain unchanged. Focused cutover225/225 and frame/chaser
+  77/77 PASS; enhanced inverse suite12/12, full SDK typecheck/lint PASS.
+- Previous root44/28/27, compiled SDK111/111 and host65/65 receipts passed before
+  this merge; affected final-source checks are being rerun. Fresh workspace
+  native and combined WASM builds are running, with no public CPU scoring.
+- Final runner now includes frame-wire1 and scripted smoke9 integration
+  controls alongside57 planned replays,11 venue controls and25 feature budgets.
+  Scripted smoke is not funded live execution evidence. The fixed1,258,291-byte
+  ceiling and strict output/performance comparisons are unchanged.
