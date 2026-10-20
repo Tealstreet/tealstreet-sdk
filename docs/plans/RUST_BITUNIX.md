@@ -3074,3 +3074,20 @@ Preserve /tmp/bitunix-702-bitunix-{private,public}.log and complete raw samples
 sdk-rs/harness/out/bitunix-bitunix-public-jsonl-gz-30916. Host qualified before
 each profile. Remaining regression gates and actual published-head PR review/CI
 are still pending; continue, do not report complete from these Bitunix receipts.
+
+Final batch14/15PASS: bothBitunix, KuCoin futures/Spot, baseBinance, all3pending
+OKXpublicprofiles and Paradexprivate/public; Bitrueprivate alsoPASS. Bitruepublic
+stops on firstTS at unchanged1s backing-buffer settlement guard, noJSON/result.
+Preserve /tmp/bitunix-702-bitrue-public.log and empty rawdirectory83187. The
+asynchronous timer stack cannot establish baseline vs final-sample phase, so
+claim neither; there is no accepted equality/performance result from this attempt.
+
+Read-only diagnostic uses a loader hook to run ONLY the unchanged preconstructor
+baseline and throw before either constructor:137.2ms wall,218.8msCPU, host140%
+aggregate. Source and policy untouched; no producer or performance gate runs.
+Diagnostic /tmp/bitunix-702-bitrue-baseline-diagnostic.log is not a gate pass.
+Original qualification readings228.8/293.9% allowed the attempt under500%limit.
+Propose a stricter runner state for ONE final Bitruepublic attempt: two readings
+below quartercapacity250%,15sapart. All gates,1sdeadline,100msquietwindow,
+fixtures/equality/metrics and warmup policy remain unchanged; no other profiles
+repeat. Independent review of that bounded infrastructure action pending.
