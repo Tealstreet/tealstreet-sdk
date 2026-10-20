@@ -29,6 +29,7 @@ struct Session {
     failing_positions: bool,
     reject_read_key: bool,
     key_permission_failures: u32,
+    deactivated: bool,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -60,6 +61,7 @@ impl Session {
             failing_positions: false,
             reject_read_key: false,
             key_permission_failures: 0,
+            deactivated: false,
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -82,6 +84,7 @@ impl Session {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
                     self.results.push((command, result))
                 }
+                Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
@@ -1748,7 +1751,11 @@ fn saved_read_only_key_signs_reads_while_writes_keep_the_trading_key() {
         .collect::<Vec<_>>();
     assert!(reads.len() > 3);
     for read in reads {
-        if read.url.ends_with("/key_permissions") && jwt_subject(read).ends_with("/test") {
+        let catalogue = read.url.contains("/products");
+        if catalogue
+            || read.url.ends_with("/key_permissions") && jwt_subject(read).ends_with("/test")
+        {
+            assert!(jwt_subject(read).ends_with("/test"), "{}", read.url);
             assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Primary));
             continue;
         }
@@ -1947,6 +1954,7 @@ fn concurrent_read_key_rejections_never_deactivate_the_account() {
             if r.method == safe_cex_engine::Method::Get
                 && r.url.contains("/brokerage/")
                 && !r.url.contains("/market/")
+                && !r.url.contains("/products")
                 && jwt_subject(&r).ends_with("/read")
             {
                 held.push(r);
@@ -1963,6 +1971,8 @@ fn concurrent_read_key_rejections_never_deactivate_the_account() {
     for r in held {
         s.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
     }
+    s.collect();
+    assert!(!s.deactivated);
     let r = s.place(327, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
     s.reply(
         r,

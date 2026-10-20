@@ -54,7 +54,7 @@ exists. Spot reduce-only is sent as a plain order. A definite 4xx placement
 rejection releases its reservation with Coinbase's message; a lost response,
 408 or 5xx keeps it until the client ID appears or 30 s pass with a later order
 snapshot (and, for derivatives, a later position read). Saved read-only keys
-sign REST reads once `key_permissions` shows both keys on the same portfolio;
+sign account and history reads once `key_permissions` shows both keys on the same portfolio;
 otherwise the read key is refused with an error and reads use the trading key
 on the primary route; a later 401 on a read-key request does the same instead
 of deactivating the account. Writes and the user stream keep the trading key.

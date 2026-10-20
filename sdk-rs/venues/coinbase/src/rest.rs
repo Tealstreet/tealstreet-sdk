@@ -74,10 +74,11 @@ impl Coinbase {
                 _
             )
         );
-        // Trading reads (amend cancellation proof) always use the trading key.
+        // Only account and history reads use the read-only key; catalogue and
+        // trading reads (the amend cancellation proof) keep the trading key.
         let read = request.method == Method::Get
             && !trading_key_check
-            && !matches!(request.pending, Pending::Trading(_));
+            && matches!(request.pending, Pending::Account(..) | Pending::History(_));
         let primary_route = request.method == Method::Get
             && !public
             && self.read_supplied
