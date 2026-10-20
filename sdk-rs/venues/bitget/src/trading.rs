@@ -2037,6 +2037,7 @@ fn place_opts(order: &Order) -> PlaceOrderOpts {
         trigger_type: order.trigger_type,
         tp_trigger_type: order.trigger_type,
         sl_trigger_type: order.trigger_type,
+        max_slippage_pct: None,
         client_order_id: None,
         close: order.close,
         stp_mode: None,

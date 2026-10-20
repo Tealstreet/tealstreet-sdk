@@ -8,9 +8,10 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
-import { fixBlofinAccount, fixWeexConditionals } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { venueOf } from './venues.mjs';
+import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 
 const { values } = parseArgs({
@@ -129,6 +130,43 @@ const KNOWN_TS_FIXES = {
       'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response.',
     ],
   },
+  // Independent documented-tape oracle; native request/protocol counters remain exact.
+  orderly: (ts) => fixOrderly(ts, tapeRecords),
+  lighter: {
+    fills: fixLighterFills,
+    commands: fixLighterCommands,
+    // Native tests pin these defects without rewriting account or trading output.
+    notes: [
+      'Emit one execution by native trade ID; TS emits both the filled order and the execution.',
+      'Keep valid live executions during the initial five-second notification guard and inherit by-market execution identity.',
+      'Read execution history from trades, not cumulative inactive orders; preserve exact IDs and timestamp range units.',
+      'Convert native venue/integrator fee rate ticks to signed quote fees and rebates; retain venue-reported account-side PnL.',
+      'Validate integrator approval expiry and both runtime fee caps before attributed order submission.',
+      'Keep known orders after definite cancel rejections, and normalize official hyphenated terminal statuses and time-in-force.',
+      'Use engine socket watchdogs rather than a lifetime close-loop cap.',
+      'Preserve account and open orders after failed, malformed, or capped reads.',
+      'Fence delayed REST snapshots, fills, and acknowledgements behind newer private state.',
+      'Require a nonempty transaction hash for every batch item; TS accepts missing batch acknowledgements.',
+      'Reject book nonce gaps and pre-gap REST recovery snapshots.',
+      'Reject API key index 255, the query-all sentinel, for signing.',
+      'Support the full official int16 market domain; TS leverage still rejects active IDs above 254.',
+      'Acknowledge retaining the only supported net position mode; TS inherits an unsupported method.',
+    ],
+  },
+  // WOO repairs live in the TS reference itself; no result normalization:
+  // exact integer IDs; order-axis journal provenance; camel-case aliases;
+  // monotonic cumulative/terminal state and reconciled optimistic fill deltas;
+  // nested algo child executions and minimal terminal parent tombstones;
+  // execution-ID dedup and per-execution fills; atomic failed-page snapshots
+  // including malformed nested executable leaves;
+  // STOP direction/source and buy-trailing inference; exact tick splitting;
+  // sized protections, full-position trailing and sibling preservation;
+  // mandatory rounded amendment quantities; both-family cancellation;
+  // unsupported Conditional preflight; authoritative account hedge mode;
+  // clear synthetic flat marginSize when an authoritative holding reopens;
+  // paced, complete V1 income with signed fees and account aggregate scope.
+  // Rust additionally walks V3 fill time windows (TS still reads one page).
+  woo: [],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
@@ -398,6 +436,8 @@ const KNOWN_TS_FIXES = {
   },
 };
 
+for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
+
 const normalizeBingxPublic = (ts) => {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
 // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -470,6 +510,7 @@ for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
   if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
+  if (venue.family === 'orderly') KNOWN_TS_FIXES[values.venue](ts);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -510,6 +551,10 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
     if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
+    if (values.venue === 'lighter') {
+      KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
+      KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
+    }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(stable(ts.account[field]));
       const right = JSON.stringify(stable(rust.account[field]));
@@ -565,6 +610,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

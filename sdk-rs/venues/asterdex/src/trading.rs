@@ -792,6 +792,7 @@ fn empty_order() -> PlaceOrderOpts {
         client_order_id: None,
         close: None,
         stp_mode: None,
+        max_slippage_pct: None,
     }
 }
 fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> Job {

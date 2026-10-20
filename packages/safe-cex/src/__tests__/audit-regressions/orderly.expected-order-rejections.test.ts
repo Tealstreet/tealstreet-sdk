@@ -2,7 +2,7 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Market, OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
 

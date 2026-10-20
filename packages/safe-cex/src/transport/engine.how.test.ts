@@ -71,6 +71,12 @@ describe('engine through the real HOW package', () => {
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'JA' }, TOKYO_HOW_EGRESS],
     ['bybit', { tealstreetTunnel: true, proxyRegion: 'SG' }, SINGAPORE_HOW_EGRESS],
     ['okx', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+    ['tealstreet-dex', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+    ['kodiakfi', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+    ['mode', { tealstreetTunnel: true, testnet: true }, SINGAPORE_HOW_EGRESS],
+    ['salsadex', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+    ['what', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+    ['woofi', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
   ] as const)('sends %s to the resolved tunnel with signed bytes intact', async (exchange, options, host) => {
     const raw = rawTransport();
     const route = createEngineTransport(
@@ -81,13 +87,18 @@ describe('engine through the real HOW package', () => {
     const state = tunnels.get(host)!;
     const responseBody = ' { "orderId": 900719925474099312345, "price": 1.2300 }\n';
     state.reply = { status: 429, data_raw: responseBody, headers: { 'retry-after': '2' } };
-    const url = 'https://api.example.com/order?a=1&a=2&encoded=%2F+%20&signature=abc';
+    const orderly = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'].includes(exchange);
+    const origin = orderly
+      ? `https://${'testnet' in options && options.testnet ? 'testnet-' : ''}api-evm.orderly.org`
+      : 'https://api.example.com';
+    const url = `${origin}/order?a=1&a=2&encoded=%2F+%20&signature=abc`;
     const body = ' {"id":900719925474099312345, "price":1.2300}\n';
+    const headers = { 'Content-Type': 'application/json', [orderly ? 'orderly-signature' : 'X-Venue-Signature']: 'signed' };
     const response = await route.request({
       method: 'POST',
       url,
       body,
-      headers: { 'Content-Type': 'application/json', 'X-Venue-Signature': 'signed' },
+      headers,
     });
     expect(raw.request).not.toHaveBeenCalled();
     expect(state.sent).toHaveLength(1);
@@ -103,7 +114,7 @@ describe('engine through the real HOW package', () => {
         method: 'POST',
         params: {},
         data: body,
-        headers: { 'Content-Type': 'application/json', 'X-Venue-Signature': 'signed' },
+        headers,
       },
     });
     expect(response.status).toBe(429);

@@ -194,7 +194,7 @@ impl RoutingState {
             SocketChannel::Private => &self.plan.ws.private,
             SocketChannel::Business => &self.plan.ws.business,
         };
-        let feed = context.as_ref().map_or("", |context| context.feed);
+        let feed = context.as_ref().map_or("", |context| context.feed.as_str());
         let recover = context.as_ref().is_some_and(|context| context.recover);
         let key = format!(
             "{channel:?}:{feed}:{}",
@@ -1028,7 +1028,7 @@ mod tests {
                             .as_ref()
                             .or(socket.context.as_ref())
                             .map(|context| safe_cex_engine::SocketContext {
-                                feed: context.feed,
+                                feed: context.feed.into(),
                                 recover: context.recover,
                             }),
                     );

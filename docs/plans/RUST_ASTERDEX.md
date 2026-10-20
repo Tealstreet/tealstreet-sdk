@@ -139,3 +139,15 @@ for green CI, merge, and cut a fresh follow-up branch.
   this failed evidence; it is not a passing gate. No timeout/assertion was weakened.
 - Next: commit checkpoint, merge latest landing (WOO/Lighter), run final artifact
   gates and complete CI/PR code-correctness review loop.
+
+### Landing integration
+
+- Merged landing31ec401f60 (WOO, Orderly and Lighter) after checkpoint076496fbb1.
+  Combined additive registrations/tests/CI and retained incoming async host
+  cancellation, single-use wrapper startup, position IDs and signed-packet guards.
+- Three independent integration reviews resolved assigned conflict scopes. All
+  sixteen venue features and both hosts compile; engine53 tests, incoming WOO
+  and Lighter suites, wire8 tests, WASM native2 tests, host25 tests, harness212
+  tests and wrapper35 tests pass. Package typecheck, scoped lint and syntax pass.
+- Final integrated artifact build/replays and broad CI are next; previous
+  single-lane numbers remain explicitly preliminary.

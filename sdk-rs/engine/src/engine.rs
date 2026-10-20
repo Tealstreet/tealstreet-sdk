@@ -72,6 +72,8 @@ pub enum LogLevel {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
+    /// Definitive credential rejection; transient failures never deactivate.
+    Deactivate,
     Log {
         level: LogLevel,
         message: String,
@@ -102,7 +104,7 @@ pub enum SocketChannel {
 /// Stable feed identity and protocol recovery; hosts choose transport routes.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct SocketContext {
-    pub feed: &'static str,
+    pub feed: String,
     pub recover: bool,
 }
 
@@ -406,10 +408,17 @@ impl<P> Cx<'_, P> {
         &mut self,
         url: impl Into<String>,
         channel: SocketChannel,
-        feed: &'static str,
+        feed: impl Into<String>,
         recover: bool,
     ) -> SocketId {
-        self.connect_context(url, Some(channel), Some(SocketContext { feed, recover }))
+        self.connect_context(
+            url,
+            Some(channel),
+            Some(SocketContext {
+                feed: feed.into(),
+                recover,
+            }),
+        )
     }
 
     fn connect_context(
@@ -589,6 +598,10 @@ impl<P> Cx<'_, P> {
             level,
             message: message.into(),
         }));
+    }
+
+    pub fn deactivate(&mut self) {
+        self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
     pub fn done(&mut self, command: CommandId, result: Result<String, String>) {

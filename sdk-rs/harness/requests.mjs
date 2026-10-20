@@ -63,6 +63,7 @@ export const callerIdsOf = (records) => {
 };
 
 const normalize = (value, callerIds, root = true, options = {}) => {
+  if (typeof value === 'bigint') return JSON.rawJSON(String(value));
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
@@ -97,16 +98,38 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
-  if (body instanceof URLSearchParams) return `${prefix} ${canonicalParams(body, callerIds)}`;
+  if (body instanceof URLSearchParams) {
+    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds)}`;
+    body = Object.fromEntries(body);
+  }
   let parsed;
   try { parsed = typeof body === 'string' ? parseJson(body) : body; }
   catch {
-    return `${prefix} ${typeof body === 'string' && body.includes('=')
-      ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
+    if (typeof body === 'string' && body.includes('=')) {
+      const form = new URLSearchParams(body);
+      if (options.requestBody) {
+        const transformed = options.requestBody(Object.fromEntries(form), { method, url, callerIds });
+        return `${prefix} ${JSON.stringify(normalize(transformed, callerIds))}`;
+      }
+      return `${prefix} ${canonicalParams(form, callerIds)}`;
+    }
+    return `${prefix} ${body}`;
   }
   parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
   return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options.ignoreGeneratedBodyId
     ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options))}`;
+};
+
+export const subscriptionMessage = (message) => {
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
+  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const topics =
+    message.params?.channels ??
+    message.params ??
+    message.args ??
+    (typeof message.topic === 'string' ? [message.topic] : message.dataType ? [message.dataType] : []);
+  return Array.isArray(topics) ? { op, topics } : undefined;
 };
 
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
@@ -114,7 +137,8 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
+  message = options.subscriptionMessage?.(message) ?? message;
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
     if (message?.params?.cb_id !== undefined) {
@@ -129,6 +153,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    if (options.orderlyProtocol && method === 'auth' && message.params) {
+      message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
+    }
     // Crypto.com's audit validates auth and heartbeat identity before capture.
     if (options.cryptoProtocol) {
       delete message.nonce;
@@ -142,6 +169,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     if (method === 'login' && Array.isArray(message.args)) {
       message.args = message.args.map((arg) => ({ ...arg, timestamp: '<timestamp>', sign: '<signature>',
         ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) }));
+    }
+    if (options.wooProtocol && method === 'auth' && message.params) {
+      message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }
     // Bybit signs a fresh expiration per connection. Keep the API identity.
     if (method === 'auth' && Array.isArray(message.args) && message.args.length === 3) {
@@ -165,7 +195,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,

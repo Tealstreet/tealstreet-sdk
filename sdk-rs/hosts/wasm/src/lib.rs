@@ -9,6 +9,7 @@
     feature = "asterdex",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -16,10 +17,12 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
+    feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::{PlaceOrderOpts, StpMode};
@@ -46,12 +49,18 @@ use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "lighter")]
+use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "mexc")]
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "orderly")]
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+#[cfg(feature = "woo")]
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -94,6 +103,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "asterdex",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -102,18 +112,33 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
+    feature = "lighter",
     feature = "okx"
 ))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    api_key_index: Option<String>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    #[serde(deserialize_with = "optional_lighter_index")]
+    lighter_integrator_account_index: Option<u64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "binance",
         feature = "asterdex",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "orderly",
+        feature = "lighter",
         feature = "bitget",
         feature = "okx"
     ))]
@@ -136,7 +161,13 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "asterdex"))]
+    #[cfg(any(
+        feature = "hyperliquid",
+        feature = "asterdex",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "woo"
+    ))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -155,6 +186,9 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "orderly")]
+    #[serde(default)]
+    tick_interval: Option<f64>,
 }
 #[cfg(feature = "asterdex")]
 #[derive(Deserialize, Default)]
@@ -179,9 +213,26 @@ struct HyperliquidBuilder {
     fee_tenths_bps: u32,
 }
 
+#[cfg(feature = "lighter")]
+fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Index {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Index>::deserialize(d)?
+        .map(|index| match index {
+            Index::Number(n) => Ok(n),
+            Index::Text(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
+        })
+        .transpose()
+}
+
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    Deactivate,
     WsConnect {
         socket: u32,
         url: &'a str,
@@ -294,6 +345,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -627,6 +679,7 @@ impl WasmEngine {
         feature = "asterdex",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "bingx",
         feature = "mexc",
@@ -635,6 +688,8 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "orderly",
+        feature = "lighter",
         feature = "okx"
     ))]
     #[wasm_bindgen(constructor)]
@@ -664,6 +719,36 @@ impl WasmEngine {
                 builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
                 read_key: options.asterdex.read_key,
                 read_secret: options.asterdex.read_secret,
+            }))),
+            #[cfg(feature = "orderly")]
+            "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+                Box::new(Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })))
+            }
+            #[cfg(feature = "lighter")]
+            "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                api_key_index: options.api_key_index,
+                integrator_account_index: options.lighter_integrator_account_index,
+                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
             }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
@@ -714,6 +799,14 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
+            }))),
+            #[cfg(feature = "woo")]
+            "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
             }))),
             #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {

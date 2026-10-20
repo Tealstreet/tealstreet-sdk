@@ -964,7 +964,10 @@ async fn feed_connection(
         url,
         vec![],
         Some(channel),
-        feed.map(|feed| safe_cex_engine::SocketContext { feed, recover }),
+        feed.map(|feed| safe_cex_engine::SocketContext {
+            feed: feed.into(),
+            recover,
+        }),
         send,
     );
     assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));
@@ -1285,4 +1288,53 @@ async fn raw_native_transport_rejects_unconfigured_public_cors_route() {
     assert!(
         matches!(next(&mut events).await,HostEvent::HttpFailed(RequestId(200),error) if error.contains("not configured"))
     );
+}
+
+#[tokio::test]
+async fn typed_clock_deadline_stays_active_while_native_response_body_stalls() {
+    let (listener, origin) = listener().await;
+    let (release, held) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _ = request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\nx")
+            .await
+            .unwrap();
+        let _ = held.await;
+    });
+    let (send, mut events) = mpsc::unbounded_channel();
+    NetworkTransport::default().request(
+        HttpRequest {
+            id: RequestId(201),
+            method: Method::Get,
+            route: Some(safe_cex_engine::RequestRoute::Direct),
+            timeout_ms: Some(5_000),
+            url: origin,
+            headers: vec![],
+            body: None,
+        },
+        send,
+    );
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::HttpStart {
+            request: RequestId(201),
+            status: 200,
+            ..
+        }
+    ));
+    assert!(
+        matches!(next(&mut events).await,HostEvent::HttpChunk(RequestId(201),chunk) if chunk==b"x")
+    );
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(4)).await;
+    assert!(events.try_recv().is_err());
+    tokio::time::advance(Duration::from_millis(1_100)).await;
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::HttpFailed(RequestId(201), _)
+    ));
+    let _ = release.send(());
+    server.await.unwrap();
 }

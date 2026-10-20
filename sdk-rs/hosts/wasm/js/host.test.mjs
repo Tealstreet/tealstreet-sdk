@@ -214,6 +214,119 @@ test('late read and write request failures cannot reach a disposed engine or ret
   }
 });
 
+test('disposal aborts deferred authorization before a signed write can dispatch', async () => {
+  let authorize;
+  const authorization = new Promise((resolve) => { authorize = resolve; });
+  let signal;
+  let writes = 0;
+  let failures = 0;
+  const host = new EngineHost({ httpFailed: () => { failures++; return ''; } }, {
+    now: () => 100,
+    async request(request) {
+      signal = request.signal;
+      await authorization;
+      request.signal.throwIfAborted();
+      writes++;
+      return { status: 200, body: new Uint8Array() };
+    },
+  });
+  host.execute({ op: 'http', request: 1, method: 'POST', url: 'https://example.test/order', headers: [['Signature', 'signed-body']], body: '{}' });
+  assert.equal(host.requests.size, 1);
+  assert.equal(signal.aborted, false);
+  host.dispose();
+  assert.equal(signal.aborted, true);
+  assert.equal(host.requests.size, 0);
+  authorize();
+  await new Promise(setImmediate);
+  assert.equal(writes, 0);
+  assert.equal(failures, 0);
+});
+
+test('request controllers cover streaming consumption and release after completion', async () => {
+  let resume;
+  const pending = new Promise((resolve) => { resume = resolve; });
+  let firstChunk;
+  const first = new Promise((resolve) => { firstChunk = resolve; });
+  let signal;
+  let completed;
+  const done = new Promise((resolve) => { completed = resolve; });
+  const host = new EngineHost({
+    httpStart: () => '',
+    httpChunk: () => { firstChunk(); return ''; },
+    httpEnd: () => { completed(); return ''; },
+    httpFailed: assert.fail,
+  }, {
+    now: () => 100,
+    async request(request) {
+      signal = request.signal;
+      return { status: 200, body: (async function* () { yield Uint8Array.of(1); await pending; yield Uint8Array.of(2); })() };
+    },
+  });
+  host.execute({ op: 'http', request: 1, method: 'GET', url: 'https://example.test/list', headers: [] });
+  await first;
+  assert.equal(host.requests.size, 1, 'headers alone do not complete a streamed request');
+  resume();
+  await done;
+  await new Promise(setImmediate);
+  assert.equal(host.requests.size, 0);
+  host.dispose();
+  assert.equal(signal.aborted, false, 'completed requests are no longer retained by the host');
+});
+
+test('synchronous transport errors release their request controller', async () => {
+  const failures = [];
+  const host = new EngineHost({ httpFailed: (_, error) => { failures.push(error); return ''; } }, {
+    now: () => 100,
+    request() { throw new Error('transport unavailable'); },
+  });
+  host.execute({ op: 'http', request: 1, method: 'POST', url: 'https://example.test/order', headers: [] });
+  await new Promise(setImmediate);
+  assert.deepEqual(failures, ['transport unavailable']);
+  assert.equal(host.requests.size, 0);
+  host.dispose();
+});
+
+for (const runtime of ['native', 'worker']) {
+  test(`${runtime} fetch abort reaches an in-flight streamed body and releases its reader`, async () => {
+    const transport = runtime === 'native' ? nativeTransport() : (await import('./workers.mjs')).workersTransport();
+    const originalFetch = globalThis.fetch;
+    let signal;
+    let stream;
+    let delivered;
+    const first = new Promise((resolve) => { delivered = resolve; });
+    let failures = 0;
+    globalThis.fetch = async (_url, options) => {
+      signal = options.signal;
+      stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(Uint8Array.of(1));
+          signal.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+        },
+      });
+      return { status: 200, headers: new Headers(), body: stream };
+    };
+    const host = new EngineHost({
+      httpStart: () => '', httpChunk: () => { delivered(); return ''; },
+      httpEnd: assert.fail, httpFailed: () => { failures++; return ''; },
+    }, transport);
+    try {
+      host.execute({ op: 'http', request: 1, method: 'GET', url: 'https://example.test/list', headers: [] });
+      await first;
+      assert.equal(stream.locked, true);
+      assert.equal(host.requests.size, 1);
+      host.dispose();
+      assert.equal(signal.aborted, true);
+      await new Promise(setImmediate);
+      assert.equal(stream.locked, false);
+      assert.equal(host.requests.size, 0);
+      assert.equal(failures, 0);
+    } finally {
+      host.dispose();
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
 test('already queued timers cannot enter the engine after disposal', () => {
   const callbacks = [];
   let calls = 0;
@@ -257,6 +370,14 @@ test('an asynchronous binary message cannot enter a disposed engine', async () =
   assert.equal(calls, 0);
 });
 
+test('credential deactivation is an explicit host event', () => {
+  let deactivated = 0;
+  const host = new EngineHost({ start() { return '[{"op":"deactivate"}]'; } }, { now: () => 1 }, {
+    onDeactivate() { deactivated++; },
+  });
+  host.start();
+  assert.equal(deactivated, 1);
+});
 
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;

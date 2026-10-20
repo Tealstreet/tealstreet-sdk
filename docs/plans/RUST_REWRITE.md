@@ -100,7 +100,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
 | 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss |
-| 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate |
+| 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
@@ -315,10 +315,12 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
-| KuCoin, Phemex, WOO, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
+| WOO | Implemented; [PR #1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316), adversarial fixes and gates passing |
+| KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| AsterDEX perpetuals | port in progress (`feat/rust-asterdex`); V1/V3 auth planned, phase reviews and gates pending |
-| Lighter, Paradex, GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| AsterDEX perpetuals | implemented on `feat/rust-asterdex`; phase reviews clear, final integrated gates and PR pending |
+| Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Paradex, GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 
