@@ -1,10 +1,11 @@
 //! Classic futures queries: numbered pages for fills/orders, exact ledger offsets.
 use crate::{Kucoin, Pending};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const DAY: u64 = 86_400_000;
 #[derive(Clone, Copy, PartialEq)]
@@ -29,6 +30,8 @@ pub struct Request {
     from: u64,
     to: u64,
     chunk_end: u64,
+    /// Windows still to read after the current one, newest first.
+    windows: VecDeque<(u64, u64)>,
     page: u32,
     offset: Option<u64>,
     limit: usize,
@@ -308,20 +311,35 @@ impl Kucoin {
             return;
         }
         let explicit_range = from.is_some() && to.is_some();
+        let width = if kind == Kind::Income {
+            DAY - 1
+        } else {
+            7 * DAY - 1
+        };
+        // Millisecond integers below 2^53 tile exactly as f64.
+        let mut windows: VecDeque<(u64, u64)> = paging::windows(
+            start as f64,
+            end as f64,
+            width as f64,
+            WindowOrder::NewestFirst,
+            usize::MAX,
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(a, b)| (a as u64, b as u64))
+        .collect();
+        let (first_start, first_end) = windows.pop_front().unwrap_or((start, end));
         let request = Request {
             command,
             kind,
             symbol,
             order,
             filter,
-            start: start.max(end.saturating_sub(if kind == Kind::Income {
-                DAY - 1
-            } else {
-                7 * DAY - 1
-            })),
+            start: first_start,
             from: start,
             to: end,
-            chunk_end: end,
+            chunk_end: first_end,
+            windows,
             page: 1,
             offset: None,
             limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
@@ -651,15 +669,9 @@ impl Kucoin {
             self.history_schedule(cx, r);
             return;
         }
-        if !capped && r.start > r.from {
-            r.chunk_end = r.start - 1;
-            r.start = r
-                .from
-                .max(r.chunk_end.saturating_sub(if r.kind == Kind::Income {
-                    DAY - 1
-                } else {
-                    7 * DAY - 1
-                }));
+        if !capped && let Some((start, end)) = r.windows.pop_front() {
+            r.start = start;
+            r.chunk_end = end;
             r.page = 1;
             r.window_count = 0;
             r.offset = None;
@@ -869,6 +881,72 @@ mod tests {
             assert_eq!(rows.len(), 1, "nanosecond timestamp: {nanos}");
             assert_eq!(rows[0].id, "0");
         }
+    }
+    /// Pins the exact request sequence of a windowed, page-numbered read:
+    /// 7-day windows newest first, the first walked over two pages. Paging
+    /// refactors keep it.
+    #[test]
+    fn windowed_fill_request_sequence_is_pinned() {
+        const END: u64 = 1_740_640_088_002;
+        let mut e = engine();
+        let mut r = query(
+            &mut e,
+            Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some((END - 15 * DAY) as f64),
+                to_ms: Some(END as f64),
+                limit: Some(1000),
+            },
+        );
+        let fill = |id: &str, created: u64| {
+            format!(
+                r#"{{"symbol":"XBTUSDTM","tradeId":"{id}","orderId":"order","side":"buy","liquidity":"maker","price":"100","size":1,"fee":"0","feeCurrency":"USDT","createdAt":{created},"tradeTime":{}}}"#,
+                u128::from(created) * 1_000_000
+            )
+        };
+        let pages = [
+            (1, 2, 2, fill("a", END - 1)),
+            (2, 2, 2, fill("b", END - 2)),
+            (1, 1, 0, String::new()),
+            (1, 1, 0, String::new()),
+        ];
+        let mut sent = Vec::new();
+        for (index, (page, total_pages, total, items)) in pages.iter().enumerate() {
+            sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+            let body = format!(
+                r#"{{"code":"200000","data":{{"currentPage":{page},"totalPage":{total_pages},"totalNum":{total},"items":[{items}]}}}}"#
+            );
+            let actions = reply(&mut e, r, &body);
+            if index + 1 == pages.len() {
+                assert!(!done(&actions).is_empty());
+                break;
+            }
+            let (timer, at) = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(at, Event::TimerFired { timer });
+            r = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            sent,
+            [
+                "v1/fills?symbol=XBTUSDTM&startAt=1740035288003&endAt=1740640088002&currentPage=1&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1740035288003&endAt=1740640088002&currentPage=2&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1739430488003&endAt=1740035288002&currentPage=1&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1739344088002&endAt=1739430488002&currentPage=1&pageSize=50",
+            ]
+        );
     }
     #[test]
     fn fill_native_time_survives_millisecond_window_boundaries() {

@@ -51,3 +51,11 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
     it then discarded (Rust-only tape record; TS still sends only `end_at`);
   - a page cap with a cursor pending returned partial history with a warning;
     it now fails as INCOMPLETE.
+- Batch 2: `paging::windows` (disjoint inclusive windows of a maximum width,
+  newest or oldest first, with a window budget). Bybit, Bitget, MEXC and
+  KuCoin futures use it, each with a request-sequence pin written and passing
+  first. Fix (MEXC, regression failed first): windows ran oldest first and the
+  read stops at its limit, so a limited read over more than 90 days returned
+  the oldest window's rows; windows now run newest first. Not changed: Bitget
+  applies its limit as the page size only; the UTA private tape shows the TS
+  reference also follows the cursor past the limit and returns every row.
