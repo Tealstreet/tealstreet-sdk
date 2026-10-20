@@ -358,3 +358,156 @@ fn both_legacy_dogecoin_balance_codes_value_against_the_canonical_market_asset()
         assert_eq!(e.store().market("XDG/USD").unwrap().base, "DOGE");
     }
 }
+
+// WS v2 executions reports trade execution fields separately from order-status transitions.
+// https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/executions
+#[test]
+fn final_trade_and_filled_lifecycle_in_one_batch_emit_one_execution() {
+    let trade = r#"{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":2,"last_qty":1.5,"last_price":100,"exec_id":"T-final","timestamp":"2023-11-14T22:13:21Z"}"#;
+    let filled = r#"{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"filled","order_qty":2,"cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"}"#;
+    for (first, last) in [(trade, filled), (filled, trade)] {
+        let (mut e, _, private) = ready(false);
+        e.take_frame(NOW);
+        let frame =
+            format!(r#"{{"channel":"executions","type":"update","data":[{first},{last}]}}"#);
+        message(&mut e, private.unwrap(), &frame);
+        let o = e.store().order("O-100").unwrap();
+        assert_eq!(
+            (o.filled, o.remaining, o.status),
+            (2., 0., OrderStatus::Closed)
+        );
+        assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 1);
+        message(&mut e, private.unwrap(), &frame);
+        assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+    }
+}
+#[test]
+fn cumulative_fallback_progress_uses_the_previous_row_in_the_same_batch() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"trade","cum_qty":1,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"},{"order_id":"O-100","exec_type":"trade","cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    let frame = e.take_frame(NOW).unwrap();
+    assert_eq!(support_fill_count(frame), 2);
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            let payload = &frame[at + 8..at + 8 + size];
+            let n = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+            let offset = (4 + 12 * n + 7) & !7;
+            let amounts = (0..n)
+                .map(|i| {
+                    f64::from_le_bytes(
+                        payload[offset + i * 16 + 8..offset + i * 16 + 16]
+                            .try_into()
+                            .unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(amounts, vec![0.5, 1.]);
+            return;
+        }
+        at += 8 + size;
+    }
+    panic!("missing fills");
+}
+#[test]
+fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 901 }));
+    let first = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    let retry = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(first.body, retry.body);
+    reply(
+        &mut e,
+        &retry,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 901,
+            result: Err(_)
+        })
+    )));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+#[test]
+fn malformed_nonempty_private_secret_fails_locally_before_io() {
+    let mut opts = options();
+    opts.secret = Some("invalid base64!".into());
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(opts));
+    e.start(NOW);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("invalid secret"))));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
+}
+
+#[test]
+fn distinct_same_order_native_trades_in_a_batch_remain_separate_fills() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":1,"last_qty":0.5,"last_price":99,"exec_id":"T-first","timestamp":"2023-11-14T22:13:21Z"},{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":2,"last_qty":1,"last_price":100,"exec_id":"T-second","timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 2);
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Closed
+    );
+}
+#[test]
+fn filled_lifecycle_without_trade_does_not_invent_an_execution() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"filled","order_qty":2,"cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Closed
+    );
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+}

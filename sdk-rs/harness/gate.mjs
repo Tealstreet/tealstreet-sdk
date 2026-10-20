@@ -205,6 +205,7 @@ const KNOWN_TS_FIXES = {
       'Sign exact form bytes and enforce monotonic nonce, including retries and reconnect token reads.',
       'Refresh the authenticated WS token for each socket generation.',
       'Emit exact per-execution last_qty/last_price once per native execution identity.',
+      'Treat filled lifecycle rows as status transitions rather than extra executions, including trade/filled rows batched in either order.',
       'Preserve native order txid across atomic amendments and reject ambiguous edits before a write.',
     ],
   },

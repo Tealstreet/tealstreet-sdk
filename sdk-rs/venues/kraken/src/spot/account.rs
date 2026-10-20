@@ -241,8 +241,17 @@ impl KrakenSpot {
                 );
                 cx.request_timeout(id, 20_000);
             }
-            Err(e) => self.private_failed(cx, request, &e),
+            Err(e) => {
+                if !self.options.public_data_only && self.signer.is_none() {
+                    self.reject_auth(cx, &e);
+                }
+                self.private_failed(cx, request, &e);
+            }
         }
+    }
+    pub(super) fn reject_auth(&self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(LogLevel::Error, error);
+        cx.deactivate();
     }
     pub(super) fn request_private(
         &mut self,
@@ -502,10 +511,11 @@ impl KrakenSpot {
                     return;
                 }
                 if e.contains("EAPI:Invalid key")
+                    || e.contains("EAPI:Invalid signature")
                     || e.contains("EGeneral:Permission denied")
                     || matches!(response.status, 401 | 403)
                 {
-                    cx.deactivate();
+                    self.reject_auth(cx, &e);
                 }
                 self.private_failed(cx, request, &e);
                 return;
@@ -713,7 +723,8 @@ impl KrakenSpot {
         if msg.channel != "executions" {
             return true;
         }
-        let mut rows = vec![];
+        let mut rows: Vec<Order> = vec![];
+        let mut row_indices = HashMap::<String, usize>::new();
         let mut provenance = HashMap::new();
         let mut fills = vec![];
         let snapshot = msg.kind == "snapshot";
@@ -726,15 +737,17 @@ impl KrakenSpot {
                 return;
             }
             let time = crate::history::timestamp(&e.timestamp).unwrap_or(cx.now);
-            if self
-                .account
-                .native_times
+            if times
                 .get(&*e.order_id)
+                .or_else(|| self.account.native_times.get(&*e.order_id))
                 .is_some_and(|t| time < *t)
             {
                 return;
             }
-            let existing = cx.store.order(&e.order_id);
+            let existing = row_indices
+                .get(&*e.order_id)
+                .and_then(|i| rows.get(*i))
+                .or_else(|| cx.store.order(&e.order_id));
             if e.cum_qty
                 .is_some_and(|filled| existing.is_some_and(|o| filled < o.filled))
             {
@@ -833,10 +846,10 @@ impl KrakenSpot {
             if !e.order_type.is_empty() {
                 provenance.insert(o.id.clone(), e.order_type.to_string());
             }
-            if !snapshot && matches!(&*e.exec_type, "trade" | "filled") {
-                let qty = e
-                    .last_qty
-                    .unwrap_or_else(|| (filled - existing.map_or(0., |o| o.filled)).max(0.));
+            let progress = (filled - existing.map_or(0., |o| o.filled)).max(0.);
+            // Only trade rows describe executions; filled rows are lifecycle updates.
+            if !snapshot && e.exec_type == "trade" {
+                let qty = e.last_qty.unwrap_or(progress);
                 let price = e.last_price.or(e.avg_price).unwrap_or(o.price);
                 let key = if !e.exec_id.is_empty() {
                     e.exec_id.to_string()
@@ -856,7 +869,12 @@ impl KrakenSpot {
                     ));
                 }
             }
-            rows.push(o);
+            if let Some(index) = row_indices.get(&o.id).copied() {
+                rows[index] = o;
+            } else {
+                row_indices.insert(o.id.clone(), rows.len());
+                rows.push(o);
+            }
         });
         if parsed.is_err() || invalid {
             cx.log(LogLevel::Warning, "Kraken Spot invalid execution frame");

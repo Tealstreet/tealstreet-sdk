@@ -263,3 +263,51 @@ lifecycle row in one batch can double-emit, and exhausted explicit signature
 rejection can warn instead of failing account validation. Both findings have
 standalone repro probes; closure requires independent regression review and
 rebuilt Kraken gates. No merge until all findings close and CI is green.
+
+
+## PR #1339 Hyperliquid correctness revalidation (supersedes prior metrics)
+
+The PR trading review found that zero-valued spot `stopLoss`/`takeProfit`
+fields must mean disabled, as in TS. Native validation now accepts those
+sentinels and omits their bracket wires, while rejecting negative/non-finite
+triggers and preserving perpetual validation. Independent trading review is
+clear; 90 crate tests (32 spot), strict Clippy and formatting pass.
+
+The following results supersede the earlier Hyperliquid measurement ledger
+for the rebuilt PR artifact. Fixtures, thresholds and replay economics are
+unchanged; all four gates run serially on the same selected artifact.
+
+| Gate | Frames | TS / Rust main CPU ms | TS / Rust steady CPU ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Hyperliquid spot public, three runs | 67 | 39.1 / 35.5 | 10.8 / 10.1 | 18.5 / 6.0 |
+| Hyperliquid spot private, one run | 10 | 50.4 / 49.9 | 33.1 / 36.0 | 17.7 / 5.1 |
+| Hyperliquid perpetual public, three runs | 285 | 251.2 / 46.5 | 21.5 / 13.5 | 24.1 / 2.6 |
+| Hyperliquid perpetual private, one run | 26 | 208.8 / 48.6 | 85.1 / 30.4 | 20.9 / 1.1 |
+
+All four gates PASS; three compiled spot controls also PASS. Public spot and
+perpetual replays retain two books with 302 and 341 markets/tickers respectively.
+Private parity covers two spot and three perpetual markets/tickers; performance
+is informational. Native linear memory remains 1.2 MB for spot public, 1.6 MB
+for perpetual public and 0.3 MB for each private replay.
+
+Rebuilt browser and Node WASM are both 1,050,441 bytes, below 1,258,291;
+SHA-256 is `a3624f475129d5278defcdd062fefa914e6402f2eaa462bda0bdb8f3ef63ae47`.
+The 69-record live spot fixture and its recorded provenance/hash remain unchanged.
+Kraken PR correctness fixes, final combined-host revalidation and green-CI
+landing remain pending.
+
+- Kraken review fixes are frozen and independently closed: only trade rows
+  emit fills, filled rows retain lifecycle closure, and a batch-local order
+  cursor preserves incremental progress. The TS lifecycle-as-fill defect is
+  explicit in `KNOWN_TS_FIXES`; no economic normalizer hides it. Exhausted
+  explicit signature rejection now emits Error/Deactivate after one fresh-nonce
+  resend; malformed nonempty native secrets fail before I/O. Missing credentials
+  still select public mode. Full crate passes 128 tests (35 spot, 93 futures),
+  formatting and strict Clippy. The reviewer independently passed 17 account
+  tests and rebuilt both original failing probes, now 2/2 passing.
+- Rebuilt selected Kraken passes five compiled host controls, including one
+  native execution for a repeated final-trade/filled batch at exact last price/
+  quantity. Raw wire retains the closed terminal row; the SDK's existing frame
+  policy filters it. Both touched crates now total 218 passing native tests.
+  Final Kraken replay gates and rebuilt combined-host checks follow before
+  pushing the reviewed fixes; CI must pass at the exact final PR head.

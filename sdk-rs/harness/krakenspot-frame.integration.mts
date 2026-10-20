@@ -79,3 +79,29 @@ test('compiled Kraken Spot documented native triggers retain their protective pr
     assert.equal(orders.price[row], 80);
   } finally { r.dispose(); }
 });
+test('compiled Kraken Spot batches final trade and filled lifecycle without duplicating an execution', async () => {
+  const r = rig();
+  try {
+    await r.start();
+    const socket = r.sockets.find((socket) => socket.url.includes('ws-auth.'));
+    const row = { order_id: 'O-100', symbol: 'BTC/USD', side: 'buy', order_type: 'limit', limit_price: 90, order_qty: 2, cum_qty: 2, avg_price: 89.5, timestamp: new Date(KRAKEN_SPOT_EPOCH).toISOString() };
+    // Executions with order_status:true includes both trade and lifecycle rows.
+    const message = { channel: 'executions', type: 'update', data: [
+      { ...row, exec_type: 'trade', exec_id: 'T-FINAL', last_qty: 2, last_price: 87.5 },
+      { ...row, exec_type: 'filled' },
+    ] };
+    await r.send(socket, message);
+    await r.send(socket, message);
+    const fills = r.frames.flatMap((frame) => {
+      const table = frame.fills();
+      return table ? Array.from({ length: table.count }, (_, i) => ({ id: table.orderId(i), price: table.rows[i * 2], amount: table.rows[i * 2 + 1] })) : [];
+    });
+    assert.deepEqual(fills, [{ id: 'O-100', price: 87.5, amount: 2 }]);
+    const orders = r.frames.map((frame) => frame.orders()).filter(Boolean).at(-1);
+    const index = Array.from({ length: orders.count }, (_, i) => i).find((i) => orders.id(i) === 'O-100');
+    assert.notEqual(index, undefined);
+    assert.equal(orders.enums[index] & 0xff, 1); // Closed; the SDK filters terminal rows.
+    assert.equal(orders.filled[index], 2);
+    assert.equal(orders.remaining[index], 0);
+  } finally { r.dispose(); }
+});
