@@ -1967,6 +1967,12 @@ impl BitgetFutures {
                         "{}; protection rollback failed: {}",
                         original.message, error.message
                     ),
+                    // A lost or unproven rollback makes the result Unknown, with its kind.
+                    kind: if error.outcome == Some(Outcome::Unknown) {
+                        error.kind
+                    } else {
+                        original.kind
+                    },
                     outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
                     ..original
                 },
