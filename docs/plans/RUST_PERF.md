@@ -12,7 +12,7 @@ Production source is `ecca589fb3`, integrated through landing `922b5fdc89`.
 There are 15 isolated WASM families and 19 public fixture profiles. Release,
 all size budgets, 1,295 Rust tests, native/wasm and isolated-feature Clippy,
 273 harness tests, 100 host tests, 78 SDK WASM tests and repository checks pass.
-The 36 private gates are running. The final public comparison and diagnostic
+All 36 private gates pass. The final public comparison and diagnostic
 profiles have not started; performance widening remains unproven. Earlier
 negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
 
@@ -849,3 +849,14 @@ SHAe1fc65867cbc97c996f2c08c070a47ad6690276796c9cbe18e96b858bdbee008.
 No19public/profile samples exist. Refreshsharedhelper provenance to19b and
 repeatall36privategates withnewlogs; noRust/binary rebuild is needed. Fix the
 real-buffer unit assertion to permit independentheap releases duringGC.
+
+
+Private36v2 phase completes at71ad: all36gates PASS, identical final outputs,
+requests, signatures, subscriptions and orderedwrites. BothKodiaknetworks now
+pass; original informational-memory failure remains retained. All273harness
+and1295Rusttests,100host/78SDKWASM tests,15isolatedclippys/30sizechecks,
+workspacechecks and44typecheck/28lint/27repositorytasks pass. Gate/source
+review passes. Productionecca/control922 artifacts unchanged; shared71ad
+manifest19b SHA749c690f7c5e78bfeeacac79bca7fcc9d118086e036bc3b457fb031af576cc0b
+is independently verified. Noownedbuild/test jobs remain. Proceedwithfour
+fixedoptionalprofiles, then19officialpublic3-run gates andfixed190validpairs.
