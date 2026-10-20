@@ -17,11 +17,13 @@ pub enum Request {
     Probe,
     Positions {
         rows: Vec<Position>,
+        coins: std::collections::VecDeque<String>,
         started: f64,
         invalid: bool,
     },
     Balance {
         row: Option<Amounts>,
+        coins: Vec<InverseAsset>,
         version: u64,
         invalid: bool,
     },
@@ -39,9 +41,20 @@ pub struct OrderSnapshot {
     page_count: usize,
     rows: Vec<Order>,
     plans: Vec<(String, String)>,
+    trailing: Vec<(String, (String, f64))>,
     started: f64,
+    stream_revision: u64,
     invalid: bool,
     virtual_only: bool,
+}
+
+#[derive(Clone)]
+pub struct InverseAsset {
+    coin: CoinBalance,
+    free: f64,
+    upnl: f64,
+    used: f64,
+    total: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -71,16 +84,21 @@ pub struct Account {
     positions_in_flight: bool,
     balance_in_flight: bool,
     orders_in_flight: bool,
+    orders_dirty: bool,
     positions_timer: Option<TimerId>,
     balance_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
     balance_version: u64,
+    inverse_assets: Vec<InverseAsset>,
     full_positions_at: Option<f64>,
     full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
     terminal: HashMap<String, f64>,
     opened: HashMap<String, f64>,
     pub plans: HashMap<String, String>,
+    pub trailing: HashMap<String, (String, f64)>,
+    ws_order_clock: u64,
+    ws_order_revisions: HashMap<String, u64>,
     executed: HashSet<String>,
     executed_order: std::collections::VecDeque<String>,
     filled: HashMap<String, (f64, f64)>,
@@ -252,6 +270,8 @@ impl BitgetFutures {
             inst_id: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
             coin: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            symbol: Option<&'a str>,
         }
         #[derive(Serialize)]
         struct Subscribe<'a> {
@@ -264,6 +284,7 @@ impl BitgetFutures {
                 .into_iter()
                 .map(|topic| Topic {
                     inst_type: "UTA",
+                    symbol: (topic == "strategy-order").then_some("default"),
                     channel: None,
                     topic: Some(topic),
                     inst_id: None,
@@ -275,6 +296,7 @@ impl BitgetFutures {
                 .into_iter()
                 .map(|channel| Topic {
                     inst_type: &product,
+                    symbol: None,
                     channel: Some(channel),
                     topic: None,
                     inst_id: (channel != "account").then_some("default"),
@@ -300,6 +322,15 @@ impl BitgetFutures {
             return;
         }
         self.account.positions_in_flight = true;
+        let mut coins = std::collections::VecDeque::new();
+        if self.inverse() {
+            for market in cx.store.markets() {
+                if !coins.contains(&market.base) {
+                    coins.push_back(market.base.clone());
+                }
+            }
+        }
+        let coin = coins.pop_front().unwrap_or_else(|| self.coin().to_owned());
         let path = if self.account.uta {
             format!(
                 "{}?category={}",
@@ -311,7 +342,7 @@ impl BitgetFutures {
                 "{}?productType={}&marginCoin={}",
                 paths::POSITIONS,
                 self.product(),
-                self.coin()
+                sign::encode(&coin)
             )
         };
         let at = if self.account.uta {
@@ -325,6 +356,7 @@ impl BitgetFutures {
             Some(at),
             Request::Positions {
                 rows: vec![],
+                coins,
                 started: cx.now,
                 invalid: false,
             },
@@ -354,6 +386,7 @@ impl BitgetFutures {
                 Some(ArrayAt::Envelope(&[&["data"]])),
                 Request::Balance {
                     row: None,
+                    coins: vec![],
                     version,
                     invalid: false,
                 },
@@ -369,6 +402,7 @@ impl BitgetFutures {
             return;
         }
         self.account.orders_in_flight = true;
+        self.account.orders_dirty = false;
         self.order_page(
             cx,
             OrderSnapshot {
@@ -379,7 +413,9 @@ impl BitgetFutures {
                 page_count: 0,
                 rows: vec![],
                 plans: vec![],
+                trailing: vec![],
                 started: cx.now,
+                stream_revision: self.order_revision_clock(),
                 invalid: false,
                 virtual_only,
             },
@@ -398,9 +434,14 @@ impl BitgetFutures {
                 )
             } else {
                 format!(
-                    "{}?category={}&type=tpsl",
+                    "{}?category={}&type={}",
                     paths::UTA_STRATEGIES,
-                    self.product().to_uppercase()
+                    self.product().to_uppercase(),
+                    if source == OrderSource::Trailing {
+                        "trailing_stop"
+                    } else {
+                        "tpsl"
+                    }
                 )
             }
         } else if source == OrderSource::Normal {
@@ -448,8 +489,19 @@ impl BitgetFutures {
                     Err(_) => *invalid = true,
                 }
             }
-            Request::Balance { row, invalid, .. } => match serde_json::from_str::<AccountRow>(item)
-            {
+            Request::Balance {
+                row,
+                coins,
+                invalid,
+                ..
+            } => match serde_json::from_str::<AccountRow>(item) {
+                Ok(value) if self.inverse() => match self.inverse_asset(cx, &value) {
+                    Some(asset) if !coins.iter().any(|a| a.coin.base == asset.coin.base) => {
+                        coins.push(asset)
+                    }
+                    Some(_) => *invalid = true,
+                    None => *invalid = true,
+                },
                 Ok(value) if value.margin_coin == self.coin() || value.coin == self.coin() => {
                     *row = classic_amounts(&value);
                     *invalid |= row.is_none();
@@ -463,13 +515,24 @@ impl BitgetFutures {
                     .map_err(|e| e.to_string())
                     .and_then(|mut row| {
                         if self.account.uta
-                            && snapshot.source == OrderSource::Protection
+                            && snapshot.source != OrderSource::Normal
                             && raw_status(&row).is_empty()
                         {
                             row.status = std::borrow::Cow::Borrowed("live");
                         }
+                        if self.account.uta
+                            && snapshot.source == OrderSource::Trailing
+                            && row.strategy_type.is_empty()
+                        {
+                            row.strategy_type = std::borrow::Cow::Borrowed("trailing_stop");
+                        }
                         let orders = self.map_order(cx, &row)?;
-                        if self.account.uta && snapshot.source == OrderSource::Protection {
+                        if let Some(trailing) = trailing_state(&row) {
+                            for order in &orders {
+                                snapshot.trailing.push((order.id.clone(), trailing.clone()));
+                            }
+                        }
+                        if self.account.uta && snapshot.source != OrderSource::Normal {
                             for order in &orders {
                                 snapshot
                                     .plans
@@ -508,8 +571,8 @@ impl BitgetFutures {
                     self.private_detected(cx);
                 }
                 Ok(header) if header.code.0 == Some(0.0) && response.status == 200 => {
-                    if self.options.testnet {
-                        cx.log(LogLevel::Error, "Bitget testnet UTA is unsupported");
+                    if self.options.testnet || self.inverse() {
+                        cx.log(LogLevel::Error, "Bitget inverse/testnet UTA is unsupported");
                         return;
                     }
                     match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
@@ -561,9 +624,29 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
+                mut coins,
                 started,
                 invalid: false,
             } => {
+                if let Some(coin) = coins.pop_front() {
+                    self.account_request(
+                        cx,
+                        format!(
+                            "{}?productType={}&marginCoin={}",
+                            paths::POSITIONS,
+                            self.product(),
+                            sign::encode(&coin)
+                        ),
+                        Some(ArrayAt::Envelope(&[&["data"]])),
+                        Request::Positions {
+                            rows,
+                            coins,
+                            started,
+                            invalid: false,
+                        },
+                    );
+                    return;
+                }
                 self.account.positions_in_flight = false;
                 let rows = self.merge_positions(cx, rows, started);
                 for p in &rows {
@@ -574,12 +657,16 @@ impl BitgetFutures {
             }
             Request::Balance {
                 row,
+                coins,
                 version,
                 invalid: false,
             } => {
                 self.account.balance_in_flight = false;
                 if self.account.balance_version == version {
-                    if let Some(row) = row {
+                    if self.inverse() && !coins.is_empty() {
+                        self.account.inverse_assets = coins;
+                        self.apply_inverse_balance(cx);
+                    } else if let Some(row) = row {
                         self.apply_balance(cx, row);
                     } else {
                         cx.store.set_balance(cx.store.balance().clone());
@@ -647,7 +734,7 @@ impl BitgetFutures {
                 }
                 let next = match snapshot.source {
                     OrderSource::Normal if !snapshot.virtual_only => Some(OrderSource::Protection),
-                    OrderSource::Protection if !self.account.uta => Some(OrderSource::Trailing),
+                    OrderSource::Protection => Some(OrderSource::Trailing),
                     _ => None,
                 };
                 if let Some(next) = next {
@@ -658,10 +745,39 @@ impl BitgetFutures {
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
+                    for (id, state) in snapshot.trailing {
+                        let newer = self.order_revision(&id) > snapshot.stream_revision
+                            || self
+                                .account
+                                .opened
+                                .get(&id)
+                                .is_some_and(|until| *until >= snapshot.started + 5_000.0);
+                        let terminal = self.account.terminal.contains_key(&id)
+                            || cx.store.order(&id).is_some_and(|o| {
+                                matches!(
+                                    o.status,
+                                    OrderStatus::Canceled
+                                        | OrderStatus::Closed
+                                        | OrderStatus::Canceling
+                                )
+                            });
+                        if !newer && !terminal {
+                            self.account.trailing.insert(id, state);
+                        }
+                    }
                     for (id, plan) in snapshot.plans {
                         self.account.plans.insert(id, plan);
                     }
-                    self.commit_orders(cx, snapshot.rows, snapshot.virtual_only, snapshot.started);
+                    self.commit_orders(
+                        cx,
+                        snapshot.rows,
+                        snapshot.virtual_only,
+                        snapshot.started,
+                        snapshot.stream_revision,
+                    );
+                    if self.account.uta && self.account.orders_dirty {
+                        self.refresh_orders(cx, false);
+                    }
                 }
             }
             Request::Probe => {}
@@ -709,7 +825,7 @@ impl BitgetFutures {
     }
 
     pub(crate) fn promote_uta(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        if self.account.uta || self.options.testnet {
+        if self.account.uta || self.options.testnet || self.inverse() {
             return false;
         }
         self.account.uta = true;
@@ -828,17 +944,19 @@ impl BitgetFutures {
         mut rows: Vec<Order>,
         virtual_only: bool,
         started: f64,
+        stream_revision: u64,
     ) {
         self.account.terminal.retain(|_, until| *until > cx.now);
         self.account.opened.retain(|_, until| *until > cx.now);
         let mut seen = HashSet::new();
         rows.retain(|row| seen.insert(row.id.clone()));
         for row in &mut rows {
-            if self
-                .account
-                .opened
-                .get(&row.id)
-                .is_some_and(|until| *until >= started + 5_000.0)
+            if (self.order_revision(&row.id) > stream_revision
+                || self
+                    .account
+                    .opened
+                    .get(&row.id)
+                    .is_some_and(|until| *until >= started + 5_000.0))
                 && let Some(current) = cx.store.order(&row.id)
             {
                 *row = current.clone();
@@ -873,13 +991,81 @@ impl BitgetFutures {
             for current in cx.store.orders() {
                 if current.status == OrderStatus::Open
                     && !rows.iter().any(|r| r.id == current.id)
-                    && (is_algo(current.kind) || self.account.opened.contains_key(&current.id))
+                    && ((is_algo(current.kind)
+                        && !(self.account.uta && current.kind == OrderType::TrailingStopLoss))
+                        || self.account.opened.contains_key(&current.id)
+                        || self.order_revision(&current.id) > stream_revision)
                 {
                     rows.push(current.clone());
                 }
             }
         }
         cx.store.set_orders(rows);
+    }
+
+    fn inverse_asset(&self, cx: &Cx<'_, Pending>, raw: &AccountRow<'_>) -> Option<InverseAsset> {
+        let coin = first_text(&[&raw.margin_coin, &raw.coin]);
+        if coin.is_empty() {
+            return None;
+        }
+        let amounts = classic_amounts(raw)?;
+        let usd = raw
+            .usdt_equity
+            .0
+            .filter(|v| *v > 0.0)
+            .or_else(|| {
+                cx.store
+                    .tickers()
+                    .iter()
+                    .find(|t| t.symbol == format!("{coin}USD") || t.symbol == format!("{coin}USDT"))
+                    .map(|t| amounts.equity * t.mark)
+            })
+            .unwrap_or(0.0);
+        let rate = if usd > 0.0 && amounts.equity != 0.0 {
+            usd / amounts.equity
+        } else {
+            1.0
+        };
+        let asset = InverseAsset {
+            coin: CoinBalance {
+                base: coin.into(),
+                amount: amounts.equity,
+                notional: if usd != 0.0 { usd } else { amounts.equity },
+            },
+            free: amounts.free * rate,
+            used: (amounts.equity - amounts.free) * rate,
+            total: (amounts.equity - amounts.upnl) * rate,
+            upnl: amounts.upnl * rate,
+        };
+        [
+            asset.coin.amount,
+            asset.coin.notional,
+            asset.free,
+            asset.used,
+            asset.total,
+            asset.upnl,
+        ]
+        .iter()
+        .all(|n| n.is_finite())
+        .then_some(asset)
+    }
+
+    fn apply_inverse_balance(&self, cx: &mut Cx<'_, Pending>) {
+        let mut balance = Balance::default();
+        for a in &self.account.inverse_assets {
+            balance.total += a.total;
+            balance.upnl += a.upnl;
+            balance.used += a.used;
+            balance.free += a.free;
+        }
+        cx.store.set_coin_balances(
+            self.account
+                .inverse_assets
+                .iter()
+                .map(|a| a.coin.clone())
+                .collect(),
+        );
+        cx.store.set_balance(balance);
     }
 
     fn apply_balance(&self, cx: &mut Cx<'_, Pending>, amounts: Amounts) {
@@ -1034,6 +1220,13 @@ impl BitgetFutures {
                         self.emit_execution(cx, &raw, order);
                     }
                     for order in orders {
+                        self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
+                        self.account
+                            .ws_order_revisions
+                            .insert(order.id.clone(), self.account.ws_order_clock);
+                        if let Some(state) = trailing_state(&raw) {
+                            self.account.trailing.insert(order.id.clone(), state);
+                        }
                         if self.account.uta && channel == "strategy-order" {
                             self.account
                                 .plans
@@ -1140,12 +1333,34 @@ impl BitgetFutures {
                 } else if let Ok(message) = serde_json::from_str::<Message<'_, AccountRow>>(text)
                     && let Some(rows) = message.data
                 {
-                    for row in rows {
-                        if (row.margin_coin == self.coin() || row.coin == self.coin())
-                            && let Some(amounts) = classic_amounts(&row)
-                        {
-                            self.apply_balance(cx, amounts);
+                    if self.inverse() {
+                        let assets: Option<Vec<_>> =
+                            rows.iter().map(|row| self.inverse_asset(cx, row)).collect();
+                        if let Some(assets) = assets.filter(|assets| {
+                            let mut seen = HashSet::new();
+                            assets.iter().all(|a| seen.insert(a.coin.base.as_str()))
+                        }) {
+                            if message.action == "snapshot" {
+                                self.account.inverse_assets = assets;
+                            } else {
+                                for asset in assets {
+                                    self.account
+                                        .inverse_assets
+                                        .retain(|a| a.coin.base != asset.coin.base);
+                                    self.account.inverse_assets.push(asset);
+                                }
+                            }
+                            self.apply_inverse_balance(cx);
                             self.account.balance_version += 1;
+                        }
+                    } else {
+                        for row in rows {
+                            if (row.margin_coin == self.coin() || row.coin == self.coin())
+                                && let Some(amounts) = classic_amounts(&row)
+                            {
+                                self.apply_balance(cx, amounts);
+                                self.account.balance_version += 1;
+                            }
                         }
                     }
                 }
@@ -1229,7 +1444,23 @@ impl BitgetFutures {
         true
     }
 
+    pub(crate) fn order_revision_clock(&self) -> u64 {
+        self.account.ws_order_clock
+    }
+
+    pub(crate) fn order_revision(&self, id: &str) -> u64 {
+        self.account
+            .ws_order_revisions
+            .get(id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn mark_opened(&mut self, now: f64, id: &str) {
+        self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
+        self.account
+            .ws_order_revisions
+            .insert(id.to_owned(), self.account.ws_order_clock);
         self.account.opened.insert(id.to_owned(), now + 5_000.0);
     }
 
@@ -1254,6 +1485,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn note_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.uta {
+            self.account.orders_dirty = true;
+            self.refresh_orders(cx, false);
+        }
         if self.account.write_check.is_none() {
             self.account.write_check = Some((cx.set_timer(5_000.0), cx.now));
         }
@@ -1280,6 +1515,12 @@ impl BitgetFutures {
         }
         if self.account.poll == Some(timer) {
             self.account.poll = None;
+            // Keep stream updates and closures until every collateral read completes.
+            if !self.account.positions_in_flight {
+                self.account
+                    .ws_positions
+                    .retain(|_, m| cx.now - m.at < 10_000.0);
+            }
             if self.account.degraded {
                 self.refresh_balance(cx);
                 self.refresh_orders(cx, false);
@@ -1290,18 +1531,21 @@ impl BitgetFutures {
                 self.refresh_balance(cx);
             }
             if self.account.tick.is_multiple_of(4) {
-                self.refresh_orders(cx, true);
+                self.refresh_orders(cx, !self.account.uta);
             }
             self.account.poll = Some(cx.set_timer(2_000.0));
             self.account
                 .filled
                 .retain(|id, (_, at)| cx.now - *at < 600_000.0 || cx.store.order(id).is_some());
             self.account
+                .trailing
+                .retain(|id, _| cx.store.order(id).is_some());
+            self.account.ws_order_revisions.retain(|id, _| {
+                cx.store.order(id).is_some() || self.account.terminal.contains_key(id)
+            });
+            self.account
                 .plans
                 .retain(|id, _| cx.store.order(id).is_some());
-            self.account
-                .ws_positions
-                .retain(|_, m| cx.now - m.at < 10_000.0);
             self.account.terminal.retain(|_, until| *until > cx.now);
             self.account.opened.retain(|_, until| *until > cx.now);
         }
@@ -1329,7 +1573,7 @@ impl BitgetFutures {
         raw: &PositionRow<'_>,
     ) -> Result<Position, String> {
         let symbol = self.normalized_symbol(first_text(&[&raw.inst_id, &raw.symbol]));
-        let contracts = first(&[
+        let native_contracts = first(&[
             raw.total,
             raw.size,
             raw.pos,
@@ -1337,7 +1581,7 @@ impl BitgetFutures {
             raw.available,
         ])
         .ok_or("Bitget position has no size")?;
-        if cx.store.market(&symbol).is_none() || contracts < 0.0 {
+        if cx.store.market(&symbol).is_none() || native_contracts < 0.0 {
             return Err("invalid Bitget position symbol/size".into());
         }
         let side = if matches!(
@@ -1385,12 +1629,31 @@ impl BitgetFutures {
         } else {
             raw.achieved_profits.get() + raw.total_fee.get() - raw.deducted_fee.get()
         };
+        let contracts = if self.inverse() {
+            let reference = cx
+                .store
+                .ticker(&symbol)
+                .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
+                .filter(|p| *p > 0.0)
+                .unwrap_or(entry);
+            if reference > 0.0 {
+                round8(native_contracts / reference)
+            } else {
+                native_contracts
+            }
+        } else {
+            native_contracts
+        };
         Ok(Position {
             id: id.clone(),
             symbol,
             side,
             entry_price: entry,
-            notional: clean(contracts * mark),
+            notional: if self.inverse() {
+                native_contracts
+            } else {
+                clean(contracts * mark)
+            },
             leverage: first(&[raw.leverage, raw.lever]).unwrap_or(1.0),
             margin_type: Some(margin(&raw.margin_mode)),
             position_mode: Some(mode),
@@ -1422,6 +1685,11 @@ impl BitgetFutures {
         }
         let status = order_status(raw_status(raw)).ok_or("unknown Bitget order status")?;
         let kind = order_type(first_text(&[
+            if raw.strategy_type == "trailing_stop" {
+                "trailing_stop"
+            } else {
+                ""
+            },
             &raw.plan_type,
             &raw.order_type,
             &raw.ord_type,
@@ -1435,7 +1703,9 @@ impl BitgetFutures {
                 OrderSide::Sell
             });
         let protected = first_text(&[&raw.hold_side, &raw.pos_side]);
-        if !raw.plan_type.is_empty() && matches!(protected, "long" | "short" | "buy" | "sell") {
+        if (!raw.plan_type.is_empty() || (self.account.uta && kind.is_none()))
+            && matches!(protected, "long" | "short" | "buy" | "sell")
+        {
             side = if matches!(protected, "long" | "buy") {
                 OrderSide::Sell
             } else {
@@ -1470,6 +1740,8 @@ impl BitgetFutures {
             raw.stoploss,
         ])
         .filter(|v| *v > 0.0);
+        let native_remaining = clean((amount - filled).max(0.0));
+        let raw_price = first(&[raw.price, raw.px]).unwrap_or(0.0);
         let base = Order {
             id,
             parent_id: None,
@@ -1477,16 +1749,26 @@ impl BitgetFutures {
             status,
             kind: kind.unwrap_or(OrderType::StopLoss),
             side,
-            price: if !raw.plan_type.is_empty() {
+            price: if raw.strategy_type == "trailing_stop" {
+                raw.trailing_stop_params
+                    .as_ref()
+                    .and_then(|p| p.activation_price.0)
+                    .ok_or("Bitget trailing order missing activation price")?
+            } else if !raw.plan_type.is_empty() {
                 first(&[raw.trigger_price, raw.trigger_px]).unwrap_or(0.0)
             } else {
                 first(&[raw.price, raw.px]).unwrap_or(0.0)
             },
             amount,
             filled,
-            remaining: clean((amount - filled).max(0.0)),
+            remaining: if self.inverse() && raw_price > 0.0 {
+                round8(native_remaining / raw_price)
+            } else {
+                native_remaining
+            },
             reduce_only: raw.reduce_only.0
                 || !raw.plan_type.is_empty()
+                || (raw.strategy_type == "trailing_stop" && !unsupported_trailing_exposure(raw))
                 || [&raw.trade_side, &raw.t_s, &raw.side].iter().any(|value| {
                     matches!(
                         value.as_ref(),
@@ -1515,16 +1797,25 @@ impl BitgetFutures {
             ),
             last_update: first(&[raw.u_time, raw.updated_time, raw.c_time, raw.created_time])
                 .unwrap_or(cx.now),
-            trigger_type: (!raw.plan_type.is_empty()).then_some(
-                if raw.trigger_type == "fill_price" {
-                    StopTriggerType::LastPrice
-                } else {
-                    StopTriggerType::MarkPrice
-                },
-            ),
+            trigger_type: (!raw.plan_type.is_empty() || raw.strategy_type == "trailing_stop")
+                .then_some(
+                    if raw.trigger_type == "fill_price"
+                        || raw
+                            .trailing_stop_params
+                            .as_ref()
+                            .is_some_and(|p| p.activation_type == "market")
+                    {
+                        StopTriggerType::LastPrice
+                    } else {
+                        StopTriggerType::MarkPrice
+                    },
+                ),
             take_profit: tp,
             stop_loss: sl,
-            extra: None,
+            extra: self.inverse().then_some(OrderExtra {
+                remaining_native: Some(native_remaining),
+                ..OrderExtra::default()
+            }),
         };
         let mut orders = vec![];
         if kind.is_none() {
@@ -1624,7 +1915,7 @@ pub(crate) fn order_type(value: &str) -> Option<OrderType> {
         "market" => OrderType::Market,
         "pos_loss" | "loss_plan" | "psl" | "sl" => OrderType::StopLoss,
         "pos_profit" | "profit_plan" | "ptp" | "tp" => OrderType::TakeProfit,
-        "track_plan" | "track" => OrderType::TrailingStopLoss,
+        "track_plan" | "track" | "trailing_stop" => OrderType::TrailingStopLoss,
         _ => return None,
     })
 }
@@ -1665,7 +1956,7 @@ pub(crate) fn order_side(value: &str) -> Option<OrderSide> {
 }
 fn classic_amounts(row: &AccountRow<'_>) -> Option<Amounts> {
     Some(Amounts {
-        equity: first(&[row.union_total_margin, row.account_equity])?,
+        equity: first(&[row.union_total_margin, row.account_equity, row.equity])?,
         free: first(&[row.union_available, row.available])?,
         upnl: row
             .unrealized_pl
@@ -1686,4 +1977,50 @@ fn uta_amounts(row: &UtaBalance<'_>, coin: &str) -> Option<Amounts> {
             .or_else(|| asset.and_then(|a| a.available.0))?,
         upnl: first(&[row.unrealised_pnl, row.usdt_unrealised_pnl]).unwrap_or(0.0),
     })
+}
+
+fn round8(value: f64) -> f64 {
+    (value * 100_000_000.0).round() / 100_000_000.0
+}
+
+fn unsupported_trailing_exposure(raw: &OrderRow<'_>) -> bool {
+    if raw.strategy_type != "trailing_stop" {
+        return false;
+    }
+    match (raw.side.as_ref(), raw.pos_side.as_ref()) {
+        ("buy", "long" | "buy") | ("sell", "short" | "sell") => true,
+        ("sell", "long" | "buy") | ("buy", "short" | "sell") => false,
+        // Replacing side-only or net orders is safe only with explicit reduce-only intent.
+        _ => !raw.reduce_only.0,
+    }
+}
+
+fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
+    if let Some(params) = &raw.trailing_stop_params {
+        let value = params.trail_variance.0.filter(|v| *v > 0.0)?;
+        if unsupported_trailing_exposure(raw)
+            || (!params.pre_order_type.is_empty() && params.pre_order_type != "market")
+            || (!params.activation_type.is_empty()
+                && !matches!(params.activation_type.as_str(), "mark" | "market"))
+        {
+            return Some(("unsupported".into(), value));
+        }
+        if !matches!(params.trail_type.as_str(), "distance" | "spread" | "ratio") {
+            return None;
+        }
+        // REST names price distance "spread"; placement names the same mode "distance".
+        Some((
+            if params.trail_type == "spread" {
+                "distance".into()
+            } else {
+                params.trail_type.clone()
+            },
+            value,
+        ))
+    } else {
+        raw.callback_ratio
+            .0
+            .filter(|v| *v > 0.0)
+            .map(|v| ("ratio".to_owned(), v))
+    }
 }

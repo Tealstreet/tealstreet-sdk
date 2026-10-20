@@ -121,6 +121,20 @@ const binanceFixes = (account, rustAccount) => {
 const KNOWN_TS_FIXES = {
   // Independent documented-tape oracle; native request/protocol counters remain exact.
   orderly: (ts) => fixOrderly(ts, tapeRecords),
+  // WOO repairs live in the TS reference itself; no result normalization:
+  // exact integer IDs; order-axis journal provenance; camel-case aliases;
+  // monotonic cumulative/terminal state and reconciled optimistic fill deltas;
+  // nested algo child executions and minimal terminal parent tombstones;
+  // execution-ID dedup and per-execution fills; atomic failed-page snapshots
+  // including malformed nested executable leaves;
+  // STOP direction/source and buy-trailing inference; exact tick splitting;
+  // sized protections, full-position trailing and sibling preservation;
+  // mandatory rounded amendment quantities; both-family cancellation;
+  // unsupported Conditional preflight; authoritative account hedge mode;
+  // clear synthetic flat marginSize when an authoritative holding reopens;
+  // paced, complete V1 income with signed fees and account aggregate scope.
+  // Rust additionally walks V3 fill time windows (TS still reads one page).
+  woo: [],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
@@ -141,6 +155,7 @@ const KNOWN_TS_FIXES = {
       'Use UTA execution IDs, quantities and prices from the fill topic.',
       'Keep both TP/SL legs of status-less UTA strategy rows.',
       'Include UTA totalFundingFee in realized PnL.',
+      'Derive UTA TPSL closing direction from the protected position side, preserving ordinary execution directions.',
       'Use cumulative executed size for orders and deduplicate executions.',
       'Do not emit an execution for an algo trigger acknowledgement.',
       'Split normal orders at floored max lots without losing requested volume.',
@@ -148,6 +163,12 @@ const KNOWN_TS_FIXES = {
       'Resolve native modify identity using the fresh newClientOid.',
       'Never cancel-replace an amendment after an ambiguous transport/server result.',
       'Report incomplete or malformed financial history as a failed read.',
+      'Read UTA bills through financial-records; retain raw signed deltas and fee metadata without assuming gross PnL.',
+      'Support documented UTA trailing strategies without unsupported clientOid fields.',
+      'Amend Classic trailing via modify-plan-order and cancel with orderIdList; preserve callback on size-only edits.',
+      'Use documented Classic hedge-close trailing side and validate callback/lot before writes.',
+      'Normalize inverse private WS sizing and aggregate all collateral coins in USD like REST.',
+      'Clamp inverse sized stops in native contracts and preserve size on amend instead of downgrading to full-position.',
     ],
   },
 

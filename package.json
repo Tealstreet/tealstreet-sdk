@@ -20,6 +20,9 @@
     "rust:private-tape-orderly": "node sdk-rs/harness/private-tape-orderly.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-bitget-uta": "node sdk-rs/harness/private-tape-bitget-uta.mjs",
+    "rust:private-tape-bitgetinverse": "node sdk-rs/harness/private-tape-bitgetinverse.mjs",
+    "rust:test-bitget-parity": "node --test sdk-rs/harness/bitget-parity.integration.mjs",
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
     "rust:private-tape-hyperliquid": "node sdk-rs/harness/private-tape-hyperliquid.mjs",
@@ -33,7 +36,8 @@
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:replay": "node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
-    "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs"
+    "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

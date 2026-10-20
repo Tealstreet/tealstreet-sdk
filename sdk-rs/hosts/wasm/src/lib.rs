@@ -8,6 +8,7 @@
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -19,7 +20,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, orderly, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -52,6 +53,8 @@ use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+#[cfg(feature = "woo")]
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -93,6 +96,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
+    feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
@@ -111,6 +115,7 @@ struct EngineOptions {
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "orderly",
@@ -136,7 +141,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "orderly"))]
+    #[cfg(any(feature = "hyperliquid", feature = "orderly", feature = "woo"))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -578,6 +583,7 @@ impl WasmEngine {
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
+        feature = "woo",
         feature = "cryptocom",
         feature = "bingx",
         feature = "mexc",
@@ -669,6 +675,14 @@ impl WasmEngine {
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
             }))),
+            #[cfg(feature = "woo")]
+            "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+            }))),
             #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
                 testnet: options.testnet,
@@ -677,7 +691,7 @@ impl WasmEngine {
                 secret: options.secret,
             }))),
             #[cfg(feature = "bitget")]
-            "bitget" | "bitgetusdc" => {
+            "bitget" | "bitgetusdc" | "bitgetinverse" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
                     && options.secret.as_ref().is_some_and(|s| !s.is_empty())
@@ -691,7 +705,9 @@ impl WasmEngine {
                     key: options.key,
                     secret: options.secret,
                     passphrase: options.passphrase,
-                    product: if venue == "bitgetusdc" {
+                    product: if venue == "bitgetinverse" {
+                        Product::Inverse
+                    } else if venue == "bitgetusdc" {
                         Product::Usdc
                     } else {
                         Product::Usdt
