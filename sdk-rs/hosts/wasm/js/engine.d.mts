@@ -9,8 +9,9 @@ export class WasmEngine implements WasmEngineLike {
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;
-  wsMessageActions(socket: number, text: string, now: number): string | undefined;
-  wsMessageBytes(socket: number, bytes: Uint8Array, now: number): string | undefined;
+  /** Optional text fast paths; Paradex-only builds use wsMessage for controls. */
+  wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary(socket: number, data: Uint8Array, now: number): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;

@@ -8,20 +8,22 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+# Paradex streams binary SBE; its JSON control messages use the stable text entry.
+text-ingress = []
 paradex = ["dep:safe-cex-venue-paradex"]
-apexomni = ["dep:safe-cex-venue-apexomni"]
-kraken = ["dep:safe-cex-venue-kraken"]
-asterdex = ["dep:safe-cex-venue-asterdex"]
-lighter = ["dep:safe-cex-venue-lighter"]
-woo = ["dep:safe-cex-venue-woo"]
-bitrue = ["dep:safe-cex-venue-bitrue"]
-bitget = ["dep:safe-cex-venue-bitget"]
-backpack = ["dep:safe-cex-venue-backpack"]
-blofin = ["dep:safe-cex-venue-blofin"]
-mexc = ["dep:safe-cex-venue-mexc"]
-bingx = ["dep:safe-cex-venue-bingx"]
-weex = ["dep:safe-cex-venue-weex"]
-phemex = ["dep:safe-cex-venue-phemex"]
+apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress"]
+kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
+asterdex = ["dep:safe-cex-venue-asterdex", "text-ingress"]
+lighter = ["dep:safe-cex-venue-lighter", "text-ingress"]
+woo = ["dep:safe-cex-venue-woo", "text-ingress"]
+bitrue = ["dep:safe-cex-venue-bitrue", "text-ingress"]
+bitget = ["dep:safe-cex-venue-bitget", "text-ingress"]
+backpack = ["dep:safe-cex-venue-backpack", "text-ingress"]
+blofin = ["dep:safe-cex-venue-blofin", "text-ingress"]
+mexc = ["dep:safe-cex-venue-mexc", "text-ingress"]
+bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
+weex = ["dep:safe-cex-venue-weex", "text-ingress"]
+phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
 default = [
     "paradex",
     "apexomni",
@@ -46,14 +48,14 @@ default = [
     "orderly",
     "phemex",
 ]
-cryptocom = ["dep:safe-cex-venue-cryptocom"]
-binance = ["dep:safe-cex-venue-binance"]
-kucoin = ["dep:safe-cex-venue-kucoin"]
-kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
-bybit = ["dep:safe-cex-venue-bybit"]
-hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
-okx = ["dep:safe-cex-venue-okx"]
-orderly = ["dep:safe-cex-venue-orderly"]
+cryptocom = ["dep:safe-cex-venue-cryptocom", "text-ingress"]
+binance = ["dep:safe-cex-venue-binance", "text-ingress"]
+kucoin = ["dep:safe-cex-venue-kucoin", "text-ingress"]
+kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "text-ingress"]
+bybit = ["dep:safe-cex-venue-bybit", "text-ingress"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid", "text-ingress"]
+okx = ["dep:safe-cex-venue-okx", "text-ingress"]
+orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
 
 [dependencies]
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }

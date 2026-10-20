@@ -247,6 +247,12 @@ Routing uses the account's existing Tealstreet resolver. Routed Paradex requests
 carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JWT
 `Authorization: Bearer …` header.
 
+Paradex-only WASM builds retain `wsBinary` for SBE and the stable `wsMessage`
+entry for JSON controls. The optional text byte/empty-action entries are enabled
+by the other venues through the `text-ingress` feature; mixed/default builds
+keep them. The host selects its existing text fallback when those entries are
+absent, keeping the binary feed and account routing unchanged.
+
 **Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
 **Keepalive**: The venue uses RFC6455 control pings; socket libraries answer with

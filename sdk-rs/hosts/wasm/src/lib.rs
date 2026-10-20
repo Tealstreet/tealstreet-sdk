@@ -1168,6 +1168,7 @@ impl WasmEngine {
 
     /// Like `wsMessage`, returning `undefined` when there are no host actions.
     /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
+    #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageActions)]
     pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
         let actions = self.ws_message(socket, text, now);
@@ -1175,6 +1176,7 @@ impl WasmEngine {
     }
 
     /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
+    #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageBytes)]
     pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
         let text = std::str::from_utf8(bytes).ok()?;
@@ -1400,11 +1402,13 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "text-ingress")]
     #[derive(Default)]
     struct Messages {
         actions: Vec<Action>,
     }
 
+    #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
         fn start(&mut self, _now: f64) {}
         fn handle(&mut self, _now: f64, event: Event<'_>) {
@@ -1430,6 +1434,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "text-ingress")]
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
@@ -1452,6 +1457,7 @@ mod tests {
         assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
     }
 
+    #[cfg(feature = "text-ingress")]
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
