@@ -234,6 +234,12 @@ impl Okx {
         }) {
             return Err("Bybit execution controls are supported only on Bybit".into());
         }
+        if orders
+            .iter()
+            .any(|order| order.implied_volatility.is_some())
+        {
+            return Err("Implied volatility is supported only for options".into());
+        }
         let mut seen = HashSet::new();
         for o in &orders {
             let m = cx
@@ -708,6 +714,7 @@ impl Okx {
                     max_slippage_pct: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
+                    implied_volatility: None,
                 }],
             )?;
             result.steps.extend(replacement.steps);

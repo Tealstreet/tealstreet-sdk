@@ -102,7 +102,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
-| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss; optional trailing f64 column remainingNative (NaN when absent per row) |
+| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss; optional trailing f64 columns remainingNative, then filledInPlacementUnits (NaN when absent per row) |
 | 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
@@ -111,6 +111,9 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
 | 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
 | 15 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
+| 16 | `INSTRUMENT_CLASSIFICATIONS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][3]` (native symbolType, marketRegion, underlyingTicker); absent and explicitly empty strings differ |
+| 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
+| 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve
@@ -496,9 +499,9 @@ ported. The linked inventory records exact callers and product constraints.
 | `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
 | `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
 | `binanceinverse` | Opt-in COIN-M; native contract quantities, USD-per-contract multiplier, base position quantities and coin-denominated PnL/margin; worker/main native-count/quote-notional bridge retained. Regular/stops/trailing, identity/final-fill-safe replacement, caller client IDs rejected. Public trades implemented; private histories retain TS empty-result contract. Keep USD-M/PM controls and [exact scope/evidence](BINANCE_VARIANTS_PORT.md). |
-| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; combined inverse/options toggles and semantic instrument classification remain blockers. Hyro live connectivity unverified. Preserve region/Hyro policy helpers. |
+| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; typed native classification now survives worker/main frames and the real CLI TradFi preflight. The `bybit` linear account supports all four inverse/options flag combinations in its existing crate, with category-specific feeds, reconciliation, native quantities, option terms, chain/expiries and account/position Greeks. Plain option limit/market and limit-IV orders retain sizing/caller IDs; unsupported option controls and queries fail explicitly. Standalone inverse/spot/demo/Hyro retain their own profile boundaries; they do not inherit combined options merely from registration. Actual TS/native and documented private fixtures do not prove live combined/private connectivity; Hyro live connectivity remains unverified. Preserve region/Hyro policy helpers and remaining consumer/default blockers; [scope/evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | Opt-in; keep inverse/native sizing, UTA ledger/trailing and account-mode evidence; extract shared transport constants. |
-| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; native chaser bridge, linear/inverse SWAP and EEA ruleType=xperp FUTURES are covered by the parity sweep, preserving native contract counts and coin collateral. All four profiles have deterministic private lifecycle evidence; inverse/X-Perp public captures pass through the strict replay. Live account eligibility remains unverified. Extract broker constants. |
+| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; global linear/inverse swaps and EU `FUTURES` with `ruleType=xperp` share the existing crate. Preserve native placement counts, inverse base quantities at reference price, USD-valued position PnL/margin, native ledger currency, worker/main chaser sizing and account-scoped EU discovery. The parity sweep additionally preserves primary definitive lookup and secondary GET routing. Private subscriptions/reconciliation and product-scoped/joined histories retain host/demo boundaries; documented fixtures and live public captures do not prove live private units or connectivity. Defaults, external-public/account overlays, broker extraction and other consumer gates remain prerequisites; [scope/evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `apexomni` | Opt-in; preserve native zkLink/API-key and consumer/protocol evidence. |
 | `asterdex` | Opt-in; retain V1/V3, builder/STP, public wallet/approval exports and secondary-read-key policy. |
 | `backpack` | Opt-in; perpetuals and uint32 decimal IDs, no spot claim. |
@@ -530,12 +533,15 @@ cutover or deletion:
 - `privateOnly` does not currently suppress Rust public sockets, and Rust does
   not initialize/use the TS `externalPublicData` provider. Replace these with
   explicit shared-public-feed policy and test private-worker/provider fan-out.
-- Rust frames carry typed Polymarket prediction/holding metadata, reconstructed
-  into its specific `info` fields; they do not carry arbitrary native `info`.
-  Bybit's instrument classifier still lacks `info.symbolType`, so CLI TradFi
-  preflight returns unknown and no longer enforces the existing refusal. Carry
-  typed semantic classification
-  through frames and test the real preflight before changing those defaults.
+- Rust frames carry typed Polymarket prediction/holding metadata and typed
+  instrument/product metadata; they do not carry arbitrary native `info`.
+  Bybit's native `symbolType`, `marketRegion` and `underlyingTicker` now survive
+  real discovery, worker application, buffer transfer and main application.
+  The real CLI preflight refuses classified stock/ETF/commodity/FX instruments;
+  empty and innovation crypto labels pass, while absent/new labels remain
+  unknown. This closes that metadata gap within the documented fixture scope;
+  it does not change defaults or certify live private connectivity. See
+  [product semantics evidence](RUST_PRODUCT_SEMANTICS.md).
 - `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
   exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
   starts are empty and forced refresh does not refresh native metadata. Define

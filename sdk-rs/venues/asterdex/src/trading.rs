@@ -916,6 +916,7 @@ fn empty_order() -> PlaceOrderOpts {
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
     }
 }
 fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> Job {

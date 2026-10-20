@@ -1,6 +1,75 @@
 //! V5 products share routes; categories, socket depth and account capabilities differ.
 use crate::Options;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Category {
+    Linear,
+    Inverse,
+    Spot,
+    Option,
+}
+
+impl Category {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Inverse => "inverse",
+            Self::Spot => "spot",
+            Self::Option => "option",
+        }
+    }
+
+    pub(crate) fn for_symbol(symbol: &str) -> Self {
+        if !symbol.contains('-') {
+            return if crate::account::is_inverse_symbol(symbol) {
+                Self::Inverse
+            } else {
+                Self::Linear
+            };
+        }
+        let parts: Vec<&str> = symbol.split('-').collect();
+        if let [base, expiry, strike, right, ..] = parts.as_slice() {
+            let expiry = expiry.as_bytes();
+            let day = expiry
+                .iter()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            let expiry_valid = (1..=2).contains(&day)
+                && expiry.len() == day + 5
+                && expiry[day..day + 3].iter().all(u8::is_ascii_uppercase)
+                && expiry[day + 3..].iter().all(u8::is_ascii_digit);
+            let mut decimals = strike.split(['d', '.']);
+            let integer = decimals.next().unwrap_or_default();
+            let fraction = decimals.next();
+            let strike_valid = !integer.is_empty()
+                && integer.bytes().all(|byte| byte.is_ascii_digit())
+                && fraction.is_none_or(|part| {
+                    !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+                })
+                && decimals.next().is_none();
+            if !base.is_empty()
+                && base
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+                && expiry_valid
+                && strike_valid
+                && matches!(*right, "C" | "P")
+                && (parts.len() == 4
+                    || (parts.len() == 5
+                        && !parts[4].is_empty()
+                        && parts[4].bytes().all(|byte| byte.is_ascii_uppercase())))
+            {
+                return Self::Option;
+            }
+        }
+        if crate::account::is_inverse_symbol(symbol) {
+            Self::Inverse
+        } else {
+            Self::Linear
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Variant {
     #[default]

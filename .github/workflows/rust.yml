@@ -238,6 +238,9 @@ jobs:
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
+      - name: Native product semantics through the real CLI preflight
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-product-semantics
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
@@ -307,6 +310,9 @@ jobs:
       - name: Bitget UTA ledger and Classic/UTA trailing native contracts
         if: matrix.venue == 'bitget'
         run: yarn rust:test-bitget-parity
+      - name: OKX EU X-Perp public products (correctness, CPU and memory)
+        if: matrix.venue == 'okx'
+        run: yarn rust:gate --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |

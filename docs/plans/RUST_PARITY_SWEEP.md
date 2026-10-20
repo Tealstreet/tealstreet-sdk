@@ -597,3 +597,37 @@ than treating the original port boundary as a waiver.
 - RuntimeheadCI39/39PASS. This documentation-only checkpoint changes no
   runtime source; wait for exact final PR-head greenCI, merge into
   feat/rust-rewrite, then cut a fresh follow-up branch.
+
+### Landing product-semantics union after completed local verification
+
+- While final documentation-head CI ran, landing advanced to5e92f93a/PR1341.
+  Its shared product metadata, Bybit combined products and OKX units overlap
+  this branch. Merge it before landing; resolve conflicts by retaining the
+  incoming typed semantics plus reviewed lookup/read-routing/equity safeguards.
+- NativeOKX, SDK/frame and harness/WASM/Bybit conflict work is delegated to
+  disjoint reviewers. Root owns documentation and final integration. Preserve
+  both independent regression suites and actual product fixtures; no financial
+  normalization, threshold change or budget increase.
+- Completed96a39runtime receipts and both first CPU misses/control diagnoses
+  remain historical evidence. Fresh merged-source verification is required;
+  previous72accepted checks are not relabeled as proof of this later union.
+
+- Product union conflict resolution checkpoint: incoming metadata/classification,
+  combined Bybit options and USD-facing OKX risk retained with all lookup,
+  read-credential, exact-filled and equity-revision safeguards.54focusedTS
+  cases and3reference integrations PASS, including7race controls. New fresh
+  REST reference drives real revision-fenced read rather than assuming a new
+  array is fresh; explicit-empty ticker quotes retain proven values and
+  malformed supplied quotes remain visible.
+- First merged native119-case target had one incoming placement setup failure:
+  it omitted completed account reconciliation. Complete the test setup and
+  preserve readiness preflight/economic assertions. Independent native review
+  found missing order currency reserve attribution; fallback to proven settle
+  currency for REST/WS orders, with linearUSDT/inverseBTC regressions. All41
+  product cases PASS; fresh complete workspace/combined checks follow.
+- Independent registration and SDK unit/provenance reviews PASS; native reserve
+  fix re-review pending. New CI inventory102replays(39public/63private),
+  34Rust jobs. Parentadds incomingEEA publiccapture:8OKXreplays, so72planned
+  selected local replays plus separate combinedGRVT=73proofs on the new union.
+  Child manifest remains136steps/64replays/28builds; combined product-control
+  group adds16cases. No old scores are attributed to this new runtime.

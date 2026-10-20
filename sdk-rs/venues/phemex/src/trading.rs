@@ -684,6 +684,7 @@ impl PhemexPerpetuals {
             stp_mode: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
         };
         let mut replacement = self.place_plan(cx, vec![opts])?;
         if let Some(step) = replacement.front_mut() {

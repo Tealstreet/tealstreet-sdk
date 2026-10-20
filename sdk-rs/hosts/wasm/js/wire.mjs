@@ -19,6 +19,9 @@ export const SECTION = {
   PREDICTION_MARKETS: 13,
   PREDICTION_HOLDINGS: 14,
   BOOK_DELTA: 15,
+  INSTRUMENT_CLASSIFICATIONS: 16,
+  DERIVATIVE_PRODUCTS: 17,
+  POSITION_GREEKS: 18,
 };
 
 export const NONE = 0xffffffff;
@@ -177,6 +180,55 @@ export class Frame {
     };
   }
 
+  /** Native labels preserve absent and explicitly empty values independently. */
+  instrumentClassifications() {
+    const section = this.first(SECTION.INSTRUMENT_CLASSIFICATIONS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    if (4 + count * 16 > section.length) throw new Error('Truncated instrument classifications');
+    const market = new Uint32Array(this.buffer, section.offset + 4, count);
+    const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count * 3);
+    return { count, market,
+      symbolType: (i) => this.string(refs[i * 3]),
+      marketRegion: (i) => this.string(refs[i * 3 + 1]),
+      underlyingTicker: (i) => this.string(refs[i * 3 + 2]),
+    };
+  }
+
+  derivativeProducts() {
+    const section = this.first(SECTION.DERIVATIVE_PRODUCTS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    const data = align8(section.offset + 4 + count * 28);
+    if (data + count * 16 > section.offset + section.length) throw new Error('Truncated derivative products');
+    const market = new Uint32Array(this.buffer, section.offset + 4, count);
+    const kind = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count);
+    const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 8, count * 5);
+    for (const value of kind) if (value < 1 || value > 3) throw new Error('Unknown derivative product kind');
+    return { count, market, kind,
+      expiry: new Float64Array(this.buffer, data, count),
+      strike: new Float64Array(this.buffer, data + count * 8, count),
+      underlying: (i) => this.string(refs[i * 5]),
+      settleAsset: (i) => this.string(refs[i * 5 + 1]),
+      premiumAsset: (i) => this.string(refs[i * 5 + 2]),
+      style: (i) => this.string(refs[i * 5 + 3]),
+      settlement: (i) => this.string(refs[i * 5 + 4]),
+    };
+  }
+
+  positionGreeks() {
+    const section = this.first(SECTION.POSITION_GREEKS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    const data = align8(section.offset + 4 + count * 8);
+    if (data + count * 32 > section.offset + section.length) throw new Error('Truncated position Greeks');
+    const refs = new Uint32Array(this.buffer, section.offset + 4, count * 2);
+    return { count, ...columns(this.buffer, data, count, ['delta', 'gamma', 'vega', 'theta']),
+      positionId: (i) => this.string(refs[i * 2]),
+      units: (i) => this.string(refs[i * 2 + 1]),
+    };
+  }
+
   /** Optional outcome identity/signing metadata, keyed by current market index. */
   predictionMarkets() {
     const section = this.first(SECTION.PREDICTION_MARKETS);
@@ -287,6 +339,9 @@ export class Frame {
       ...columns(buffer, data, count, ORDER_COLUMNS),
       ...(count && native + count * 8 <= section.offset + section.length
         ? { remainingNative: new Float64Array(buffer, native, count) }
+        : {}),
+      ...(count && native + count * 16 <= section.offset + section.length
+        ? { filledInPlacementUnits: new Float64Array(buffer, native + count * 8, count) }
         : {}),
       id: (i) => frame.string(refs[i * 3]),
       clientOrderId: (i) => frame.string(refs[i * 3 + 1]),

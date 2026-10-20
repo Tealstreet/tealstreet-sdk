@@ -92,6 +92,37 @@ export class FrameApplier {
           };
         }
       }
+      const classifications = frame.instrumentClassifications?.();
+      if (classifications) {
+        for (let i = 0; i < classifications.count; i++) {
+          const market = rows[classifications.market[i]];
+          if (!market) throw new Error('Instrument classification has no market');
+          market.info = {
+            ...market.info,
+            symbolType: classifications.symbolType(i),
+            marketRegion: classifications.marketRegion(i),
+            underlyingTicker: classifications.underlyingTicker(i),
+          };
+        }
+      }
+      const products = frame.derivativeProducts?.();
+      if (products) {
+        for (let i = 0; i < products.count; i++) {
+          const market = rows[products.market[i]];
+          if (!market) throw new Error('Derivative product has no market');
+          const kind = products.kind[i];
+          const expiry = finite(products.expiry[i]);
+          const strike = finite(products.strike[i]);
+          const style = products.style(i);
+          const settlement = products.settlement(i);
+          const settleAsset = products.settleAsset(i);
+          const premiumAsset = products.premiumAsset(i);
+          market.info = { ...market.info, instrumentKind: kind === 1 ? 'FUTURE' : kind === 2 ? 'CALL' : 'PUT', underlying: products.underlying(i), expiry, strike };
+          if (kind !== 1 && expiry !== undefined && strike !== undefined && style === 'european' && settlement === 'cash' && settleAsset && premiumAsset) {
+            market.option = { underlying: products.underlying(i), expiry, strike, right: kind === 2 ? 'call' : 'put', style, settlement, settleAsset, premiumAsset };
+          }
+        }
+      }
       update.markets = rows;
     }
 
@@ -132,18 +163,27 @@ export class FrameApplier {
         const market = update.markets?.[orders.market[i]] ?? this.store.marketsBySymbol[symbol];
         const native = orders.remainingNative?.[i];
         const regular = enums.type === 'limit' || enums.type === 'market';
+        const placementFill = orders.filledInPlacementUnits?.[i];
+        const exactPlacementFill = placementFill !== undefined && Number.isFinite(placementFill) ? placementFill : undefined;
         const nativeExtra = this.contractCountAmounts
           ? native !== undefined && Number.isFinite(native)
-            ? { remainingNative: native,
-                ...(regular && orders.amount[i] >= native && { filledInPlacementUnits: subtract(orders.amount[i], native) }),
+            ? {
+                remainingNative: native,
+                ...(market?.isInverse && { remainingNotional: native * this.contractSizes[orders.market[i]] }),
+                ...(exactPlacementFill !== undefined
+                  ? { filledInPlacementUnits: exactPlacementFill }
+                  : regular && orders.amount[i] >= native && { filledInPlacementUnits: subtract(orders.amount[i], native) }),
               }
             : !market?.isInverse
-              ? { remainingNative: divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
-                  ...(regular && { filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]) }),
+              ? {
+                  remainingNative: divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
+                  ...(exactPlacementFill !== undefined
+                    ? { filledInPlacementUnits: exactPlacementFill }
+                    : regular && { filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]) }),
                 }
-              : undefined
+              : exactPlacementFill !== undefined ? { filledInPlacementUnits: exactPlacementFill } : undefined
           : market?.isInverse && native !== undefined && Number.isFinite(native)
-            ? { remainingNative: native, remainingNotional: native * (this.inverseContractSized ? this.contractSizes[orders.market[i]] : 1) }
+            ? { remainingNative: native, remainingNotional: native * (this.inverseContractSized || this.nativePlacementAmounts ? this.contractSizes[orders.market[i]] : 1) }
             : this.inverseNativeAmounts
               ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
               : undefined;
@@ -155,7 +195,11 @@ export class FrameApplier {
                 remainingNative: native !== undefined && Number.isFinite(native)
                   ? native
                   : divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
-                filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]),
+                filledInPlacementUnits: exactPlacementFill !== undefined
+                  ? exactPlacementFill
+                  : market?.isInverse
+                    ? undefined
+                    : divide(orders.filled[i], this.contractSizes[orders.market[i]]),
               }),
             }
           : undefined;
@@ -188,6 +232,13 @@ export class FrameApplier {
     const positions = frame.positions();
     if (positions) {
       const rows: Position[] = [];
+      const greekTable = frame.positionGreeks?.();
+      const greeksById = new Map<string, NonNullable<Position['option']>>();
+      if (greekTable) {
+        for (let i = 0; i < greekTable.count; i++) {
+          greeksById.set(greekTable.positionId(i), { greeks: { delta: greekTable.delta[i], gamma: greekTable.gamma[i], vega: greekTable.vega[i], theta: greekTable.theta[i], units: greekTable.units(i) } });
+        }
+      }
       const predictionHoldings = frame.predictionHoldings?.();
       const holdingFlags = predictionHoldings && new Map<number, number>();
       if (predictionHoldings) {
@@ -198,8 +249,10 @@ export class FrameApplier {
         const symbol = this.symbol(positions.market[i]);
         const market = update.markets?.[positions.market[i]] ?? this.store.marketsBySymbol[symbol];
         const mode = enums.positionMode as PositionMode | undefined;
+        const id = positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol);
         rows.push({
-          id: positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol),
+          id,
+          ...(greeksById.has(id) && { option: greeksById.get(id) }),
           symbol,
           side: enums.side as Position['side'],
           ...(market?.info?.conditionId && {
@@ -221,7 +274,10 @@ export class FrameApplier {
             }),
             ...(this.contractCountAmounts
               ? { contractsNative: divide(market?.isInverse ? positions.notional[i] : positions.contracts[i], this.contractSizes[positions.market[i]]) }
-              : (market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i] / (this.inverseContractSized ? this.contractSizes[positions.market[i]] : 1), unrealizedPnlNative: positions.unrealizedPnl[i] }),
+              : (market?.isInverse || this.inverseNativeAmounts) && {
+                  contractsNative: divide(positions.notional[i], this.inverseContractSized || this.nativePlacementAmounts ? this.contractSizes[positions.market[i]] : 1),
+                  ...(!this.nativePlacementAmounts && { unrealizedPnlNative: positions.unrealizedPnl[i] }),
+                }),
           } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),

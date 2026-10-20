@@ -1,6 +1,6 @@
 //! Private streams and atomic REST reconciliation, guarded against newer pushes.
 use crate::wire::*;
-use crate::{Okx, Pending, Topic, usd};
+use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,16 @@ fn add(a: f64, b: f64) -> f64 {
 
 fn subtract(a: f64, b: f64) -> f64 {
     decimal_result(a, b, a - b)
+}
+
+fn reserve_leverage(value: &str) -> f64 {
+    // Unproven leverage must reserve the full notional; infinity would erase it.
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or(1.0)
+        .max(1.0)
 }
 
 pub enum Request {
@@ -63,7 +73,6 @@ pub enum Request {
 #[derive(Clone, Default)]
 pub struct RiskValues {
     imr: f64,
-    mmr: f64,
     upl: f64,
     currency: String,
     native_imr: f64,
@@ -293,6 +302,26 @@ impl Okx {
         }
     }
 
+    fn account_scope(&self, product: usize, inst_id: &str, supplied_type: &str) -> bool {
+        let expected = self.instrument_types()[product].as_str();
+        (supplied_type.is_empty() || supplied_type == expected)
+            && self
+                .products
+                .get(inst_id)
+                .is_none_or(|instrument| instrument.kind.as_str() == expected)
+    }
+
+    fn order_margin_currency(&self, row: &OrderRow<'_>) -> String {
+        if row.ccy.is_empty() {
+            self.products
+                .get(row.inst_id)
+                .map_or("", |instrument| instrument.settle_ccy.as_str())
+                .into()
+        } else {
+            row.ccy.into()
+        }
+    }
+
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -328,20 +357,27 @@ impl Okx {
                 }
                 Err(_) => *invalid = true,
             },
-            Request::Positions { rows, invalid, .. } => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(p) => {
-                        if let Some(row) = self.position(cx, &p) {
-                            rows.push(row);
-                        } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some()
-                        {
-                            *invalid = true;
-                        }
+            Request::Positions {
+                product,
+                rows,
+                invalid,
+                ..
+            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(p) => {
+                    if !self.account_scope(*product, p.inst_id, p.inst_type) {
+                        *invalid = true;
+                        return;
                     }
-                    Err(_) => *invalid = true,
+                    if let Some(row) = self.position(cx, &p) {
+                        rows.push(row);
+                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                        *invalid = true;
+                    }
                 }
-            }
+                Err(_) => *invalid = true,
+            },
             Request::Orders {
+                product,
                 rows,
                 margins,
                 page_count,
@@ -356,7 +392,8 @@ impl Okx {
                     } else {
                         o.algo_id.into()
                     };
-                    if o.inst_id.is_empty()
+                    if !self.account_scope(*product, o.inst_id, o.inst_type)
+                        || o.inst_id.is_empty()
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
                         *invalid = true;
@@ -365,7 +402,7 @@ impl Okx {
                     for order in self.orders(cx, &o) {
                         margins.insert(
                             order.id.clone(),
-                            (num::parse(o.lever).max(1.0), o.ccy.into()),
+                            (reserve_leverage(o.lever), self.order_margin_currency(&o)),
                         );
                         rows.push(order);
                     }
@@ -924,7 +961,10 @@ impl Okx {
                         } else if matches!(row.state, "live" | "partially_filled" | "pause") {
                             self.account.order_leverage.insert(
                                 order.id.clone(),
-                                (num::parse(row.lever).max(1.0), row.ccy.into()),
+                                (
+                                    reserve_leverage(row.lever),
+                                    self.order_margin_currency(&row),
+                                ),
                             );
                             cx.store.upsert_order(order);
                         }
@@ -932,8 +972,6 @@ impl Okx {
                 });
             }
             "positions" => {
-                let mut used = 0.0;
-                let mut upnl = 0.0;
                 let mut valid = false;
                 let _ = json::each::<PositionRow<'_>>(data.get(), |row| {
                     if let Some((p, risk)) = self.position(cx, &row) {
@@ -942,8 +980,6 @@ impl Okx {
                         self.account
                             .position_versions
                             .insert(p.id.clone(), self.account.revision);
-                        used += risk.mmr;
-                        upnl += p.unrealized_pnl;
                         Self::setting(cx, &p);
                         if p.contracts == 0.0 {
                             self.account.risk.remove(&p.id);
@@ -956,10 +992,7 @@ impl Okx {
                 if !valid {
                     return;
                 }
-                let mut balance = cx.store.balance().clone();
-                balance.used = usd(used);
-                balance.upnl = usd(upnl);
-                cx.store.set_balance(balance);
+                self.recalculate(cx);
             }
             "account" => {
                 let mut equity = 0.0;
@@ -1024,6 +1057,24 @@ impl Okx {
     ) -> Option<(Position, RiskValues)> {
         let m = cx.store.market_by_id(p.inst_id)?;
         let pos = p.pos.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        let finite = |value: &str| value.parse::<f64>().ok().filter(|value| value.is_finite());
+        if (!p.imr.is_empty() && finite(p.imr).is_none_or(|value| value < 0.0))
+            || (!p.upl.is_empty() && finite(p.upl).is_none())
+        {
+            return None;
+        }
+        let (initial_margin, unrealized) = if pos == 0.0 {
+            (0.0, 0.0)
+        } else {
+            // Isolated positions omit IMR and report their locked margin instead.
+            // An open row with unavailable risk cannot replace proven account data.
+            let initial = if p.imr.is_empty() && p.mgn_mode == "isolated" {
+                finite(p.margin).filter(|value| *value >= 0.0)?
+            } else {
+                finite(p.imr)?
+            };
+            (initial, finite(p.upl)?)
+        };
         let side = if p.pos_side == "short" || (p.pos_side == "net" && pos < 0.0) {
             PositionSide::Short
         } else {
@@ -1043,28 +1094,45 @@ impl Okx {
             m.symbol.clone()
         };
         let mark = cx.store.ticker(&m.symbol).map_or(0.0, |t| t.mark);
-        let contracts = self.contracts_to_base(
-            cx,
-            m,
-            pos.abs(),
-            if mark > 0.0 {
-                mark
-            } else {
-                num::parse(p.avg_px)
-            },
-        );
-        let risk_price = self.reference_price(cx, m, num::parse(p.mark_px));
-        let multiplier = if m.is_inverse == Some(true) && p.ccy.eq_ignore_ascii_case(&m.base) {
-            risk_price
+        let reference = if mark > 0.0 {
+            mark
+        } else if num::parse(p.mark_px) > 0.0 {
+            num::parse(p.mark_px)
         } else {
-            1.0
+            num::parse(p.avg_px)
         };
-        let display_multiplier =
-            if m.is_inverse == Some(true) && p.ccy.eq_ignore_ascii_case(&m.base) {
-                self.reference_price(cx, m, mark)
+        let contracts = self.contracts_to_base(cx, m, pos.abs(), reference);
+        if pos != 0.0 && contracts <= 0.0 {
+            return None;
+        }
+        let margin_currency = if p.ccy.is_empty() {
+            self.products
+                .get(&m.id)
+                .map_or("", |i| i.settle_ccy.as_str())
+        } else {
+            p.ccy
+        };
+        let margin_factor =
+            if m.is_inverse == Some(true) && margin_currency.eq_ignore_ascii_case(&m.base) {
+                reference
             } else {
                 1.0
             };
+        let native_imr = initial_margin;
+        let native_upl = unrealized;
+        let initial_margin = if pos == 0.0 {
+            0.0
+        } else {
+            initial_margin * margin_factor
+        };
+        let unrealized = if pos == 0.0 {
+            0.0
+        } else {
+            unrealized * margin_factor
+        };
+        if !initial_margin.is_finite() || !unrealized.is_finite() {
+            return None;
+        }
         let leverage = if p.lever.is_empty() {
             cx.store.setting(&m.symbol).map_or(0.0, |s| s.leverage)
         } else {
@@ -1080,13 +1148,11 @@ impl Okx {
                 } else {
                     num::parse(p.avg_px)
                 },
-                notional: pos.abs()
-                    * m.contract_size.unwrap_or(1.0)
-                    * if m.is_inverse == Some(true) {
-                        1.0
-                    } else {
-                        mark
-                    },
+                notional: if m.is_inverse == Some(true) {
+                    scaled(pos.abs(), m.contract_size.unwrap_or(1.0))
+                } else {
+                    pos.abs() * mark * m.contract_size.unwrap_or(1.0)
+                },
                 leverage,
                 margin_type: Some(if p.mgn_mode == "cross" {
                     MarginType::Cross
@@ -1101,7 +1167,7 @@ impl Okx {
                 unrealized_pnl: if pos == 0.0 {
                     0.0
                 } else {
-                    num::adjust(num::parse(p.upl) * display_multiplier, m.precision.price)
+                    num::adjust(unrealized, m.precision.price)
                 },
                 realized_pnl: None,
                 contracts,
@@ -1110,12 +1176,11 @@ impl Okx {
                 last_update: None,
             },
             RiskValues {
-                imr: num::parse(p.imr) * multiplier,
-                mmr: num::parse(p.mmr) * multiplier,
-                upl: num::parse(p.upl) * multiplier,
-                currency: p.ccy.into(),
-                native_imr: num::parse(p.imr),
-                native_upl: num::parse(p.upl),
+                imr: initial_margin,
+                upl: unrealized,
+                currency: margin_currency.into(),
+                native_imr,
+                native_upl,
             },
         ))
     }
@@ -1126,15 +1191,30 @@ impl Okx {
         };
         let native = num::parse(o.sz).abs();
         let filled = num::parse(o.acc_fill_sz);
-        let reference_fields: &[&str] = match o.ord_type {
-            "trigger" => &[o.last, o.px, o.ord_px, o.order_px, o.trigger_px],
-            "oco" | "conditional" => &[o.last, o.px, o.tp_trigger_px, o.sl_trigger_px],
-            _ => &[o.px, o.avg_px, o.fill_px, o.last],
-        };
-        let reference = reference_fields
-            .iter()
-            .find(|v| !v.is_empty())
-            .map_or(0.0, |v| num::parse(v));
+        let reference = if matches!(
+            o.ord_type,
+            "trigger" | "oco" | "conditional" | "move_order_stop"
+        ) {
+            [
+                o.last,
+                o.px,
+                o.ord_px,
+                o.order_px,
+                o.trigger_px,
+                o.sl_trigger_px,
+                o.tp_trigger_px,
+            ]
+        } else {
+            [o.px, o.avg_px, o.fill_px, o.last, "", "", ""]
+        }
+        .into_iter()
+        .map(num::parse)
+        .find(|p| *p > 0.0)
+        .unwrap_or_else(|| {
+            cx.store
+                .ticker(&m.symbol)
+                .map_or(0.0, |t| if t.mark > 0.0 { t.mark } else { t.last })
+        });
         let mut legs = Vec::new();
         match o.ord_type {
             "trigger" => {

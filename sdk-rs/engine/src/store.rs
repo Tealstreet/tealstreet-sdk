@@ -5,12 +5,20 @@ use crate::model::{
     Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
     Position, PredictionHolding, PredictionMarket, Ticker,
 };
+#[cfg(any(test, feature = "product-semantics"))]
+use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, ProductKind};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
+    #[cfg(any(test, feature = "product-semantics"))]
+    instrument_classifications: Option<Vec<InstrumentClassification>>,
+    #[cfg(any(test, feature = "product-semantics"))]
+    derivative_products: Option<Vec<DerivativeProduct>>,
+    #[cfg(any(test, feature = "product-semantics"))]
+    position_greeks: Option<Vec<PositionGreeks>>,
     prediction_markets: Option<Vec<PredictionMarket>>,
     prediction_holdings: Option<Vec<PredictionHolding>>,
     market_by_symbol: HashMap<Box<str>, u32>,
@@ -145,12 +153,80 @@ impl Store {
             .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
+        #[cfg(any(test, feature = "product-semantics"))]
+        {
+            self.instrument_classifications = None;
+            self.derivative_products = None;
+        }
         let had_prediction_markets = self.prediction_markets.take().is_some();
         if self.prediction_holdings.take().is_some() || had_prediction_markets {
             self.changes.positions = true;
         }
         self.changes.markets = true;
         self.set_loaded(|loaded| loaded.markets = true);
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn instrument_classifications(&self) -> Option<&[InstrumentClassification]> {
+        self.instrument_classifications.as_deref()
+    }
+
+    /// Replace labels after `set_markets`; indices belong to that snapshot.
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn set_instrument_classifications(
+        &mut self,
+        classifications: Vec<InstrumentClassification>,
+    ) {
+        if self.instrument_classifications.as_ref() != Some(&classifications) {
+            self.instrument_classifications = Some(classifications);
+            self.changes.markets = true;
+        }
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn derivative_products(&self) -> Option<&[DerivativeProduct]> {
+        self.derivative_products.as_deref()
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn set_derivative_products(&mut self, products: Vec<DerivativeProduct>) {
+        if self.derivative_products.as_ref() != Some(&products) {
+            self.derivative_products = Some(products);
+            self.changes.markets = true;
+        }
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn position_greeks(&self) -> Option<&[PositionGreeks]> {
+        self.position_greeks.as_deref()
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    pub fn set_position_greeks(&mut self, greeks: Vec<PositionGreeks>) {
+        if self.position_greeks.as_ref() != Some(&greeks) {
+            self.position_greeks = Some(greeks);
+            self.prune_position_greeks();
+            // Greeks reference exact venue IDs, including positions without a mode.
+            if self
+                .position_greeks
+                .as_ref()
+                .is_some_and(|rows| !rows.is_empty())
+            {
+                self.retain_position_ids();
+            }
+            self.changes.positions = true;
+        }
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    fn prune_position_greeks(&mut self) {
+        if let Some(rows) = &mut self.position_greeks {
+            rows.retain(|row| {
+                self.positions
+                    .iter()
+                    .any(|position| position.id == row.position_id)
+            });
+        }
     }
 
     pub fn prediction_markets(&self) -> Option<&[PredictionMarket]> {
@@ -317,6 +393,8 @@ impl Store {
     }
 
     fn prune_prediction_holdings(&mut self) {
+        #[cfg(any(test, feature = "product-semantics"))]
+        self.prune_position_greeks();
         if let Some(holdings) = &mut self.prediction_holdings {
             holdings.retain(|holding| {
                 self.markets
@@ -535,6 +613,11 @@ impl Store {
         }
         if changes.markets {
             self.write_markets(w);
+            #[cfg(any(test, feature = "product-semantics"))]
+            {
+                self.write_instrument_classifications(w);
+                self.write_derivative_products(w);
+            }
             self.write_prediction_markets(w);
         }
         if changes.tickers_replaced {
@@ -557,6 +640,8 @@ impl Store {
         }
         if changes.positions {
             self.write_positions(w);
+            #[cfg(any(test, feature = "product-semantics"))]
+            self.write_position_greeks(w);
             self.write_prediction_holdings(w);
         }
         if changes.balance {
@@ -618,6 +703,86 @@ impl Store {
 
     fn market_ref(&self, symbol: &str) -> u32 {
         self.market_index(symbol).unwrap_or(wire::NONE)
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    fn write_instrument_classifications<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(rows) = &self.instrument_classifications else {
+            return;
+        };
+        w.begin(section::INSTRUMENT_CLASSIFICATIONS);
+        w.u32(rows.len() as u32);
+        w.u32s(rows.iter().map(|row| row.market));
+        for row in rows {
+            let refs = [
+                row.symbol_type
+                    .as_deref()
+                    .map(|s| w.string(s))
+                    .unwrap_or(wire::NONE),
+                row.market_region
+                    .as_deref()
+                    .map(|s| w.string(s))
+                    .unwrap_or(wire::NONE),
+                row.underlying_ticker
+                    .as_deref()
+                    .map(|s| w.string(s))
+                    .unwrap_or(wire::NONE),
+            ];
+            w.u32s(refs);
+        }
+        w.end();
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    fn write_derivative_products<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(rows) = &self.derivative_products else {
+            return;
+        };
+        w.begin(section::DERIVATIVE_PRODUCTS);
+        w.u32(rows.len() as u32);
+        w.u32s(rows.iter().map(|row| row.market));
+        w.u32s(rows.iter().map(|row| match row.kind {
+            ProductKind::Future => 1,
+            ProductKind::Call => 2,
+            ProductKind::Put => 3,
+        }));
+        for row in rows {
+            let refs = [
+                w.string(&row.underlying),
+                w.optional_string(row.settlement_asset.as_deref()),
+                w.optional_string(row.premium_asset.as_deref()),
+                w.optional_string(row.style.as_deref()),
+                w.optional_string(row.settlement.as_deref()),
+            ];
+            w.u32s(refs);
+        }
+        w.pad();
+        w.f64s(rows.iter().map(|row| row.expiry.unwrap_or(f64::NAN)));
+        w.f64s(rows.iter().map(|row| row.strike.unwrap_or(f64::NAN)));
+        w.end();
+    }
+
+    #[cfg(any(test, feature = "product-semantics"))]
+    fn write_position_greeks<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(rows) = &self.position_greeks else {
+            return;
+        };
+        w.begin(section::POSITION_GREEKS);
+        w.u32(rows.len() as u32);
+        for row in rows {
+            let refs = [w.string(&row.position_id), w.string(&row.greeks.units)];
+            w.u32s(refs);
+        }
+        w.pad();
+        for value in [0, 1, 2, 3] {
+            w.f64s(rows.iter().map(|row| match value {
+                0 => row.greeks.delta,
+                1 => row.greeks.gamma,
+                2 => row.greeks.vega,
+                _ => row.greeks.theta,
+            }));
+        }
+        w.end();
     }
 
     fn write_prediction_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
@@ -771,16 +936,30 @@ impl Store {
         }
         // Native leavesQty cannot be recovered from rounded base quantities or
         // amount=0 full-position stops. Older readers ignore this optional tail.
-        if orders
-            .iter()
-            .any(|o| o.extra.as_ref().and_then(|e| e.remaining_native).is_some())
-        {
+        if orders.iter().any(|o| {
+            o.extra.as_ref().is_some_and(|e| {
+                e.remaining_native.is_some() || e.filled_in_placement_units.is_some()
+            })
+        }) {
             w.f64s(orders.iter().map(|o| {
                 o.extra
                     .as_ref()
                     .and_then(|e| e.remaining_native)
                     .unwrap_or(f64::NAN)
             }));
+            if orders.iter().any(|o| {
+                o.extra
+                    .as_ref()
+                    .and_then(|e| e.filled_in_placement_units)
+                    .is_some()
+            }) {
+                w.f64s(orders.iter().map(|o| {
+                    o.extra
+                        .as_ref()
+                        .and_then(|e| e.filled_in_placement_units)
+                        .unwrap_or(f64::NAN)
+                }));
+            }
         }
         w.end();
     }
@@ -1278,6 +1457,89 @@ mod tests {
             last_update: None,
         }]);
         store
+    }
+
+    #[test]
+    fn semantic_labels_preserve_empty_absent_and_refresh_without_numeric_changes() {
+        let mut store = prediction_store();
+        let legacy = balance_frame(&mut store);
+        let labels = InstrumentClassification {
+            market: 0,
+            symbol_type: Some(String::new()),
+            market_region: None,
+            underlying_ticker: Some("株式".into()),
+        };
+        store.set_instrument_classifications(vec![labels.clone()]);
+        let frame = balance_frame(&mut store);
+        let payload = |bytes: &[u8], kind| {
+            wire::sections(bytes)
+                .find(|(k, _)| *k == kind)
+                .unwrap()
+                .1
+                .to_vec()
+        };
+        assert_eq!(
+            payload(&legacy, section::MARKETS),
+            payload(&frame, section::MARKETS)
+        );
+        let words = payload(&frame, section::INSTRUMENT_CLASSIFICATIONS);
+        let word = |at| u32::from_le_bytes(words[at..at + 4].try_into().unwrap());
+        assert_eq!((word(0), word(4)), (1, 0));
+        assert_ne!(word(8), wire::NONE);
+        assert_eq!(word(12), wire::NONE);
+        assert_ne!(word(16), wire::NONE);
+        store.set_instrument_classifications(vec![labels]);
+        assert!(!store.take_pending().changes.markets);
+        store.set_instrument_classifications(vec![]);
+        let cleared = balance_frame(&mut store);
+        assert_eq!(
+            &payload(&cleared, section::INSTRUMENT_CLASSIFICATIONS)[..4],
+            &[0; 4]
+        );
+        store.set_markets(store.markets.clone());
+        assert!(store.instrument_classifications().is_none());
+        assert!(
+            wire::sections(&balance_frame(&mut store))
+                .all(|(k, _)| k != section::INSTRUMENT_CLASSIFICATIONS)
+        );
+    }
+
+    #[test]
+    fn derivative_terms_are_optional_and_position_greeks_never_resurrect_on_reopen() {
+        let mut store = prediction_store();
+        store.set_derivative_products(vec![DerivativeProduct {
+            market: 0,
+            kind: ProductKind::Call,
+            underlying: "BTC".into(),
+            expiry: None,
+            strike: Some(100_000.0),
+            settlement_asset: None,
+            premium_asset: None,
+            style: None,
+            settlement: None,
+        }]);
+        let metadata = PositionGreeks {
+            position_id: store.positions[0].id.clone(),
+            greeks: crate::model::OptionGreeks {
+                delta: 0.5,
+                gamma: 0.01,
+                vega: 2.0,
+                theta: -3.0,
+                units: "native".into(),
+            },
+        };
+        store.set_position_greeks(vec![metadata.clone()]);
+        let frame = balance_frame(&mut store);
+        assert!(wire::sections(&frame).any(|(k, _)| k == section::DERIVATIVE_PRODUCTS));
+        assert!(wire::sections(&frame).any(|(k, _)| k == section::POSITION_GREEKS));
+        let position = store.positions[0].clone();
+        store.set_positions(vec![]);
+        assert_eq!(store.position_greeks(), Some([].as_slice()));
+        store.upsert_position(position);
+        assert_eq!(store.position_greeks(), Some([].as_slice()));
+        store.set_position_greeks(vec![metadata]);
+        store.set_markets(store.markets.clone());
+        assert!(store.derivative_products().is_none());
     }
 
     fn prediction_metadata() -> PredictionMarket {

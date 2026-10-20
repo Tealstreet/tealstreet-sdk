@@ -149,6 +149,17 @@ pub enum Action {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    FetchOptionChain {
+        command: CommandId,
+        query: crate::model::OptionChainQuery,
+    },
+    FetchOptionExpiries {
+        command: CommandId,
+        underlying: String,
+    },
+    FetchAccountGreeks {
+        command: CommandId,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -675,6 +686,10 @@ impl<P> Cx<'_, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Opt in to typed option queries and IV-priced orders at the command boundary.
+    fn supports_options(&self) -> bool {
+        false
+    }
     /// Per-request continuation: what to do with the response.
     type Pending;
 
@@ -891,7 +906,31 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_timer(&mut cx, timer);
                 }
             }
-            Event::Command(command) => self.venue.on_command(&mut cx, command),
+            Event::Command(command) => {
+                if !self.venue.supports_options() {
+                    let unsupported = match &command {
+                        Command::FetchOptionChain { command, .. }
+                        | Command::FetchOptionExpiries { command, .. }
+                        | Command::FetchAccountGreeks { command } => Some(*command),
+                        Command::PlaceOrders { command, orders }
+                            if orders
+                                .iter()
+                                .any(|order| order.implied_volatility.is_some()) =>
+                        {
+                            Some(*command)
+                        }
+                        _ => None,
+                    };
+                    if let Some(command) = unsupported {
+                        cx.done(
+                            command,
+                            Err("Options are not enabled on this account".into()),
+                        );
+                        return;
+                    }
+                }
+                self.venue.on_command(&mut cx, command);
+            }
         }
     }
 
@@ -1198,6 +1237,7 @@ mod streaming_tests {
     use super::*;
 
     struct StreamVenue {
+        commands: u32,
         at: ArrayAt,
         rows: Vec<String>,
         body: Option<String>,
@@ -1249,7 +1289,9 @@ mod streaming_tests {
             self.failure = Some(error.to_owned());
         }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
-        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {
+            self.commands += 1;
+        }
         fn book(&self, _symbol: &str) -> Option<&Book> {
             self.book.as_ref()
         }
@@ -1302,6 +1344,7 @@ mod streaming_tests {
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
         let mut engine = Engine::new(StreamVenue {
+            commands: 0,
             at,
             rows: Vec::new(),
             body: None,
@@ -1333,12 +1376,40 @@ mod streaming_tests {
 
     fn frame_engine() -> Engine<StreamVenue> {
         Engine::new(StreamVenue {
+            commands: 0,
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,
             failure: None,
             book: Some(Book::default()),
         })
+    }
+
+    #[test]
+    fn unsupported_options_complete_without_reaching_the_venue() {
+        let mut engine = frame_engine();
+        let query = serde_json::from_str(r#"{"underlying":"BTC","right":"call"}"#).unwrap();
+        let commands = [
+            Command::FetchOptionChain { command: 1, query },
+            Command::FetchOptionExpiries { command: 2, underlying: "BTC".into() },
+            Command::FetchAccountGreeks { command: 3 },
+            Command::PlaceOrders { command: 4, orders: vec![
+                serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}"#).unwrap(),
+                serde_json::from_str(r#"{"symbol":"BTC-option","type":"limit","side":"buy","amount":1,"impliedVolatility":0.5}"#).unwrap(),
+            ] },
+        ];
+        for command in commands {
+            engine.handle(0.0, Event::Command(command));
+        }
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(actions.len(), 4, "no order or query I/O may escape");
+        assert_eq!(engine.venue.commands, 0);
+        for (index, action) in actions.iter().enumerate() {
+            assert!(
+                matches!(action, Action::Notice(Notice::CommandDone { command, result: Err(error) })
+                if *command == index as u32 + 1 && error.contains("Options are not enabled"))
+            );
+        }
     }
 
     fn market(symbol: &str) -> crate::model::Market {

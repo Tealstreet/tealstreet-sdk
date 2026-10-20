@@ -2,21 +2,25 @@
 mod account;
 mod history;
 mod hyro;
+mod options;
 mod paths;
 mod sign;
 mod trading;
 mod wire;
 
 use paths::Paths;
-pub use paths::{Endpoints, Variant};
+pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{
+    Candle, DerivativeProduct, InstrumentClassification, Limits, Market, MinMax, Precision,
+    ProductKind, Ticker,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
 use sign::{Credentials, Query};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
 const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
@@ -45,6 +49,8 @@ pub struct Options {
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
     pub testnet: bool,
+    pub enable_inverse_markets: bool,
+    pub enable_option_markets: bool,
     /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -106,6 +112,11 @@ pub enum Then {
     },
     Fees(HashMap<String, (f64, f64)>),
     Tickers(Vec<Ticker>),
+    OptionSeed {
+        base_coin: String,
+        tickers: Vec<Ticker>,
+    },
+    Options(options::Request),
     Klines {
         command: CommandId,
         candles: Vec<Candle>,
@@ -116,6 +127,7 @@ pub enum Then {
 }
 
 pub struct Pending {
+    category: Category,
     rest: Rest,
     then: Then,
 }
@@ -189,11 +201,32 @@ struct Startup {
     fees_in_flight: bool,
     tickers_in_flight: bool,
     account_info: bool,
+    option_tickers_pending: HashSet<String>,
+    option_tickers: HashMap<String, Vec<Ticker>>,
     retry_ms: f64,
     retry: Option<TimerId>,
 }
 
+struct ProductState {
+    category: Category,
+    public: Connection,
+    startup: Startup,
+    account: account::AccountState,
+}
+
 pub struct BybitLinear {
+    category: Category,
+    primary_category: Category,
+    products: Vec<ProductState>,
+    catalogs: HashMap<Category, Vec<Market>>,
+    ticker_seeds: HashMap<Category, Vec<Ticker>>,
+    catalog_ready: bool,
+    tickers_ready: bool,
+    classification: HashMap<String, InstrumentClassification>,
+    derivatives: HashMap<String, DerivativeProduct>,
+    wallet: Option<account::Wallet>,
+    orders_loaded: HashSet<Category>,
+    positions_loaded: HashSet<Category>,
     variant: Variant,
     paths: Paths,
     config_error: Option<String>,
@@ -273,6 +306,32 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
+        let category = match options.variant {
+            Variant::Inverse => Category::Inverse,
+            Variant::Spot => Category::Spot,
+            _ => Category::Linear,
+        };
+        let mut products = Vec::new();
+        if options.variant == Variant::Linear {
+            for (enabled, category) in [
+                (options.enable_inverse_markets, Category::Inverse),
+                (options.enable_option_markets, Category::Option),
+            ] {
+                if enabled {
+                    products.push(ProductState {
+                        category,
+                        public: Connection::new(),
+                        startup: Startup {
+                            retry_ms: STARTUP_RETRY_MIN_MS,
+                            prelaunch: (category == Category::Option).then(Vec::new),
+                            fees: (category == Category::Option).then(HashMap::new),
+                            ..Startup::default()
+                        },
+                        account: account::AccountState::default(),
+                    });
+                }
+            }
+        }
         let paths = Paths::for_options(&options);
         let config_error = options.validate().err();
         let credentials = match (&options.key, &options.secret) {
@@ -285,6 +344,18 @@ impl BybitLinear {
             _ => None,
         };
         Self {
+            category,
+            primary_category: category,
+            products,
+            catalogs: HashMap::new(),
+            ticker_seeds: HashMap::new(),
+            catalog_ready: false,
+            tickers_ready: false,
+            classification: HashMap::new(),
+            derivatives: HashMap::new(),
+            wallet: None,
+            orders_loaded: HashSet::new(),
+            positions_loaded: HashSet::new(),
             variant: options.variant,
             paths,
             config_error,
@@ -308,10 +379,102 @@ impl BybitLinear {
         }
     }
 
+    fn categories(&self) -> Vec<Category> {
+        let mut categories = vec![self.category];
+        categories.extend(self.products.iter().map(|state| state.category));
+        categories.sort_by_key(|category| match category {
+            Category::Linear => 0,
+            Category::Inverse => 1,
+            Category::Spot => 2,
+            Category::Option => 3,
+        });
+        categories
+    }
+
+    fn select_category(&mut self, category: Category) {
+        if category == self.category {
+            return;
+        }
+        let state = self
+            .products
+            .iter_mut()
+            .find(|state| state.category == category)
+            .expect("enabled category");
+        std::mem::swap(&mut self.category, &mut state.category);
+        std::mem::swap(&mut self.public, &mut state.public);
+        std::mem::swap(&mut self.startup, &mut state.startup);
+        std::mem::swap(&mut self.account, &mut state.account);
+        self.paths.category = self.category.as_str();
+        if let Some((prefix, _)) = self.paths.public_ws.rsplit_once('/') {
+            self.paths.public_ws = format!("{prefix}/{}", self.paths.category);
+        }
+        self.paths.book_depth = if self.category == Category::Option {
+            25
+        } else if self.category == Category::Spot {
+            200
+        } else {
+            1000
+        };
+    }
+
+    fn category_for(&self, symbol: &str) -> Category {
+        if self.variant.is_spot() {
+            Category::Spot
+        } else {
+            Category::for_symbol(symbol)
+        }
+    }
+
+    fn category_enabled(&self, category: Category) -> bool {
+        self.category == category || self.products.iter().any(|state| state.category == category)
+    }
+
+    fn owns_symbol(&self, symbol: &str) -> bool {
+        self.category_for(symbol) == self.category
+    }
+
+    fn any_hedged(&self) -> bool {
+        self.account.has_hedged() || self.products.iter().any(|state| state.account.has_hedged())
+    }
+
+    fn symbol_mode(&self, symbol: &str) -> Option<bool> {
+        let category = self.category_for(symbol);
+        if category == Category::Option || category == Category::Spot {
+            return Some(false);
+        }
+        if category == self.category {
+            self.account.position_modes.get(symbol).copied()
+        } else {
+            self.products
+                .iter()
+                .find(|state| state.category == category)?
+                .account
+                .position_modes
+                .get(symbol)
+                .copied()
+        }
+    }
+
     fn connection(&mut self, channel: Channel) -> &mut Connection {
         match channel {
             Channel::Public => &mut self.public,
             Channel::Private => &mut self.private,
+        }
+    }
+
+    fn select_socket_category(&mut self, socket: SocketId) {
+        let category = if self.private.socket == Some(socket) {
+            Some(self.primary_category)
+        } else if self.public.socket == Some(socket) {
+            Some(self.category)
+        } else {
+            self.products
+                .iter()
+                .find(|state| state.public.socket == Some(socket))
+                .map(|state| state.category)
+        };
+        if let Some(category) = category {
+            self.select_category(category);
         }
     }
 
@@ -353,7 +516,11 @@ impl BybitLinear {
         };
         let body = (rest.method != Method::Get).then(|| rest.payload.clone());
         let (method, stream) = (rest.method, rest.stream);
-        let pending = Pending { rest, then };
+        let pending = Pending {
+            category: self.category,
+            rest,
+            then,
+        };
         if stream {
             cx.request_streamed(method, url, headers, ArrayAt::Path(MARKETS_PATH), pending);
         } else {
@@ -446,7 +613,12 @@ impl BybitLinear {
         let timer = cx.set_timer(delay);
         self.connection(channel).reconnect = Some(timer);
         if channel == Channel::Private {
-            self.on_private_closed(cx);
+            let category = self.category;
+            for other in self.categories() {
+                self.select_category(other);
+                self.on_private_closed(cx);
+            }
+            self.select_category(category);
         }
         cx.log(
             LogLevel::Warning,
@@ -494,6 +666,9 @@ impl BybitLinear {
 
     fn request_markets(&self, cx: &mut Cx<'_, Pending>, prelaunch: bool, cursor: Option<&str>) {
         let mut query = Query::new().str("category", self.paths.category);
+        if self.category == Category::Option {
+            query = query.str("baseCoin", "All");
+        }
         if !self.variant.is_spot() {
             query = query
                 .num("limit", f64::from(MARKETS_PAGE_LIMIT))
@@ -524,7 +699,11 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
-        if !self.startup.tickers_loaded
+        if self.category == Category::Option && self.startup.markets_loaded {
+            self.request_option_seeds(cx);
+        }
+        if self.category != Category::Option
+            && !self.startup.tickers_loaded
             && self.startup.tickers.is_none()
             && !self.startup.tickers_in_flight
         {
@@ -676,12 +855,88 @@ impl BybitLinear {
             LogLevel::Info,
             format!("Loaded {} Bybit markets", markets.len()),
         );
-        cx.store.set_markets(markets);
-        self.try_load_tickers(cx);
+        self.catalogs.insert(self.category, markets);
+        if self.category == Category::Option {
+            self.request_option_seeds(cx);
+        }
+        if self.catalogs.len() == self.products.len() + 1 {
+            let mut markets = Vec::new();
+            for category in self.categories() {
+                markets.extend(self.catalogs.get(&category).into_iter().flatten().cloned());
+            }
+            cx.store.set_markets(markets);
+            let classifications = cx
+                .store
+                .markets()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, market)| {
+                    let mut row = self.classification.get(&market.symbol)?.clone();
+                    row.market = index as u32;
+                    Some(row)
+                })
+                .collect();
+            cx.store.set_instrument_classifications(classifications);
+            let derivatives = cx
+                .store
+                .markets()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, market)| {
+                    let mut row = self.derivatives.get(&market.symbol)?.clone();
+                    row.market = index as u32;
+                    Some(row)
+                })
+                .collect();
+            cx.store.set_derivative_products(derivatives);
+            self.catalog_ready = true;
+            let category = self.category;
+            for other in self.categories() {
+                self.select_category(other);
+                self.try_load_tickers(cx);
+            }
+            self.select_category(category);
+        }
+    }
+
+    fn request_option_seeds(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.startup.tickers_loaded || self.startup.tickers.is_some() {
+            return;
+        }
+        let mut bases = std::collections::BTreeSet::new();
+        for market in self.catalogs.get(&Category::Option).into_iter().flatten() {
+            bases.insert(market.base.clone());
+        }
+        if bases.is_empty() {
+            self.startup.tickers = Some(Vec::new());
+            self.try_load_tickers(cx);
+            return;
+        }
+        for base_coin in bases {
+            if self.startup.option_tickers.contains_key(&base_coin)
+                || !self
+                    .startup
+                    .option_tickers_pending
+                    .insert(base_coin.clone())
+            {
+                continue;
+            }
+            let query = Query::new()
+                .str("category", "option")
+                .str("baseCoin", &base_coin);
+            self.send(
+                cx,
+                Rest::get("/v5/market/tickers", query).streamed(),
+                Then::OptionSeed {
+                    base_coin,
+                    tickers: Vec::new(),
+                },
+            );
+        }
     }
 
     fn try_load_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.startup.markets_loaded || self.startup.tickers_loaded {
+        if !self.catalog_ready || !self.startup.markets_loaded || self.startup.tickers_loaded {
             return;
         }
         let Some(rows) = self.startup.tickers.take() else {
@@ -704,16 +959,36 @@ impl BybitLinear {
                 Some(ticker)
             })
             .collect();
+        self.ticker_seeds.insert(self.category, tickers);
+        if self.ticker_seeds.len() != self.products.len() + 1 {
+            return;
+        }
+        let mut tickers = Vec::new();
+        for category in self.categories() {
+            tickers.extend(
+                self.ticker_seeds
+                    .get(&category)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+        }
         cx.store.set_tickers(tickers);
-        // Subscribe only after the seed exists: ticker deltas omit unchanged fields.
-        self.connect(cx, Channel::Public);
+        self.tickers_ready = true;
+        let category = self.category;
+        for other in self.categories() {
+            self.select_category(other);
+            self.connect(cx, Channel::Public);
+            if self.credentials.is_some() {
+                self.try_start_account(cx);
+            }
+        }
+        self.select_category(category);
         if self.credentials.is_none() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
-            return;
         }
-        self.try_start_account(cx);
     }
 
     fn on_public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -727,6 +1002,13 @@ impl BybitLinear {
             }
             return;
         };
+        if topic
+            .rsplit('.')
+            .next()
+            .is_some_and(|symbol| !self.owns_symbol(symbol))
+        {
+            return;
+        }
         if topic.starts_with("tickers.") {
             if let Ok(event) = serde_json::from_str::<TickerEvent>(text) {
                 on_ticker(cx, &event.data, self.variant);
@@ -869,6 +1151,12 @@ impl BybitLinear {
         interval: String,
         add: bool,
     ) {
+        if self.category_for(&symbol) == Category::Option
+            || !self.category_enabled(self.category_for(&symbol))
+        {
+            cx.log(LogLevel::Warning, "Bybit has no candles for this product");
+            return;
+        }
         let Some(topic) = Self::kline_topic(&symbol, &interval) else {
             cx.log(
                 LogLevel::Warning,
@@ -900,6 +1188,14 @@ impl BybitLinear {
         interval: &str,
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
+        if self.category_for(symbol) == Category::Option {
+            cx.done(command, Err("Bybit has no candles for options".into()));
+            return;
+        }
+        if !self.category_enabled(self.category_for(symbol)) {
+            cx.done(command, Err("Bybit product is not enabled".into()));
+            return;
+        }
         let Some(code) = interval_code(interval) else {
             cx.done(command, Err(format!("Bybit has no {interval} candles")));
             return;
@@ -920,7 +1216,7 @@ impl BybitLinear {
     }
 }
 
-fn on_item_public(then: &mut Then, item: &str, variant: Variant) {
+fn on_item_public(then: &mut Then, item: &str, variant: Variant, category: Category) {
     {
         match then {
             Then::Markets { markets, .. } => {
@@ -929,8 +1225,10 @@ fn on_item_public(then: &mut Then, item: &str, variant: Variant) {
                         || (m.quote_coin == "USDT"
                             && (m.contract_type.is_empty()
                                 || m.contract_type == "LinearPerpetual")))
+                    && (category != Category::Option
+                        || (m.status == "Trading" && derivative_from_wire(&m, category).is_some()))
                 {
-                    markets.push(market_from_wire(&m, variant));
+                    markets.push(market_from_wire(&m, variant, category));
                 }
             }
             Then::Fees(fees) => {
@@ -941,9 +1239,12 @@ fn on_item_public(then: &mut Then, item: &str, variant: Variant) {
                     );
                 }
             }
-            Then::Tickers(tickers) => {
+            Then::Tickers(tickers) | Then::OptionSeed { tickers, .. } => {
                 if let Ok(t) = serde_json::from_str::<TickerRow>(item) {
-                    tickers.push(ticker_from_rest(&t));
+                    tickers.push(ticker_from_rest(
+                        &t,
+                        variant == Variant::Linear && category == Category::Inverse,
+                    ));
                 }
             }
             Then::Klines { candles, .. } => {
@@ -998,6 +1299,36 @@ impl BybitLinear {
                     }
                 }
             }
+            Then::OptionSeed { base_coin, tickers } => {
+                self.startup.option_tickers_pending.remove(&base_coin);
+                if let Some(error) = failure {
+                    self.retry_startup(cx, "option tickers", &error);
+                } else {
+                    self.startup.option_tickers.insert(base_coin, tickers);
+                    let bases: HashSet<&str> = self
+                        .catalogs
+                        .get(&Category::Option)
+                        .into_iter()
+                        .flatten()
+                        .map(|market| market.base.as_str())
+                        .collect();
+                    if bases
+                        .iter()
+                        .all(|base| self.startup.option_tickers.contains_key(*base))
+                    {
+                        self.startup.tickers = Some(
+                            self.startup
+                                .option_tickers
+                                .values()
+                                .flatten()
+                                .cloned()
+                                .collect(),
+                        );
+                        self.try_load_tickers(cx);
+                    }
+                }
+            }
+            Then::Options(request) => self.on_options_response(cx, request, response),
             Then::Klines {
                 command,
                 mut candles,
@@ -1038,8 +1369,18 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>, variant: Variant) {
     } else {
         field(&d.next_funding_time)
     };
-    let volume = field(&d.volume24h);
-    let quote_volume = field(&d.turnover24h);
+    let inverse =
+        variant == Variant::Linear && Category::for_symbol(&d.symbol) == Category::Inverse;
+    let volume = field(if inverse {
+        &d.turnover24h
+    } else {
+        &d.volume24h
+    });
+    let quote_volume = field(if inverse {
+        &d.volume24h
+    } else {
+        &d.turnover24h
+    });
     cx.store.update_ticker(&d.symbol, |t| {
         let set = |slot: &mut f64, value: Option<f64>| {
             if let Some(value) = value {
@@ -1060,9 +1401,13 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>, variant: Variant) {
     });
 }
 
-fn ticker_from_rest(t: &TickerRow<'_>) -> Ticker {
+fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
     let last = float_of(&t.last_price);
-    let volume = float_of(&t.volume24h);
+    let volume = if inverse {
+        float_of(&t.turnover24h)
+    } else {
+        float_of(&t.volume24h)
+    };
     Ticker {
         id: t.symbol.to_string(),
         symbol: t.symbol.to_string(),
@@ -1079,11 +1424,15 @@ fn ticker_from_rest(t: &TickerRow<'_>) -> Ticker {
         volume,
         // REST reports turnover too, but TS seeds quote volume as volume x last
         // and the stream then replaces it with turnover; kept identical.
-        quote_volume: volume * last,
+        quote_volume: if inverse {
+            float_of(&t.volume24h)
+        } else {
+            volume * last
+        },
     }
 }
 
-fn market_from_wire(m: &Instrument<'_>, variant: Variant) -> Market {
+fn market_from_wire(m: &Instrument<'_>, variant: Variant, category: Category) -> Market {
     let lot = m.lot_size_filter.as_ref();
     let leverage = m.leverage_filter.as_ref();
     let expiring = !variant.is_spot()
@@ -1134,142 +1483,87 @@ fn market_from_wire(m: &Instrument<'_>, variant: Variant) -> Market {
                 }),
             },
             leverage: MinMax {
-                min: if variant.is_spot() {
+                min: if variant.is_spot() || category == Category::Option {
                     1.0
                 } else {
                     leverage.map_or(f64::NAN, |l| float_of(&l.min_leverage))
                 },
-                max: if variant.is_spot() {
+                max: if variant.is_spot() || category == Category::Option {
                     1.0
                 } else {
                     leverage.map_or(f64::NAN, |l| float_of(&l.max_leverage))
                 },
             },
-            price: None,
+            price: if category == Category::Option {
+                m.price_filter.as_ref().and_then(|price| {
+                    let min = float_of(&price.min_price);
+                    min.is_finite()
+                        .then_some(safe_cex_engine::model::Min { min })
+                })
+            } else {
+                None
+            },
         },
-        contract_size: None,
-        is_expiring: Some(expiring),
-        is_inverse: variant.is_inverse().then_some(true),
+        contract_size: (category == Category::Option).then_some(1.0),
+        is_expiring: Some(expiring || category == Category::Option),
+        is_inverse: (category == Category::Inverse).then_some(true),
         is_spot: variant.is_spot().then_some(true),
-        is_perpetual: Some(!variant.is_spot() && !expiring),
+        is_perpetual: Some(!variant.is_spot() && category != Category::Option && !expiring),
         is_read_only: None,
         taker_fee: None,
         maker_fee: None,
     }
 }
 
-impl Venue for BybitLinear {
-    type Pending = Pending;
+fn derivative_from_wire(row: &Instrument<'_>, category: Category) -> Option<DerivativeProduct> {
+    let kind = if category == Category::Option {
+        match row.options_type.as_deref()? {
+            "Call" => ProductKind::Call,
+            "Put" => ProductKind::Put,
+            _ => return None,
+        }
+    } else if row.contract_type.ends_with("Futures") {
+        ProductKind::Future
+    } else {
+        return None;
+    };
+    let strike = if category == Category::Option {
+        let strike = row
+            .symbol
+            .split('-')
+            .nth(2)?
+            .replace('d', ".")
+            .parse::<f64>()
+            .ok()?;
+        if !strike.is_finite() || strike <= 0.0 {
+            return None;
+        }
+        Some(strike)
+    } else {
+        None
+    };
+    Some(DerivativeProduct {
+        market: 0,
+        kind,
+        underlying: row.base_coin.to_string(),
+        expiry: present(&row.delivery_time)
+            .map(float)
+            .filter(|expiry| expiry.is_finite() && *expiry > 0.0),
+        strike,
+        settlement_asset: row.settle_coin.as_ref().map(ToString::to_string),
+        premium_asset: (category == Category::Option).then(|| row.quote_coin.to_string()),
+        style: (category == Category::Option).then(|| "european".into()),
+        settlement: (category == Category::Option).then(|| "cash".into()),
+    })
+}
 
-    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.read_credentials
-            && let Err(error) = read.validate()
-        {
-            cx.log(LogLevel::Error, error);
-            return;
-        }
-        if let Some(error) = &self.config_error {
-            cx.log(LogLevel::Error, error.clone());
-            return;
-        }
-        self.request_startup(cx);
-        if self.credentials.is_some() {
-            self.request_account_info(cx);
-        }
-    }
-
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        let Some(channel) = self.channel_of(socket) else {
-            return;
-        };
-        let now = cx.now;
-        let connection = self.connection(channel);
-        connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = now;
-        connection.last_ping = now;
-        self.watch(cx, channel);
-        match channel {
-            Channel::Public => {
-                let mut topics: Vec<String> = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .filter(|m| {
-                        self.variant.is_inverse()
-                            || self.variant.is_spot()
-                            || matches!(m.quote.as_str(), "USDT" | "USDC")
-                    })
-                    .map(|m| format!("tickers.{}", m.symbol))
-                    .collect();
-                for (symbol, state) in &mut self.books {
-                    state.book.clear();
-                    if let Sync::Resubscribing(timer) = state.sync {
-                        cx.clear_timer(timer);
-                    }
-                    state.sync = Sync::Waiting;
-                    topics.push(Self::book_topic(self.paths.book_depth, symbol));
-                }
-                topics.extend(
-                    self.candles
-                        .keys()
-                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
-                );
-                self.subscribe(cx, "subscribe", &topics);
-            }
-            Channel::Private => self.on_private_open(cx, socket),
-        }
-    }
-
-    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        let Some(channel) = self.channel_of(socket) else {
-            return;
-        };
-        self.connection(channel).last_received = cx.now;
-        match channel {
-            Channel::Public => self.on_public_frame(cx, text),
-            Channel::Private => self.on_private_frame(cx, text),
-        }
-    }
-
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
-        if let Some(channel) = self.channel_of(socket) {
-            self.on_socket_closed(cx, channel, code);
-        }
-    }
-
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        let mut pending = Some(pending);
-        if self.resend(cx, &mut pending, response.body) {
-            return;
-        }
-        let Some(Pending { then, .. }) = pending else {
-            return;
-        };
-        self.on_public_response(cx, then, Ok(response));
-    }
-
-    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        match &mut pending.then {
-            Then::Account(request) => self.on_account_item(cx, request, item),
-            then => on_item_public(then, item, self.variant),
-        }
-    }
-
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        let mut pending = Some(pending);
-        if self.resend(cx, &mut pending, error) {
-            return;
-        }
-        let Some(Pending { then, .. }) = pending else {
-            return;
-        };
-        self.on_public_response(cx, then, Err(error));
-    }
-
-    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+impl BybitLinear {
+    fn on_category_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         let mut resubscribe = Vec::new();
         for (symbol, state) in &mut self.books {
+            if !self.variant.is_spot() && Category::for_symbol(symbol) != self.category {
+                continue;
+            }
             if matches!(state.sync, Sync::Resubscribing(t) if t == timer) {
                 state.sync = Sync::Waiting;
                 resubscribe.push(Self::book_topic(self.paths.book_depth, symbol));
@@ -1296,6 +1590,9 @@ impl Venue for BybitLinear {
             self.try_load_markets(cx);
         }
         for channel in [Channel::Public, Channel::Private] {
+            if channel == Channel::Private && self.category != self.primary_category {
+                continue;
+            }
             if self.connection(channel).reconnect == Some(timer) {
                 self.connection(channel).reconnect = None;
                 self.connect(cx, channel);
@@ -1305,11 +1602,231 @@ impl Venue for BybitLinear {
             }
         }
         self.on_account_timer(cx, timer);
-        self.on_trade_timer(cx, timer);
+        if self.category == self.primary_category {
+            self.on_trade_timer(cx, timer);
+        }
+    }
+}
+
+impl Venue for BybitLinear {
+    type Pending = Pending;
+
+    fn supports_options(&self) -> bool {
+        self.category_enabled(Category::Option)
+    }
+
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
+        if let Some(error) = &self.config_error {
+            cx.log(LogLevel::Error, error.clone());
+            return;
+        }
+        if self.category_enabled(Category::Option) {
+            // Keep identity stable before an option position first receives Greeks.
+            cx.store.retain_position_ids();
+        }
+        for category in self.categories() {
+            self.select_category(category);
+            self.request_startup(cx);
+        }
+        self.select_category(self.primary_category);
+        if self.credentials.is_some() {
+            self.request_account_info(cx);
+        }
+    }
+
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.select_socket_category(socket);
+        let Some(channel) = self.channel_of(socket) else {
+            return;
+        };
+        let now = cx.now;
+        let connection = self.connection(channel);
+        connection.open = true;
+        connection.attempts = 0;
+        connection.last_received = now;
+        connection.last_ping = now;
+        self.watch(cx, channel);
+        match channel {
+            Channel::Public => {
+                let mut topics: Vec<String> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .filter(|m| self.owns_symbol(&m.symbol))
+                    .map(|m| format!("tickers.{}", m.symbol))
+                    .collect();
+                let category = self.category;
+                let spot = self.variant.is_spot();
+                for (symbol, state) in &mut self.books {
+                    if !spot && Category::for_symbol(symbol) != category {
+                        continue;
+                    }
+                    state.book.clear();
+                    if let Sync::Resubscribing(timer) = state.sync {
+                        cx.clear_timer(timer);
+                    }
+                    state.sync = Sync::Waiting;
+                    topics.push(Self::book_topic(self.paths.book_depth, symbol));
+                }
+                topics.extend(
+                    self.candles
+                        .keys()
+                        .filter(|(symbol, _)| self.owns_symbol(symbol))
+                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
+                );
+                self.subscribe(cx, "subscribe", &topics);
+            }
+            Channel::Private => self.on_private_open(cx, socket),
+        }
+    }
+
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        self.select_socket_category(socket);
+        let Some(channel) = self.channel_of(socket) else {
+            return;
+        };
+        self.connection(channel).last_received = cx.now;
+        match channel {
+            Channel::Public => self.on_public_frame(cx, text),
+            Channel::Private => {
+                self.on_private_frame(cx, text);
+                if topic(text).is_some_and(|topic| !topic.starts_with("wallet")) {
+                    for category in self
+                        .categories()
+                        .into_iter()
+                        .filter(|category| *category != self.primary_category)
+                        .collect::<Vec<_>>()
+                    {
+                        self.select_category(category);
+                        self.on_private_frame(cx, text);
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
+        self.select_socket_category(socket);
+        if let Some(channel) = self.channel_of(socket) {
+            self.on_socket_closed(cx, channel, code);
+        }
+    }
+
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        self.select_category(pending.category);
+        let mut pending = Some(pending);
+        if self.resend(cx, &mut pending, response.body) {
+            return;
+        }
+        let Some(Pending { then, .. }) = pending else {
+            return;
+        };
+        self.on_public_response(cx, then, Ok(response));
+    }
+
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        self.select_category(pending.category);
+        match &mut pending.then {
+            Then::Account(request) => self.on_account_item(cx, request, item),
+            Then::Options(request) => options::on_item(request, item),
+            then => {
+                if matches!(then, Then::Markets { .. })
+                    && let Ok(row) = serde_json::from_str::<Instrument>(item)
+                {
+                    self.classification.insert(
+                        row.symbol.to_string(),
+                        InstrumentClassification {
+                            market: 0,
+                            symbol_type: row.symbol_type.as_ref().map(ToString::to_string),
+                            market_region: row.market_region.as_ref().map(ToString::to_string),
+                            underlying_ticker: row
+                                .underlying_ticker
+                                .as_ref()
+                                .map(ToString::to_string),
+                        },
+                    );
+                    if let Some(product) = derivative_from_wire(&row, self.category) {
+                        self.derivatives.insert(row.symbol.to_string(), product);
+                    }
+                }
+                on_item_public(then, item, self.variant, self.category)
+            }
+        }
+    }
+
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        self.select_category(pending.category);
+        let mut pending = Some(pending);
+        if self.resend(cx, &mut pending, error) {
+            return;
+        }
+        let Some(Pending { then, .. }) = pending else {
+            return;
+        };
+        self.on_public_response(cx, then, Err(error));
+    }
+
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        for category in self.categories() {
+            self.select_category(category);
+            self.on_category_timer(cx, timer);
+        }
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let symbol = match &command {
+            Command::SubscribeOrderBook { symbol }
+            | Command::UnsubscribeOrderBook { symbol }
+            | Command::SubscribeCandles { symbol, .. }
+            | Command::UnsubscribeCandles { symbol, .. }
+            | Command::FetchCandles { symbol, .. }
+            | Command::CancelSymbolOrders { symbol, .. }
+            | Command::SetLeverage { symbol, .. }
+            | Command::SetMarginType { symbol, .. } => Some(symbol.as_str()),
+            Command::AmendOrder { id, .. } => cx.store.order(id).map(|order| order.symbol.as_str()),
+            Command::Query { query, .. } => match query {
+                safe_cex_engine::Query::Fills { symbol, .. }
+                | safe_cex_engine::Query::OrderHistory { symbol, .. }
+                | safe_cex_engine::Query::Income { symbol, .. } => symbol.as_deref(),
+                safe_cex_engine::Query::PublicTrades { symbol, .. }
+                | safe_cex_engine::Query::OrderByClientId { symbol, .. } => Some(symbol.as_str()),
+            },
+            _ => None,
+        };
+        let category = symbol.map_or(self.primary_category, |symbol| self.category_for(symbol));
+        if !self.category_enabled(category) {
+            let id = match &command {
+                Command::FetchCandles { command, .. }
+                | Command::CancelSymbolOrders { command, .. }
+                | Command::SetLeverage { command, .. }
+                | Command::SetMarginType { command, .. }
+                | Command::AmendOrder { command, .. }
+                | Command::Query { command, .. } => Some(*command),
+                _ => None,
+            };
+            if let Some(id) = id {
+                cx.done(id, Err("Bybit product is not enabled".into()));
+            } else {
+                cx.log(LogLevel::Warning, "Bybit product is not enabled");
+            }
+            return;
+        }
+        self.select_category(category);
         match command {
+            Command::FetchOptionChain { command, query } => {
+                self.fetch_option_chain(cx, command, query)
+            }
+            Command::FetchOptionExpiries {
+                command,
+                underlying,
+            } => self.fetch_option_expiries(cx, command, &underlying),
+            Command::FetchAccountGreeks { command } => self.fetch_account_greeks(cx, command),
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {

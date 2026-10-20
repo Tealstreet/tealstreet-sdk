@@ -9,6 +9,20 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    #[cfg(feature = "command-options")]
+    FetchOptionChain {
+        command: u32,
+        query: crate::model::OptionChainQuery,
+    },
+    #[cfg(feature = "command-options")]
+    FetchOptionExpiries {
+        command: u32,
+        underlying: String,
+    },
+    #[cfg(feature = "command-options")]
+    FetchAccountGreeks {
+        command: u32,
+    },
     #[cfg(feature = "command-apexomni")]
     GetAccount {
         command: u32,
@@ -163,6 +177,20 @@ impl From<CommandIn> for Command {
     #[inline(always)]
     fn from(command: CommandIn) -> Self {
         match command {
+            #[cfg(feature = "command-options")]
+            CommandIn::FetchOptionChain { command, query } => {
+                Self::FetchOptionChain { command, query }
+            }
+            #[cfg(feature = "command-options")]
+            CommandIn::FetchOptionExpiries {
+                command,
+                underlying,
+            } => Self::FetchOptionExpiries {
+                command,
+                underlying,
+            },
+            #[cfg(feature = "command-options")]
+            CommandIn::FetchAccountGreeks { command } => Self::FetchAccountGreeks { command },
             #[cfg(feature = "command-apexomni")]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
@@ -334,6 +362,46 @@ pub enum HostInput {
     TickIntervalChanged { interval_ms: f64 },
 }
 
+/// Decode startup subscriptions without compiling the trading/query parser.
+#[inline(always)]
+pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Error> {
+    #[derive(Deserialize)]
+    struct Header<'a> {
+        #[serde(borrow)]
+        op: std::borrow::Cow<'a, str>,
+    }
+    let header: Header<'_> = serde_json::from_str(json)?;
+    if matches!(
+        header.op.as_ref(),
+        "subscribeOrderBook" | "unsubscribeOrderBook" | "subscribeCandles" | "unsubscribeCandles"
+    ) {
+        // Keep the internally tagged representation: unknown values and duplicate
+        // fields must validate exactly as they do in the complete command enum.
+        #[derive(Deserialize)]
+        #[serde(tag = "op", rename_all = "camelCase")]
+        enum Subscription {
+            SubscribeOrderBook { symbol: String },
+            UnsubscribeOrderBook { symbol: String },
+            SubscribeCandles { symbol: String, interval: String },
+            UnsubscribeCandles { symbol: String, interval: String },
+        }
+        let command = match serde_json::from_str::<Subscription>(json)? {
+            Subscription::SubscribeOrderBook { symbol } => Command::SubscribeOrderBook { symbol },
+            Subscription::UnsubscribeOrderBook { symbol } => {
+                Command::UnsubscribeOrderBook { symbol }
+            }
+            Subscription::SubscribeCandles { symbol, interval } => {
+                Command::SubscribeCandles { symbol, interval }
+            }
+            Subscription::UnsubscribeCandles { symbol, interval } => {
+                Command::UnsubscribeCandles { symbol, interval }
+            }
+        };
+        return Ok(Some(command));
+    }
+    Ok(None)
+}
+
 /// Decode the shared host protocol, including nullable polling configuration.
 // Keep the large command variant inlined through the host boundary as well.
 #[inline(always)]
@@ -373,6 +441,115 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_boundary_matches_the_complete_command_decoder() {
+        for op in [
+            "subscribeOrderBook",
+            "unsubscribeOrderBook",
+            "subscribeCandles",
+            "unsubscribeCandles",
+        ] {
+            for template in [
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m"}"#,
+                r#"{"interval":"1m","symbol":"BTCUSDT","op":"@OP@"}"#,
+                r#"{"op":"@OP@","symbol":"BTC\u0055SDT","interval":"1\u006d"}"#,
+                r#"{"op":"@OP@","symbol":"","interval":""}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT"}"#,
+                r#"{"op":"@OP@","interval":"1m"}"#,
+                r#"{"op":"@OP@","symbol":null,"interval":"1m"}"#,
+                r#"{"op":"@OP@","symbol":123,"interval":"1m"}"#,
+                r#"{"op":"@OP@","symbol":[],"interval":"1m"}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":null}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":2}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":{}}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","symbol":"ETHUSDT","interval":"1m"}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m","interval":"5m"}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m","unknown":{"rows":[true,null,1.5,"x"]}}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m","unknown":1e400}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m","unknown":{"n":-1e400}}"#,
+                r#"{"op":"@OP@","symbol":"BTCUSDT","interval":"1m"}null"#,
+            ] {
+                let json = template.replace("@OP@", op);
+                assert_subscription_decoders_match(&json);
+                assert_subscription_decoders_match(&json.replace("\"op\"", r#""\u006fp""#));
+                assert_subscription_decoders_match(
+                    &json.replace(op, &op.replacen('s', r#"\u0073"#, 1)),
+                );
+            }
+            let nested = format!(
+                r#"{{"op":"{op}","symbol":"BTCUSDT","interval":"1m","unknown":{}0{}}}"#,
+                "[".repeat(130),
+                "]".repeat(130)
+            );
+            assert_subscription_decoders_match(&nested);
+        }
+        // The host header already rejects duplicate operations before dispatch.
+        for json in [
+            r#"{"op":"subscribeOrderBook","op":"subscribeOrderBook","symbol":"BTCUSDT"}"#,
+            r#"{"op":"subscribeCandles","op":"placeOrders","symbol":"BTCUSDT","interval":"1m"}"#,
+        ] {
+            assert!(decode_subscription(json).is_err());
+            assert!(decode_host_input(json).is_err());
+            assert!(decode_command(json).is_err());
+        }
+    }
+
+    fn assert_subscription_decoders_match(json: &str) {
+        let host = decode_subscription(json).map(|selected| selected.expect("subscription input"));
+        assert_eq!(
+            host.map_err(|error| error.to_string()),
+            decode_command(json).map_err(|error| error.to_string()),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn iv_survives_the_command_boundary_with_or_without_option_queries() {
+        let command = decode_command(r#"{"op":"placeOrders","command":41,"orders":[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100},{"symbol":"BTC-option","type":"limit","side":"buy","amount":1,"impliedVolatility":0.5}]}"#).unwrap();
+        let Command::PlaceOrders { command, orders } = command else {
+            panic!("place orders")
+        };
+        assert_eq!(command, 41);
+        assert_eq!(orders[0].implied_volatility, None);
+        assert_eq!(orders[1].implied_volatility, Some(0.5));
+    }
+
+    #[test]
+    #[cfg(not(feature = "command-options"))]
+    fn option_json_queries_are_absent_from_unrelated_venue_parsers() {
+        for json in [
+            r#"{"op":"fetchOptionChain","command":1,"query":{"underlying":"BTC"}}"#,
+            r#"{"op":"fetchOptionExpiries","command":2,"underlying":"BTC"}"#,
+            r#"{"op":"fetchAccountGreeks","command":3}"#,
+        ] {
+            assert!(
+                decode_command(json).is_err(),
+                "option parser must be explicitly enabled: {json}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "command-options")]
+    fn option_json_queries_preserve_ids_and_all_native_filters_when_enabled() {
+        assert_eq!(decode_command(r#"{"op":"fetchOptionChain","command":1,"query":{"underlying":"BTC","expiry":1800000000000,"right":"put","strikeMin":90000,"strikeMax":110000}}"#).unwrap(),
+            Command::FetchOptionChain { command: 1, query: crate::model::OptionChainQuery {
+                underlying: "BTC".into(), expiry: Some(1_800_000_000_000.0), right: Some(crate::model::OptionRight::Put), strike_min: Some(90_000.0), strike_max: Some(110_000.0)
+            }});
+        assert_eq!(
+            decode_command(r#"{"op":"fetchOptionExpiries","command":2,"underlying":"ETH"}"#)
+                .unwrap(),
+            Command::FetchOptionExpiries {
+                command: 2,
+                underlying: "ETH".into()
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountGreeks","command":3}"#).unwrap(),
+            Command::FetchAccountGreeks { command: 3 }
+        );
+    }
 
     #[test]
     fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {

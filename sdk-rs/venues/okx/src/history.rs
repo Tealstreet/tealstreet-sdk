@@ -1,4 +1,4 @@
-//! Typed, streamed rare reads. Native SWAP quantities are contract counts.
+//! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending};
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
@@ -20,6 +20,8 @@ pub struct Request {
     endpoint: &'static str,
     symbol: Option<String>,
     instrument: Option<String>,
+    inst_type: &'static str,
+    next_type: bool,
     order_id: Option<String>,
     income_kind: Option<String>,
     from: Option<f64>,
@@ -113,6 +115,8 @@ struct HistoricalOrder {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Income {
+    #[serde(skip)]
+    bill: String,
     symbol: String,
     income_type: &'static str,
     income: f64,
@@ -320,6 +324,14 @@ impl Request {
             }
             Rows::Income(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+                let mut bills = std::collections::HashSet::new();
+                for row in rows.iter() {
+                    if bills.len() >= self.limit && !bills.contains(&row.bill) {
+                        break;
+                    }
+                    bills.insert(row.bill.clone());
+                }
+                rows.retain(|row| bills.contains(&row.bill));
                 serde_json::to_string(rows)
             }
             Rows::Trades(rows) => serde_json::to_string(rows),
@@ -436,6 +448,10 @@ impl Okx {
             cx.done(command, Ok("[]".into()));
             return;
         }
+        let inst_type = instrument
+            .as_deref()
+            .map_or("SWAP", |id| self.instrument_type(id));
+        let next_type = self.options.eea && instrument.is_none();
         self.history_request(
             cx,
             Request {
@@ -444,6 +460,8 @@ impl Okx {
                 endpoint,
                 symbol,
                 instrument,
+                inst_type,
+                next_type,
                 order_id,
                 income_kind,
                 from,
@@ -514,6 +532,8 @@ impl Okx {
                 endpoint: "/api/v5/trade/order",
                 symbol: Some(symbol),
                 instrument: Some(instrument),
+                inst_type: "SWAP",
+                next_type: false,
                 order_id: None,
                 income_kind: None,
                 from: None,
@@ -672,14 +692,7 @@ impl Okx {
         };
         let mut path = format!("{}?", r.endpoint);
         if !matches!(r.rows, Rows::Trades(_)) {
-            let kind = if matches!(r.rows, Rows::Fills(_)) {
-                r.instrument
-                    .as_deref()
-                    .map_or("SWAP", |id| self.instrument_type(id))
-            } else {
-                "SWAP"
-            };
-            path.push_str(&format!("instType={kind}&"));
+            path.push_str(&format!("instType={}&", r.inst_type));
         }
         if let Some(id) = &r.instrument {
             path.push_str(&format!("instId={id}&"));
@@ -892,6 +905,7 @@ impl Okx {
                         continue;
                     }
                     let record = Income {
+                        bill: bill_id.into(),
                         symbol: symbol.into(),
                         income_type: income_type(category),
                         income: amount,
@@ -975,10 +989,27 @@ impl Okx {
             Rows::Fills(_) => unreachable!(),
         };
         if r.count < PAGE || enough {
+            if r.next_type {
+                r.next_type = false;
+                r.inst_type = "FUTURES";
+                r.after = None;
+                r.oldest = None;
+                r.pages = 0;
+                r.rows_seen = 0;
+                self.history_request(cx, r);
+                return;
+            }
             r.finish(cx);
             return;
         }
         if r.pages >= cap {
+            if self.options.eea && r.instrument.is_none() {
+                cx.done(
+                    r.command,
+                    Err("OKX composite history hit page cap; incomplete source".into()),
+                );
+                return;
+            }
             cx.log(
                 LogLevel::Warning,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
@@ -992,6 +1023,13 @@ impl Okx {
                 .as_deref()
                 .is_some_and(|old| !id_cmp(next, old).is_lt())
         }) {
+            if self.options.eea && r.instrument.is_none() {
+                cx.done(
+                    r.command,
+                    Err("OKX composite history cursor did not advance; incomplete source".into()),
+                );
+                return;
+            }
             cx.log(
                 LogLevel::Warning,
                 "OKX history cursor did not advance; older rows were not fetched",

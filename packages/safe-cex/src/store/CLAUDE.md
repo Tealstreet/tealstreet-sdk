@@ -287,7 +287,9 @@ alongside the native sizing fields.
 
 OKX frame bridges keep native contract-count placement amounts separately from
 base-sized fills and remaining quantities. Exact native leaves populate
-`remainingNative`; regular order cumulative native fills are amount minus those
+`remainingNative`, with inverse `remainingNotional` equal to those counts times
+the quote contract value. A finite exact `filledInPlacementUnits` tail is
+authoritative; legacy regular-order frames derive native fills as amount minus
 leaves. Position `contractsNative` is base contracts divided by ctVal for linear
 markets and quote notional divided by ctVal for inverse markets. OKX inverse
 PnL is already converted to USD, so do not relabel it as coin-native PnL. Both
@@ -308,3 +310,23 @@ Frame application keeps OKX native contract-count metadata separate from Binance
 COIN-M contract multipliers: constructor argument four is the OKX count policy;
 argument five is COIN-M inverse notional sizing. Worker and main-thread callers
 set both independently; Bitget inverse retains its existing third argument.
+
+## Instrument and derivative frame metadata
+
+Optional `INSTRUMENT_CLASSIFICATIONS` preserves native `symbolType`,
+`marketRegion` and `underlyingTicker` without an arbitrary JSON payload.
+Absent and explicitly empty labels are distinct; Bybit's empty label and
+`innovation` positively identify crypto, while absent/new values remain unknown.
+Both frame consumers reconstruct these minimal `Market.info` fields for the
+shared classifier and actual CLI TradFi preflight.
+
+`DERIVATIVE_PRODUCTS` carries typed Future/Call/Put identity and known terms.
+Unknown expiry/strike/settlement remain absent; only complete European cash
+option terms create `Market.option`. A market replacement clears old indexed
+metadata; metadata-only changes re-emit their matching market table.
+`POSITION_GREEKS` uses exact position IDs and clears on position closure, so
+reopening cannot resurrect stale Greeks. The optional second `ORDERS` tail
+retains exact `filledInPlacementUnits` after native leaves. Inverse fills cannot
+be reconstructed by dividing base fills by a quote contract multiplier. OKX
+reports USD-normalized position PnL, so its frame consumer does not label that
+number as native coin PnL.

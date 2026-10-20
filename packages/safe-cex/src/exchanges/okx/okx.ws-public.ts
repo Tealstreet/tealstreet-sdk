@@ -14,10 +14,8 @@ import { BASE_WS_URLS } from './okx.types';
 import { resolveTransportRouting } from '../../transport/registry';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 
-const tickerNumber = (value: unknown): number => {
-  const parsed = Number.parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+const tickerNumber = (value: unknown): number =>
+  value === '' || value === undefined || value === null ? 0 : Number.parseFloat(String(value));
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -230,17 +228,19 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   handleTickerEvents = ({ data: [update] }: Data) => {
-    const open = tickerNumber(update.open24h);
-    const last = tickerNumber(update.last);
-    const percentage = open > 0 ? roundUSD(((last - open) / open) * 100) : 0;
+    // Empty live last/open fields carry no new trade; retain the proven values.
+    const open = update.open24h === '' ? undefined : tickerNumber(update.open24h);
+    const last = update.last === '' ? undefined : tickerNumber(update.last);
+    const percentage =
+      last === undefined || open === undefined ? undefined : open === 0 ? 0 : roundUSD(((last - open) / open) * 100);
 
     this.store.updateTicker(
       { id: update.instId },
       {
         bid: tickerNumber(update.bidPx),
         ask: tickerNumber(update.askPx),
-        last,
-        percentage,
+        ...(last !== undefined && { last }),
+        ...(percentage !== undefined && { percentage }),
         volume: tickerNumber(update.volCcy24h),
         quoteVolume: tickerNumber(update.vol24h),
       },

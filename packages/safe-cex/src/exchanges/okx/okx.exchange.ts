@@ -118,6 +118,9 @@ const parseOKXTriggerPxType = (triggerPxType?: string) => {
   return OrderStopTriggerType.LastPrice;
 };
 
+const tickerNumber = (value: unknown): number =>
+  value === '' || value === undefined || value === null ? 0 : Number.parseFloat(String(value));
+
 export class OKXExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
@@ -463,23 +466,23 @@ export class OKXExchange extends BaseExchange {
 
         if (!market) return acc;
 
-        const open = this.toFiniteNumber(t.open24h);
-        const last = this.toFiniteNumber(t.last);
-        const percentage = open > 0 ? roundUSD(((last - open) / open) * 100) : 0;
+        const open = tickerNumber(t.open24h);
+        const last = tickerNumber(t.last);
+        const percentage = open === 0 ? 0 : roundUSD(((last - open) / open) * 100);
 
         const ticker = {
           id: market.id,
           symbol: market.symbol,
-          bid: this.toFiniteNumber(t.bidPx),
-          ask: this.toFiniteNumber(t.askPx),
+          bid: tickerNumber(t.bidPx),
+          ask: tickerNumber(t.askPx),
           last,
           mark: last,
           index: last,
           percentage,
           fundingRate: 0,
           fundingTime: 0,
-          volume: this.toFiniteNumber(t.volCcy24h),
-          quoteVolume: this.toFiniteNumber(t.vol24h),
+          volume: tickerNumber(t.volCcy24h),
+          quoteVolume: tickerNumber(t.vol24h),
           openInterest: 0,
         };
 

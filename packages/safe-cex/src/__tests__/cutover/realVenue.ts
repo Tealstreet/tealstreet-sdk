@@ -144,37 +144,28 @@ export const realVenue = (name: ExchangeName) => {
       restore.push(() => Object.assign(object, previous));
     }
   }
-  // EEA inputs include the captured FUTURES catalog/tickers as well as SWAP.
-  // Demo aliases retain those products while selecting their public WS host.
+  // EU captures contain the additional native FUTURES catalog and ticker seed.
+  // Demo aliases share their regional product input at their own native hosts.
   if (name.startsWith('okx'))
-    records = records.map((record) => ({
-      ...record,
-      ...(record.url
-        ? {
-            url: record.url
-              .replace('wseea.okx.com', 'ws.okx.com')
-              .replace('eea.okx.com', 'www.okx.com')
-              .replace(
-                'www.okx.com',
-                name === 'okxeu' || name === 'okxeudemo'
-                  ? 'eea.okx.com'
-                  : name === 'okxdemo'
-                    ? 'openapi.okx.com'
-                    : 'www.okx.com',
-              )
-              .replace(
-                'ws.okx.com',
-                name === 'okxeu'
-                  ? 'wseea.okx.com'
-                  : name === 'okxeudemo'
-                    ? 'wseeapap.okx.com'
-                    : name === 'okxdemo'
-                      ? 'wspap.okx.com'
-                      : 'ws.okx.com',
-              ),
-          }
-        : {}),
-    }));
+    records = records.map((record) => {
+      if (!record.url) return record;
+      const url = new URL(record.url);
+      url.hostname =
+        url.protocol === 'wss:'
+          ? name === 'okxeu'
+            ? 'wseea.okx.com'
+            : name === 'okxeudemo'
+              ? 'wseeapap.okx.com'
+              : name === 'okxdemo'
+                ? 'wspap.okx.com'
+                : 'ws.okx.com'
+          : name.startsWith('okxeu')
+            ? 'eea.okx.com'
+            : name === 'okxdemo'
+              ? 'openapi.okx.com'
+              : 'www.okx.com';
+      return { ...record, url: url.toString() };
+    });
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
   const polling = venue.polling === true;
   let pollingEpoch: number | undefined;

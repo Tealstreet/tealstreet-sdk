@@ -1130,13 +1130,19 @@ The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
 
 ## Rust engine scope and verified corrections
 
-`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names,
-plus EEA FUTURES with `ruleType=xperp` under `okxeu`/`okxeudemo`. Catalogs,
-tickers, positions, and regular/algo orders stage complete product unions before
-committing. EEA X-Perp dated IDs stay distinct from the matching SWAP.
-Sizes sent to OKX remain contracts; inverse fills and remaining quantities use
-quote contract value divided by the reference price. Coin margin and PnL convert
-to USD for aggregate balances and remain coin values in the currency table.
+`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names;
+EEA profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
+Signed EEA discovery uses account-scoped instruments for both product types.
+Catalogs, tickers, positions, and regular/algo orders stage complete product
+unions before committing. X-Perp dated IDs stay distinct from matching SWAPs.
+Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
+while the existing book contract uses lotSz. Inverse base quantities divide
+quote contract value by the native reference price; position notional remains
+quote value. Position PnL and margin are USD-normalized, while raw coin collateral
+and ledger units remain distinct. Exact native filled/leaves and position counts
+survive both frame consumers. EEA income walks both product types before global
+limiting; stalled/capped composite sources fail explicitly. Generic account-wide
+fills retain the inherited empty-result contract.
 
 The replay oracle also implements public trades (previously inherited an
 unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
@@ -1164,8 +1170,11 @@ before truncating public execution timestamps to seconds. Positive protective
 dust must not become close-all; ambiguous standalone protective limit amends
 fail before cancellation in Rust, preserving the existing execution price.
 
-
-Untraded X-Perps can appear live with empty REST `last` and `open24h` fields
-(observed in the keyless EEA catalog). They seed finite zero prices and a zero
-percentage; they do not invalidate the complete market/ticker startup or
-publish NaN into the TS store. Rust still rejects nonempty malformed numbers.
+EEA account reconciliation reads explicit SWAP and FUTURES scopes and commits
+positions/orders only after both products finish successfully. Failed, malformed
+or stale later-product reads retain the proven whole-account snapshot. Public
+index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
+Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
+unavailable REST seeds start at finite zero. An explicitly empty live last/open
+quote retains the last proven trade/change. Blank bid/ask/volume fields remain
+finite zero; malformed nonempty quotes stay visible to the reference oracle.

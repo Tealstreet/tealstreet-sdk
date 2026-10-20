@@ -86,6 +86,7 @@ pub(crate) enum Operation {
     Quotes {
         rows: Vec<Ticker>,
         invalid: bool,
+        validated_time: Option<String>,
     },
     Portfolio {
         revision: u64,
@@ -131,9 +132,14 @@ impl Operation {
                 rows.clear();
                 *invalid = false;
             }
-            Self::Quotes { rows, invalid } => {
+            Self::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 rows.clear();
                 *invalid = false;
+                *validated_time = None;
             }
             Self::Candles { rows, invalid, .. } => {
                 rows.clear();
@@ -320,25 +326,22 @@ impl BreakoutProp {
         };
         let mut headers = vec![("Content-Type", "application/json".into())];
         if !matches!(operation, Operation::Login) {
-            headers.push((
-                "Authorization",
-                format!(
-                    "DXAPI {}",
-                    self.session.token.as_deref().unwrap_or_default()
-                ),
-            ));
+            let token = self.session.token.as_deref().unwrap_or_default();
+            let mut authorization = String::with_capacity("DXAPI ".len() + token.len());
+            authorization.push_str("DXAPI ");
+            authorization.push_str(token);
+            headers.push(("Authorization", authorization));
         }
         if method == Method::Delete {
             headers.push(("If-Match", "*".into()));
         }
         let stream = operation.stream();
-        let id = cx.request(
-            method,
-            format!("{BASE_URL}/{}", path.trim_start_matches('/')),
-            headers,
-            body,
-            pending,
-        );
+        let path = path.trim_start_matches('/');
+        let mut url = String::with_capacity(BASE_URL.len() + 1 + path.len());
+        url.push_str(BASE_URL);
+        url.push('/');
+        url.push_str(path);
+        let id = cx.request(method, url, headers, body, pending);
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
@@ -356,7 +359,6 @@ impl BreakoutProp {
         operation: &Operation,
     ) -> Result<(Method, String, Option<String>), String> {
         let account = self.account_code().unwrap_or_default();
-        let encoded = wire::path_segment(account);
         let serialize = |body: &MarketData<'_>| {
             serde_json::to_string(body)
                 .map(Some)
@@ -383,9 +385,11 @@ impl BreakoutProp {
                     ),
                 )
             }
-            Operation::Portfolio { .. } => {
-                (Method::Get, format!("accounts/{encoded}/portfolio"), None)
-            }
+            Operation::Portfolio { .. } => (
+                Method::Get,
+                format!("accounts/{}/portfolio", wire::path_segment(account)),
+                None,
+            ),
             Operation::Discover => (
                 Method::Get,
                 format!("users/{}", wire::path_segment(&self.options.key)),
@@ -393,12 +397,15 @@ impl BreakoutProp {
             ),
             Operation::Instruments { .. } => (
                 Method::Get,
-                format!("instruments/query?accountCode={encoded}"),
+                format!(
+                    "instruments/query?accountCode={}",
+                    wire::path_segment(account)
+                ),
                 None,
             ),
             Operation::Details { .. } => (
                 Method::Get,
-                format!("accounts/{encoded}/instruments/query"),
+                format!("accounts/{}/instruments/query", wire::path_segment(account)),
                 None,
             ),
             Operation::Quotes { .. } => {
@@ -481,6 +488,7 @@ impl BreakoutProp {
                 Operation::Quotes {
                     rows: Vec::new(),
                     invalid: false,
+                    validated_time: None,
                 },
             );
         }
@@ -855,12 +863,20 @@ impl Venue for BreakoutProp {
                     self.join_markets(cx);
                 }
             }
-            Operation::Quotes { rows, invalid } => {
+            Operation::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 self.quotes_pending = false;
                 if invalid {
                     self.fail_operation(
                         cx,
-                        Operation::Quotes { rows, invalid },
+                        Operation::Quotes {
+                            rows,
+                            invalid,
+                            validated_time,
+                        },
                         "Invalid DXtrade quotes response",
                     );
                 } else {
@@ -928,7 +944,11 @@ impl Venue for BreakoutProp {
                     _ => *invalid = true,
                 }
             }
-            Operation::Quotes { rows, invalid } => {
+            Operation::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 match serde_json::from_str::<wire::Quote<'_>>(item) {
                     Ok(row)
                         if row.kind == "Quote"
@@ -937,9 +957,15 @@ impl Venue for BreakoutProp {
                             && row.bid > 0.0
                             && row.ask.is_finite()
                             && row.ask > 0.0
-                            && wire::timestamp(&row.time).is_ok()
+                            && (validated_time.as_deref() == Some(row.time.as_ref())
+                                || wire::timestamp(&row.time).is_ok())
                             && !rows.iter().any(|old| old.symbol == row.symbol) =>
                     {
+                        // DXtrade quotes share a snapshot time; validate identical
+                        // bytes once within this response, never across retries.
+                        if validated_time.as_deref() != Some(row.time.as_ref()) {
+                            *validated_time = Some(row.time.into_owned());
+                        }
                         rows.push(Ticker {
                             id: row.symbol.to_string(),
                             symbol: row.symbol.into_owned(),
@@ -1050,6 +1076,14 @@ impl Venue for BreakoutProp {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchOptionChain { command, .. }
+            | Command::FetchOptionExpiries { command, .. }
+            | Command::FetchAccountGreeks { command } => {
+                cx.done(
+                    command,
+                    Err("Options are not enabled on this account".into()),
+                );
+            }
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 let entry = self.books.entry(symbol).or_default();

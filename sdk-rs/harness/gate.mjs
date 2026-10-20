@@ -629,6 +629,16 @@ const KNOWN_TS_FIXES = {
     // Paired TS/Rust fix; account output is still compared without normalization.
     'account totalEq stays separate from real USD currency equity; delta currencies, live-order margin and revision fences survive delayed reads and local ticks',
     'acknowledged leverage survives failed post-write snapshots',
+    // Position pushes carry a slice, not whole-account maintenance margin.
+    'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',
+    // TS finite coercion hides malformed risk; isolated native IMR may be absent.
+    'malformed or overflowing native risk cannot become zero; isolated position pushes use reported margin when IMR is unavailable',
+    'untraded EEA X-Perp empty last/open seeds initialize to zero and stream updates retain proven trade/percentage instead of NaN',
+    // Phase-9: inverse contracts convert at native mark/execution reference;
+    // EEA history scopes by native product rather than hardcoded SWAP.
+    'EEA historical orders and income query retained FUTURES X-Perps as well as SWAP',
+    'composite income limits apply after joining newest whole native bill groups',
+    'composite capped or stalled product histories fail explicitly as incomplete',
   ],
 
   binance: (ts, rust) => {
@@ -640,6 +650,12 @@ const KNOWN_TS_FIXES = {
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
   },
+  // Phase-9 native regressions additionally correct TS: account-wide history
+  // limits before joining newer inverse/options sources; ignored IV on ordinary
+  // derivatives; generic option tickers omitted and option books routed through
+  // the linear feed; malformed supplied option WS Greeks coerced to zero
+  // instead of retaining proven position/Greek state. Dedicated API tests compare
+  // options terms/queries/signing, and assert native option depth25 separately.
   bybit: (ts, rust) => {
     if (!ts.account) return;
     const output = ts;

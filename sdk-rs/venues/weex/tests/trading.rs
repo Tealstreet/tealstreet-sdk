@@ -79,6 +79,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
     }
 }
 fn order(id: &str, kind: OrderType) -> Order {

@@ -48,18 +48,6 @@ pub struct Instrument<'a> {
     pub lever: &'a str,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TickerSeed<'a> {
-    pub inst_id: &'a str,
-    pub bid_px: &'a str,
-    pub ask_px: &'a str,
-    pub last: &'a str,
-    pub open24h: &'a str,
-    pub vol_ccy24h: &'a str,
-    pub vol24h: &'a str,
-}
-
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Prices<'a> {
@@ -138,6 +126,8 @@ pub struct Config<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PositionRow<'a> {
+    pub inst_type: &'a str,
+    pub margin: &'a str,
     pub inst_id: &'a str,
     pub pos: &'a str,
     pub pos_side: &'a str,
@@ -155,6 +145,7 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrderRow<'a> {
+    pub inst_type: &'a str,
     pub inst_id: &'a str,
     pub ord_id: &'a str,
     pub algo_id: &'a str,
