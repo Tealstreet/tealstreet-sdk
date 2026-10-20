@@ -425,3 +425,14 @@ request, signature, economic and caller-ID checks remain enabled. Independent
 review reports/findings/fixes are posted on PR1325. Merge requires all checks at
 its exact final head to pass. No live private authentication or retired INTX
 availability is claimed; inactive Starbase remains outside activation.
+
+### Paradex shared-transport integration
+
+Integrated landing1f9e9a5206 after the preceding PR head passed all30 CI checks.
+Retained both venue registrations and explicit binary transport opt-in; Coinbase
+public/private sockets continue through text channels. Corrected an automatic
+merge omission in the single-venue secret-field cfg. Independent Rust/native,
+SDK/host and harness code-correctness reviews are clear. Harness337, host57,
+targeted SDK270, SDK typecheck/lint, selected WASM Clippy and113 venue tests
+plus shared engine tests pass. Full integrated Clippy, rebuilt acceptance
+replays and exact-head CI are rerunning; their final evidence is posted on PR1325.

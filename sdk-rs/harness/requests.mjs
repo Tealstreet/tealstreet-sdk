@@ -187,6 +187,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   } catch {
     return `WS ${canonicalUrl(url, callerIds, options)} ${text}`;
   }
+  if (options.socketMessage) {
+    message = options.socketMessage(message);
+    if (message === undefined) return undefined;
+  }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(
     message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '',
@@ -225,9 +229,13 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
       message.args = message.args.map((arg) => {
         const nested = typeof arg === 'string';
         const payload = nested ? parseJson(arg) : arg;
-        const normalized = { ...payload, timestamp: '<timestamp>', sign: '<signature>',
+        const normalized = {
+          ...payload,
+          timestamp: '<timestamp>',
+          sign: '<signature>',
           ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
-          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) };
+          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
+        };
         return nested ? JSON.stringify(normalized) : normalized;
       });
     }
@@ -283,7 +291,10 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
         subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
       );
     }
-    if (options.productSubscriptions && Array.isArray(message.product_ids)) return message.product_ids.map((product) => subscriptionKey(url, {...message,product_ids:[product]},callerIds,options));
+    if (options.productSubscriptions && Array.isArray(message.product_ids))
+      return message.product_ids.map((product) =>
+        subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options),
+      );
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field)
       return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));

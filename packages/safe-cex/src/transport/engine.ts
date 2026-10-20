@@ -190,7 +190,7 @@ const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+  exchange === 'hyperliquid' || exchange === 'hyperliquidspot' || exchange === 'paradex'
     ? !options.publicDataOnly
     : exchange === 'bingx'
       ? !options.publicDataOnly && options.tealstreetTunnel !== false
@@ -475,7 +475,8 @@ export const createEngineTransport = (
         if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
         handlers.onMessage(text);
       };
-      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive });
+      const receiveBinary = (data: Uint8Array) => { fallback?.onMessage(); handlers.onBinary?.(data); };
+      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
       let socket: { send(text: string): void; close(): void } | undefined;
       let closed = false;
       let opened = false;
@@ -500,8 +501,8 @@ export const createEngineTransport = (
             }
           });
           const decode = socketMessages(
-            (text) => {
-              if (!closed) receive(text);
+            (data) => {
+              if (!closed) { if (typeof data === 'string') receive(data); else receiveBinary(data); }
             },
             () => {
               if (!closed) {
@@ -512,6 +513,7 @@ export const createEngineTransport = (
                 handlers.onClose(1007);
               }
             },
+            handlers.binary,
           );
           relay.addEventListener('message', (event) => {
             if (!closed) decode((event as MessageEvent).data);

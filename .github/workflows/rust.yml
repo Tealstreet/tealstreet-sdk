@@ -164,6 +164,9 @@ jobs:
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
+          - venue: paradex
+            books: BTC-USD-PERP,ETH-USD-PERP
+            private_script: rust:private-tape-paradex
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # Budget per single-venue browser bundle.
