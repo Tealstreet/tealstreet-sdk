@@ -1008,7 +1008,7 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
 }
 
 #[test]
-fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() {
+fn partial_stops_amend_the_native_order_and_full_stops_modify_the_position() {
     for mode in ["Partial", "Full"] {
         let mut h = ready();
         let stop = format!(
@@ -1022,17 +1022,15 @@ fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() 
             amount: None,
         });
         if mode == "Partial" {
-            h.respond(
-                "/v5/order/cancel-batch",
-                200,
-                r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
-            );
-            let amend = h.take("/v5/position/trading-stop");
+            let amend = h.take("/v5/order/amend");
             assert_eq!(
                 body(&amend),
-                r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","takeProfit":"87000","tpTriggerBy":"LastPrice","tpSize":"0.005"}"#
+                r#"{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","triggerPrice":"87000"}"#
             );
-            assert!(!h.has_request("/v5/order/amend"));
+            assert!(
+                !h.has_request("/v5/position/trading-stop"),
+                "Partial trading-stop adds another order"
+            );
         } else {
             let amend = h.take("/v5/position/trading-stop");
             assert_eq!(

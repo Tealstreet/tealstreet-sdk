@@ -1,6 +1,5 @@
 //! Binance market and account families on the sans-I/O engine.
 mod account;
-mod candles;
 mod history;
 mod paths;
 mod sign;
@@ -1457,15 +1456,17 @@ impl Venue for BinanceFutures {
                 from_ms,
                 to_ms,
             } => {
-                let query = match candles::query(&symbol, &interval, limit, from_ms, to_ms, cx.now)
-                {
-                    Ok(query) => query,
-                    Err(error) => {
-                        cx.done(command, Err(error.into()));
-                        return;
-                    }
-                };
-                let path = format!("{}?{}", self.paths.klines, query.unsigned());
+                let mut path = format!(
+                    "{}?symbol={symbol}&interval={interval}&limit={}",
+                    self.paths.klines,
+                    limit.unwrap_or(500)
+                );
+                if let Some(from) = from_ms {
+                    path.push_str(&format!("&startTime={}", num::format(from)));
+                }
+                if let Some(to) = to_ms {
+                    path.push_str(&format!("&endTime={}", num::format(to)));
+                }
                 let candles = Vec::new();
                 self.get_streamed(
                     cx,
@@ -1490,6 +1491,7 @@ impl Venue for BinanceFutures {
         Box::new(
             self.books
                 .iter()
+                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

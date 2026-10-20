@@ -1877,6 +1877,7 @@ impl Venue for BybitLinear {
         Box::new(
             self.books
                 .iter()
+                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

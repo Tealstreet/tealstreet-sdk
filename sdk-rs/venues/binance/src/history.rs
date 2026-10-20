@@ -204,11 +204,7 @@ impl BinanceFutures {
             ) {
                 cx.done(command, Err("Binance Spot query is not supported".into()));
             } else {
-                let profile = if self.is_spot() { "Spot" } else { "COIN-M" };
-                cx.done(
-                    command,
-                    Err(format!("Binance {profile} history is not supported")),
-                );
+                cx.done(command, Ok("[]".into()));
             }
             return;
         }
@@ -690,9 +686,7 @@ impl BinanceFutures {
                                 .unwrap_or(safe_cex_engine::model::OrderType::Limit);
                             let status = match o.status.as_ref() {
                                 "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
-                                "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED" => {
-                                    OrderStatus::Canceled
-                                }
+                                "CANCELED" | "EXPIRED" | "REJECTED" => OrderStatus::Canceled,
                                 _ => OrderStatus::Closed,
                             };
                             orders.push(HistoricalOrder {

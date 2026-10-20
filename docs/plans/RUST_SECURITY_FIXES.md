@@ -621,3 +621,33 @@ live trading, weakened parity oracle, or performance threshold changes.
   features, touched-crate formatting and bans. Independent static review
   accepts the receive-window contract and retained security boundaries.
   Commit/push the resolved merge; all new release/gate work stays in CI.
+
+### WEEX landing and explicit restoration boundary
+
+- Before Rust CI can launch for `5de440fe97`, landing advances to
+  `04973f2729` (OKX/Aster/WEEX) and causes actual conflicts. Integrate it;
+  keep WEEX's new incomplete-credential guard inside the original Sensitive
+  owner, clone read credentials under that owner, and retain our host/TS
+  receive-window union and generic error/erasure behavior. WEEX itself adds
+  no receive-window option. TS also retains incoming OKX leverage forwarding.
+- Detected that incoming landing `0ce5383377` had removed the previously
+  landed #1354 Binance/Bybit follow-up (still present at preceding `9279ddc1c0`).
+  Overseer confirmed a dedicated restoration lane `claude-8x5tm1`; do not
+  restore #1354 broadly here. Preserve only this security PR's Binance
+  receive-window signing and regressions, plus security ownership changes.
+  The broader removal is existing landing state, explicitly reported.
+- Overseer holds other landing merges until #1351 lands (except #1353);
+  refresh only on an actual conflict. After focused checks/review, push and
+  merge as soon as every other check is green under the Hyro exception.
+  Collect detailed receipts after merge to avoid another artifact-download
+  race, keeping the feature HEAD unchanged until receipt collection finishes.
+- Resolved WEEX integration passes 240 Binance/WEEX tests (22 suite results),
+  11 focused native host tests, 13 focused TS tests, touched-venue/host strict
+  Clippy, formatting and bans with CARGO_BUILD_JOBS=4. Independent security
+  review accepts WEEX partial-credential ownership and retained signing,
+  nonce, erasure and error boundaries. No release build or replay ran locally.
+- Mandatory revert guard: before merge, with landing integrated, run
+  `git diff --stat origin/feat/rust-rewrite HEAD`; inspect every file against
+  this PR's intended scope and block on any unexpected deletion/revert. Audit
+  our open PR as well. The already-removed #1354 files remain explicitly owned
+  by the separate restoration lane, not silently restored/dropped by this PR.
