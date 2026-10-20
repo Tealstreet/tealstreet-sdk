@@ -316,16 +316,18 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
-| Bitrue futures | done (#1314) |
+| Bitrue futures | done (#1314); open-order client-ID lookup parity follow-up in `RUST_PARITY_GAPS.md`; TS has no complete order/PnL/funding histories or mode changes |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
 | WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
-| KuCoin, Phemex, Orderly family | wave 2 lanes running |
+| KuCoin futures | done ([#1312](https://github.com/Tealstreet/tealstreet-sdk/pull/1312)); spot parity follow-up in `RUST_PARITY_GAPS.md` |
+| Phemex | PR in review ([#1310](https://github.com/Tealstreet/tealstreet-sdk/pull/1310)) |
+| Orderly family | done ([#1318](https://github.com/Tealstreet/tealstreet-sdk/pull/1318)) |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
+| Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; delegated signing follow-up in `RUST_PARITY_GAPS.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
-| Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Lighter perps | done ([#1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319)) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | GRVT, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 

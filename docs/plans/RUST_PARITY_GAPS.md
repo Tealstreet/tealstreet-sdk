@@ -18,12 +18,12 @@ PR into `feat/rust-rewrite`, review findings posted, merge only on green CI.
    venues name real URLs and retain existing account transport routing. Verify
    local/delegated equivalence, missing/failed/malformed/late signer replies,
    concurrent auth and writes, and absence of automatic write retries.
-3. **Bitrue queries and settings.** Implement TS-supported order/PnL/funding
-   history, complete pagination/time filters, client-order-ID lookup and its
-   definitive-miss contract, hedge mode and margin mode changes. Check native
-   request shapes, successful settings commits and stale-read fences; reject
-   failures without clearing last-known-good state. Test paging boundaries,
-   signed amounts, closed-order lookup and rejected/ambiguous writes.
+3. **Bitrue lookup and capability audit.** Implement the TS cache/open-order
+   client-ID lookup with its non-definitive miss contract. Verify existing
+   supported fills filters and incomplete-page handling. Pin absent TS
+   order/PnL/funding histories and hedge/margin setters with runtime contract
+   tests and document the skips. Check native request shapes, aliases and
+   cache fallback; failed reads must not clear last-known-good state.
 4. **KuCoin spot.** TS has a separate HF spot adapter. Add a typed spot venue
    in the existing crate, reuse signing and host routing, register the exchange
    in WASM/SDK/harness. Cover public markets/tickers/full books/candles, private
@@ -50,7 +50,13 @@ proceed in disjoint scopes; shared host/engine/SDK/harness changes are coordinat
 
 - Paradex: merged local signing explicitly rejects delegated modes; compare
   current TS modes before designing the signature boundary.
-- Bitrue: requested histories, lookup and settings require a TS/Rust audit.
+- Bitrue: TS `BitrueExchange` inherits the branded empty order/PnL/funding
+  histories from `BaseExchange`, inherits its throwing hedge-mode setter, and
+  explicitly throws in `changeMarginType`. Those capabilities are skipped.
+  Its supported fills query is one bounded `myTrades` page; Rust already has
+  coverage including explicit incomplete filtered pages. The real gap is
+  `BaseExchange.findOrderByClientOrderId`: cache-first, symbol-scoped open-order
+  lookup, including the shared native/parent-ID aliases and sentinel checks.
 - KuCoin spot: TS supports spot. Its HF adapter does not override order/PnL/
   funding history or public trades; do not invent capabilities TS lacks.
 - Roster: explicitly unverified HyroTrader live connectivity is evidence work,
@@ -64,3 +70,47 @@ proceed in disjoint scopes; shared host/engine/SDK/harness changes are coordinat
 - Read the current brief and rewrite spec. Parallel bounded discovery and
   implementation owners established for each venue, with shared files owned
   by the integration lane.
+- Phase 1 audit: inspected current TS implementations rather than interpreting
+  the venue API's potential capabilities as the adapter's actual support.
+  GitHub confirms Orderly #1318, KuCoin futures #1312 and Lighter #1319 merged;
+  their stale roster status can be corrected. Bitunix #1309, Phemex #1310,
+  GRVT #1321, Coinbase #1325 and Binance variants #1326 remain separate PRs.
+- Bitrue phase peer review: KuCoin owner independently compared the complete
+  lookup diff and tests against the TS base helper, PASS with no blocker.
+  Lookup never commits account snapshots; failures retain cache semantics and
+  a miss remains non-definitive because closed orders were not queried.
+
+## Paradex signing design and review
+
+TS `signParadexTypedData` passes the StarkNet typed-data message hash, an
+opaque public subkey, `scheme: stark`, and `encoding: felt-pair` to
+`payloadSigner`. Auth uses seconds and a 24-hour expiry; Order/ModifyOrder use
+millisecond signature timestamps. Signature strings may be stand-ins and are
+inserted verbatim with signer headers, matching TS rather than re-parsing keys.
+More than one delegated batch entry is rejected before any write.
+
+The engine adds a typed `SignPayload` action and signed/failed result events.
+It holds the original typed HTTP action by ID with a bounded pending map and
+whole-operation deadline. A valid result resumes exactly that request; failed,
+timed-out, disposed and duplicate/late replies cannot send a write. A signing
+failure occurs before I/O and can release an unsent amendment guard, whereas
+an ambiguous HTTP failure retains that guard. JS and native hosts perform the
+callback and return the result event; no venue performs asynchronous I/O.
+
+TS `remoteSigner` is the generic API HTTP adapter, distinct from StarkNet
+payload signing. Its request receives account name, real base URL, method,
+path, decoded params/body and headers. Returned URL/params/data replace the
+old fields, including deliberate deletion, and usable bearer headers retain
+the existing fallback contract. It still needs a locally usable key or a
+payload signer for JWT acquisition; remoteSigner alone is not a new keyless
+StarkNet protocol. JWT auth uses raw direct fetch in TS and bypasses that
+remote adapter. Payload signing disables the API factory's HOW adapter while
+ordinary provider proxy selection remains intact.
+
+Independent Bitrue-owner review found two P1 cases and one P2 case: auth URL
+contains `/auth/{subkey}`, JWT must bypass account HOW/proxy routing, and
+returned query arrays require TS's comma serializer. Fixes are being verified
+with real suffixed paths, host route metadata and array regression cases.
+Independent re-review passes for the corrected wrapper, route policy and
+inventory scope. Root focused TS checks passed 241 tests before the final
+auth-path/array cases were added; full rerun is required for the final head.
