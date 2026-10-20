@@ -133,3 +133,33 @@ absence. KuCoin initial readiness must cover both normal and stop books; unknown
 contract metadata cannot authorize guessed fill quantities. WOO parent completion
 alone cannot prove each protective child terminal. Full rejected-row isolation
 and row-by-row retained-state merges remain the third phase.
+
+## Funded-wallet gate repairs
+
+The frozen `16c7b2f830` checkpoint passed the full native workspace (2,971
+cases / 249 targets), strict native/Wasm workspace Clippy, wasm32 build, bans,
+format, 590 harness cases, 76 JS host cases and root checks. Its actual Wasm SDK
+run passed 443/444: COIN-M startup exposed missing non-USD wallet FX. The private
+matrix passed 61/64; USD-M/COIN-M wallet valuation and a MEXC harness socket-role
+assumption were the three failures. These are checkpoint results, not final
+proof for the repaired source.
+
+The funded-wallet audit repaired Lighter native PnL/value authority, OKX native
+currency FX and coherent inverse handoff, Hyperliquid portfolio/unified
+collateral readiness and Kraken Spot valuation recovery. Missing prices retain
+native quantities and prior USD rather than publishing invented zero/one-dollar
+values. A rejected catalogue peer cannot prove a funded asset unsupported.
+Kraken Spot retries incomplete metadata and subscribes recovered symbols on its
+existing socket; Binance has a parallel catalogue/valuation repair under final
+verification.
+
+Independent OKX/Hyperliquid review found and closed inverse FX inconsistency
+and spot-before-core principal errors. Both crates passed 242 cases / 19
+targets, then the final OKX valuation target passed 7/7 including an unsupported
+native currency requiring real `totalEq`. Lighter account/valuation targets
+passed 29 cases. Kraken passed 150 cases / 14 targets, then its final malformed
+pair-identity guard passed 19 focused cases. All four crates passed strict
+all-target Clippy. The MEXC harness repair preserves signature validation and
+routes recorded public/private ordinals by sent semantic role; 121 focused
+harness cases and the default three-run private gate (final Store egress
+enabled) passed. Full final Wasm/replay/root gates remain required.

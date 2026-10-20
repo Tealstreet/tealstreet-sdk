@@ -799,9 +799,7 @@ impl Venue for Hyperliquid {
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public prices cannot establish a private snapshot or mark it loaded.
-        if cx.store.loaded().balance {
-            self.live_balance(cx);
-        }
+        self.account_prices(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.connection.socket != Some(socket) {
@@ -951,6 +949,7 @@ impl Venue for Hyperliquid {
                 } else {
                     self.startup.failed(cx, (String::new(), 0));
                 }
+                self.account_prices(cx);
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }
@@ -1035,6 +1034,7 @@ impl Venue for Hyperliquid {
                         self.commit_discovery(cx, markets, tickers);
                     }
                 }
+                self.account_prices(cx);
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
                     self.refresh_account(cx);
                 }

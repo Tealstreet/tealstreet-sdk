@@ -216,6 +216,7 @@ const KNOWN_TS_FIXES = {
     notes: [
       'Translate AssetPairs XBT and XDG/XXDG identities to accepted WS v2 BTC/DOGE wire symbols while preserving canonical store symbols.',
       'Value normalized BTC holdings through the market identity even when the SDK ticker uses XBT/USD.',
+      'Keep native wallet quantities and prior USD while supported conversion prices or rejected catalogue peers recover; only a clean catalogue proves an asset outside the supported aggregate scope.',
       'Parse documented decimal tick and lot steps canonically instead of exposing Math.pow ULP artifacts as extra precision.',
       'Trim subscribed book depth after each update and clear reconnect book caches.',
       'Fan supported native OHLC updates out to every requested fallback timeframe.',
@@ -389,6 +390,9 @@ const KNOWN_TS_FIXES = {
     //   identity and caller ranges, and rejects failed or saturated reads.
     // - Execution limits sort raw milliseconds before serializing seconds.
     // - Income honors the requested kind; fills support all-symbol queries.
+    // - Defer unified/portfolio collateral valuation until real FX and a core
+    //   exposure baseline exist; retain pending native balances across delayed
+    //   REST and recover on live/shared/discovery prices without fake zero USD.
     // The tape compares converged state: no account values are rewritten here.
   },
 
@@ -401,6 +405,7 @@ const KNOWN_TS_FIXES = {
     notes: [
       'Emit one execution by native trade ID; TS emits both the filled order and the execution.',
       'Keep valid live executions during the initial five-second notification guard and inherit by-market execution identity.',
+      'Value account positions from native unrealized_pnl and position_value before public prices; missing PnL retains prior same-side valuation instead of inventing a zero-price entry loss.',
       'Read execution history from trades, not cumulative inactive orders; preserve exact IDs and timestamp range units.',
       'Convert native venue/integrator fee rate ticks to signed quote fees and rebates; retain venue-reported account-side PnL.',
       'Validate integrator approval expiry and both runtime fee caps before attributed order submission.',
@@ -636,6 +641,7 @@ const KNOWN_TS_FIXES = {
 
   okx: [
     'full books retain levels past a stale last trade',
+    'collateral uses proven native or public FX, never a one-dollar fallback for missing nonstable prices; retain native currencies and prior USD until valuation is available, and hand inverse margin, PnL and normalized exposure to the same recovered quote',
     'paired TS/Rust fix: untraded X-Perp blank quote fields seed and stream finite zeros and zero-open percentage stays zero; one unpriced ticker cannot abort the whole catalog',
     'public trades implement the inherited Not implemented method',
     'candle calendar bounds use UTC independently of host timezone',

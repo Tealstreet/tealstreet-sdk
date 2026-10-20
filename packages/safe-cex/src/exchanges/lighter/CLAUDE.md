@@ -841,3 +841,14 @@ successful account. A REST snapshot with an unmappable nonzero position, or
 an open-order scope with an unmappable working order, warns and retains its
 previous scope. Zero unknown positions and terminal unknown orders remain
 ignorable. This bounded whole-scope guard precedes separate row-isolation work.
+
+Rust private account valuation uses the native `positions[].unrealized_pnl` and
+`position_value` when supplied (official model:
+https://github.com/elliottech/lighter-python/blob/main/docs/AccountPosition.md).
+Missing native PnL retains the prior finite valuation for the same market and
+position side; a new unvalued exposure remains visible with zero unavailable PnL
+and a warning. Realized PnL is never substituted. Aggregate balance sums the
+preserved position PnL instead of calculating a fictitious entry loss from a
+zero/missing ticker. Native account equity/free remain authoritative; a genuine
+later public quote can update position PnL, which a subsequent private snapshot
+without PnL retains. Explicit native PnL overrides conflicting public quotes.

@@ -60,6 +60,7 @@ pub struct KrakenSpot {
     poll: Option<TimerId>,
     markets_in_flight: bool,
     tickers_in_flight: bool,
+    catalogue_incomplete: bool,
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
@@ -93,6 +94,7 @@ impl KrakenSpot {
             poll: None,
             markets_in_flight: false,
             tickers_in_flight: false,
+            catalogue_incomplete: false,
             retries: vec![],
         }
     }
@@ -202,17 +204,31 @@ impl KrakenSpot {
         let mut markets = vec![];
         let mut pairs = HashMap::new();
         let mut identities = HashMap::new();
+        let mut rejected = false;
         map_each::<&serde_json::value::RawValue>(text, |key, raw| {
-            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
-                safe_cex_engine::startup::skipped_row(cx);
-                return;
-            };
             if key.ends_with(".d") {
                 return;
             }
-            let Some((base, quote)) = p.wsname.split_once('/') else {
+            let Ok(p) = serde_json::from_str::<Pair<'_>>(raw.get()) else {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             };
+            let Some((base, quote)) = p.wsname.split_once('/') else {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            };
+            if base.is_empty()
+                || quote.is_empty()
+                || base.trim() != base
+                || quote.trim() != quote
+                || quote.contains('/')
+            {
+                rejected = true;
+                safe_cex_engine::startup::skipped_row(cx);
+                return;
+            }
             let base = asset(base);
             let quote = asset(quote);
             if !matches!(quote, "USD" | "USDT" | "USDC") {
@@ -221,12 +237,14 @@ impl KrakenSpot {
             let pd = p.pair_decimals.unwrap_or(2);
             let ad = p.lot_decimals.unwrap_or(8);
             if pd > 18 || ad > 18 || p.ordermin < 0. {
+                rejected = true;
                 safe_cex_engine::startup::skipped_row(cx);
                 return;
             }
             let symbol = p.wsname.to_string();
             let pretty = format!("{base}{quote}");
             if pairs.contains_key(&symbol) {
+                rejected = true;
                 safe_cex_engine::startup::skipped_row(cx);
                 return;
             }
@@ -269,6 +287,15 @@ impl KrakenSpot {
         if markets.is_empty() {
             return Err("No supported Kraken Spot market rows".into());
         }
+        let recovered: Vec<_> = markets
+            .iter()
+            .filter(|market| {
+                !self.pairs.contains_key(&market.symbol)
+                    && (self.ticker_symbols.is_empty()
+                        || self.ticker_symbols.contains(&market.symbol))
+            })
+            .map(|market| market.symbol.clone())
+            .collect();
         self.ws_symbols = markets
             .iter()
             .map(|m| (m.symbol.clone(), format!("{}/{}", m.base, m.quote)))
@@ -280,8 +307,19 @@ impl KrakenSpot {
             .collect();
         self.pairs = pairs;
         self.identities = identities;
-        self.discovery.succeeded(cx, &false);
+        self.catalogue_incomplete = rejected;
+        if rejected {
+            self.discovery.failed(cx, false);
+        } else {
+            self.discovery.succeeded(cx, &false);
+        }
         cx.store.set_markets(markets);
+        if self.public.open {
+            for batch in recovered.chunks(50) {
+                self.subscribe(cx, "subscribe", "ticker", batch, None);
+            }
+        }
+        self.revalue_pending_balances(cx);
         if self.public.socket.is_none() {
             self.connect(cx);
         }
@@ -339,11 +377,8 @@ impl KrakenSpot {
         }
         self.discovery.succeeded(cx, &true);
         self.live_tickers.finish(cx.store, &mut rows);
-        let first_quotes = !cx.store.loaded().tickers;
         cx.store.set_tickers(rows);
-        if first_quotes {
-            self.revalue_initial_balances(cx);
-        }
+        self.revalue_pending_balances(cx);
         if self.public.socket.is_none() {
             self.connect(cx);
         }
@@ -359,6 +394,9 @@ impl Venue for KrakenSpot {
         }
         self.markets(cx);
         self.poll = Some(cx.set_timer(5_000.));
+    }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.revalue_pending_balances(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.private_open(cx, socket) {
@@ -410,7 +448,9 @@ impl Venue for KrakenSpot {
         let Some(data) = msg.data else { return };
         match &*msg.channel {
             "ticker" => {
+                let mut has_wallet_quote = false;
                 let _ = safe_cex_engine::json::each::<WsTicker<'_>>(data.get(), |t| {
+                    has_wallet_quote |= t.last.is_some_and(|last| last.is_finite() && last > 0.0);
                     let symbol = self
                         .ws_canonical
                         .get(&*t.symbol)
@@ -443,6 +483,9 @@ impl Venue for KrakenSpot {
                     });
                     self.live_tickers.record(cx.store, symbol, supplied);
                 });
+                if has_wallet_quote {
+                    self.revalue_pending_balances(cx);
+                }
             }
             "book" => {
                 let _ = safe_cex_engine::json::each::<Depth<'_>>(data.get(), |d| {

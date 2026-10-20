@@ -629,11 +629,15 @@ impl Okx {
                 update(p.inst_id);
             }
         });
+        self.account_prices(cx);
     }
 }
 
 impl Venue for Okx {
     type Pending = Pending;
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_prices(cx);
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.live_tickers.begin();
         if let Some(read) = &self.options.read_credentials
@@ -1117,6 +1121,7 @@ impl Venue for Okx {
                 }
                 cx.store.set_tickers(rows);
                 self.price_tickers = price_ticker_indexes(cx.store);
+                self.account_prices(cx);
                 if self.connections[PUBLIC].socket.is_none() {
                     self.connect(cx, PUBLIC);
                 }

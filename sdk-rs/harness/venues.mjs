@@ -1613,6 +1613,16 @@ export const VENUES = {
     requestBody: mexcRequestBody,
     requestUrl: mexcRequestUrl,
     generatedBodyId: (key) => key === 'externalOid',
+    onSocketSend(socket, text) {
+      const { method } = JSON.parse(text);
+      if (method === 'login') socket.mexcRole = 'private';
+      else if (method?.startsWith('sub.') || method?.startsWith('unsub.')) socket.mexcRole = 'public';
+    },
+    socketOrdinalMatches(socket, ordinal) {
+      if (ordinal === 0) return socket.mexcRole === 'public';
+      if (ordinal === 1) return socket.mexcRole === 'private';
+      return socket.ordinal === ordinal;
+    },
     validateSocketMessage(socket, text, now = Date.now()) {
       const frame = JSON.parse(text);
       if (frame.method !== 'login') return;
@@ -1635,7 +1645,8 @@ export const VENUES = {
     ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
-    // Public/private sockets share this URL; tapes identify their ordinal.
+    // Shared /edge tapes label public=0/private=1. Match authenticated role,
+    // independently of whether catalogue-first private startup connects first.
     privateSocket: undefined,
     independentLeverage: true,
     tsSettings: (exchange, store) =>

@@ -1839,3 +1839,33 @@ test('wait markers reject absent, negative and nonfinite observation times', () 
   for (const time of [undefined, -1, NaN, Infinity, '30'])
     assert.throws(() => new Tape([{ type: 'wait', t: time }]), /Invalid replay wait timestamp/);
 });
+
+for (const connectionOrder of [['public', 'private'], ['private', 'public']]) {
+  test(`MEXC recorded socket roles preserve authenticated delivery when ${connectionOrder[0]} connects first`, async () => {
+    const endpoint = 'wss://contract.mexc.com/edge';
+    const tape = new Tape([], VENUES.mexc, true, 1000);
+    const seen = [];
+    for (const role of connectionOrder) {
+      const socket = tape.connect(endpoint, () => {
+        const reqTime = String(Date.now());
+        tape.send(socket, JSON.stringify(role === 'private' ? {
+          method: 'login', param: {
+            apiKey: 'replay-key', reqTime,
+            signature: createHmac('sha256', 'replay-secret').update(`replay-key${reqTime}`).digest('hex'),
+          },
+        } : { method: 'sub.ticker', param: { symbol: 'BTC_USDT' } }));
+      }, (text) => seen.push([role, JSON.parse(text).channel]));
+    }
+    await new Promise(setImmediate);
+    for (const [socket, channel, data] of [
+      [1, 'rs.login', 'success'], [1, 'push.personal.order', { orderId: '739113577038255618' }],
+      [0, 'push.ticker', { symbol: 'BTC_USDT', lastPrice: 60000 }], [1, 'pong', {}],
+    ]) {
+      await tape.deliverFrame({ type: 'ws', url: endpoint, socket, text: JSON.stringify({ channel, data }) });
+    }
+    assert.deepEqual(seen, [
+      ['private', 'rs.login'], ['private', 'push.personal.order'], ['public', 'push.ticker'], ['private', 'pong'],
+    ]);
+    assert.equal(tape.invalidSignatures, 0);
+  });
+}

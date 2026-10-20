@@ -755,7 +755,8 @@ export class Tape {
     if (!openingOnly && (stream || streams?.size) && this.venue.subscriptionRouting) ordinal = undefined;
     const subscribed = (socket, target) => [...socket.subscriptions].some((topic) => target === topic || target.startsWith(`${topic}.`));
     const active = () => [...(this.open.get(key) ?? [])].filter((socket) =>
-      !socket.closed && (ordinal === undefined || socket.ordinal === ordinal)
+      !socket.closed && (ordinal === undefined
+        || (this.venue.socketOrdinalMatches?.(socket, ordinal) ?? socket.ordinal === ordinal))
       && (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target)))
       && (openingOnly || ordinal !== undefined || text === undefined || !this.venue.socketMatches
         || this.venue.socketMatches(socket, text)));

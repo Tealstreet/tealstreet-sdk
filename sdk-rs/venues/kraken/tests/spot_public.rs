@@ -329,7 +329,8 @@ fn first_rest_seed_retains_live_quotes_and_values_early_native_holdings_with_the
         })
         .unwrap();
     reply(&mut engine, balance, BALANCE);
-    assert_eq!(engine.store().balance().total, 1005.);
+    assert!(!engine.store().loaded().balance);
+    assert_eq!(engine.store().currency_balances().unwrap().len(), 4);
     engine.handle(NOW, Event::WsOpened { socket });
     message(
         &mut engine,

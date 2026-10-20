@@ -179,8 +179,10 @@ struct PositionWire<'a> {
         alias = "entry_price"
     )]
     avg_entry_price: Num,
+    #[serde(default, alias = "positionValue")]
+    position_value: Option<Num>,
     #[serde(default, alias = "unrealizedPnl")]
-    unrealized_pnl: Num,
+    unrealized_pnl: Option<Num>,
     #[serde(default, alias = "realizedPnl")]
     realized_pnl: Option<Num>,
     #[serde(default, alias = "initialLeverage", alias = "initial_leverage")]
@@ -844,7 +846,7 @@ impl Lighter {
     }
     fn position_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: PositionWire<'_>,
         market_hint: Option<&str>,
     ) -> Option<(Option<Position>, String, f64, MarginType)> {
@@ -958,17 +960,33 @@ impl Lighter {
                 }
             }
         }
+        let reported_pnl = wire.unrealized_pnl.map(|n| n.0);
+        let unrealized_pnl = reported_pnl
+            .or_else(|| {
+                cx.store
+                    .position(symbol)
+                    .filter(|prior| prior.side == side)
+                    .map(|prior| prior.unrealized_pnl)
+            })
+            .filter(|pnl| pnl.is_finite())
+            .unwrap_or(0.0);
+        if reported_pnl.is_none() {
+            cx.log(
+                LogLevel::Warning,
+                "Lighter position PnL unavailable; retaining prior valuation",
+            );
+        }
         Some((
             Some(Position {
                 id: symbol.into(),
                 symbol: symbol.into(),
                 side,
                 entry_price: entry,
-                notional: contracts * entry,
+                notional: wire.position_value.map_or(contracts * entry, |n| n.0.abs()),
                 leverage,
                 margin_type: Some(margin_type),
                 position_mode: Some(PositionMode::Oneway),
-                unrealized_pnl: wire.unrealized_pnl.0,
+                unrealized_pnl,
                 realized_pnl: wire.realized_pnl.map(|n| n.0),
                 contracts,
                 liquidation_price: liquidation,
@@ -982,7 +1000,7 @@ impl Lighter {
     }
     fn snapshot_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: AccountWire<'_>,
     ) -> Result<Snapshot, String> {
         if let Some(identity) = wire.index.as_ref()
@@ -1389,20 +1407,17 @@ impl Lighter {
             });
         }
         {
-            let upnl = cx
-                .store
-                .positions()
-                .iter()
-                .map(|p| {
-                    cx.store.ticker(&p.symbol).map_or(0.0, |t| {
-                        if p.side == PositionSide::Long {
-                            (t.last - p.entry_price) * p.contracts
-                        } else {
-                            (p.entry_price - t.last) * p.contracts
-                        }
-                    })
-                })
-                .sum::<f64>();
+            let upnl = cx.store.positions().iter().try_fold(0.0, |sum, position| {
+                let value = sum + position.unrealized_pnl;
+                value.is_finite().then_some(value)
+            });
+            let Some(upnl) = upnl else {
+                cx.log(
+                    LogLevel::Warning,
+                    "Lighter position PnL invalid; preserving previous balance",
+                );
+                return;
+            };
             cx.store.set_balance(Balance {
                 total: snapshot.equity - upnl,
                 upnl,

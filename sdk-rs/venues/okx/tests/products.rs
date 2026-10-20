@@ -441,7 +441,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
     assert!(out.iter().any(|a|matches!(a,Action::Http(r) if r.headers.iter().any(|(k,v)|*k=="OK-ACCESS-KEY"&&v=="primary"))));
 }
 #[test]
-fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_back() {
+fn collateral_uses_exact_swap_mark_not_xperp_basis() {
     let (mut e, _, out) = private_catalog();
     let timer = out
         .iter()
@@ -450,12 +450,11 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_ba
             _ => None,
         })
         .unwrap();
-    // Keep a second equity currency with no corresponding USD swap.
     let mut pending = out;
     while let Some(a) = pending.pop() {
         if let Action::Http(r) = &a {
             let body = if r.url.contains("account-position-risk") {
-                envelope(r#"{"balData":[{"ccy":"BTC","eq":"1"},{"ccy":"UNKNOWN","eq":"7"}]}"#)
+                envelope(r#"{"balData":[{"ccy":"BTC","eq":"1"}]}"#)
             } else {
                 envelope("")
             };
@@ -474,8 +473,8 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_ba
     }
     e.store_mut().set_tickers(tickers);
     e.handle(7000.0, Event::TimerFired { timer });
-    assert_eq!(e.store().balance().total, 42007.0);
-    assert_eq!(e.store().balance().free, 42007.0);
+    assert_eq!(e.store().balance().total, 42000.0);
+    assert_eq!(e.store().balance().free, 42000.0);
 }
 #[test]
 fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {

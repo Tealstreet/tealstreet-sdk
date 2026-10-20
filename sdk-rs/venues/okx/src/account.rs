@@ -105,6 +105,7 @@ pub struct AccountState {
     equity: Vec<(String, f64)>,
     total_equity: Option<f64>,
     equity_loaded: bool,
+    valuation_pending: bool,
     fills: HashMap<String, f64>,
     tick: Option<TimerId>,
     retry: Option<TimerId>,
@@ -676,7 +677,7 @@ impl Okx {
         }
         self.account.equity_loaded = true;
         self.recalculate(cx);
-        self.account.ready = cx.store.loaded().orders;
+        self.account.ready = cx.store.loaded().orders && cx.store.loaded().balance;
     }
 
     pub(crate) fn account_failed(
@@ -737,57 +738,108 @@ impl Okx {
         });
     }
 
-    fn recalculate(&self, cx: &mut Cx<'_, Pending>) {
-        if !self.account.equity_loaded {
-            return;
+    pub(crate) fn account_prices(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.valuation_pending {
+            let mut positions = cx.store.positions().to_vec();
+            let mut risk_updates = Vec::new();
+            for position in &mut positions {
+                let Some(market) = cx.store.market(&position.symbol) else {
+                    continue;
+                };
+                let Some(risk) = self.account.risk.get(&position.id) else {
+                    continue;
+                };
+                if market.is_inverse == Some(true)
+                    && risk.currency.eq_ignore_ascii_case(&market.base)
+                    && let Some(rate) = self.public_currency_rate(cx, &risk.currency)
+                {
+                    let contracts = position.notional / rate;
+                    let imr = risk.native_imr * rate;
+                    let upl = risk.native_upl * rate;
+                    if !contracts.is_finite() || !imr.is_finite() || !upl.is_finite() {
+                        cx.log(
+                            LogLevel::Warning,
+                            "OKX collateral FX overflow; retaining previous account valuation",
+                        );
+                        return;
+                    }
+                    position.contracts = contracts;
+                    position.unrealized_pnl = num::adjust(upl, market.precision.price);
+                    risk_updates.push((position.id.clone(), imr, upl));
+                }
+            }
+            if !risk_updates.is_empty() {
+                for (id, imr, upl) in risk_updates {
+                    if let Some(risk) = self.account.risk.get_mut(&id) {
+                        risk.imr = imr;
+                        risk.upl = upl;
+                    }
+                }
+                cx.store.set_positions(positions);
+            }
+            self.recalculate(cx);
+            self.account.ready = cx.store.loaded().positions
+                && cx.store.loaded().orders
+                && cx.store.loaded().balance;
         }
-        let collateral = usd(self.account.total_equity.unwrap_or_else(|| {
-            self.account
-                .equity
+    }
+
+    fn public_currency_rate(&self, cx: &Cx<'_, Pending>, currency: &str) -> Option<f64> {
+        let stable = |coin: &str| {
+            ["USD", "USDT", "USDC"]
                 .iter()
-                .map(|(ccy, eq)| {
-                    let candidates = [
-                        format!("{ccy}-USDT-SWAP"),
-                        format!("{ccy}-USD-SWAP"),
-                        format!("{ccy}USDT"),
-                        format!("{ccy}USD"),
-                    ];
-                    let mark = cx
-                        .store
-                        .tickers()
+                .any(|stable| coin.eq_ignore_ascii_case(stable))
+        };
+        if stable(currency) {
+            return Some(1.0);
+        }
+        for preference in 0..3 {
+            for market in cx.store.markets().iter().filter(|market| {
+                let priority = if market.id.ends_with("-SWAP") {
+                    if market.quote.eq_ignore_ascii_case("USDT") {
+                        0
+                    } else {
+                        1
+                    }
+                } else {
+                    2
+                };
+                market.base.eq_ignore_ascii_case(currency)
+                    && stable(&market.quote)
+                    && preference == priority
+            }) {
+                if let Some(rate) = cx.store.ticker(&market.symbol).and_then(|ticker| {
+                    [ticker.mark, ticker.last]
+                        .into_iter()
+                        .find(|price| price.is_finite() && *price > 0.0)
+                }) {
+                    return Some(rate);
+                }
+            }
+        }
+        None
+    }
+
+    fn currency_rate(&self, cx: &Cx<'_, Pending>, currency: &str) -> Option<f64> {
+        self.public_currency_rate(cx, currency).or_else(|| {
+            // Position notional below uses only a validated native/public mark.
+            cx.store.positions().iter().find_map(|position| {
+                let market = cx.store.market(&position.symbol)?;
+                if !market.base.eq_ignore_ascii_case(currency)
+                    || !["USD", "USDT", "USDC"]
                         .iter()
-                        .find(|t| candidates.contains(&t.id) || candidates.contains(&t.symbol))
-                        .map_or(1.0, |t| t.mark);
-                    eq * mark
-                })
-                .sum()
-        }));
-        let used = usd(self.account.risk.values().map(|p| p.imr).sum());
-        let upnl = usd(self.account.risk.values().map(|p| p.upl).sum());
-        let orders = usd(cx
-            .store
-            .orders()
-            .iter()
-            .filter(|o| {
-                o.status == OrderStatus::Open && o.kind == OrderType::Limit && !o.reduce_only
+                        .any(|coin| market.quote.eq_ignore_ascii_case(coin))
+                    || position.contracts <= 0.0
+                {
+                    return None;
+                }
+                let price = position.notional / position.contracts;
+                (price.is_finite() && price > 0.0).then_some(price)
             })
-            .map(|o| {
-                o.remaining * o.price
-                    / self
-                        .account
-                        .order_leverage
-                        .get(&o.id)
-                        .map(|(leverage, _)| *leverage)
-                        .unwrap_or(1.0)
-            })
-            .sum::<f64>()
-            * 1.1);
-        cx.store.set_balance(Balance {
-            used,
-            free: usd(collateral - used - orders),
-            total: usd(collateral - upnl),
-            upnl,
-        });
+        })
+    }
+
+    fn publish_currencies(&self, cx: &mut Cx<'_, Pending>) {
         let currencies = if self.account.account_level == 2 {
             self.account
                 .equity
@@ -841,6 +893,78 @@ impl Okx {
             Vec::new()
         };
         cx.store.set_currency_balances(currencies);
+    }
+
+    fn recalculate(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.equity_loaded {
+            return;
+        }
+        self.publish_currencies(cx);
+        let collateral = self
+            .account
+            .total_equity
+            .or_else(|| {
+                self.account
+                    .equity
+                    .iter()
+                    .try_fold(0.0, |total, (currency, equity)| {
+                        let rate = if *equity == 0.0 {
+                            1.0
+                        } else {
+                            self.currency_rate(cx, currency)?
+                        };
+                        let total = total + equity * rate;
+                        total.is_finite().then_some(total)
+                    })
+            })
+            .filter(|total| total.is_finite());
+        let Some(collateral) = collateral else {
+            if !self.account.valuation_pending {
+                cx.log(LogLevel::Warning, "OKX collateral price unavailable; retaining native currencies and previous USD balance");
+            }
+            self.account.valuation_pending = true;
+            return;
+        };
+        // Native position marks prove startup FX, but the first public price
+        // must supersede them without waiting for another account poll.
+        self.account.valuation_pending = self.account.total_equity.is_none()
+            && self.account.equity.iter().any(|(currency, equity)| {
+                *equity != 0.0 && self.public_currency_rate(cx, currency).is_none()
+            });
+        let collateral = usd(collateral);
+        let used = usd(self.account.risk.values().map(|risk| risk.imr).sum());
+        let upnl = usd(self.account.risk.values().map(|risk| risk.upl).sum());
+        if !used.is_finite() || !upnl.is_finite() {
+            cx.log(
+                LogLevel::Warning,
+                "OKX collateral risk invalid; retaining previous USD balance",
+            );
+            return;
+        }
+        let orders = usd(cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| {
+                o.status == OrderStatus::Open && o.kind == OrderType::Limit && !o.reduce_only
+            })
+            .map(|o| {
+                o.remaining * o.price
+                    / self
+                        .account
+                        .order_leverage
+                        .get(&o.id)
+                        .map(|(leverage, _)| *leverage)
+                        .unwrap_or(1.0)
+            })
+            .sum::<f64>()
+            * 1.1);
+        cx.store.set_balance(Balance {
+            used,
+            free: usd(collateral - used - orders),
+            total: usd(collateral - upnl),
+            upnl,
+        });
     }
 
     fn execution(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
@@ -1131,14 +1255,20 @@ impl Okx {
         } else {
             m.symbol.clone()
         };
-        let mark = cx.store.ticker(&m.symbol).map_or(0.0, |t| t.mark);
-        let reference = if mark > 0.0 {
-            mark
-        } else if num::parse(p.mark_px) > 0.0 {
-            num::parse(p.mark_px)
-        } else {
-            num::parse(p.avg_px)
-        };
+        let mark = finite(p.mark_px)
+            .filter(|price| *price > 0.0)
+            .or_else(|| {
+                cx.store.ticker(&m.symbol).and_then(|ticker| {
+                    [ticker.mark, ticker.last]
+                        .into_iter()
+                        .find(|price| price.is_finite() && *price > 0.0)
+                })
+            })
+            .unwrap_or(0.0);
+        if pos != 0.0 && mark == 0.0 {
+            return None;
+        }
+        let reference = mark;
         let contracts = self.contracts_to_base(cx, m, pos.abs(), reference);
         if pos != 0.0 && contracts <= 0.0 {
             return None;

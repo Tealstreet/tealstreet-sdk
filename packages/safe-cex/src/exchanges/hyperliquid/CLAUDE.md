@@ -1462,3 +1462,11 @@ another client. Frames with a cloid but no record still get `clientOrderId`
 stamped, so the web's exact match works for them once REST/WS delivers.
 
 **Cancel** still goes by oid; `cancelByCloid` exists but nothing needs it yet.
+
+Rust unified/portfolio startup caches a native spot collateral snapshot when a
+nonstable conversion quote or the initial core exposure baseline is unavailable.
+It retains the prior USD aggregate; cold private accounts publish no synthetic
+zero balance. Valid pending live snapshots fence older REST reads immediately.
+A real live/shared/context quote or the first core snapshot rechecks that native
+collateral and derives wallet principal using current proven position PnL.
+Ordinary successful private snapshots keep the existing valuation cadence.

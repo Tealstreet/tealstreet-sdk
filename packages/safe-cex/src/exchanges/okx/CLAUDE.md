@@ -1178,3 +1178,12 @@ Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
 unavailable REST seeds start at finite zero. An explicitly empty live last/open
 quote retains the last proven trade/change. Blank bid/ask/volume fields remain
 finite zero; malformed nonempty quotes stay visible to the reference oracle.
+
+Rust account startup preserves native currency balances when collateral FX is
+unavailable; it retains the previous USD aggregate or waits to publish the first
+one. Stable currencies use one; other currencies need a finite positive public
+quote or the native position mark. Entry prices and discounted `disEq`/`adjEq`
+are not raw equity conversion rates. Native `totalEq` remains authoritative.
+The first real public price supersedes a startup native mark and converts inverse
+exposure, native IMR and native PnL consistently. Missing-market currencies remain
+visible and require native aggregate equity rather than a one-dollar fallback.
