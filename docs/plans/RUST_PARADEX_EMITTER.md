@@ -48,3 +48,14 @@ Task: `.aimux/plans/paradex-and-emitter.md`; spec/process:
   rejection messages and float leverage against current source. Phase1 shared
   emitter implementation and independent plan audit delegated; phase2 read-only
   audit delegated. Coordination requests sent to the two named lanes.
+- Phase1 PASS: shared exchange emitter isolates synchronous listener exceptions,
+  logs venue/event and original cause to console, and preserves inherited
+  once/off/context plus snapshot/reentrant behavior. Seven regressions pass;
+  original TinyEmitter control reproduces five failures with two API controls
+  passing. Independent implementation review passes; SDK typecheck/lint pass.
+  Async listener promises retain the existing contract; console reporting does
+  not generate new account error/toast events or recurse through log listeners.
+- Phase2 ownership confirmed in startup lane's committed plan: codex-u1pmrg
+  owns known-perpetual blank ticker/startup and blank optional position numbers.
+  This lane owns malformed SBE drop; its independent review passes, retaining
+  per-book sequence-gap recovery and silence watchdogs. Integration/tests pending.
