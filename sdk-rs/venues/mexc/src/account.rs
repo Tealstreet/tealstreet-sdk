@@ -1,6 +1,7 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::error::{ErrorKind, VenueError};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -83,6 +84,7 @@ pub struct Account {
     pub full_failed: bool,
     pub needs_full: bool,
     pub mode_ready: bool,
+    pub auth_rejected: bool,
     pub fills: HashMap<String, f64>,
     pub paused_until: f64,
 }
@@ -932,6 +934,16 @@ impl MexcFutures {
         if response.status == 429 {
             self.account.paused_until = cx.now + 10_000.0;
         }
+        // A refused key can never pass the mode read, so startup fails instead of polling.
+        if matches!(request, Request::Mode)
+            && !self.account.mode_ready
+            && let Some(error) = auth_rejection(response.status, response.body)
+        {
+            self.account.auth_rejected = true;
+            cx.log(LogLevel::Error, &error.message);
+            cx.startup_failed(error);
+            return;
+        }
         let result = if response.status == 200 {
             Envelope::checked(response.body)
         } else {
@@ -1320,7 +1332,7 @@ impl MexcFutures {
             self.account.poll = None;
             if self.account.mode_ready {
                 self.refresh_account(cx, false);
-            } else if cx.now >= self.account.paused_until {
+            } else if cx.now >= self.account.paused_until && !self.account.auth_rejected {
                 self.signed(
                     cx,
                     Method::Get,
@@ -1385,4 +1397,35 @@ pub fn side(n: f64) -> OrderSide {
     } else {
         OrderSide::Buy
     }
+}
+
+/// MEXC's documented key refusals; any other failure may be transient and is retried.
+fn auth_rejection(status: u16, body: &str) -> Option<VenueError> {
+    let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
+    let code = envelope.as_ref().map_or(0.0, |e| e.code);
+    let kind = match code {
+        401.0 | 602.0 => ErrorKind::AuthInvalid,
+        402.0 => ErrorKind::AuthExpired,
+        406.0 | 701.0 | 702.0 | 703.0 | 704.0 => ErrorKind::AuthPermission,
+        _ if status == 401 => ErrorKind::AuthInvalid,
+        _ if status == 403 => ErrorKind::AuthPermission,
+        _ => return None,
+    };
+    let venue_message = envelope.map(|e| e.message.into_owned()).unwrap_or_default();
+    let mut error = VenueError::new(format!(
+        "MEXC rejected the API key ({}): {venue_message}",
+        if code == 0.0 {
+            status.to_string()
+        } else {
+            code.to_string()
+        }
+    ))
+    .kind(kind);
+    if code != 0.0 {
+        error = error.venue_code(code.to_string());
+    }
+    if !venue_message.is_empty() {
+        error = error.venue_message(venue_message);
+    }
+    Some(error)
 }

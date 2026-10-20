@@ -665,8 +665,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   rows are skipped/logged while malformed identities retain prior snapshots.
 - Medium: ~~full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
   single order uses the batch path paced 1.5 s (`trading.rs:451`)~~;
-  startup halts on tickers/markets/position-mode/plan-list failures
-  (cross-venue startup lane; not changed by the venue-highs lane).
+  startup halts on tickers/markets/~~position-mode/plan-list~~ failures
+  (tickers/markets: public-startup PR). Reverified: mode and plan-list failures
+  retry every 2 s and a failed plan read publishes no normal-only list; a refused
+  key (602/401/402/406/70x or HTTP 401/403) now fails startup instead of retrying.
 - Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
   refused by the adapter.
 

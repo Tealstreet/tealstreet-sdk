@@ -677,14 +677,18 @@ impl Venue for MexcFutures {
         if response.status == 429 {
             self.account.paused_until = self.depth_paused_until;
         }
-        if response.status != 200 {
+        // Account reads classify their own HTTP failures (a refused key ends startup).
+        if response.status != 200 && !matches!(pending, Pending::Account(_)) {
             self.failure(cx, pending, &format!("MEXC HTTP {}", response.status));
             return;
         }
         match pending {
             Pending::Account(request) => {
+                let ok = response.status == 200;
                 self.account_response(cx, request, response);
-                self.refresh_stop_orders(cx);
+                if ok {
+                    self.refresh_stop_orders(cx);
+                }
             }
             Pending::Trade(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
