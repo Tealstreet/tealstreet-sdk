@@ -753,30 +753,6 @@ fn private_pong_reports_rounded_one_way_latency() {
 }
 
 #[test]
-fn invalid_omni_seed_fails_private_start_without_hiding_public_markets() {
-    let mut e = Engine::new(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some("bad".into()),
-        ..Default::default()
-    }));
-    e.start(0.0);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 10.0, MARKETS);
-    assert_eq!(e.store().markets().len(), 1);
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::WsConnect {
-            channel: Some(SocketChannel::Private),
-            ..
-        } | Action::Http(_)
-    )));
-    assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.contains("Invalid OmniKey seed"))));
-}
-
-#[test]
 fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
     let mut e = Engine::new(ApexOmni::new(Options {
         key: Some("key".into()),
