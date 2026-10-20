@@ -3,6 +3,7 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import type { ExchangeOptions } from '../../types';
 import { OrderStatus } from '../../types';
 
@@ -33,6 +34,7 @@ describe('TxFlow account identity at the worker seam', () => {
     const exchange = new RustEngineExchange('txflow', options, new DefaultStore());
     const rails = { buyLeverage: 5, sellLeverage: 8, marginType: 'isolated' };
     const command = vi.spyOn(exchange as never as { command: (args: unknown) => Promise<unknown> }, 'command').mockResolvedValue(rails);
+    adoptEngineCapabilities(exchange);
     try {
       expect(await exchange.fetchLeverageForSymbol('BTC-USDC')).toEqual(rails);
       expect(command).toHaveBeenCalledWith({ op: 'fetchLeverage', symbol: 'BTC-USDC' }, { report: false });

@@ -84,6 +84,16 @@ pub fn number_or_zero(text: &str) -> Option<f64> {
 
 /// Retains positional identities when one row in a nested public list is invalid.
 pub struct Row<T>(pub Option<T>);
+
+/// Parse a JSON list of rows in one pass when every row is well formed. Only
+/// a list with a malformed row pays for the tolerant per-row parse, which
+/// scans each row twice; the result is the same either way.
+pub fn rows<'de, T: serde::Deserialize<'de>>(text: &'de str) -> serde_json::Result<Vec<Row<T>>> {
+    match serde_json::from_str::<Vec<T>>(text) {
+        Ok(rows) => Ok(rows.into_iter().map(|row| Row(Some(row))).collect()),
+        Err(_) => serde_json::from_str(text),
+    }
+}
 impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Row<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw: &'de serde_json::value::RawValue = serde::Deserialize::deserialize(deserializer)?;
@@ -316,5 +326,27 @@ mod live_ticker_tests {
             "a delayed seed cannot restore a cleared midpoint"
         );
         assert_eq!((rows[0].last, rows[0].mark), (200.0, 103.0));
+    }
+}
+
+#[cfg(test)]
+mod rows_tests {
+    use super::rows;
+
+    #[test]
+    fn well_formed_and_malformed_lists_keep_every_position() {
+        let all: Vec<Option<u32>> = rows::<u32>("[1,2,3]")
+            .unwrap()
+            .into_iter()
+            .map(|row| row.0)
+            .collect();
+        assert_eq!(all, [Some(1), Some(2), Some(3)]);
+        let partial: Vec<Option<u32>> = rows::<u32>(r#"[1,"two",3]"#)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.0)
+            .collect();
+        assert_eq!(partial, [Some(1), None, Some(3)]);
+        assert!(rows::<u32>("[1,").is_err());
     }
 }

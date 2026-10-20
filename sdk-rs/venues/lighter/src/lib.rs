@@ -5,14 +5,14 @@ mod limits;
 pub mod sign;
 mod trading;
 mod wire;
-use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Candle, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -98,14 +98,26 @@ pub struct MarketMeta {
     pub initial_margin_fraction: f64,
     pub maintenance_margin_fraction: f64,
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 120_000.0,
+                idle_timeout_ms: 120_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -234,11 +246,13 @@ impl Lighter {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket =
             Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Public));
         self.public.open = false;
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(10_000.0));
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
         if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
@@ -624,6 +638,12 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account_tier: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -665,8 +685,7 @@ impl Venue for Lighter {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.topic(cx, "subscribe", "market_stats/all");
         for market in cx.store.markets().to_vec() {
             self.topic(cx, "subscribe", &format!("ticker/{}", market.id));
@@ -703,7 +722,7 @@ impl Venue for Lighter {
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -821,9 +840,6 @@ impl Venue for Lighter {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for (symbol, state) in &mut self.books {
             state.waiting = true;
             state.revision += 1;
@@ -831,13 +847,7 @@ impl Venue for Lighter {
             state.book.clear();
             cx.book_changed(symbol);
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(
-            cx.set_timer(
-                Backoff::new(1_000.0, 4, 30_000.0)
-                    .jittered(self.public.attempts.saturating_sub(1), cx.now),
-            ),
-        );
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -1219,25 +1229,23 @@ impl Venue for Lighter {
         if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 120_000.0 {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => {}
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, r#"{"type":"ping"}"#);
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006);
                 }
                 return;
             }
-            if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                cx.send(s, r#"{"type":"ping"}"#);
-            }
-            self.public.watchdog = Some(cx.set_timer(10_000.0));
-            return;
+            Tick::Handled => return,
         }
         if self.poll == Some(timer) {
             self.poll = Some(cx.set_timer(2_000.0));

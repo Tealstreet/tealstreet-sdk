@@ -10,6 +10,7 @@ import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 const align8 = (value: number) => Math.ceil(value / 8) * 8;
 type FixtureOptions = {
@@ -762,23 +763,27 @@ describe('Rust frame recovery callers', () => {
     main.dispose();
   });
 
-  it('routes KuCoin Spot leverage acknowledgements through the applier and keeps SETTINGS authoritative', async () => {
+  it('publishes KuCoin Spot leverage acknowledgements from engine SETTINGS and keeps them authoritative', async () => {
     const store = new DefaultStore();
     const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret' }, store);
     receive(exchange, fixture({ fills: 0 }));
     const command = vi.fn().mockResolvedValue(undefined);
     (exchange as unknown as { command: unknown }).command = command;
+    // The engine confirms KuCoin Spot's fixed 1x rails in the frame the flush publishes.
+    const flush = vi.fn(() => receive(exchange, fixture({ fills: 0, leverage: 1 })));
+    (exchange as unknown as { host: unknown }).host = { flush, dispose: vi.fn() };
     const applier = (exchange as unknown as { applier: FrameApplier }).applier;
     const writer = vi.spyOn(applier, 'applyLeverage');
     await exchange.setLeverage('BTCUSDT', 20);
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'setLeverage', symbol: 'BTCUSDT', leverage: 20 });
-    expect(writer).toHaveBeenCalledExactlyOnceWith('BTCUSDT', { buyLeverage: 1, sellLeverage: 1 });
-    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 1, sellLeverage: 1 });
+    expect(flush).toHaveBeenCalledOnce();
+    expect(writer).not.toHaveBeenCalled();
+    expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 1, sellLeverage: 1 });
     receive(exchange, fixture({ fills: 0 }));
     expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);
     command.mockRejectedValueOnce(new Error('command failed'));
     await expect(exchange.setLeverage('BTCUSDT', 20)).rejects.toThrow('command failed');
-    expect(writer).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalledOnce();
     expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);
     exchange.dispose();
   });
@@ -786,6 +791,7 @@ describe('Rust frame recovery callers', () => {
   it('returns confirmed Binance leverage without replacing it with the market maximum and leaves unknown leverage absent', async () => {
     const store = new DefaultStore();
     const exchange = new RustEngineExchange('binance', { key: 'key', secret: 'secret' }, store);
+    adoptEngineCapabilities(exchange);
     receive(exchange, fixture({ fills: 0 }));
     const confirmed = store.fetchedLeverage.BTCUSDT;
     const maxLeverage = vi.spyOn(exchange, 'fetchSymbolMaxLeverage').mockResolvedValue(100);
@@ -843,6 +849,7 @@ describe('Rust frame recovery callers', () => {
     async (venue) => {
       const store = new DefaultStore();
       const exchange = new RustEngineExchange(venue, { key: 'key', secret: 'secret' }, store);
+      adoptEngineCapabilities(exchange);
       receive(exchange, fixture({ fills: 0 }));
       const rails = { buyLeverage: 7, sellLeverage: 9 };
       const command = vi.fn().mockResolvedValue(rails);

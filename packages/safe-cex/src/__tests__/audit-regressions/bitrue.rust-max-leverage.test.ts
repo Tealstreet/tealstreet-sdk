@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
@@ -19,6 +20,7 @@ const setup = (publicDataOnly = false) => {
   exchanges.push(exchange);
   const command = vi.fn().mockResolvedValue(125);
   Object.defineProperty(exchange, 'command', { value: command });
+  adoptEngineCapabilities(exchange);
   return { exchange, store, command };
 };
 

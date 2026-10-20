@@ -5,12 +5,12 @@ mod sign;
 mod trading;
 mod wire;
 
-use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -55,15 +55,28 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    received: f64,
     ping_at: f64,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 struct Delta {
@@ -131,6 +144,10 @@ pub struct Backpack {
 impl Backpack {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.public.socket.is_none() {
+            // Suppressed public feeds never open; supervising them would only churn retries.
+            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                self.public.supervisor.connecting(cx);
+            }
             self.public.socket =
                 Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         }
@@ -504,10 +521,8 @@ impl Venue for Backpack {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.received = cx.now;
         self.public.ping_at = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5000.0));
+        self.public.supervisor.opened(cx);
         let topics = cx
             .store
             .markets()
@@ -540,7 +555,7 @@ impl Venue for Backpack {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         let result = (|| {
             let envelope: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
             if let Some(error) = envelope.error {
@@ -569,20 +584,11 @@ impl Venue for Backpack {
         }
         self.public.open = false;
         self.public.socket = None;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for state in self.books.values_mut() {
             state.generation += 1;
             state.sync = Sync::Waiting(vec![]);
         }
-        self.public.attempts += 1;
-        self.public.reconnect = Some(
-            cx.set_timer(
-                Backoff::new(1_000.0, 4, 30_000.0)
-                    .jittered(self.public.attempts.saturating_sub(1), cx.now),
-            ),
-        );
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let result = match pending {
@@ -904,7 +910,12 @@ impl Venue for Backpack {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network)
+                    .outcome(safe_cex_engine::Outcome::Unknown);
+                self.trade_failed(cx, request, error)
+            }
             Pending::History(request) => cx.done(request.command, Err(error.into())),
             Pending::Depth { symbol, generation }
                 if self
@@ -929,25 +940,26 @@ impl Venue for Backpack {
             self.seed_read(cx, kind);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 20000.0 {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-            } else {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => {}
+            Tick::Reconnect => return self.connect_public(cx),
+            Tick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
                     cx.send(socket, "{\"method\":\"PING\"}");
                 }
-                self.public.watchdog = Some(cx.set_timer(5000.0));
+                return;
             }
-        } else if let Some(symbol) = self
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+                return;
+            }
+            Tick::Handled => return,
+        }
+        if let Some(symbol) = self
             .books
             .iter()
             .find_map(|(s, b)| matches!(b.sync,Sync::Retry(t, _) if t==timer).then(|| s.clone()))
