@@ -4,7 +4,7 @@ use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
 use crate::{Pending, Polymarket, encode, success};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, VenueError};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -69,6 +69,8 @@ struct Job {
     symbols: HashSet<String>,
     scope: Option<String>,
     total: usize,
+    /// A step took effect, so a later refusal cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -314,7 +316,7 @@ impl Polymarket {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
-        result: Result<String, String>,
+        result: Result<String, VenueError>,
     ) {
         if let Some(job) = self.trading.jobs.remove(&command) {
             for id in job.locks {
@@ -324,13 +326,16 @@ impl Polymarket {
                 self.trading.scopes.remove(&scope);
             }
             match result {
-                // Whole failures still use the plain path until Polymarket migrates to `fail`.
-                Err(message) if job.ids.is_empty() => cx.done(command, Err(message)),
                 Ok(result) => cx.done(command, Ok(result)),
-                Err(message) => cx.fail(
-                    command,
-                    VenueError::new(message).partial(&job.ids, job.total, job.ids.len()),
-                ),
+                Err(mut error) => {
+                    // A later refusal after a step took effect cannot mean nothing happened.
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(command, error.partial(&job.ids, job.total, job.ids.len()));
+                }
             }
         }
     }
@@ -344,7 +349,7 @@ impl Polymarket {
             let Some(job) = self.trading.jobs.get(&command) else {
                 return;
             };
-            let result = serde_json::to_string(&job.ids).map_err(|e| e.to_string());
+            let result = serde_json::to_string(&job.ids).map_err(|e| e.to_string().into());
             self.trading_finish(cx, command, result);
             return;
         };
@@ -364,7 +369,7 @@ impl Polymarket {
             .map(|_| ())
         });
         if let Err(error) = result {
-            self.trading_finish(cx, command, Err(error));
+            self.trading_finish(cx, command, Err(not_sent(error)));
         }
     }
     fn start_job(
@@ -406,6 +411,7 @@ impl Polymarket {
                 locks,
                 symbols,
                 scope,
+                effective: false,
             },
         );
         Ok(())
@@ -442,7 +448,7 @@ impl Polymarket {
             cx.done(command_id, Ok("[]".into()));
             return;
         }
-        let result = (|| {
+        let result = (|| -> Result<(), String> {
             self.trading_auth()?;
             match command {
                 Command::PlaceOrders { command, orders } => {
@@ -626,9 +632,9 @@ impl Polymarket {
         })();
         if let Err(error) = result {
             if self.trading.jobs.contains_key(&command_id) {
-                self.trading_finish(cx, command_id, Err(error));
+                self.trading_finish(cx, command_id, Err(not_sent(error)));
             } else {
-                cx.done(command_id, Err(error));
+                cx.fail(command_id, not_sent(error));
             }
         }
     }
@@ -834,8 +840,24 @@ impl Polymarket {
             }
             Ok(())
         })();
-        if let Err(error) = result {
-            self.trading_finish(cx, command, Err(error));
+        match result {
+            Ok(()) => {
+                if let Some(job) = self.trading.jobs.get_mut(&command) {
+                    job.effective = true;
+                }
+            }
+            Err(error) => {
+                let error = if !(200..300).contains(&response.status) {
+                    http_failure(response.status, error)
+                } else if error.starts_with("Polymarket placement rejected") {
+                    // An explicit refusal; its messages are not a documented code table.
+                    VenueError::new(error)
+                } else {
+                    // A 2xx answer that does not prove what happened.
+                    VenueError::new(error).outcome(Outcome::Unknown)
+                };
+                self.trading_finish(cx, command, Err(error));
+            }
         }
     }
     pub(crate) fn trading_failed(
@@ -844,6 +866,32 @@ impl Polymarket {
         request: Request,
         error: &str,
     ) {
-        self.trading_finish(cx, request.command(), Err(error.into()));
+        let error = VenueError::new(error)
+            .kind(ErrorKind::Network)
+            .outcome(Outcome::Unknown);
+        self.trading_finish(cx, request.command(), Err(error));
     }
+}
+
+/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+fn http_failure(status: u16, message: String) -> VenueError {
+    let error = VenueError::new(message);
+    match status {
+        408 | 500.. => error.outcome(Outcome::Unknown),
+        401 => error
+            .kind(ErrorKind::AuthInvalid)
+            .outcome(Outcome::Rejected),
+        403 => error
+            .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        429 => error
+            .kind(ErrorKind::RateLimited)
+            .outcome(Outcome::Rejected),
+        _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
