@@ -700,8 +700,9 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert!(
             actions.iter().any(|a| matches!(
                 a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
+                Action::Notice(Notice::CommandFailed { command: 991, error })
+                    if error.message.contains("456") && error.message.contains("not found")
+                        && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
             )),
             "missing cancellation error: {actions:?}"
         );
@@ -795,4 +796,125 @@ fn a_failed_later_fills_window_reports_a_command_error_before_an_empty_success()
     h.reply(r.id, 503, "", "unavailable");
     assert_eq!(h.result(25), Some(&Ok("[]".into())));
     assert!(h.command_errors.iter().any(|(command, _)| *command == 25));
+}
+
+#[test]
+fn trading_failures_carry_the_binance_code_kind_and_outcome() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let cases = [
+        (
+            400,
+            r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-2019"),
+        ),
+        (
+            400,
+            r#"{"code":-1111,"msg":"Precision is over the maximum defined for this asset."}"#,
+            Some(ErrorKind::InvalidInput),
+            Outcome::Rejected,
+            Some("-1111"),
+        ),
+        (
+            401,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}"#,
+            Some(ErrorKind::AuthInvalid),
+            Outcome::Rejected,
+            Some("-2015"),
+        ),
+        (
+            429,
+            r#"{"code":-1003,"msg":"Too many requests."}"#,
+            Some(ErrorKind::RateLimited),
+            Outcome::Rejected,
+            Some("-1003"),
+        ),
+        (
+            503,
+            r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
+            Some(ErrorKind::Timeout),
+            Outcome::Unknown,
+            Some("-1007"),
+        ),
+        (
+            502,
+            "<html>Bad Gateway</html>",
+            None,
+            Outcome::Unknown,
+            None,
+        ),
+        (
+            503,
+            r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Unknown,
+            Some("-2019"),
+        ),
+        (
+            400,
+            r#"{"code":-1000,"msg":"An unknown error occurred while processing the request."}"#,
+            None,
+            Outcome::Unknown,
+            Some("-1000"),
+        ),
+    ];
+    for (status, body, kind, outcome, code) in cases {
+        let mut h = ready();
+        place(&mut h, 3, vec![limit(OrderSide::Buy, 0.01, 90000.0)]);
+        let order = h.take("/fapi/v1/order");
+        h.reply(order.id, status, "", body);
+        let [(3, error)] = h.failures.as_slice() else {
+            panic!("{body}: {:?}", h.failures);
+        };
+        assert_eq!(
+            (error.kind, error.outcome, error.venue_code.as_deref()),
+            (kind, Some(outcome), code),
+            "{body}"
+        );
+        assert_eq!(
+            h.result(3),
+            Some(&Err(error.message.clone())),
+            "text is unchanged"
+        );
+    }
+
+    let mut h = ready();
+    place(&mut h, 4, vec![limit(OrderSide::Buy, 0.01, 90000.0)]);
+    let order = h.take("/fapi/v1/order");
+    h.event(Event::HttpFailed {
+        request: order.id,
+        error: "connection reset",
+    });
+    assert_eq!(h.failures[0].1.outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected() {
+    let mut h = ready();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: "8389765519993909000".into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
+    );
+    let replacement = h.take("/fapi/v1/order");
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+    );
+    let [(12, error)] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(error.message, "Margin is insufficient.");
+    assert_eq!(error.outcome, None, "the cancel already took effect");
 }

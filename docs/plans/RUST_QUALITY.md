@@ -10,10 +10,11 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
 - Command rejections on Rust venues never emit `'error'`
   (`rust.exchange.ts:857-868`), so the app shows no toast unless the venue also
   logs. Emit once per rejection, de-duplicated against a same-frame `Log Error`.
-- Lost-send recovery never runs for Rust: `isUnknownOutcome`
+- ~~Lost-send recovery never runs for Rust: `isUnknownOutcome`
   (`utils/unknownSendOutcome.ts:3`) does not match the Rust "outcome unknown"
   texts (lighter, coinbase, txflow, orderly, bybit). **Risky** (enables lookups
-  and chaser decisions).
+  and chaser decisions).~~ Venues classify `outcome`; the host builds an
+  `ExchangeError` from it and `isUnknownOutcome` honours it before text matching.
 - ~~A bad key can hang `start()`: Bybit retries startup forever
   (`bybit/src/lib.rs:734-745`) and `untilLoaded` has no failure path
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
@@ -129,7 +130,9 @@ Medium:
 
 Bridge (contract change):
 8. Engine-reported capabilities replace 76 venue-name branches in
-   `rust.exchange.ts` and `FrameApplier` positional booleans. tealstreet-next:
+   `rust.exchange.ts` and `FrameApplier` positional booleans. Capability
+   record: done (`Venue::capabilities()`, `exchange.capabilities`); market
+   quantity units in the frame: open. tealstreet-next:
    `collectAccountAxes.ts`, `ClosedPositions.tsx`, `symbolScopedFills.ts`.
    Keep `contractsNative`/`remainingNative` names (**risky** if their
    computation moves).
@@ -138,9 +141,10 @@ Risky, after live-smoke captures:
 9. `num::whole` for leverage (five serialisations today, incl. truncation and
    `20.0`) and one Rust owner for client-id rules.
 
-Lower: shared test-support `ProbeVenue` (12 copied `secondary_tests.rs`) and
-one `SocketSpec`. ~~`RangeWalk` for the 16 hand-rolled history paginators.~~
-Shared `CursorWalk`, `windows` and `OffsetWalk` now page Lighter, GRVT,
-Coinbase, Paradex, Bybit, Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and
-Binance fills; OKX, Kraken, Crypto.com, Hyperliquid, Orderly and WOO stay
-hand-rolled with reasons in [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).
+Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
+(done: `engine::test_support`), one `SocketSpec`.
+~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
+`windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
+Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,
+Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
+[RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).
