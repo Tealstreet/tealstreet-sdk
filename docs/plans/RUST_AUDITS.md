@@ -54,9 +54,13 @@ High:
   (`binance/src/account.rs:1186`).
 - Binance USD-M amend re-places the full original size when the order filled
   during the cancel ("unknown order" counted as cancel) (`binance/src/trading.rs:1131,536,1463`).
-- Rejected private login leaves a silent socket: bitget `account.rs:1128`,
+- ~~Rejected private login leaves a silent socket: bitget `account.rs:1128`,
   blofin `account.rs:1125`, mexc `account.rs:308`, woo `account.rs:1482`,
-  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.
+  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.~~
+  Fixed in `feat/rust-socket-supervisor`: rejected login retires the socket,
+  preserves account state and schedules jittered retry; an independent auth
+  deadline expires despite pongs. Native regressions cover all six, including
+  ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).
 
@@ -74,8 +78,13 @@ Medium:
 - Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).
 - Write timeout discards optimistic state instead of refreshing: orderly, okx.
 
-Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
-coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
+Low: ~~no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
+coinbase public, grvt, paradex, polymarket)~~ — fixed for the requested feeds
+by the shared supervisor, including fresh KuCoin token POSTs. Reverification
+dropped the literal public no-backoff claim for AsterDEX, Bitrue, BingX and
+Paradex: they already had exponential delays, but reset at open; their fixed
+private recovery, missing jitter and repeated-flap reset are now covered.
+KuCoin client-id collisions;
 `uuid().unwrap_or_default()` in Binance; Backpack empty positions on any 404;
 OKX `partially_effective` final; Lighter late-fill drop; Bybit unused `exec_id`.
 
@@ -112,8 +121,12 @@ no freshness fence, so every venue reinvents dedupe and terminal fencing.
 ## Architecture
 
 - Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.
-- Socket supervision copied per venue, no jitter, two without backoff →
-  `engine::socket::Supervisor`.
+- ~~Socket supervision copied per venue, no jitter, two without backoff →
+  `engine::socket::Supervisor`.~~ Shared policy now provides bounded opening,
+  independent auth deadlines, receive watchdog, native ping hooks and capped
+  jittered backoff for the requested feeds. Remaining adapters are explicitly
+  listed for follow-up in [the lane report](RUST_SOCKET_SUPERVISOR.md), alongside
+  the native failure regressions, review findings and gate evidence.
 - Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
   `safe-cex-venues` crate shared by both hosts.
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).

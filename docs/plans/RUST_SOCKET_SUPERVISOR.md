@@ -4,6 +4,13 @@ Lane: `feat/rust-socket-supervisor`, based on `bd94abb524` on
 `origin/feat/rust-rewrite`. Scope: socket authentication/liveness and the
 shared supervisor; no TS venue deletion or unrelated trading fixes.
 
+Production impact is the judging rule: silent/stale account or market data,
+unseen failures, lost money/attribution or broken callers. Internal startup,
+cleanup, disposal and retry choreography may differ freely from TS. The lane
+does not treat cosmetic lifecycle differences as defects or require a TS-shaped
+supervisor; native authentication/topic/heartbeat constraints remain necessary
+to receive correct live data.
+
 ## Reverification
 
 The rejected-login findings still hold for Bitget, BloFin, MEXC, WOO,
@@ -91,6 +98,22 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
 - Fresh 20-second Paradex public recording succeeded: 26,674 frames, two HTTP
   responses and both requested books. Performance/replay gates remain pending;
   no live private connectivity is claimed.
+- KuCoin Spot extension: `07fb8c0295`; default 105 tests and Spot-enabled 158
+  tests pass (overlapping suites, not additive), with six new regressions
+  exercising both roles. Formatting, strict Clippy and independent review pass.
+- `d106389e12` preserves constant-policy constructor folding and exact integer
+  power-of-two retry scaling. On merged landing, Paradex is 1,252,515 bytes
+  against the unchanged 1,258,291 budget (5,776-byte headroom); no further size
+  refactoring was necessary. Engine default 93/all-feature 99 tests pass.
+- Merged root TypeScript checks pass: typecheck 44 tasks, lint 28 tasks and
+  tests 27 tasks. Workspace native/WASM checks and public recordings are active.
+- Gate-plan review covers 21 frozen public profile controls, 23 fresh public
+  profile gates from 21 captures, 29 generated private correctness cases and
+  17 single-feature size selectors. Before any CPU measurement, the initial
+  six-second fresh trims were superseded by a complete-capture policy: retain
+  all recorded timestamps (ceil of the raw maximum timestamp, at least 20s),
+  with every HTTP anchor. This retains native heartbeat/watchdog opportunities.
+  Frozen fixtures, metrics, thresholds and output normalizers are unchanged.
 
 ## Remaining migration inventory
 
