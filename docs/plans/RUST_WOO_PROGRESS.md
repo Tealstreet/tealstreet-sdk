@@ -266,3 +266,14 @@ Remaining phases:
   144 records / 20 commands. Final TS replay's first attempt failed the shared
   backing-buffer settling check under concurrent full tests; rerun the same
   unchanged memory gate after builds/tests settle. No gate threshold changed.
+
+### Final fixture and verification audit
+
+Independent fixture review confirmed the added alternate/legacy route cases.
+Corrected the synthetic top-level replies to include documented `success:true`
+and V1 page metadata proving completion; strict native envelope/pager validation
+was retained. Final fixture review PASS. Native workspace now passes 843 tests
+(WOO 109), plus bans/fmt/clippy and wasm clippy. Combined SDK 27 and host 25 PASS.
+The latest full root test attempt hit host fork EAGAIN and unrelated Hyro import
+timeouts under concurrent lane runs. Retrying unchanged coverage with two Vitest
+workers and one Turbo task at a time; no timeout or assertion was relaxed.

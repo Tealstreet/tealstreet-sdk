@@ -155,17 +155,17 @@ http('GET', '/v1/client/transaction_history', { size: 100, page: 1 }, ok({ rows:
 ], meta: meta(2) }));
 // Empty canonical symbols recover through the active TS alias sequence.
 command(14500, 'fetchFills', { symbol: 'ETHUSDT', limit: 2 });
-http('GET', '/v3/trade/transactionHistory', { symbol: 'PERP_ETH_USDT', limit: 2 }, { rows: [] });
-http('GET', '/v3/trade/transactionHistory', { symbol: 'ETH_USDT_PERP', limit: 2 }, { rows: [
+http('GET', '/v3/trade/transactionHistory', { symbol: 'PERP_ETH_USDT', limit: 2 }, { success: true, rows: [] });
+http('GET', '/v3/trade/transactionHistory', { symbol: 'ETH_USDT_PERP', limit: 2 }, { success: true, rows: [
   { orderId: 920, symbol: 'ETH_USDT_PERP', side: 'BUY', executedPrice: '3000', executedQuantity: '0.01', executedTimestamp: String((EPOCH + 14000) / 1000) },
 ] });
 // The legacy aggregate schema has an order ID but no per-execution ID.
 command(15000, 'fetchFills', { symbol: 'BTCUSDT', limit: 3 });
 for (const symbol of ['PERP_BTC_USDT', 'BTC_USDT_PERP', 'BTC-USDT-PERP', 'BTCUSDT', undefined])
-  http('GET', '/v3/trade/transactionHistory', { ...(symbol ? { symbol } : {}), limit: 3 }, { rows: [] });
-http('GET', '/v1/client/trades', { symbol: 'PERP_BTC_USDT', size: 3 }, { rows: [
+  http('GET', '/v3/trade/transactionHistory', { ...(symbol ? { symbol } : {}), limit: 3 }, { success: true, rows: [] });
+http('GET', '/v1/client/trades', { symbol: 'PERP_BTC_USDT', size: 3 }, { success: true, rows: [
   { order_id: 930, symbol: 'PERP_BTC_USDT', side: 'BUY', average_executed_price: '62000', executed: '0.002', created_time: String((EPOCH + 14500) / 1000), total_fee: '0.01', fee_asset: 'USDT' },
-] });
+], meta: meta(1, 3) });
 // Entry and its native paired protections retain the closing hedge rail.
 command(17000, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.01, price: 59000, stopLoss: 58000, takeProfit: 65000, tpTriggerType: 'last_price' }] });
 pendingRegular = [regular(800, 0.01, 59000, 0, 'NEW', { position_side: 'LONG' })];
