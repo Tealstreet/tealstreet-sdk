@@ -332,6 +332,10 @@ const KNOWN_TS_FIXES = {
   // Security audit: Rust auth signatures expire after 300 seconds; TS keeps
   // 86400. The protocol audit binds the lifetime separately per implementation
   // and verifies both signed preimages; no output normalization is needed.
+  // Rust preserves accepted IDs from partial native/sequential placement batches,
+  // continues independent orders after rejection, surfaces failed protection at
+  // Error level, retains structured rejection reasons and sends integer leverage.
+  // These TS defects have native regressions; no replay normalization is applied.
   paradex() {},
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping

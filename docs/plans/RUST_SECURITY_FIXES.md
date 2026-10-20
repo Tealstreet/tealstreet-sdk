@@ -523,3 +523,21 @@ live trading, weakened parity oracle, or performance threshold changes.
   Independent final code-correctness review accepts every preserved schema and
   mutation boundary; it makes no speedup claim. Commit this bounded repair and
   require fresh CI measurements before landing.
+
+### Latest landing merge before final CI
+
+- Landing advanced to `f895a98f26` (Paradex partial-placement/error/SBE repairs
+  and exchange-listener isolation), making the PR temporarily conflicted.
+  Resolve the sole conflict by retaining both independent Paradex
+  KNOWN_TS_FIXES comments; their handler remains empty and no oracle is changed.
+  Keep incoming structure and all protocol/listener fixes. Security auth
+  lifetime/credential behavior and the bounded Bybit parser repair are retained.
+- Review the combined boundary and verify focused Paradex/Bybit tests, strict
+  Clippy, harness/formatting/bans before pushing; then require fresh full CI.
+  The a185 source scan is a historical 161-file/zero-finding checkpoint only;
+  scan the committed merged result again before final acceptance.
+- Resolved integration passes 296 Bybit/Paradex tests across 19 suite results,
+  strict all-target Clippy, workspace formatting, bans and all 601 harness
+  tests. Independent merged-boundary review accepts auth/credential retention,
+  native partial-identity/error behavior, SBE validation and listener isolation.
+  Final CI and a fresh committed-source scan remain required before merge.
