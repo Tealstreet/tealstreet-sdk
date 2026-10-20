@@ -3,7 +3,7 @@ use crate::wire::{Envelope, Number};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -29,6 +29,7 @@ struct Replacement {
 }
 #[derive(Clone)]
 struct Step {
+    receipt: Option<OrderIdentityReceipt>,
     method: Method,
     path: String,
     body: Option<String>,
@@ -182,6 +183,7 @@ fn trigger(value: Option<StopTriggerType>) -> &'static str {
 }
 fn post(path: &str, body: String, call: Call) -> Step {
     Step {
+        receipt: None,
         method: Method::Post,
         path: path.into(),
         body: Some(body),
@@ -190,6 +192,7 @@ fn post(path: &str, body: String, call: Call) -> Step {
 }
 fn cancel(id: &str, symbol: &str) -> Step {
     Step {
+        receipt: None,
         method: Method::Delete,
         path: if symbol.is_empty() {
             format!("/api/v1/orders/{}", encode(id))
@@ -205,6 +208,7 @@ fn cancel(id: &str, symbol: &str) -> Step {
 }
 fn confirm_cancel(replacement: Replacement, symbol: &str) -> Step {
     Step {
+        receipt: None,
         method: Method::Get,
         path: format!(
             "/api/v1/orders/{}?symbol={}",
@@ -351,7 +355,12 @@ impl Kucoin {
             trigger_stop_up_price: up.map(price),
             trigger_stop_down_price: down.map(price),
         };
-        Ok(post(
+        let receipt = OrderIdentityReceipt {
+            symbol: order.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: payload.client_oid.clone(),
+        };
+        let mut step = post(
             if has_attached {
                 "/api/v1/st-orders"
             } else {
@@ -359,7 +368,9 @@ impl Kucoin {
             },
             json(&payload),
             Call::Place,
-        ))
+        );
+        step.receipt = Some(receipt);
+        Ok(step)
     }
 
     fn replacement(
@@ -523,6 +534,7 @@ impl Kucoin {
             }
             Command::CancelSymbolOrders { symbol, .. } => {
                 steps.push_back(Step {
+                    receipt: None,
                     method: Method::Delete,
                     path: if symbol.is_empty() {
                         "/api/v3/orders".into()
@@ -537,6 +549,7 @@ impl Kucoin {
                 });
                 if symbol.is_empty() {
                     steps.push_back(Step {
+                        receipt: None,
                         method: Method::Delete,
                         path: "/api/v1/stopOrders".into(),
                         body: None,
@@ -603,6 +616,7 @@ impl Kucoin {
                 ));
             }
             Command::SetPositionMode { hedged, .. } => steps.push_back(Step {
+                receipt: None,
                 method: Method::Get,
                 path: "/api/v1/positions".into(),
                 body: None,
@@ -753,7 +767,7 @@ impl Kucoin {
             && self.account_order_filled(id) > *filled
         {
             let error = "KuCoin newer fills invalidated cancellation proof";
-            cx.log(LogLevel::Error, error);
+            cx.command_error(request.command, error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
             job.error = Some(error.into());
             job.steps.clear();
@@ -765,6 +779,9 @@ impl Kucoin {
         let method = request.step.method;
         let path = request.step.path.clone();
         let body = request.step.body.clone();
+        if let Some(receipt) = &request.step.receipt {
+            cx.command_progress(request.command, vec![receipt.clone()]);
+        }
         if matches!(request.step.call, Call::CheckMode { .. }) {
             self.signed_streamed(
                 cx,
@@ -829,6 +846,7 @@ impl Kucoin {
             } = &request.step.call
         {
             let step = Step {
+                receipt: None,
                 method: Method::Delete,
                 path: format!("/api/v1/stopOrders/{}", encode(id)),
                 body: None,
@@ -1036,7 +1054,7 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(100.0));
                 return;
             }
-            cx.log(LogLevel::Error, &error);
+            cx.command_error(request.command, &error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
             job.error.get_or_insert(error);
             if !job.keep_going {

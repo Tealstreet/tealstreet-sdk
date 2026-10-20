@@ -56,7 +56,37 @@ impl Harness {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(self.engine.drain_actions());
+        let mut receipts = Vec::new();
+        for action in self.engine.drain_actions() {
+            if let Action::Notice(Notice::CommandProgress {
+                receipts: actual, ..
+            }) = &action
+            {
+                receipts.extend(actual.clone());
+            }
+            if let Action::Http(request) = &action {
+                let body = request
+                    .body
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok());
+                let expected: Vec<_> = body
+                    .as_ref()
+                    .and_then(|body| body["clientOid"].as_str())
+                    .map(|id| OrderIdentityReceipt {
+                        symbol: "BTCUSDT".into(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: id.into(),
+                    })
+                    .into_iter()
+                    .collect();
+                assert_eq!(
+                    std::mem::take(&mut receipts),
+                    expected,
+                    "actual KuCoin clientOid must be receipted before dispatch"
+                );
+            }
+            self.actions.push(action);
+        }
     }
     fn command(&mut self, command: Command) {
         self.event(Event::Command(command));
@@ -208,6 +238,47 @@ fn caller_id_native_lots_and_headless_metadata_are_preserved() {
     );
     h.pace();
     assert_eq!(h.done(1), &Ok(r#"["9007199254740993"]"#.into()));
+}
+#[test]
+fn futures_native_alias_and_caller_or_generated_oid_have_exact_receipt_ownership() {
+    for generated in [false, true] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        if generated {
+            opts.client_order_id = None;
+        }
+        h.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts],
+        });
+        h.metadata(true, "CROSS");
+        let receipt_at = h
+            .actions
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandProgress { command: 91, .. })
+                )
+            })
+            .unwrap();
+        let write_at = h.actions.iter().position(|action| matches!(action, Action::Http(request) if request.url.ends_with("/api/v1/orders"))).unwrap();
+        assert!(receipt_at < write_at);
+        let Action::Notice(Notice::CommandProgress { receipts, .. }) = &h.actions[receipt_at]
+        else {
+            unreachable!()
+        };
+        let Action::Http(request) = &h.actions[write_at] else {
+            unreachable!()
+        };
+        let payload: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["symbol"], "XBTUSDTM");
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "BTCUSDT");
+        assert_eq!(receipts[0].identity, payload["clientOid"].as_str().unwrap());
+        assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+    }
 }
 #[test]
 fn caller_id_preflight_rejects_the_whole_batch_before_any_transport() {

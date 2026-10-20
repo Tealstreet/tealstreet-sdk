@@ -1,8 +1,8 @@
-import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { CommandProgress, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../types';
 
 import { createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createExchange } from '../index';
 import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
@@ -88,6 +88,59 @@ describe('shipping Coinbase Rust family', () => {
   let exchange: RustEngineExchange | undefined;
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
+
+  it('delivers queued native IDs after a deadline and retains them in the existing log path if a listener throws', async () => {
+    const tape = transport();
+    const request = tape.native.request;
+    const writes: Array<{ request: Parameters<Transport['request']>[0]; release: (body: Awaited<ReturnType<Transport['request']>>) => void }> = [];
+    const progress: CommandProgress[] = [];
+    const logs: string[] = [];
+    tape.native.request = (input) => {
+      if (input.method === 'POST' && new URL(input.url).pathname.endsWith('/orders')) {
+        expect(progress.some((event) => event.receipts.some((row) => row.identity === JSON.parse(input.body!).client_order_id))).toBe(true);
+        return new Promise((release) => writes.push({ request: input, release }));
+      }
+      return request(input);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    exchange = new RustEngineExchange('coinbasespot', {
+      key: downloaded, secret: '', tealstreetTunnel: false, extra: { rustCommandTimeoutMs: 1000 },
+    }, new DefaultStore());
+    exchange.on('log', (message: string) => logs.push(message));
+    exchange.on('command-progress', (event: CommandProgress) => {
+      progress.push(event);
+      if (event.late && event.receipts.length) throw new Error('Consumer receipt listener failed');
+    });
+    await exchange.start();
+    const order = { symbol: 'BTC-USD', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.1, price: 99 };
+    const first = exchange.placeOrder(order).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    const second = exchange.placeOrder(order).catch((error: unknown) => error);
+    const [firstFailure, secondFailure] = await Promise.all([first, second]) as Array<Error & {
+      receiptKey: string; orderIdentities: Array<{ identity: string }>;
+    }>;
+    expect(firstFailure).toMatchObject({ code: 'COMMAND_TIMEOUT', outcome: 'unknown' });
+    expect(secondFailure).toMatchObject({ code: 'COMMAND_TIMEOUT', outcome: 'unknown', orderIdentities: [] });
+    expect(writes).toHaveLength(1);
+    const firstId = JSON.parse(writes[0].request.body!).client_order_id;
+    expect(firstFailure.orderIdentities).toEqual([{ symbol: 'BTC-USD', kind: 'clientOrderId', identity: firstId }]);
+    writes[0].release({ status: 200, body: new TextEncoder().encode(JSON.stringify({
+      success: true, success_response: { order_id: 'receipt-order-first' },
+    })) });
+    await vi.waitFor(() => expect(writes).toHaveLength(2));
+    const secondId = JSON.parse(writes[1].request.body!).client_order_id;
+    expect(secondId).not.toBe(firstId);
+    expect(secondId).toMatch(/^tealstreet-/);
+    expect(progress).toContainEqual(expect.objectContaining({
+      receiptKey: secondFailure.receiptKey, late: true, complete: false,
+      receipts: [{ symbol: 'BTC-USD', kind: 'clientOrderId', identity: secondId }],
+    }));
+    expect(logs.some((line) => line.includes(secondFailure.receiptKey) && line.includes(secondId))).toBe(true);
+    expect(secondFailure.orderIdentities).toEqual([]);
+    expect(exchange.isEngineDead).toBe(false);
+    expect(writes).toHaveLength(2);
+  }, 20000);
 
   it.each([
     ['coinbasespot', true],

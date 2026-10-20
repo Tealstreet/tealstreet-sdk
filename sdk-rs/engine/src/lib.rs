@@ -27,6 +27,7 @@ pub use engine::{
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
+pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

@@ -8,6 +8,7 @@ import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const CLOID = '0x0123456789abcdef0123456789abcdef';
 const MARKET: Market = {
@@ -56,7 +57,9 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,

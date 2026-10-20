@@ -1,4 +1,6 @@
 /** Runs a WasmEngine against a transport. See host.mjs. */
+export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
+
 export interface Socket {
   send(text: string): void;
   close(): void;
@@ -60,15 +62,135 @@ export interface VenueErrorDetail {
 }
 
 export interface EngineHandlers {
+  /** Called once after a WASM trap makes this host terminal and releases its I/O. */
+  onDead?(error: EngineDeadError): void;
   onDeactivate?(): void;
   /** Startup cannot complete; the account should fail `start` with this. */
   onStartupFailed?(detail: VenueErrorDetail): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
-  /** Unstructured log; also receives Info+ events when `onEvent` is absent. */
+  /** Associated native command errors arrive as warning diagnostics. Known
+   * successful partial/best-effort commands promote the first diagnostic once
+   * after settlement; rejected commands report at the SDK promise boundary.
+   * Late diagnostics remain warnings. Background logs keep their native level. */
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
-  /** Structured events at or above the engine's `logLevel` option. */
+  /** Native identities are delivered before the corresponding I/O. Late events
+   * retain the same key after a deadline; consumers may merge receipt tuples.
+   * Complete events are idempotent and may repeat for duplicate native done. */
+  onCommandProgress?(event: CommandProgress): void;
+  /** Structured events at or above the engine's `logLevel` option; Info+ also
+   * reach `onLog` when this is absent. */
   onEvent?(event: EngineEvent): void;
+}
+
+export interface OrderIdentityReceipt {
+  readonly symbol: string;
+  readonly kind: 'clientOrderId' | 'clientOrderIndex' | 'orderCode';
+  /** Exact native identity; numeric indices and codes remain decimal strings. */
+  readonly identity: string;
+}
+
+export interface CommandProgress {
+  readonly receiptKey: string;
+  readonly commandId: number;
+  /** Immutable per-action delta. The host keeps no receipt ledger after settlement. */
+  readonly receipts: readonly OrderIdentityReceipt[];
+  readonly complete: boolean;
+  readonly late: boolean;
+}
+
+export class EngineDeadError extends Error {
+  constructor(cause: unknown, command?: CommandIdentity);
+  readonly code: 'ENGINE_DEAD';
+  readonly command?: string;
+  /** An interrupted write may already have been accepted; reconcile before retrying. */
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
+}
+
+export interface CommandIdentity {
+  op: string;
+  /** Caller-supplied identifiers only; native-generated identifiers need separate receipts. */
+  clientOrderId?: string;
+  clientOrderIds?: string[];
+  receiptKey?: string;
+  commandId?: number;
+  orderIdentities?: readonly OrderIdentityReceipt[];
+}
+
+export class CommandTimeoutError extends Error {
+  constructor(timeoutMs: number, command?: CommandIdentity);
+  readonly code: 'COMMAND_TIMEOUT';
+  readonly timeoutMs: number;
+  readonly command?: string;
+  /** The write can still complete at the venue. Reconcile before retrying. */
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
+}
+
+/** The host could not arm a deadline after handing the command to the engine.
+ * This is a waiting failure, not an expired deadline or an engine trap. */
+export class CommandDeadlineError extends Error {
+  constructor(cause: unknown, command?: CommandIdentity);
+  readonly code: 'COMMAND_DEADLINE_FAILED';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
+}
+
+/** A malformed result or unsupported action prevents confirming the command outcome. */
+export class CommandProtocolError extends Error {
+  constructor(cause: unknown, command?: CommandIdentity);
+  readonly code: 'ENGINE_PROTOCOL_ERROR';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
+}
+
+export class EngineDisposedError extends Error {
+  constructor(command?: CommandIdentity, interrupted?: boolean);
+  readonly code: 'ENGINE_DISPOSED';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
+}
+
+export interface EngineHostOptions {
+  /** Whole-command waiting deadline, including pagination; default 120000 ms.
+   * Positive safe integer <= 2147483647. Long history queries may need a larger value.
+   * Expiry does not cancel venue work or retry it. */
+  commandTimeoutMs?: number;
+}
+
+export interface CommandOptions {
+  /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
+   * Host metadata: never sent to the native engine or venue. */
+  timeoutMs?: number;
 }
 
 export interface EngineEvent {
@@ -120,11 +242,13 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  readonly dead: boolean;
+  readonly deadError?: EngineDeadError;
   accountId(): string | undefined;
-  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
+  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
   /** Resolves with the command's result for commands that report one. */
-  command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
+  command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
