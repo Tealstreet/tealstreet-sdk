@@ -33,3 +33,9 @@ Public fixes peer-reviewed: empty invalidation frames, dropped-clear snapshot re
 Exploratory selected Paradex build measured 1,258,877 bytes, exceeding fixed 1,258,291 by 586. This is a real gate failure, not accepted evidence. Replace global snapshot subscription bookkeeping with the existing venue book iterator contract, then rerun final-source budgets.
 
 Next: checkpoint all verified work, merge current origin landing (includes other lane PR1338), reconcile shared feature/command changes, lean snapshot repair, strike verified audit items, freeze source and run final gates. Existing focused logs are developmental evidence, not final frozen-source results.
+
+### Lean recovery and merged-source review
+
+Merged current parity landing in `c2eb6aa8ca`, preserving prediction/polling feature isolation, remote-sign request events and KuCoin Spot. Removed global snapshot subscription allocation in favor of the documented `Venue::books` subscription census: snapshots emit clears when `book()` is unavailable. Non-Binance/Bybit iterators now comply; their lane was notified through Aimux of its two readiness-filtered iterators. Engine snapshots retain valid one-sided books and clear stale consumers even after a missed invalidation frame. Developmental engine tests (95+), WOO/Kraken/Aster suites (354) and strict Clippy pass. Merged exploratory Paradex size returned below the unchanged budget; final frozen-source budgets remain required.
+
+Integration review fixed causal-token leaks on rejected/expired delegated signing, duplicate unsupported-command IDs, and late signer errors erasing active HTTP provenance. Five focused signing regressions and strict Clippy pass. Production-impact guidance from Sam governs all scope decisions; lifecycle differences alone are not a reason to change code.

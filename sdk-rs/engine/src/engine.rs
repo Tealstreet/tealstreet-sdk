@@ -293,6 +293,7 @@ impl Command {
     fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
+            | Self::AmendOrderWithSymbol { command, .. }
             | Self::AmendOrder { command, .. }
             | Self::CancelOrders { command, .. }
             | Self::CancelOrdersWithSymbols { command, .. }
@@ -673,6 +674,8 @@ impl<P> Cx<'_, P> {
             unreachable!()
         };
         if self.io.signatures.len() >= 256 {
+            #[cfg(feature = "order-locks")]
+            self.io.order_read_tokens.remove(&id);
             self.io.streams.remove(&id);
             return Err(self
                 .io
@@ -941,7 +944,8 @@ pub trait Venue {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
-    /// Every synchronized book, for snapshot frames.
+    /// Every subscribed book, including unsynchronized subscriptions.
+    /// Snapshot frames clear subscriptions for which `book` returns `None`.
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
 }
 
@@ -950,7 +954,6 @@ pub struct Engine<V: Venue> {
     store: Store,
     io: Io<V::Pending>,
     started: bool,
-    book_subscriptions: Vec<(String, u32)>,
     #[cfg(feature = "command-tracking")]
     commands_received: bool,
     #[cfg(feature = "book-deltas")]
@@ -975,7 +978,6 @@ impl<V: Venue> Engine<V> {
             store: Store::default(),
             io: Io::default(),
             started: false,
-            book_subscriptions: Vec::new(),
             #[cfg(feature = "command-tracking")]
             commands_received: false,
             #[cfg(feature = "book-deltas")]
@@ -1055,32 +1057,19 @@ impl<V: Venue> Engine<V> {
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         #[cfg(feature = "order-locks")]
+        if let Event::Command(command) = &event
+            && let Some(id) = command.completion_id()
+            && !self.io.active_commands.insert(id)
+        {
+            self.io.actions.push(Action::Notice(Notice::Log {
+                level: LogLevel::Error,
+                message: "Command ID is already in flight".into(),
+            }));
+            return;
+        }
+        #[cfg(feature = "order-locks")]
         {
             self.io.order_response_token = None;
-        }
-        match &event {
-            Event::Command(Command::SubscribeOrderBook { symbol }) => {
-                if let Some((_, count)) = self
-                    .book_subscriptions
-                    .iter_mut()
-                    .find(|(s, _)| s == symbol)
-                {
-                    *count = count.saturating_add(1);
-                } else {
-                    self.book_subscriptions.push((symbol.clone(), 1));
-                }
-            }
-            Event::Command(Command::UnsubscribeOrderBook { symbol }) => {
-                if let Some((_, count)) = self
-                    .book_subscriptions
-                    .iter_mut()
-                    .find(|(s, _)| s == symbol)
-                {
-                    *count = count.saturating_sub(1);
-                }
-                self.book_subscriptions.retain(|(_, count)| *count > 0);
-            }
-            _ => {}
         }
         #[cfg(feature = "command-tracking")]
         if matches!(&event, Event::Command(_)) {
@@ -1141,6 +1130,8 @@ impl<V: Venue> Engine<V> {
                         cx.io.actions.push(Action::Http(signing.http));
                     }
                     Err(error) => {
+                        #[cfg(feature = "order-locks")]
+                        cx.io.order_read_tokens.remove(&request);
                         cx.io.streams.remove(&request);
                         if let Some(pending) = cx.io.pending.remove(&request) {
                             self.venue.on_sign_failed(&mut cx, pending, error);
@@ -1150,6 +1141,8 @@ impl<V: Venue> Engine<V> {
             }
             Event::PayloadSignFailed { request, error } => {
                 if cx.io.take_signature(request).is_some() {
+                    #[cfg(feature = "order-locks")]
+                    cx.io.order_read_tokens.remove(&request);
                     cx.io.streams.remove(&request);
                     if let Some(pending) = cx.io.pending.remove(&request) {
                         self.venue.on_sign_failed(&mut cx, pending, error);
@@ -1181,17 +1174,11 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
-                if let Some(id) = command.completion_id()
-                    && !cx.io.active_commands.insert(id)
-                {
-                    cx.log(LogLevel::Error, "Command ID is already in flight");
-                    return;
-                }
-                #[cfg(feature = "order-locks")]
                 if self.venue.guard_order_mutations() {
                     let id = match &command {
                         Command::PlaceOrders { command, .. }
                         | Command::AmendOrder { command, .. }
+                        | Command::AmendOrderWithSymbol { command, .. }
                         | Command::CancelOrders { command, .. }
                         | Command::CancelOrdersWithSymbols { command, .. }
                         | Command::CancelSymbolOrders { command, .. } => Some(*command),
@@ -1408,18 +1395,12 @@ impl<V: Venue> Engine<V> {
         self.store.write(&everything, &mut w);
         for (symbol, book) in self.venue.books() {
             if let Some(market) = self.store.market_index(symbol) {
-                book.write(market, &mut w);
-            }
-        }
-        // A recovering consumer may have missed the original invalidation frame.
-        for (symbol, _) in &self.book_subscriptions {
-            if let Some(market) = self.store.market_index(symbol)
-                && !self.venue.books().any(|(s, _)| s == symbol)
-            {
-                self.venue
-                    .book(symbol)
-                    .unwrap_or(&Book::default())
-                    .write(market, &mut w);
+                // Recovering consumers may have missed the original invalidation frame.
+                if self.venue.book(symbol).is_some() {
+                    book.write(market, &mut w);
+                } else {
+                    Book::default().write(market, &mut w);
+                }
             }
         }
         self.io.snapshot = w.finish();
@@ -1650,6 +1631,8 @@ mod streaming_tests {
         body: Option<String>,
         failure: Option<String>,
         book: Option<Book>,
+        empty_book: Book,
+        book_subscribers: u32,
         symbol_amend: bool,
         commands: Vec<Command>,
     }
@@ -1748,13 +1731,26 @@ mod streaming_tests {
             self.symbol_amend
         }
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, command: Command) {
+            match &command {
+                Command::SubscribeOrderBook { .. } => self.book_subscribers += 1,
+                Command::UnsubscribeOrderBook { .. } => {
+                    self.book_subscribers = self.book_subscribers.saturating_sub(1)
+                }
+                _ => {}
+            }
             self.commands.push(command);
         }
         fn book(&self, _symbol: &str) -> Option<&Book> {
             self.book.as_ref()
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-            Box::new(self.book.iter().map(|book| ("A", book)))
+            Box::new(
+                self.book
+                    .as_ref()
+                    .or((self.book_subscribers > 0).then_some(&self.empty_book))
+                    .into_iter()
+                    .map(|book| ("A", book)),
+            )
         }
     }
 
@@ -1775,7 +1771,8 @@ mod streaming_tests {
             );
         }
         assert_eq!(
-            engine.venue.commands, 2,
+            engine.venue.commands.len(),
+            2,
             "overlapping native mutation must not dispatch"
         );
         assert!(engine.drain_actions().any(|a| matches!(
@@ -1800,7 +1797,7 @@ mod streaming_tests {
                 ids: vec!["native".into()],
             }),
         );
-        assert_eq!(engine.venue.commands, 2);
+        assert_eq!(engine.venue.commands.len(), 2);
         engine.io.order_locks.finish(1, false);
         engine.handle(
             0.,
@@ -1809,7 +1806,7 @@ mod streaming_tests {
                 ids: vec!["native".into()],
             }),
         );
-        assert_eq!(engine.venue.commands, 3);
+        assert_eq!(engine.venue.commands.len(), 3);
         let mut cx = Cx {
             now: 0.,
             store: &mut engine.store,
@@ -1824,7 +1821,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 4,
+            engine.venue.commands.len(),
+            4,
             "failed completion must also release"
         );
     }
@@ -1852,7 +1850,7 @@ mod streaming_tests {
                 }),
             );
         }
-        assert_eq!(engine.venue.commands, 2);
+        assert_eq!(engine.venue.commands.len(), 2);
         engine.handle(
             0.,
             Event::Command(Command::CancelSymbolOrders {
@@ -1861,7 +1859,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 2,
+            engine.venue.commands.len(),
+            2,
             "global cancel-all conflicts with either symbol"
         );
     }
@@ -1902,7 +1901,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 1,
+            engine.venue.commands.len(),
+            1,
             "cancel-all cannot miss in-flight placement"
         );
         engine.handle(
@@ -1921,22 +1921,25 @@ mod streaming_tests {
         );
         engine.handle(0., Event::Command(held_place(3, "B")));
         assert_eq!(
-            engine.venue.commands, 2,
+            engine.venue.commands.len(),
+            2,
             "unrelated market may place while cancellation waits"
         );
         complete_held(&mut engine, 1, false);
         assert_eq!(
-            engine.venue.commands, 3,
+            engine.venue.commands.len(),
+            3,
             "waiting cancel-all dispatches after ACK"
         );
         engine.handle(0., Event::Command(held_place(4, "A")));
         assert_eq!(
-            engine.venue.commands, 3,
+            engine.venue.commands.len(),
+            3,
             "replacement placement cannot escape active cancel-all scope"
         );
         complete_held(&mut engine, 2, false);
         engine.handle(0., Event::Command(held_place(5, "A")));
-        assert_eq!(engine.venue.commands, 4);
+        assert_eq!(engine.venue.commands.len(), 4);
     }
 
     #[cfg(feature = "order-locks")]
@@ -1964,7 +1967,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 1,
+            engine.venue.commands.len(),
+            1,
             "neither cancellation may report false success"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
@@ -1992,7 +1996,7 @@ mod streaming_tests {
                 symbol: "A".into(),
             }),
         );
-        assert_eq!(engine.venue.commands, 2);
+        assert_eq!(engine.venue.commands.len(), 2);
         // A preflight failure without a dispatched write does not poison its market.
         engine.handle(0., Event::Command(held_place(5, "B")));
         complete_held(&mut engine, 5, true);
@@ -2029,7 +2033,7 @@ mod streaming_tests {
                 symbol: "B".into(),
             }),
         );
-        assert_eq!(engine.venue.commands, 4);
+        assert_eq!(engine.venue.commands.len(), 4);
     }
 
     #[cfg(feature = "order-locks")]
@@ -2082,7 +2086,7 @@ mod streaming_tests {
                 symbol: "A".into(),
             }),
         );
-        assert_eq!(engine.venue.commands, 1);
+        assert_eq!(engine.venue.commands.len(), 1);
         message(&mut engine, "read-orders:A");
         let fresh = request(&mut engine);
         respond(&mut engine, fresh);
@@ -2094,7 +2098,7 @@ mod streaming_tests {
                 symbol: "A".into(),
             }),
         );
-        assert_eq!(engine.venue.commands, 2);
+        assert_eq!(engine.venue.commands.len(), 2);
     }
 
     #[cfg(feature = "order-locks")]
@@ -2141,7 +2145,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 1,
+            engine.venue.commands.len(),
+            1,
             "virtual alias must inherit underlying order's market"
         );
         engine.handle(
@@ -2152,7 +2157,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 2,
+            engine.venue.commands.len(),
+            2,
             "known alias does not block unrelated market"
         );
         complete_held(&mut engine, 1, false);
@@ -2172,7 +2178,8 @@ mod streaming_tests {
             }),
         );
         assert_eq!(
-            engine.venue.commands, 3,
+            engine.venue.commands.len(),
+            3,
             "unresolved native identity overlaps every symbol-wide mutation"
         );
     }
@@ -2226,6 +2233,8 @@ mod streaming_tests {
             body: None,
             failure: None,
             book: None,
+            empty_book: Book::default(),
+            book_subscribers: 0,
             symbol_amend: false,
             commands: Vec::new(),
         });
@@ -2259,6 +2268,8 @@ mod streaming_tests {
             body: None,
             failure: None,
             book: Some(Book::default()),
+            empty_book: Book::default(),
+            book_subscribers: 0,
             symbol_amend: false,
             commands: Vec::new(),
         })
@@ -2643,6 +2654,10 @@ mod streaming_tests {
             );
             engine.take_frame(1.).unwrap();
             engine.venue.book = None;
+            engine
+                .venue
+                .empty_book
+                .apply(crate::book::BookSide::Bids, 99., 7.);
             engine.handle(
                 2.,
                 Event::WsMessage {
@@ -2932,6 +2947,8 @@ mod signing_tests {
             }
         }
         assert_eq!(io.pending.len(), 256);
+        #[cfg(feature = "order-locks")]
+        assert_eq!(io.order_read_tokens.len(), 256);
         assert_eq!(io.signatures.len(), 256);
         assert_eq!(io.actions.len(), 256);
         assert!(
@@ -2940,6 +2957,242 @@ mod signing_tests {
                 .all(|a| matches!(a, Action::SignPayload { .. }))
         );
     }
+    #[cfg(feature = "order-locks")]
+    #[derive(Default)]
+    struct SigningVenue {
+        signing_failures: Vec<(u32, String)>,
+        transport_failures: Vec<(u32, String)>,
+        responses: Vec<(u32, Option<u64>)>,
+    }
+    #[cfg(feature = "order-locks")]
+    impl Venue for SigningVenue {
+        fn guard_order_mutations(&self) -> bool {
+            true
+        }
+        type Pending = u32;
+        fn start(&mut self, _cx: &mut Cx<'_, u32>) {}
+        fn on_open(&mut self, _cx: &mut Cx<'_, u32>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, u32>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, u32>, _socket: SocketId, _code: u16) {}
+        fn on_response(&mut self, cx: &mut Cx<'_, u32>, pending: u32, _response: Response<'_>) {
+            self.responses.push((pending, cx.io.order_response_token));
+        }
+        fn on_sign_failed(&mut self, _cx: &mut Cx<'_, u32>, pending: u32, error: &str) {
+            self.signing_failures.push((pending, error.to_owned()));
+        }
+        fn on_request_failed(&mut self, _cx: &mut Cx<'_, u32>, pending: u32, error: &str) {
+            self.transport_failures.push((pending, error.to_owned()));
+        }
+        fn on_timer(&mut self, _cx: &mut Cx<'_, u32>, _timer: TimerId) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, u32>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn staged_request(engine: &mut Engine<SigningVenue>, target: SignatureTarget) -> RequestId {
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let request = cx.request_streamed(
+            Method::Get,
+            "https://venue.test/orders".into(),
+            vec![("SIGNATURE", "placeholder".into())],
+            ArrayAt::Root,
+            42,
+        );
+        cx.request_timeout(request, 1_000);
+        assert_eq!(cx.sign_request(request, payload(), target), Ok(()));
+        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(
+            matches!(actions.as_slice(), [Action::SignPayload { request: id, timeout_ms: 1_000, .. }] if *id == request)
+        );
+        request
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn terminal_signer_failures_release_causal_tokens_without_unsigned_http_or_duplicate_completion()
+     {
+        for failure in ["invalid target", "invalid header", "expired", "failed"] {
+            let mut engine = Engine::new(SigningVenue::default());
+            let target = SignatureTarget::Header(if failure == "invalid target" {
+                "MISSING"
+            } else {
+                "SIGNATURE"
+            });
+            let request = staged_request(&mut engine, target);
+            if failure == "failed" {
+                engine.handle(
+                    100.,
+                    Event::PayloadSignFailed {
+                        request,
+                        error: "signer rejected",
+                    },
+                );
+            } else {
+                engine.handle(
+                    if failure == "expired" { 1_000. } else { 100. },
+                    Event::PayloadSigned {
+                        request,
+                        signature: "opaque",
+                        headers: if failure == "invalid header" {
+                            vec![("X-Signer".into(), "bad\r\nvalue".into())]
+                        } else {
+                            Vec::new()
+                        },
+                    },
+                );
+            }
+            assert!(engine.io.order_read_tokens.is_empty(), "{failure}");
+            assert!(engine.io.pending.is_empty());
+            assert!(engine.io.streams.is_empty());
+            assert!(engine.io.signatures.is_empty());
+            assert_eq!(engine.venue.signing_failures.len(), 1);
+            assert_eq!(engine.venue.signing_failures[0].0, 42);
+            assert!(engine.venue.transport_failures.is_empty());
+            assert!(engine.venue.responses.is_empty());
+            assert!(
+                !engine.has_actions(),
+                "unsigned/invalid HTTP must never escape"
+            );
+            engine.handle(
+                1_100.,
+                Event::PayloadSigned {
+                    request,
+                    signature: "late",
+                    headers: Vec::new(),
+                },
+            );
+            engine.handle(
+                1_101.,
+                Event::PayloadSignFailed {
+                    request,
+                    error: "duplicate",
+                },
+            );
+            assert_eq!(engine.venue.signing_failures.len(), 1);
+            assert!(!engine.has_actions());
+        }
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn duplicate_unsupported_symbol_amend_cannot_complete_or_release_an_existing_mutation() {
+        let mut engine = Engine::new(SigningVenue::default());
+        engine.handle(
+            0.,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "native".into(),
+                price: Some(100.),
+                amount: None,
+            }),
+        );
+        assert!(engine.io.order_locks.contains(1));
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrderWithSymbol {
+                command: 1,
+                id: "native".into(),
+                symbol: "BTCUSDT".into(),
+                price: Some(101.),
+                amount: None,
+            }),
+        );
+        assert!(engine.io.active_commands.contains(&1));
+        assert!(engine.io.order_locks.contains(1));
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::Notice(Notice::Log {
+                level: LogLevel::Error,
+                ..
+            })]
+        ));
+        engine.handle(
+            2.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["native".into()],
+            }),
+        );
+        assert!(engine.drain_actions().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 2,
+                result: Err(_)
+            })
+        )));
+        assert!(engine.io.order_locks.contains(1));
+        engine.handle(
+            3.,
+            Event::Command(Command::AmendOrderWithSymbol {
+                command: 3,
+                id: "other".into(),
+                symbol: "ETHUSDT".into(),
+                price: Some(101.),
+                amount: None,
+            }),
+        );
+        assert!(!engine.io.active_commands.contains(&3));
+        assert!(engine.io.order_locks.contains(1));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn successful_signing_retains_causal_token_until_the_http_response_completes() {
+        let mut engine = Engine::new(SigningVenue::default());
+        let request = staged_request(&mut engine, SignatureTarget::Header("SIGNATURE"));
+        engine.handle(
+            100.,
+            Event::PayloadSigned {
+                request,
+                signature: "opaque",
+                headers: Vec::new(),
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(
+            matches!(actions.as_slice(), [Action::Http(http)] if http.id == request
+            && http.headers == [("SIGNATURE", "opaque".into())] && http.timeout_ms == Some(900))
+        );
+        assert!(engine.io.signatures.is_empty());
+        // A duplicate signer outcome cannot consume the live HTTP request's provenance.
+        engine.handle(101., Event::PayloadSignFailed { request, error: "late duplicate signer failure" });
+        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        engine.handle(
+            200.,
+            Event::HttpStart {
+                request,
+                status: 200,
+                headers: "",
+            },
+        );
+        engine.handle(
+            201.,
+            Event::HttpChunk {
+                request,
+                data: b"[]",
+            },
+        );
+        assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
+        assert!(engine.venue.responses.is_empty());
+        engine.handle(202., Event::HttpEnd { request });
+        assert!(engine.io.order_read_tokens.is_empty());
+        assert!(engine.io.pending.is_empty());
+        assert_eq!(engine.venue.responses, [(42, Some(0))]);
+        assert!(engine.venue.signing_failures.is_empty());
+        assert!(engine.venue.transport_failures.is_empty());
+    }
+
     #[test]
     fn signature_body_substitution_rejects_missing_or_ambiguous_fields() {
         for body in [r#"{}"#, r#"[{"signature":"0x123"},{"signature":"0x123"}]"#] {

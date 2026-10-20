@@ -1167,12 +1167,7 @@ impl Venue for Woo {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.depth
-                .iter()
-                .filter(|(_, s)| matches!(s.sync, Sync::Live(_)))
-                .map(|(s, d)| (s.as_str(), &d.book)),
-        )
+        Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
 }
 

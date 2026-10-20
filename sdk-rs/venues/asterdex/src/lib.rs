@@ -1092,7 +1092,6 @@ impl Venue for AsterDex {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, state)| !state.book.is_empty())
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

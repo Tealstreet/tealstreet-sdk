@@ -1056,7 +1056,6 @@ impl Venue for Orderly {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, s)| s.last.is_some())
                 .map(|(s, state)| (s.as_str(), &state.book)),
         )
     }

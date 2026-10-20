@@ -763,4 +763,18 @@ fn disconnect_publishes_clear_before_reconnect_snapshot() {
     );
     assert!(e.book("BTCUSDT").is_none());
     assert!(empty_book_frame(e.take_frame(81.0).unwrap()));
+    assert!(
+        empty_book_frame(e.snapshot_frame(82.0)),
+        "a consumer may have missed the clear flush"
+    );
+    e.handle(
+        83.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(
+        !safe_cex_engine::wire::sections(e.snapshot_frame(84.0))
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::BOOK)
+    );
 }

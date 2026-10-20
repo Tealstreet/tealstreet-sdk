@@ -57,6 +57,11 @@ impl OrderLocks {
                     .extend(orders.iter().map(|o| o.symbol.clone()));
                 *command
             }
+            Command::AmendOrderWithSymbol { command, id, symbol, .. } => {
+                scope.ids.push(id.clone());
+                scope.symbols.push(symbol.clone());
+                *command
+            }
             Command::AmendOrder { command, id, .. } => {
                 scope.ids.push(id.clone());
                 *command
@@ -86,7 +91,8 @@ impl OrderLocks {
                 *id = native(order.parent_id.as_deref().unwrap_or(&order.id)).to_owned();
             } else {
                 let routed = matches!(input, Command::CancelOrdersWithSymbols { orders, .. }
-                    if orders.iter().any(|order| &order.id == id && !order.symbol.is_empty()));
+                    if orders.iter().any(|order| &order.id == id && !order.symbol.is_empty()))
+                    || matches!(input, Command::AmendOrderWithSymbol { symbol, .. } if !symbol.is_empty());
                 scope.unknown_symbol |= !routed;
                 *id = normalized.to_owned();
             }

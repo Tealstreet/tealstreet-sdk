@@ -1005,7 +1005,6 @@ impl Venue for TxFlow {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, l)| l.time.is_some())
                 .map(|(symbol, ladder)| (symbol.as_str(), &ladder.book)),
         )
     }
