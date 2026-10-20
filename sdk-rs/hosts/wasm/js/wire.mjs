@@ -28,8 +28,12 @@ export const NONE = 0xffffffff;
 
 export const TICKER_FIELDS = [
   'bid', 'ask', 'last', 'mark', 'index', 'percentage',
-  'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume',
+  'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'midPrice',
 ];
+
+const LEGACY_TICKER_FIELDS = TICKER_FIELDS.slice(0, 11);
+const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS]);
+const KNOWN_SECTIONS = new Set(Object.values(SECTION));
 
 export const MARKET_COLUMNS = [
   'precisionAmount', 'precisionPrice', 'minAmount', 'maxAmount', 'minLeverage',
@@ -79,7 +83,14 @@ export const positionEnums = (word) => ({
 });
 
 const utf8 = new TextDecoder();
-const align8 = (n) => (n + 7) & ~7;
+const align8 = (n) => Math.ceil(n / 8) * 8;
+const requireEnd = (section, end) => {
+  if (!Number.isSafeInteger(end) || end > section.offset + section.length) throw new Error(`truncated section ${section.kind}`);
+};
+const rowCount = (frame, section) => {
+  requireEnd(section, section.offset + 4);
+  return frame.view.getUint32(section.offset, true);
+};
 
 class Strings {
   constructor(buffer, offset, length) {
@@ -134,6 +145,10 @@ export class Frame {
     for (let i = header.getUint16(6, true); i > 0; i--) {
       if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
+      const revision = header.getUint16(offset + 2, true);
+      if (KNOWN_SECTIONS.has(kind) && revision > (REVISED_SECTIONS.has(kind) ? 1 : 0)) {
+        throw new Error(`unsupported section ${kind} revision ${revision}`);
+      }
       const length = header.getUint32(offset + 4, true);
       const payload = offset + 8;
       if (payload + length > buffer.byteLength) throw new Error('truncated frame section payload');
@@ -141,7 +156,7 @@ export class Frame {
         if (this.strings) throw new Error('duplicate STRINGS section');
         this.strings = new Strings(buffer, payload, length);
       }
-      else this.sections.push({ kind, offset: payload, length });
+      else this.sections.push({ kind, revision, offset: payload, length });
       offset = payload + length;
     }
     if (offset !== buffer.byteLength) throw new Error('unexpected trailing frame bytes');
@@ -156,7 +171,9 @@ export class Frame {
   }
 
   string(index) {
-    return this.strings?.get(index);
+    if (index === NONE) return undefined;
+    if (!this.strings) throw new Error('missing STRINGS section for string reference');
+    return this.strings.get(index);
   }
 
   /** Markets, replacing any earlier table: row i is market index i. */
@@ -164,14 +181,19 @@ export class Frame {
     const section = this.first(SECTION.MARKETS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 20) + count * MARKET_COLUMNS.length * 8);
     const refs = new Uint32Array(buffer, section.offset + 4, count * 4);
     const flags = new Uint32Array(buffer, section.offset + 4 + count * 16, count);
     const data = align8(section.offset + 4 + count * 20);
+    const tail = data + count * MARKET_COLUMNS.length * 8;
+    requireEnd(section, tail + (section.revision === 1 ? count * 4 : 0));
+    const pretty = section.revision === 1 ? new Uint32Array(buffer, tail, count) : undefined;
     const frame = this;
     return {
       count,
       flags,
+      ...(pretty && { prettySymbol: (i) => frame.string(pretty[i]) }),
       ...columns(buffer, data, count, MARKET_COLUMNS),
       id: (i) => frame.string(refs[i * 4]),
       symbol: (i) => frame.string(refs[i * 4 + 1]),
@@ -184,7 +206,7 @@ export class Frame {
   instrumentClassifications() {
     const section = this.first(SECTION.INSTRUMENT_CLASSIFICATIONS);
     if (!section) return undefined;
-    const count = this.view.getUint32(section.offset, true);
+    const count = rowCount(this, section);
     if (4 + count * 16 > section.length) throw new Error('Truncated instrument classifications');
     const market = new Uint32Array(this.buffer, section.offset + 4, count);
     const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count * 3);
@@ -198,13 +220,12 @@ export class Frame {
   derivativeProducts() {
     const section = this.first(SECTION.DERIVATIVE_PRODUCTS);
     if (!section) return undefined;
-    const count = this.view.getUint32(section.offset, true);
+    const count = rowCount(this, section);
     const data = align8(section.offset + 4 + count * 28);
     if (data + count * 16 > section.offset + section.length) throw new Error('Truncated derivative products');
     const market = new Uint32Array(this.buffer, section.offset + 4, count);
     const kind = new Uint32Array(this.buffer, section.offset + 4 + count * 4, count);
     const refs = new Uint32Array(this.buffer, section.offset + 4 + count * 8, count * 5);
-    for (const value of kind) if (value < 1 || value > 3) throw new Error('Unknown derivative product kind');
     return { count, market, kind,
       expiry: new Float64Array(this.buffer, data, count),
       strike: new Float64Array(this.buffer, data + count * 8, count),
@@ -219,7 +240,7 @@ export class Frame {
   positionGreeks() {
     const section = this.first(SECTION.POSITION_GREEKS);
     if (!section) return undefined;
-    const count = this.view.getUint32(section.offset, true);
+    const count = rowCount(this, section);
     const data = align8(section.offset + 4 + count * 8);
     if (data + count * 32 > section.offset + section.length) throw new Error('Truncated position Greeks');
     const refs = new Uint32Array(this.buffer, section.offset + 4, count * 2);
@@ -234,7 +255,8 @@ export class Frame {
     const section = this.first(SECTION.PREDICTION_MARKETS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = this.view.getUint32(section.offset, true);
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 32) + count * 8);
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const refs = new Uint32Array(buffer, section.offset + 4 + count * 4, count * 6);
     const flags = new Uint32Array(buffer, section.offset + 4 + count * 28, count);
@@ -253,7 +275,8 @@ export class Frame {
   predictionHoldings() {
     const section = this.first(SECTION.PREDICTION_HOLDINGS);
     if (!section) return undefined;
-    const count = this.view.getUint32(section.offset, true);
+    const count = rowCount(this, section);
+    requireEnd(section, section.offset + 4 + count * 8);
     return { count,
       market: new Uint32Array(this.buffer, section.offset + 4, count),
       flags: new Uint32Array(this.buffer, section.offset + 4 + count * 4, count),
@@ -265,12 +288,14 @@ export class Frame {
     const section = this.first(SECTION.TICKERS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
-    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const count = rowCount(this, section);
     const at = align8(section.offset + 4 + count * 4);
-    const tail = at + count * TICKER_FIELDS.length * 8;
-    const table = { count, market, ...columns(buffer, at, count, TICKER_FIELDS) };
-    if (count > 0 && tail + count * 8 <= section.offset + section.length) {
+    const fields = section.revision === 1 ? TICKER_FIELDS : LEGACY_TICKER_FIELDS;
+    const tail = at + count * fields.length * 8;
+    requireEnd(section, tail + (section.revision === 1 ? count * 8 : 0));
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const table = { count, market, ...columns(buffer, at, count, fields) };
+    if (section.revision === 1 || (count > 0 && tail + count * 8 <= section.offset + section.length)) {
       const refs = new Uint32Array(buffer, tail, count * 2);
       table.identity = (i) => ({ symbol: this.string(refs[i]), id: this.string(refs[count + i]) });
     }
@@ -280,7 +305,19 @@ export class Frame {
   /** Packed `[ticker, mask, ...values]` deltas against the current ticker table. */
   tickerDeltas() {
     const section = this.first(SECTION.TICKER_DELTAS);
-    return section && new Float64Array(this.buffer, section.offset, section.length / 8);
+    if (!section) return undefined;
+    if (section.length % 8) throw new Error('invalid ticker delta length');
+    const values = new Float64Array(this.buffer, section.offset, section.length / 8);
+    const allowed = (1 << (section.revision === 1 ? TICKER_FIELDS.length : LEGACY_TICKER_FIELDS.length)) - 1;
+    for (let i = 0; i < values.length;) {
+      const row = values[i++], mask = values[i++];
+      if (!Number.isInteger(row) || row < 0 || !Number.isInteger(mask) || mask < 0 || mask > allowed) throw new Error('invalid ticker delta header');
+      let width = 0;
+      for (let bits = mask; bits; bits &= bits - 1) width++;
+      i += width;
+      if (i > values.length) throw new Error('truncated ticker delta');
+    }
+    return values;
   }
 
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
@@ -314,7 +351,8 @@ export class Frame {
     const section = this.first(SECTION.CANDLES);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 8) + count * 48);
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const interval = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 8), count * 6);
@@ -325,18 +363,30 @@ export class Frame {
     const section = this.first(SECTION.ORDERS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 20) + count * ORDER_COLUMNS.length * 8);
     const refs = new Uint32Array(buffer, section.offset + 4, count * 3);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 12, count);
     const enums = new Uint32Array(buffer, section.offset + 4 + count * 16, count);
     const data = align8(section.offset + 4 + count * 20);
     const native = data + count * ORDER_COLUMNS.length * 8;
+    const revised = section.revision === 1;
+    requireEnd(section, native + (revised ? count * 40 : 0));
+    const brackets = revised ? new Uint32Array(buffer, native + count * 32, count) : undefined;
+    const symbols = revised ? new Uint32Array(buffer, native + count * 36, count) : undefined;
     const frame = this;
     return {
       count,
       market,
       enums,
       ...columns(buffer, data, count, ORDER_COLUMNS),
+      ...(revised && {
+        remainingNotional: new Float64Array(buffer, native + count * 16, count),
+        conditionalOrderPrice: new Float64Array(buffer, native + count * 24, count),
+        tpTriggerType: (i) => TRIGGER_TYPE[brackets[i] & 0xff],
+        slTriggerType: (i) => TRIGGER_TYPE[(brackets[i] >>> 8) & 0xff],
+        symbol: (i) => frame.string(symbols[i]),
+      }),
       ...(count && native + count * 8 <= section.offset + section.length
         ? { remainingNative: new Float64Array(buffer, native, count) }
         : {}),
@@ -353,23 +403,29 @@ export class Frame {
     const section = this.first(SECTION.POSITIONS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 8) + count * POSITION_COLUMNS.length * 8 + (section.revision === 1 ? count * 8 : 0));
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const data = align8(section.offset + 4 + count * 8);
     const idsAt = data + count * 8 * POSITION_COLUMNS.length;
     const ids = idsAt + count * 4 <= section.offset + section.length
       ? new Uint32Array(buffer, idsAt, count) : undefined;
+    const symbols = section.revision === 1 ? new Uint32Array(buffer, idsAt + count * 4, count) : undefined;
     return { count, market, enums, ...columns(buffer, data, count, POSITION_COLUMNS),
+      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
       id: (i) => ids ? this.string(ids[i]) : undefined };
   }
 
   balance() {
     const section = this.first(SECTION.BALANCE);
     if (!section) return undefined;
+    requireEnd(section, section.offset + 32);
     const [used, free, total, upnl] = new Float64Array(this.buffer, section.offset, 4);
     if (section.length <= 32) return { used, free, total, upnl };
+    requireEnd(section, section.offset + 36);
     const count = new Uint32Array(this.buffer, section.offset + 32, 1)[0];
+    requireEnd(section, align8(section.offset + 36 + count * 4) + count * 16);
     const refs = new Uint32Array(this.buffer, section.offset + 36, count);
     const at = align8(section.offset + 36 + count * 4);
     const amounts = new Float64Array(this.buffer, at, count);
@@ -381,7 +437,9 @@ export class Frame {
     }
     const tail = at + count * 16;
     if (tail >= section.offset + section.length) return { used, free, total, upnl, coins };
+    requireEnd(section, tail + 8);
     const n = new Uint32Array(this.buffer, tail, 1)[0];
+    requireEnd(section, align8(tail + 8 + n * 4) + n * 32);
     const flags = new Uint32Array(this.buffer, tail + 4, 1)[0];
     const names = new Uint32Array(this.buffer, tail + 8, n);
     const data = align8(tail + 8 + n * 4);
@@ -402,6 +460,7 @@ export class Frame {
   status() {
     const section = this.first(SECTION.STATUS);
     if (!section) return undefined;
+    requireEnd(section, section.offset + 16);
     const [loaded, flags] = new Uint32Array(this.buffer, section.offset, 2);
     const latency = new Float64Array(this.buffer, section.offset + 8, 1)[0];
     return { loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0, latency };
@@ -412,7 +471,8 @@ export class Frame {
     const section = this.first(SECTION.SETTINGS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    requireEnd(section, align8(section.offset + 4 + count * 8) + count * (section.revision === 1 ? 28 : 8));
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const margin = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const data = align8(section.offset + 4 + count * 8);
@@ -420,25 +480,33 @@ export class Frame {
     const end = section.offset + section.length;
     const buyLeverage = data + count * 16 <= end ? new Float64Array(buffer, data + count * 8, count) : leverage;
     const sellLeverage = data + count * 24 <= end ? new Float64Array(buffer, data + count * 16, count) : leverage;
-    return { count, market, leverage, buyLeverage, sellLeverage, marginType: (i) => MARGIN_TYPE[margin[i]] };
+    const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 24, count) : undefined;
+    return { count, market, leverage, buyLeverage, sellLeverage,
+      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
+      marginType: (i) => MARGIN_TYPE[margin[i]] };
   }
 
   fills() {
     const section = this.first(SECTION.FILLS);
     if (!section) return undefined;
     const { buffer } = this;
-    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const count = rowCount(this, section);
+    const data = align8(section.offset + 4 + count * 12);
+    requireEnd(section, data + count * (section.revision === 1 ? 20 : 16));
     const orderId = new Uint32Array(buffer, section.offset + 4, count);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const side = new Uint32Array(buffer, section.offset + 4 + count * 8, count);
     const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 12), count * 2);
-    return { count, market, side, rows, orderId: (i) => this.string(orderId[i]) };
+    const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 16, count) : undefined;
+    return { count, market, side, rows,
+      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
+      orderId: (i) => this.string(orderId[i]) };
   }
 }
 
 /**
- * Live ticker columns for a consumer: adopts each replacement table and
- * applies deltas in place. Read `state.columns.last[i]` for ticker row i.
+ * Owned ticker columns and identities survive transferring source frames.
+ * Read `state.columns.last[i]` for ticker row i.
  */
 export class TickerState {
   constructor() {
@@ -452,18 +520,27 @@ export class TickerState {
     const table = frame.tickers();
     if (table) {
       this.count = table.count;
-      this.market = table.market;
-      this.identity = table.identity;
-      for (const field of TICKER_FIELDS) this.columns[field] = table[field];
+      this.market = table.market.slice();
+      const identities = table.identity && Array.from({ length: table.count }, (_, i) => table.identity(i));
+      this.identity = identities && ((i) => identities[i]);
+      for (const field of TICKER_FIELDS) {
+        if (table[field]) this.columns[field] = table[field].slice();
+        else delete this.columns[field];
+      }
     }
     const deltas = frame.tickerDeltas();
     if (!deltas) return;
     for (let i = 0; i < deltas.length; ) {
       const row = deltas[i];
       const mask = deltas[i + 1];
+      if (row >= this.count) throw new Error('ticker delta has no baseline row');
       i += 2;
       for (let field = 0; field < TICKER_FIELDS.length; field++) {
-        if (mask & (1 << field)) this.columns[TICKER_FIELDS[field]][row] = deltas[i++];
+        if (mask & (1 << field)) {
+          const name = TICKER_FIELDS[field];
+          this.columns[name] ??= new Float64Array(this.count).fill(NaN);
+          this.columns[name][row] = deltas[i++];
+        }
       }
     }
   }

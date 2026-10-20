@@ -31,7 +31,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
-import { FrameApplier } from '../../store/frameApplier';
+import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
@@ -598,39 +598,90 @@ export class RustEngineExchange extends BaseExchange {
   /** The whole current state as one frame, for a consumer that starts late. */
   snapshotFrame = () => this.host?.snapshot();
 
+  fetchEngineSnapshot = async (): Promise<ArrayBuffer> => {
+    const frame = this.host?.snapshot();
+    if (!frame) throw new Error('Engine has not started');
+    return frame;
+  };
+
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
-    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+    this.applier.applyLeverage(symbol, rails);
   };
 
-  private receiveFrame = (buffer: ArrayBuffer) => {
-    const frame = new Frame(buffer);
-    this.applier.apply(frame, !this.onFrame);
-    for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
+  private frameRecoveryPending = false;
+
+  private receiveFrame = (buffer: ArrayBuffer) => this.applyEngineFrame(buffer, true);
+
+  private applyEngineFrame(buffer: ArrayBuffer, recover: boolean) {
+    let frame: Frame;
+    try {
+      frame = new Frame(buffer);
+    } catch (error) {
+      console.error('Invalid engine frame', error);
+      if (recover) this.recoverEngineFrame();
+      return;
+    }
+    let needsSnapshot = false;
+    try {
+      this.applier.apply(frame, !this.onFrame);
+    } catch (error) {
+      needsSnapshot = error instanceof FrameApplyError;
+      console.error('Engine frame apply failed', error);
+    }
+    const read = <T>(section: () => T[]): T[] => {
+      try {
+        return section();
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine frame section failed', error);
+        return [];
+      }
+    };
+    for (const fill of read(() => this.applier.fills(frame)))
+      this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
     if (!this.onFrame) {
-      for (const { symbol, orderbook } of this.applier.books(frame)) {
+      for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
         const listeners = this.bookListeners.get(symbol);
-        if (this.name !== 'asterdex') listeners?.forEach((listener) => listener(orderbook));
+        if (this.name !== 'asterdex')
+          listeners?.forEach((listener) => this.dispatchFrameEvent(() => listener(orderbook)));
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
             if (listeners.has(id))
-              listener(
-                this.name === 'asterdex'
-                  ? {
-                      bids: orderbook.bids.map((level) => ({ ...level })),
-                      asks: orderbook.asks.map((level) => ({ ...level })),
-                    }
-                  : orderbook,
+              this.dispatchFrameEvent(() =>
+                listener(
+                  this.name === 'asterdex'
+                    ? {
+                        bids: orderbook.bids.map((level) => ({ ...level })),
+                        asks: orderbook.asks.map((level) => ({ ...level })),
+                      }
+                    : orderbook,
+                ),
               );
           }
       }
-      for (const { symbol, interval, candle } of this.applier.candles(frame)) {
-        this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => listener(candle));
+      for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
+        this.candleListeners
+          .get(`${symbol}:${interval}`)
+          ?.forEach((listener) => this.dispatchFrameEvent(() => listener(candle)));
       }
     }
-    this.onFrame?.(buffer);
-  };
+    this.dispatchFrameEvent(() => this.onFrame?.(buffer));
+    if (needsSnapshot && recover) this.recoverEngineFrame();
+  }
+
+  private recoverEngineFrame() {
+    if (this.frameRecoveryPending || this.isDisposed || !this.host) return;
+    this.frameRecoveryPending = true;
+    try {
+      this.applyEngineFrame(this.host.snapshot(), false);
+    } catch (error) {
+      console.error('Engine frame recovery failed', error);
+    } finally {
+      this.frameRecoveryPending = false;
+    }
+  }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
     if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
@@ -949,7 +1000,7 @@ export class RustEngineExchange extends BaseExchange {
         leverage = { buyLeverage: value, sellLeverage: value };
       }
       this.host?.flush();
-      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: leverage } });
+      this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);

@@ -87,11 +87,11 @@ describe('Rust BOOK_DELTA reconstruction', () => {
     expect(applier.books(empty)[0].orderbook).toEqual({ bids: [], asks: [] });
   });
 
-  it('requires snapshots and rejects malformed multi-book frames atomically before store changes', () => {
+  it('retains valid store sections while rejecting malformed multi-book changes atomically', () => {
     const store = new DefaultStore();
     const applier = new FrameApplier(store);
     expect(() => applier.apply(frame({ markets: [['btc-native', 'BTCUSDT']], deltas: [{ market: 0, bids: [99, 1], asks: [] }] }))).toThrow(/snapshot required/);
-    expect(store.markets).toHaveLength(0);
+    expect(store.markets).toHaveLength(1);
     const first = initial();
     applier.apply(first);
     applier.books(first);

@@ -546,9 +546,9 @@ export class ExchangeWorker {
         const value = ticker[field];
         if (value !== previous[field]) {
           writablePrevious[field] = value;
-          if (typeof value === 'number') {
+          if (typeof value === 'number' || field === 'midPrice') {
             mask |= 1 << fieldIndex;
-            values.push(value);
+            values.push(value ?? NaN);
           }
         }
       }

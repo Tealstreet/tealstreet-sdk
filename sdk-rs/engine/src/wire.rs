@@ -26,7 +26,8 @@ pub mod section {
     pub const BALANCE: u16 = 9;
     pub const STATUS: u16 = 10;
     pub const FILLS: u16 = 11;
-    /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
+    /// Scalar leverage retains its offset; revision one appends buy/sell
+    /// leverage columns and stable symbol references.
     pub const SETTINGS: u16 = 12;
     /// Optional typed prediction outcome identity and signing metadata.
     pub const PREDICTION_MARKETS: u16 = 13;
@@ -161,9 +162,13 @@ impl<'a> FrameWriter<'a> {
     }
 
     pub fn begin(&mut self, kind: u16) {
+        self.begin_revision(kind, 0);
+    }
+
+    pub fn begin_revision(&mut self, kind: u16, revision: u16) {
         debug_assert!(self.open.is_none(), "sections do not nest");
         self.buf.extend_from_slice(&kind.to_le_bytes());
-        self.buf.extend_from_slice(&0u16.to_le_bytes());
+        self.buf.extend_from_slice(&revision.to_le_bytes());
         self.open = Some(self.buf.len());
         self.buf.extend_from_slice(&0u32.to_le_bytes());
     }
@@ -244,7 +249,10 @@ impl<'a> FrameWriter<'a> {
 /// The `(kind, payload)` sections of a frame, for native consumers; the
 /// browser reads frames with `hosts/wasm/js/wire.mjs`.
 pub fn sections(frame: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
-    let count = if frame.len() >= 16 && frame[..4] == MAGIC {
+    let count = if frame.len() >= 16
+        && frame[..4] == MAGIC
+        && u16::from_le_bytes([frame[4], frame[5]]) == FORMAT
+    {
         u16::from_le_bytes([frame[6], frame[7]])
     } else {
         0
@@ -274,7 +282,7 @@ pub fn book_top(payload: &[u8]) -> Option<(u32, f64, f64)> {
     Some((market, float(16), float(16 + bids * 24)))
 }
 
-/// Number of f64 ticker columns in `TICKERS` and fields in `TICKER_DELTAS`.
+/// Ticker fields in revision one, including optional midpoint at bit eleven.
 pub const TICKER_COLUMNS: usize = TICKER_FIELDS.len();
 
 #[cfg(test)]
@@ -381,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_order_native_column_preserves_full_stop_leaves_without_changing_legacy_columns() {
+    fn revision_one_order_tails_preserve_full_stop_leaves_and_all_native_metadata() {
         let order = Order {
             id: "full-stop".into(),
             parent_id: None,
@@ -408,6 +416,11 @@ mod tests {
             store.set_orders(vec![Order {
                 extra: native.map(|remaining_native| OrderExtra {
                     remaining_native: Some(remaining_native),
+                    filled_in_placement_units: Some(3.0),
+                    remaining_notional: Some(700.0),
+                    conditional_order_price: Some(54320.0),
+                    tp_trigger_type: Some(StopTriggerType::IndexPrice),
+                    sl_trigger_type: Some(StopTriggerType::LastPrice),
                     ..OrderExtra::default()
                 }),
                 ..order.clone()
@@ -421,10 +434,8 @@ mod tests {
                 .unwrap();
             assert_eq!(u32_at(payload, 0), 1);
             // One row: 24 bytes of aligned references/enums, then seven columns.
-            assert_eq!(
-                payload.len(),
-                24 + 7 * 8 + usize::from(native.is_some()) * 8
-            );
+            assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+            assert_eq!(payload.len(), 24 + 11 * 8 + 8);
             let number =
                 |offset| f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap());
             assert_eq!(
@@ -443,7 +454,33 @@ mod tests {
                     native,
                     "native quantity is exact, not rounded base x price"
                 );
+                assert_eq!(number(24 + 8 * 8), 3.0);
+                assert_eq!(number(24 + 9 * 8), 700.0);
+                assert_eq!(number(24 + 10 * 8), 54320.0);
+                assert_eq!(u32_at(payload, 24 + 11 * 8), 3 | (2 << 8));
+            } else {
+                for column in 7..11 {
+                    assert!(number(24 + column * 8).is_nan());
+                }
+                assert_eq!(u32_at(payload, 24 + 11 * 8), 0);
             }
+            assert_ne!(
+                u32_at(payload, 24 + 11 * 8 + 4),
+                NONE,
+                "orphan order retains its symbol"
+            );
         }
+    }
+
+    #[test]
+    fn native_sections_reject_unsupported_frame_formats() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        writer.begin_revision(section::ORDERS, 1);
+        writer.u32(0);
+        writer.end();
+        let mut frame = writer.finish();
+        assert_eq!(sections(&frame).count(), 1);
+        frame[4..6].copy_from_slice(&(FORMAT + 1).to_le_bytes());
+        assert_eq!(sections(&frame).count(), 0);
     }
 }

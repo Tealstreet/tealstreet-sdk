@@ -11,6 +11,7 @@ import type {
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from './ExchangeWorker';
@@ -473,4 +474,23 @@ describe('ExchangeWorker store payloads', () => {
     expect(omitPayload.updateIds.orders).toBe(omitOrdersUpdateId);
     expect(worker.store.updateIds.orders).toBeGreaterThan(omitOrdersUpdateId);
   });
+});
+
+it('forwards midpoint changes and clearing through the object worker delta bridge', () => {
+  const { worker, messages } = createWorker();
+  const main = new DefaultStore();
+  worker.store.update({ tickers: [createTicker({ midPrice: 100 })] });
+  emitStoreUpdate(worker);
+  main.update(messages.at(-1).data, true);
+  expect(main.tickers[0].midPrice).toBe(100);
+  worker.store.updateTicker({ id: 'BTCUSDT' }, { midPrice: 101 });
+  emitStoreUpdate(worker);
+  expect(messages.at(-1).data.tickerDeltas).toEqual([[0, 1 << 11, 101]]);
+  main.update(messages.at(-1).data, true);
+  expect(main.tickers[0].midPrice).toBe(101);
+  worker.store.updateTicker({ id: 'BTCUSDT' }, { midPrice: undefined });
+  emitStoreUpdate(worker);
+  expect(messages.at(-1).data.tickerDeltas).toEqual([[0, 1 << 11, NaN]]);
+  main.update(messages.at(-1).data, true);
+  expect('midPrice' in main.tickers[0]).toBe(false);
 });

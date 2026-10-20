@@ -104,17 +104,32 @@ Each phase requires an independent sub-agent review and a stable commit. Every
 fixed finding gets a reproducing regression. No TS venue deletion or replay
 threshold relaxation. Strike findings with the fix PR and its evidence.
 
-- FILLS lose `orderId`, so chaser fill tracking never fires on Rust
-  (`frameApplier.ts:469`, `ChaserOrderManager.ts:783`).
-- `Market.pretty_symbol` never encoded (`store.rs:827`).
-- Rows on markets missing from the table get symbol `''` (`store.rs:704`,
-  `frameApplier.ts:337`).
-- Settings keyed by market index survive a market-table change (`store.rs:144`).
-- One throw in `FrameApplier.apply` drops the frame with no resync (`frameApplier.ts:41`).
-- Never encoded: `conditional_order_price`, bracket trigger types,
-  `remaining_notional`, `Ticker.mid_price`.
-- Low: two `fetchedLeverage` writers; `FORMAT` never bumped and reserved u16 unused;
-  fills precede orders by up to 250 ms; `TickerState` views detach on transfer.
+- ~~FILLS lose `orderId`, so chaser fill tracking never fires on Rust
+  (`frameApplier.ts:469`, `ChaserOrderManager.ts:783`).~~
+- ~~`Market.pretty_symbol` never encoded (`store.rs:827`).~~
+- ~~Rows on markets missing from the table get symbol `''` (`store.rs:704`,
+  `frameApplier.ts:337`).~~
+- ~~Settings keyed by market index survive a market-table change (`store.rs:144`).~~
+- ~~One throw in `FrameApplier.apply` drops the frame with no resync (`frameApplier.ts:41`).~~
+- ~~Never encoded: `conditional_order_price`, bracket trigger types,
+  `remaining_notional`, `Ticker.mid_price`.~~
+- Low: ~~two `fetchedLeverage` writers~~; ~~`FORMAT` never bumped and reserved u16 unused~~;
+  fills precede orders by up to 250 ms; ~~`TickerState` views detach on transfer~~.
+
+Repair evidence: actual Rust-writer → JS decoder → FrameApplier regression,
+actual FILLS frame → GRVT chaser partial/completion regression, native layout
+and market-reorder/queue tests, decoder legacy/revision/bounds/transfer tests,
+worker midpoint bridge tests, and local/worker recovery RPC regressions.
+FORMAT remains 1 because the envelope is unchanged; section revisions identify
+new fixed tails. Both readers check FORMAT; unknown enum values stay absent.
+Independent phase reviews found missing STRINGS acceptance, observer exceptions
+masking recovery, worker midpoint loss and orphan native-quantity NaNs; all fixed
+with regressions. Execution-vs-order flush cadence remains a separate finding.
+
+Phase progress: implementation and independent reviews of phases 1–3 complete.
+Local evidence: 89 all-feature/85 default engine tests, 25 decoder tests, 7
+actual-writer contract tests, 162 SDK tests plus 16 recovery cases and 22
+worker/edge cases pass. Combined WASM, acceptance gates and PR/CI follow.
 
 ## Security
 
