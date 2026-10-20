@@ -889,12 +889,17 @@ impl<V: Venue> Engine<V> {
         Ok(())
     }
 
+    #[inline]
     fn restore_shared_tickers(&mut self, force: bool, now: f64) {
         if self.public_feed_policy() != PublicFeedPolicy::Shared
             || (!force && self.shared_ticker_revision == self.store.ticker_revision())
         {
             return;
         }
+        self.apply_shared_tickers(now);
+    }
+
+    fn apply_shared_tickers(&mut self, now: f64) {
         let mut missing = Vec::new();
         for ticker in self.shared_tickers.values() {
             if self.store.ticker(&ticker.symbol).is_none()

@@ -481,10 +481,44 @@ publish an empty snapshot or dispose the previous good engine.
   Fresh exact-head CI remains required; retain the combined-build timing miss
   as a diagnostic limit, separate from this accepted canonical artifact.
 
-## Final public replay metrics
+- Cache head `a71af92782` passes the other completed CI jobs but Hyro still
+  misses the strict steady ratio at 0.99× (both medians round to 5.3 ms;
+  main CPU 32.6 / 29.7 ms and retained 13.3 / 0.8 MB pass). No unchanged
+  rerun. The fresh local combined matrix completes 16 public profiles PASS;
+  TxFlow misses steady 12.5 / 16.2 ms, while main 84.5 / 78.1 ms and memory
+  17.4 / 2.2 MB pass. Preserve this Mac/combined limitation; the same source's
+  canonical Linux TxFlow gate passes main 120.9 / 83.1 ms, steady
+  20.6 / 15.3 ms, retained 17.2 / 1.4 MB. None of these failures is relabeled
+  as a passing trial. The earlier 32 combined private controls remain passing.
+- A bounded native follow-up separates the small, unchanged shared-policy and
+  revision guard from the existing ticker-restoration body. `#[inline]` permits
+  the Direct/Disabled path to skip the large helper call/prologue; all three
+  call sites, forced Shared updates, provider authority, hook order and event
+  clocks remain unchanged. Independent source/integration audits pass. A new
+  poll/clear/poll regression proves Direct/Disabled native state still updates
+  without invoking provider hooks. Verify actual emitted release WASM before
+  attributing any benefit; sparse profiling cannot quantify a sub-percent gain.
+  The proposed JS empty-action parse shortcut was rejected during plan review:
+  real native empty actions already return absent/empty output and are skipped.
+  No speculative host change was made. Repeat affected native/WASM/consumer
+  checks and canonical CPU gates before the next checkpoint.
 
-CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
-use the current `6afa3acf…94c34` combined SDK binary; Hyperliquid Spot, Kraken
+- Guard/body split verification passes: 2,714 native tests across 215 result
+  suites, strict all-feature native and WASM Clippy, bans and workspace fmt.
+  Independent emitted-WASM audit confirms no guard-wrapper function remains:
+  both `handle` and `start` branch on policy/revision before the application
+  call and its 176-byte stack frame. The separate body is 2,183 bytes; no
+  `#[inline(never)]` is needed. This proves avoided work, not a quantified
+  end-to-end gain. Canonical Bybit solo is 1,152,852 bytes, SHA
+  `f188c569d356eb317105b240828c7d692047da1d6fdddaa6c29ad155f9fd8b28`.
+  Hyro passes main CPU TS 20.2 → Rust 19.7 ms, steady 3.8 → 3.2 ms,
+  retained 13.5 → 0.8 MB. Restore/reverify combined consumer bytes and require
+  the new exact-head CI before landing; all earlier runtime misses stay visible.
+
+## Historical public replay metrics (6afa artifact)
+
+Prior acceptance runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
+use the pinned `6afa3acf…94c34` combined SDK binary; Hyperliquid Spot, Kraken
 Spot/futures, Paradex, Bybit and global OKX use canonical solo builds. Values
 are TypeScript → Rust. Gates enforce main-thread CPU, steady CPU and retained
 memory; process CPU is an additional diagnostic. Private controls enforce

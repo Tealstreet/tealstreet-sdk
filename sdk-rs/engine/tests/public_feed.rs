@@ -154,6 +154,29 @@ fn shared() -> Engine<Feeds> {
 }
 
 #[test]
+fn direct_and_disabled_do_not_run_provider_hooks_when_native_tickers_change() {
+    for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Disabled] {
+        let mut engine = Engine::new(Feeds::default());
+        engine.set_public_feed_policy(policy).unwrap();
+        engine.store_mut().set_markets(vec![market("A")]);
+        engine.start(0.);
+        assert_eq!(engine.venue().feed_updates, 0);
+        for (at, text) in [(1., "poll"), (2., "clear"), (3., "poll")] {
+            engine.handle(
+                at,
+                Event::WsMessage {
+                    socket: SocketId(999),
+                    text,
+                },
+            );
+            assert_eq!(engine.venue().feed_updates, 0);
+        }
+        assert_eq!(engine.store().ticker("A").unwrap().bid, 456.);
+        assert_eq!(engine.store().balance().total, 999.);
+    }
+}
+
+#[test]
 fn socket_policy_suppresses_public_roles_on_every_attempt_preserves_same_url_auth_and_http() {
     for policy in [
         PublicFeedPolicy::Direct,
