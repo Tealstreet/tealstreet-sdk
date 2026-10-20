@@ -51,7 +51,7 @@ fn position(symbol: &str, total: &str, entry: &str, updated: &str) -> Value {
     json!({
         "symbol": symbol, "marginCoin": symbol.trim_end_matches("USD"),
         "holdSide": "long", "total": total, "openPriceAvg": entry,
-        "markPrice": "99999", "leverage": "20", "unrealizedPL": "0.01",
+        "leverage": "20", "unrealizedPL": "0.01",
         "achievedProfits": "0.2", "totalFee": "-0.02", "deductedFee": "0.01",
         "liquidationPrice": "1000", "marginMode": "crossed", "posMode": "one_way_mode", "uTime": updated
     })
@@ -180,6 +180,23 @@ fn inverse_position_reference_uses_mark_then_last_then_entry_and_rounds_eight_pl
         assert_eq!(p.contracts, expected, "ticker={ticker}, entry={entry}");
         assert_eq!(p.notional, native.parse::<f64>().unwrap());
     }
+}
+
+#[test]
+fn inverse_position_row_mark_sizes_coin_quantity_before_any_ticker_loads() {
+    let mut h = started(r#"{"code":"00000","data":[{"symbol":"ETHUSD","lastPr":"2500"}]}"#);
+    assert!(h.engine.store().ticker("BTCUSD").is_none());
+    let mut btc = position("BTCUSD", "1000", "25000", "100");
+    btc["markPrice"] = json!("40000");
+    positions(&mut h, btc, position("ETHUSD", "0", "2000", "100"));
+    let p = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.symbol == "BTCUSD")
+        .unwrap();
+    assert_eq!((p.contracts, p.notional), (0.025, 1000.0));
 }
 
 #[test]
@@ -486,4 +503,21 @@ fn inverse_native_amend_keeps_remaining_in_display_units_and_native_extra_curren
                 .any(|(id, result)| *id == 99 && result.is_ok())
         );
     }
+}
+
+#[test]
+fn inverse_position_zero_row_mark_falls_through_to_the_row_market_price() {
+    let mut h = started(r#"{"code":"00000","data":[{"symbol":"ETHUSD","lastPr":"2500"}]}"#);
+    let mut btc = position("BTCUSD", "1000", "25000", "100");
+    btc["markPrice"] = json!("0");
+    btc["marketPrice"] = json!("50000");
+    positions(&mut h, btc, position("ETHUSD", "0", "2000", "100"));
+    let p = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.symbol == "BTCUSD")
+        .unwrap();
+    assert_eq!(p.contracts, 0.02);
 }

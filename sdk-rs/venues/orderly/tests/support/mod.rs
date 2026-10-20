@@ -103,14 +103,32 @@ pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
 pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketId) {
-    let (e, socket, _) = ready_ticking(order, algos, positions);
+    let (e, socket, _, _) = ready_full(order, algos, positions);
     (e, socket)
+}
+/// Bootstraps like `ready_with` and returns the messages logged on the way.
+pub fn ready_with_logs(
+    order: &str,
+    algos: &str,
+    positions: &str,
+) -> (Driver, SocketId, Vec<String>) {
+    let (e, socket, _, logs) = ready_full(order, algos, positions);
+    (e, socket, logs)
 }
 /// Like `ready_with`, also returning the account poll tick timer.
 pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, SocketId, TimerId) {
+    let (e, socket, tick, _) = ready_full(order, algos, positions);
+    (e, socket, tick.unwrap())
+}
+fn ready_full(
+    order: &str,
+    algos: &str,
+    positions: &str,
+) -> (Driver, SocketId, Option<TimerId>, Vec<String>) {
     let mut e = Engine::new(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
+    let mut logs = vec![];
     let mut tick = None;
     for _ in 0..10 {
         let out = actions(&mut e);
@@ -126,6 +144,7 @@ pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, Sock
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
                 Action::SetTimer {
                     timer,
                     at_ms: 3000.0,
@@ -138,7 +157,7 @@ pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, Sock
     e.handle(1000.0, Event::WsOpened { socket });
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
-    (e, socket, tick.unwrap())
+    (e, socket, tick, logs)
 }
 pub fn account_body(url: &str, order: &str, algos: &str, positions: &str) -> String {
     if url.ends_with("/v1/client/info") {

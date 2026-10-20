@@ -226,6 +226,7 @@ fn suppressed_public_feed_is_not_supervised() {
         unknown: vec![],
         outcomes: vec![],
         logs: vec![],
+        notices: vec![],
         command_errors: vec![],
         command_notices: vec![],
         progress: vec![],
