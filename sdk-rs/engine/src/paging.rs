@@ -155,6 +155,127 @@ impl RangeWalk {
     }
 }
 
+/// Why a continuation walk stopped before the venue said it was done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stall {
+    /// The venue returned a cursor it had already returned.
+    RepeatedCursor,
+    /// A page held no rows yet carried a cursor.
+    EmptyPage,
+    /// Every row on the page had been seen before.
+    NoNewRows,
+    /// The page budget ran out with a cursor still pending.
+    PageBudget,
+}
+
+/// What a continuation walk wants after a page.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CursorStep {
+    /// Request the next page with this cursor.
+    More(String),
+    Done,
+    Stalled(Stall),
+}
+
+/// One completed page as the walk sees it.
+pub struct CursorPage {
+    /// The continuation the venue returned; empty means none.
+    pub next: Option<String>,
+    /// Rows on the page as returned, before any filtering.
+    pub rows: usize,
+    /// Rows the walk had not seen before (see [`CursorWalk::fresh`]).
+    pub fresh: usize,
+    /// The venue still wants rows (its own limit and window checks).
+    pub want_more: bool,
+}
+
+/// Continuation paging by an opaque token or id the venue returns, until it
+/// stops returning one. A venue opts into each stall rule it enforces, so a
+/// read that cannot progress fails closed instead of returning partial rows.
+pub struct CursorWalk {
+    max_pages: u32,
+    pages: u32,
+    stall_on_empty_page: bool,
+    stall_on_no_new_rows: bool,
+    cursor: Option<String>,
+    cursors: HashSet<String>,
+    seen: HashSet<String>,
+}
+
+impl CursorWalk {
+    pub fn new(max_pages: u32) -> Self {
+        Self {
+            max_pages,
+            pages: 0,
+            stall_on_empty_page: false,
+            stall_on_no_new_rows: false,
+            cursor: None,
+            cursors: HashSet::new(),
+            seen: HashSet::new(),
+        }
+    }
+
+    /// Stall when a page holds no rows but carries a cursor.
+    pub fn stall_on_empty_page(mut self) -> Self {
+        self.stall_on_empty_page = true;
+        self
+    }
+
+    /// Stall when a nonempty page holds only rows seen before.
+    pub fn stall_on_no_new_rows(mut self) -> Self {
+        self.stall_on_no_new_rows = true;
+        self
+    }
+
+    /// The cursor for the next request; `None` for the first page.
+    pub fn cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+
+    /// Pages recorded so far.
+    pub fn pages(&self) -> u32 {
+        self.pages
+    }
+
+    /// Records a row identity; true when it was not seen before.
+    pub fn fresh(&mut self, identity: String) -> bool {
+        self.seen.insert(identity)
+    }
+
+    /// Starts another stage of the same read: a new first page, keeping the
+    /// rows already seen.
+    pub fn restart(&mut self) {
+        self.pages = 0;
+        self.cursor = None;
+        self.cursors.clear();
+    }
+
+    /// Records a completed page and decides what follows it.
+    pub fn advance(&mut self, page: CursorPage) -> CursorStep {
+        self.pages += 1;
+        let Some(next) = page.next.filter(|next| !next.is_empty()) else {
+            return CursorStep::Done;
+        };
+        if !page.want_more {
+            return CursorStep::Done;
+        }
+        if !self.cursors.insert(next.clone()) {
+            return CursorStep::Stalled(Stall::RepeatedCursor);
+        }
+        if self.stall_on_empty_page && page.rows == 0 {
+            return CursorStep::Stalled(Stall::EmptyPage);
+        }
+        if self.stall_on_no_new_rows && page.rows > 0 && page.fresh == 0 {
+            return CursorStep::Stalled(Stall::NoNewRows);
+        }
+        if self.pages >= self.max_pages {
+            return CursorStep::Stalled(Stall::PageBudget);
+        }
+        self.cursor = Some(next.clone());
+        CursorStep::More(next)
+    }
+}
+
 #[derive(PartialEq)]
 enum Direction {
     Ascending,
@@ -218,6 +339,103 @@ mod tests {
         assert!(walk.page(4.0, 100.0, &rows(&[4.0])).is_empty());
         assert_eq!(walk.step(), Step::Finished);
         assert!(!walk.truncated);
+    }
+
+    fn page(next: Option<&str>, rows: usize, fresh: usize) -> CursorPage {
+        CursorPage {
+            next: next.map(str::to_owned),
+            rows,
+            fresh,
+            want_more: true,
+        }
+    }
+
+    #[test]
+    fn cursor_walk_follows_tokens_until_the_venue_stops_returning_one() {
+        let mut walk = CursorWalk::new(10);
+        assert_eq!(walk.cursor(), None);
+        assert_eq!(
+            walk.advance(page(Some("a"), 2, 2)),
+            CursorStep::More("a".into())
+        );
+        assert_eq!(walk.cursor(), Some("a"));
+        assert_eq!(walk.advance(page(Some(""), 1, 1)), CursorStep::Done);
+        assert_eq!(walk.pages(), 2);
+    }
+
+    #[test]
+    fn cursor_walk_stops_when_the_venue_has_enough_even_with_a_cursor() {
+        let mut walk = CursorWalk::new(10);
+        let mut full = page(Some("a"), 5, 5);
+        full.want_more = false;
+        assert_eq!(walk.advance(full), CursorStep::Done);
+    }
+
+    #[test]
+    fn cursor_walk_fails_closed_on_repeats_budget_and_opted_in_stalls() {
+        let mut walk = CursorWalk::new(10);
+        assert_eq!(
+            walk.advance(page(Some("a"), 1, 1)),
+            CursorStep::More("a".into())
+        );
+        assert_eq!(
+            walk.advance(page(Some("a"), 1, 1)),
+            CursorStep::Stalled(Stall::RepeatedCursor)
+        );
+
+        let mut walk = CursorWalk::new(2);
+        assert_eq!(
+            walk.advance(page(Some("a"), 1, 1)),
+            CursorStep::More("a".into())
+        );
+        assert_eq!(
+            walk.advance(page(Some("b"), 1, 1)),
+            CursorStep::Stalled(Stall::PageBudget)
+        );
+        // The last page may still end the walk inside the budget.
+        let mut walk = CursorWalk::new(1);
+        assert_eq!(walk.advance(page(None, 1, 1)), CursorStep::Done);
+
+        // Empty and repeated pages pass unless the venue opts in.
+        let mut walk = CursorWalk::new(10);
+        assert_eq!(
+            walk.advance(page(Some("a"), 0, 0)),
+            CursorStep::More("a".into())
+        );
+        assert_eq!(
+            walk.advance(page(Some("b"), 3, 0)),
+            CursorStep::More("b".into())
+        );
+        let mut walk = CursorWalk::new(10)
+            .stall_on_empty_page()
+            .stall_on_no_new_rows();
+        assert_eq!(
+            walk.advance(page(Some("a"), 0, 0)),
+            CursorStep::Stalled(Stall::EmptyPage)
+        );
+        let mut walk = CursorWalk::new(10).stall_on_no_new_rows();
+        assert_eq!(
+            walk.advance(page(Some("a"), 3, 0)),
+            CursorStep::Stalled(Stall::NoNewRows)
+        );
+    }
+
+    #[test]
+    fn cursor_walk_restart_keeps_seen_rows_and_forgets_cursors() {
+        let mut walk = CursorWalk::new(2);
+        assert!(walk.fresh("x".into()));
+        assert_eq!(
+            walk.advance(page(Some("a"), 1, 1)),
+            CursorStep::More("a".into())
+        );
+        walk.restart();
+        assert_eq!(walk.cursor(), None);
+        assert_eq!(walk.pages(), 0);
+        assert!(!walk.fresh("x".into()));
+        assert_eq!(
+            walk.advance(page(Some("a"), 1, 1)),
+            CursorStep::More("a".into())
+        );
     }
 
     #[test]
