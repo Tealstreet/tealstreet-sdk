@@ -611,7 +611,7 @@ impl Hyperliquid {
             Ok(nonce) => nonce,
             Err(error) => {
                 self.restore_cancel(cx, &effect);
-                self.finish_trade(cx, Err(error));
+                self.finish_trade(cx, Err(not_sent(error)));
                 return;
             }
         };
