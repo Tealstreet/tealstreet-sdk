@@ -8,7 +8,10 @@ pub(crate) mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, ErrorKind, LogLevel, Method, Outcome, Response, SocketId, TimerId, Venue,
+    VenueError,
+};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 
@@ -217,11 +220,11 @@ impl BreakoutProp {
 
     pub(crate) fn schedule(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation) {
         if self.auth_failed || self.auth_draining {
-            self.fail_operation(cx, operation, &self.auth_error.clone());
+            self.fail_operation(cx, operation, not_sent(self.auth_error.clone()));
             return;
         }
         if self.queue.len() >= 10_000 {
-            self.fail_operation(cx, operation, "DXtrade request queue is full");
+            self.fail_operation(cx, operation, not_sent("DXtrade request queue is full"));
             return;
         }
         self.queue.push_back(Pending {
@@ -319,7 +322,7 @@ impl BreakoutProp {
         let (method, path, body) = match spec {
             Ok(spec) => spec,
             Err(error) => {
-                self.fail_operation(cx, pending.operation, &error);
+                self.fail_operation(cx, pending.operation, not_sent(error));
                 self.drive(cx);
                 return;
             }
@@ -674,9 +677,19 @@ impl BreakoutProp {
         }
     }
 
-    fn fail_operation(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation, error: &str) {
+    fn fail_operation(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        operation: Operation,
+        error: VenueError,
+    ) {
+        let operation = match operation {
+            Operation::Trade(request) => return self.on_trade_failed(cx, request, error),
+            operation => operation,
+        };
+        let error = error.message.as_str();
         match operation {
-            Operation::Trade(request) => self.on_trade_failed(cx, request, error.into()),
+            Operation::Trade(_) => unreachable!("trade failures return above"),
             Operation::Portfolio { .. } => {
                 self.portfolio_pending = false;
                 cx.log(LogLevel::Error, error);
@@ -701,7 +714,7 @@ impl BreakoutProp {
                 let was_draining = std::mem::replace(&mut self.auth_draining, true);
                 let queued = std::mem::take(&mut self.queue);
                 for pending in queued {
-                    self.fail_operation(cx, pending.operation, error);
+                    self.fail_operation(cx, pending.operation, not_sent(error));
                 }
                 self.auth_draining = was_draining;
                 cx.log(LogLevel::Error, error);
@@ -771,13 +784,14 @@ impl Venue for BreakoutProp {
         response: Response<'_>,
     ) {
         if self.auth_failed {
-            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            let error = unanswered(&pending.operation, self.auth_error.clone());
+            self.fail_operation(cx, pending.operation, error);
             return;
         }
         if matches!(pending.operation, Operation::Login) && matches!(response.status, 401 | 403) {
             self.auth_failed = true;
             self.auth_error = format!("DXtrade HTTP {}", response.status);
-            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            self.fail_operation(cx, pending.operation, self.auth_error.as_str().into());
             cx.deactivate();
             return;
         }
@@ -797,11 +811,13 @@ impl Venue for BreakoutProp {
             return;
         }
         if !(200..300).contains(&response.status) {
-            self.fail_operation(
-                cx,
-                pending.operation,
-                &format!("DXtrade HTTP {}", response.status),
-            );
+            let mut error = http_failure(response.status);
+            // The amend's history read precedes the replacement, which was never sent.
+            if matches!(&pending.operation, Operation::Trade(request) if request.method == Method::Get)
+            {
+                error.outcome = Some(Outcome::NotSent);
+            }
+            self.fail_operation(cx, pending.operation, error);
             self.drive(cx);
             return;
         }
@@ -846,7 +862,7 @@ impl Venue for BreakoutProp {
             }
             Operation::Login => {
                 if let Err(error) = self.session.accept(response.body, cx.now) {
-                    self.fail_operation(cx, Operation::Login, &error);
+                    self.fail_operation(cx, Operation::Login, error.into());
                 }
             }
             Operation::Discover => {
@@ -855,7 +871,7 @@ impl Venue for BreakoutProp {
                     &self.options.key,
                     self.options.subaccount.as_deref(),
                 ) {
-                    self.fail_operation(cx, Operation::Discover, &error);
+                    self.fail_operation(cx, Operation::Discover, error.into());
                 }
             }
             Operation::Instruments { rows, invalid } => {
@@ -864,7 +880,7 @@ impl Venue for BreakoutProp {
                     self.fail_operation(
                         cx,
                         Operation::Instruments { rows, invalid },
-                        "Invalid DXtrade instruments response",
+                        "Invalid DXtrade instruments response".into(),
                     );
                 } else {
                     self.instruments = Some(rows);
@@ -877,7 +893,7 @@ impl Venue for BreakoutProp {
                     self.fail_operation(
                         cx,
                         Operation::Details { rows, invalid },
-                        "Invalid DXtrade instrument details response",
+                        "Invalid DXtrade instrument details response".into(),
                     );
                 } else {
                     self.details = Some(rows);
@@ -898,7 +914,7 @@ impl Venue for BreakoutProp {
                             invalid,
                             validated_time,
                         },
-                        "Invalid DXtrade quotes response",
+                        "Invalid DXtrade quotes response".into(),
                     );
                 } else {
                     self.publish_quotes(cx, rows);
@@ -1047,10 +1063,12 @@ impl Venue for BreakoutProp {
         if !(200..300).contains(&response.status) {
             self.on_response(cx, pending, response);
         } else {
+            // A 2xx answer that does not prove what happened.
             self.fail_operation(
                 cx,
                 pending.operation,
-                "DXtrade response missing its expected array",
+                VenueError::new("DXtrade response missing its expected array")
+                    .outcome(Outcome::Unknown),
             );
             self.drive(cx);
         }
@@ -1058,7 +1076,8 @@ impl Venue for BreakoutProp {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, _error: &str) {
         if self.auth_failed {
-            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            let error = unanswered(&pending.operation, self.auth_error.clone());
+            self.fail_operation(cx, pending.operation, error);
             return;
         }
         if !matches!(&pending.operation, Operation::Trade(request) if request.method != Method::Get)
@@ -1069,7 +1088,9 @@ impl Venue for BreakoutProp {
             pending.operation.reset();
             self.queue.push_back(pending);
         } else {
-            self.fail_operation(cx, pending.operation, "DXtrade transport failed");
+            let error =
+                unanswered(&pending.operation, "DXtrade transport failed").kind(ErrorKind::Network);
+            self.fail_operation(cx, pending.operation, error);
         }
         self.drive(cx);
     }
@@ -1190,5 +1211,35 @@ impl Venue for BreakoutProp {
                 .iter()
                 .map(|(symbol, (_, book))| (symbol.as_str(), book)),
         )
+    }
+}
+
+/// Refused before any request was sent.
+pub(crate) fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A sent request whose answer never arrived or was discarded. Only a write
+/// can have taken effect.
+fn unanswered(operation: &Operation, message: impl Into<String>) -> VenueError {
+    let write = matches!(operation, Operation::Trade(request) if request.method != Method::Get);
+    VenueError::new(message).outcome(if write {
+        Outcome::Unknown
+    } else {
+        Outcome::NotSent
+    })
+}
+
+/// A non-2xx answer: 408 and 5xx do not prove the venue refused it.
+fn http_failure(status: u16) -> VenueError {
+    let error = VenueError::new(format!("DXtrade HTTP {status}"));
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match status {
+        401 => rejected(error, ErrorKind::AuthInvalid),
+        403 => rejected(error, ErrorKind::AuthPermission),
+        429 => rejected(error, ErrorKind::RateLimited),
+        408 => error.outcome(Outcome::Unknown),
+        400..=499 => rejected(error, ErrorKind::Rejected),
+        _ => error.outcome(Outcome::Unknown),
     }
 }

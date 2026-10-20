@@ -4,6 +4,7 @@ use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -11,6 +12,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const CURRENCIES: [&str; 2] = ["USDT", "USDC"];
 const RETAINED_EVENTS: usize = 20_000;
+const SNAPSHOT_DEADLINE_MS: f64 = 20_000.;
+const SOCKET: Config = Config {
+    connect_timeout_ms: 15_000.,
+    auth_timeout_ms: Some(SNAPSHOT_DEADLINE_MS),
+    idle_timeout_ms: 12_500.,
+    ping_interval_ms: Some(5_000.),
+    backoff_base_ms: 1_000.,
+    backoff_cap_ms: 16_000.,
+    stable_ms: 30_000.,
+};
 #[derive(Default)]
 struct Slice {
     balance: Balance,
@@ -79,15 +90,12 @@ pub struct State {
     confirmed_modes: HashMap<String, PositionMode>,
     order_sides: HashMap<String, String>,
     socket: Option<SocketId>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     connected_at: f64,
     authenticated: bool,
     snapshot: bool,
     snapshot_revision: u64,
     sequence: Option<u64>,
-    last_pong: f64,
-    attempts: u32,
     next_id: u64,
     terminals: HashMap<String, u64>,
     terminal_queue: VecDeque<(String, u64)>,
@@ -104,6 +112,12 @@ pub struct State {
     reconcile_timer: Option<TimerId>,
 }
 impl State {
+    pub fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(SOCKET),
+            ..Self::default()
+        }
+    }
     pub fn apply_settings(
         &mut self,
         symbol: &str,
@@ -315,6 +329,7 @@ impl PhemexPerpetuals {
         }
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.supervisor.connecting(cx);
         self.account.socket =
             Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Private));
         self.account.authenticated = false;
@@ -322,8 +337,6 @@ impl PhemexPerpetuals {
         self.account.snapshot_revision = self.account.order_revision;
         self.account.sequence = None;
         self.account.connected_at = cx.now;
-        self.account.last_pong = cx.now;
-        self.account.watchdog = Some(cx.set_timer(5_000.));
     }
     fn account_finish(&mut self, cx: &mut Cx<'_, Pending>, currency: usize, failed: bool) {
         self.account.pending &= !(1 << currency);
@@ -581,6 +594,11 @@ impl PhemexPerpetuals {
         if self.account.socket != Some(socket) {
             return false;
         }
+        // The snapshot deadline runs from connect, not open.
+        let remaining = SNAPSHOT_DEADLINE_MS - (cx.now - self.account.connected_at);
+        let supervisor = &mut self.account.supervisor;
+        supervisor.set_auth_timeout(cx, Some(remaining.max(1.)));
+        supervisor.opened(cx);
         if let Some(credentials) = &self.credentials {
             cx.send(socket, credentials.websocket_auth(cx.now, 999));
             self.account.next_id = 1200;
@@ -626,7 +644,6 @@ impl PhemexPerpetuals {
                     .is_some_and(|r| r.status == "success");
             if success {
                 self.account.authenticated = true;
-                self.account.attempts = 0;
                 self.account.next_id += 1;
                 cx.send(
                     socket,
@@ -647,7 +664,7 @@ impl PhemexPerpetuals {
         }
         if message.method == "server.ping" || message.result.is_some_and(|r| r.get() == r#""pong""#)
         {
-            self.account.last_pong = cx.now;
+            self.account.supervisor.received(cx.now);
             return true;
         }
         if !self.account.authenticated {
@@ -965,6 +982,7 @@ impl PhemexPerpetuals {
                     cx.store.set_orders(cx.store.orders().to_vec());
                 }
                 self.account.snapshot = true;
+                self.account.supervisor.authenticated(cx);
             }
             let owed: Vec<_> = self
                 .account
@@ -1407,14 +1425,7 @@ impl PhemexPerpetuals {
         }
         self.account.socket = None;
         self.account.authenticated = false;
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.attempts = self.account.attempts.saturating_add(1);
-        if self.account.reconnect.is_none() {
-            self.account.reconnect =
-                Some(cx.set_timer(1_000. * 2f64.powi(self.account.attempts.min(5) as i32 - 1)));
-        }
+        self.account.supervisor.retry(cx);
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -1446,27 +1457,21 @@ impl PhemexPerpetuals {
             ));
             return true;
         }
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.account_connect(cx);
-            return true;
+        if !self.account.supervisor.owns_timer(timer) {
+            return false;
         }
-        if self.account.watchdog == Some(timer) {
-            self.account.watchdog = None;
-            if cx.now - self.account.last_pong >= 12_500.
-                || !self.account.snapshot && cx.now - self.account.connected_at >= 20_000.
-            {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.account_connect(cx),
+            Tick::TimedOut(_) => {
                 if let Some(socket) = self.account.socket {
                     cx.close(socket);
                     self.account_close(cx, socket, 1006);
                 }
-            } else {
-                self.account_ping(cx);
-                self.account.watchdog = Some(cx.set_timer(5_000.));
             }
-            return true;
+            Tick::Ping => self.account_ping(cx),
+            Tick::Handled | Tick::Unhandled => {}
         }
-        false
+        true
     }
 }
 impl State {
