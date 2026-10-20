@@ -4,6 +4,12 @@ Read-only Opus audits of `feat/rust-rewrite` at `df2d6a4a03` (after #1340).
 Findings land as fixes through lanes; strike an item when its PR merges. Line
 numbers are as of that commit.
 
+**Judging rule.** Rust need not match TS 1:1. Lifecycle (startup order, dispose,
+cleanup, retries, internal state) may differ freely. A divergence matters only
+by its production impact: wrong orders, positions, balances or fills; money or
+attribution lost; data silently missing or stale; a failure the user cannot see;
+or a downstream caller that breaks. Fix to that bar, not to TS's shape.
+
 ## Owner decisions (gate the cutover)
 
 1. **Engine delivery to tealstreet-next.** The Copybara glob has no `sdk-rs/**`,
