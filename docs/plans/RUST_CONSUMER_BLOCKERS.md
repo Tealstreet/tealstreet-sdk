@@ -300,6 +300,17 @@ publish an empty snapshot or dispose the previous good engine.
   protocol bug normalization is added. Exact-head CI and merge into
   `feat/rust-rewrite` remain the final landing steps.
 
+- CI cold-cache checkpoint: the Binance job reached MCP license generation
+  after passing its runtime tests, then Cargo metadata failed under `--offline`
+  because a locked workspace/dev manifest was absent from the production WASM
+  build cache. License generation now permits Cargo to fetch missing sources,
+  retaining `--locked`, the WASM platform filter, the non-dev notice closure
+  and the existing license allowlist. No dependency, lockfile or runtime asset
+  changes. Exact CI Node 22.23.3 MCP build, 29 unit tests, typecheck, lint and
+  isolated smoke PASS; notices remain 131 JS / 353 Rust and the packaged WASM
+  checksum is unchanged. Independent review and fresh exact-head CI govern
+  landing; native replay controls remain valid for this build-only fix.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current
