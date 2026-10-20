@@ -39,7 +39,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     start,
     command: (json) => {
       const command = JSON.parse(json);
-      if (command.op === 'setTickerSymbols' || command.op === 'setTickInterval') return noActions();
+      if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return noActions();
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
     },

@@ -7,6 +7,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::{Bingx, Options};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const KEY: &str = "/openApi/user/auth/userDataStream";
 const MODE: &str = "/openApi/swap/v1/positionSide/dual";
 const BALANCE: &str = "/openApi/swap/v3/user/balance";
@@ -735,8 +738,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -749,7 +752,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -761,8 +769,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -776,7 +784,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -807,8 +817,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -829,8 +839,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine

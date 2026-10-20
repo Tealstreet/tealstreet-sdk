@@ -10,6 +10,9 @@ use safe_cex_venue_bybit::Options;
 use support::Harness;
 
 /// "Get Open & Closed Orders", one-way: a limit buy with attached TP/SL.
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 5_000.0;
+
 const OPEN_ORDERS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"fd4300ae-7847-404e-b947-b46980a4d140","orderLinkId":"test-000005","blockTradeId":"","symbol":"ETHUSDT","price":"1600.00","qty":"0.10","side":"Buy","isLeverage":"","positionIdx":0,"orderStatus":"New","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"0","leavesQty":"0.10","leavesValue":"160","cumExecQty":"0.00","cumExecValue":"0","cumExecFee":"0","timeInForce":"GTC","orderType":"Limit","stopOrderType":"UNKNOWN","orderIv":"","triggerPrice":"0.00","takeProfit":"2500.00","stopLoss":"1500.00","tpTriggerBy":"LastPrice","slTriggerBy":"LastPrice","triggerDirection":0,"triggerBy":"UNKNOWN","lastPriceOnCreated":"","reduceOnly":false,"closeOnTrigger":false,"smpType":"None","smpGroup":"0","smpOrderId":"","tpslMode":"Full","tpLimitPrice":"","slLimitPrice":"","placeType":"","createdTime":"1684738540559","updatedTime":"1684738540561"}],"nextPageCursor":"page_args%3Dfd4300ae-7847-404e-b947-b46980a4d140%26symbol%3D6%26","category":"linear"},"retExtInfo":{},"time":1684765770483}"#;
 const EMPTY_LIST: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":"","category":"linear"},"retExtInfo":{},"time":1684765770483}"#;
 /// "Get Position Info", as a one-way BTCUSDT long.
@@ -1189,8 +1192,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -1203,7 +1206,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -1215,8 +1223,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -1230,7 +1238,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -1261,8 +1271,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -1283,8 +1293,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine

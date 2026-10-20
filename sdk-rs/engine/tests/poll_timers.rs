@@ -50,8 +50,8 @@ impl Venue for Polls {
         self.logical[index] = cx.set_poll_timer_with_bounds(ms, bounds);
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, usize>, _: usize, _: &str) {}
-    fn on_tick_interval(&mut self, cx: &mut Cx<'_, usize>, interval_ms: f64) {
-        self.updates.push(interval_ms);
+    fn on_poll_scale(&mut self, cx: &mut Cx<'_, usize>, scale: f64) {
+        self.updates.push(scale);
         if self.register_in_hook {
             self.logical.push(cx.set_poll_timer(900.));
         }
@@ -93,8 +93,8 @@ fn take(engine: &mut Engine<Polls>) -> Vec<Action> {
     engine.drain_actions().collect()
 }
 
-fn policy(engine: &mut Engine<Polls>, now: f64, interval_ms: f64) -> Vec<Action> {
-    engine.handle(now, Event::TickIntervalChanged { interval_ms });
+fn policy(engine: &mut Engine<Polls>, now: f64, scale: f64) -> Vec<Action> {
+    engine.handle(now, Event::PollScaleChanged { scale });
     take(engine)
 }
 
@@ -111,15 +111,18 @@ fn clear(engine: &mut Engine<Polls>, now: f64, index: &str) -> Vec<Action> {
 
 #[test]
 fn first_matching_policy_keeps_existing_deadline_and_rearms_only_different_fallbacks() {
-    let mut engine = Engine::new(Polls::new(&[2_000., 5_000.]));
+    let mut venue = Polls::new(&[2_000., 5_000.]);
+    venue.specs[0].1.minimum_interval_ms = 2_000.;
+    let mut engine = Engine::new(venue);
     engine.start(5.);
     let original = timers(&take(&mut engine));
-    let actions = policy(&mut engine, 105., 2_000.);
+    assert!(policy(&mut engine, 50., 1.).is_empty());
+    let actions = policy(&mut engine, 105., 0.5);
     let replacement = timers(&actions);
     assert_eq!(replacement.len(), 1);
-    assert_eq!(replacement[0].1, 2_105.);
+    assert_eq!(replacement[0].1, 2_605.);
     assert!(!actions.iter().any(|action| matches!(action, Action::ClearTimer { timer } if *timer == original[0].0 || *timer == original[2].0)));
-    assert!(policy(&mut engine, 205., 2_000.).is_empty());
+    assert!(policy(&mut engine, 205., 0.5).is_empty());
     engine.handle(
         2_005.,
         Event::TimerFired {
@@ -143,7 +146,7 @@ fn an_unchanged_effective_minimum_never_postpones_a_poll() {
     engine.start(10.);
     let original = timers(&take(&mut engine));
     assert_eq!(original[0].1, 260.);
-    assert!(policy(&mut engine, 20., 200.).is_empty());
+    assert!(policy(&mut engine, 20., 2.).is_empty());
     engine.handle(
         260.,
         Event::TimerFired {
@@ -168,7 +171,7 @@ fn fallback_cadences_are_independent_and_callbacks_use_logical_ids_once() {
         engine.handle(*at, Event::TimerFired { timer: *timer });
     }
     assert_eq!(engine.venue().fired, engine.venue().logical);
-    assert!(policy(&mut engine, 300., 50.).is_empty());
+    assert!(policy(&mut engine, 300., 0.5).is_empty());
 }
 
 #[test]
@@ -176,11 +179,11 @@ fn change_uses_fresh_physical_ids_and_fences_queued_callbacks_without_changing_o
     let mut engine = Engine::new(Polls::new(&[100., 250.]));
     engine.start(0.);
     let old = timers(&take(&mut engine));
-    let changes = policy(&mut engine, 20., 30.);
+    let changes = policy(&mut engine, 20., 0.5);
     let fresh = timers(&changes);
     assert_eq!(
         fresh.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
-        [50., 50.]
+        [70., 145.]
     );
     assert_eq!(
         changes
@@ -196,8 +199,8 @@ fn change_uses_fresh_physical_ids_and_fences_queued_callbacks_without_changing_o
     assert!(engine.venue().fired.is_empty());
     engine.handle(75., Event::TimerFired { timer: old[2].0 });
     assert_eq!(engine.venue().fired, [engine.venue().ordinary.unwrap()]);
-    for (timer, _) in fresh {
-        engine.handle(100., Event::TimerFired { timer });
+    for (timer, at) in fresh {
+        engine.handle(at, Event::TimerFired { timer });
     }
     assert_eq!(&engine.venue().fired[1..], engine.venue().logical);
 }
@@ -211,9 +214,9 @@ fn pause_retains_registrations_clear_removes_paused_demand_and_resume_is_fresh()
     assert!(timers(&paused).is_empty());
     assert_eq!(paused.len(), 2);
     assert!(clear(&mut engine, 15., "0").is_empty());
-    let resumed = timers(&policy(&mut engine, 20., 25.));
+    let resumed = timers(&policy(&mut engine, 20., 0.25));
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, 45.);
+    assert_eq!(resumed[0].1, 70.);
     for (timer, _) in old.into_iter().take(2) {
         engine.handle(100., Event::TimerFired { timer });
     }
@@ -236,25 +239,25 @@ fn initially_paused_polls_register_without_host_timers_and_clear_while_active_is
         [(engine.venue().ordinary.unwrap(), 76.)]
     );
     clear(&mut engine, 2., "1");
-    let resumed = timers(&policy(&mut engine, 3., 10.));
+    let resumed = timers(&policy(&mut engine, 3., 0.5));
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, 13.);
+    assert_eq!(resumed[0].1, 53.);
     assert!(
         matches!(clear(&mut engine, 4., "0").as_slice(), [Action::ClearTimer { timer }] if *timer == resumed[0].0)
     );
     engine.handle(
-        13.,
+        53.,
         Event::TimerFired {
             timer: resumed[0].0,
         },
     );
     assert!(engine.venue().fired.is_empty());
-    assert!(policy(&mut engine, 20., 50.).is_empty());
+    assert!(policy(&mut engine, 60., 0.25).is_empty());
 }
 
 #[test]
 fn recurring_minimum_and_absolute_cooldown_survive_policy_changes() {
-    let mut venue = Polls::new(&[500.]);
+    let mut venue = Polls::new(&[512.]);
     venue.specs[0].1 = PollTimerBounds {
         minimum_interval_ms: 40.,
         not_before_ms: 300.,
@@ -262,14 +265,15 @@ fn recurring_minimum_and_absolute_cooldown_survive_policy_changes() {
     let mut engine = Engine::new(venue);
     engine.start(0.);
     let first = timers(&take(&mut engine))[0];
-    assert_eq!(first.1, 500.);
-    assert_eq!(timers(&policy(&mut engine, 10., 5.))[0].1, 300.);
+    assert_eq!(first.1, 512.);
+    // 512/128 = 4ms and 512/64 = 8ms both sit under the 40ms minimum.
+    assert_eq!(timers(&policy(&mut engine, 10., 1. / 128.))[0].1, 300.);
     policy(&mut engine, 20., f64::INFINITY);
-    let resumed = timers(&policy(&mut engine, 100., 5.))[0];
+    let resumed = timers(&policy(&mut engine, 100., 1. / 128.))[0];
     assert_eq!(resumed.1, 300.);
-    assert!(policy(&mut engine, 290., 6.).is_empty());
-    assert_eq!(timers(&policy(&mut engine, 290., 50.))[0].1, 340.);
-    assert_eq!(timers(&policy(&mut engine, 300., 80.))[0].1, 380.);
+    assert!(policy(&mut engine, 290., 1. / 64.).is_empty());
+    assert_eq!(timers(&policy(&mut engine, 290., 0.125))[0].1, 354.);
+    assert_eq!(timers(&policy(&mut engine, 300., 0.25))[0].1, 428.);
 }
 
 #[test]
@@ -287,7 +291,7 @@ fn read_completion_rearms_against_latest_policy_even_when_paused_during_io() {
             _ => None,
         })
         .unwrap();
-    assert!(policy(&mut engine, 110., 20.).is_empty());
+    assert!(policy(&mut engine, 110., 0.5).is_empty());
     assert!(policy(&mut engine, 120., f64::INFINITY).is_empty());
     engine.handle(
         130.,
@@ -302,7 +306,7 @@ fn read_completion_rearms_against_latest_policy_even_when_paused_during_io() {
     );
     assert!(take(&mut engine).is_empty());
     assert_eq!(engine.venue().fired.len(), 1);
-    let resumed = timers(&policy(&mut engine, 150., 25.));
+    let resumed = timers(&policy(&mut engine, 150., 0.25));
     assert_eq!(resumed.len(), 1);
     assert_eq!(resumed[0].1, 175.);
     assert_ne!(timer, resumed[0].0);
@@ -315,21 +319,21 @@ fn latest_policy_is_applied_before_legacy_hook_and_invalid_updates_do_nothing() 
     let mut engine = Engine::new(venue);
     engine.start(0.);
     take(&mut engine);
-    let changed = policy(&mut engine, 10., 20.);
+    let changed = policy(&mut engine, 10., 0.25);
     assert_eq!(
         timers(&changed)
             .iter()
             .map(|(_, at)| *at)
             .collect::<Vec<_>>(),
-        [30., 30.]
+        [35., 235.]
     );
     let ids = timers(&changed);
     for invalid in [f64::NAN, f64::NEG_INFINITY, -1., -0., 0.] {
         assert!(policy(&mut engine, 15., invalid).is_empty());
     }
-    assert_eq!(engine.venue().updates, [20.]);
-    for (timer, _) in ids {
-        engine.handle(30., Event::TimerFired { timer });
+    assert_eq!(engine.venue().updates, [0.25]);
+    for (timer, at) in ids {
+        engine.handle(at, Event::TimerFired { timer });
     }
     assert_eq!(engine.venue().fired.len(), 2);
 }
@@ -339,8 +343,30 @@ fn repeated_policy_leaves_existing_due_time_and_physical_id_unchanged() {
     let mut engine = Engine::new(Polls::new(&[100.]));
     engine.start(0.);
     take(&mut engine);
-    let fresh = timers(&policy(&mut engine, 10., 50.))[0];
-    assert!(policy(&mut engine, 40., 50.).is_empty());
+    let fresh = timers(&policy(&mut engine, 10., 0.5))[0];
+    assert!(policy(&mut engine, 40., 0.5).is_empty());
     engine.handle(60., Event::TimerFired { timer: fresh.0 });
     assert_eq!(engine.venue().fired, engine.venue().logical);
+}
+
+#[test]
+fn scale_multiplies_each_native_cadence_instead_of_replacing_it() {
+    let mut engine = Engine::new(Polls::new(&[500., 5_000.]));
+    engine.start(0.);
+    let native = timers(&take(&mut engine));
+    assert_eq!(
+        native[..2].iter().map(|(_, at)| *at).collect::<Vec<_>>(),
+        [500., 5_000.]
+    );
+    assert!(policy(&mut engine, 10., 1.).is_empty());
+    let slowed = timers(&policy(&mut engine, 20., 3.));
+    assert_eq!(
+        slowed.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
+        [1_520., 15_020.]
+    );
+    let restored = timers(&policy(&mut engine, 30., 1.));
+    assert_eq!(
+        restored.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
+        [530., 5_030.]
+    );
 }

@@ -180,7 +180,7 @@ export class EngineHost {
     let timeoutMs;
     try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
     catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;

@@ -410,9 +410,10 @@ impl<'a> Response<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
-    /// Host configuration update; infinity pauses optional venue polling.
-    TickIntervalChanged {
-        interval_ms: f64,
+    /// Host polling policy: a factor on each poll's own cadence (resolved SDK
+    /// tick over its metadata tick); infinity pauses optional venue polling.
+    PollScaleChanged {
+        scale: f64,
     },
     WsOpened {
         socket: SocketId,
@@ -509,7 +510,7 @@ struct Io<P> {
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
-    poll_interval_ms: Option<f64>,
+    poll_scale: Option<f64>,
     poll_timers: HashMap<TimerId, PollTimer>,
     poll_physical: HashMap<TimerId, TimerId>,
     next_id: u32,
@@ -540,7 +541,7 @@ impl<P> Default for Io<P> {
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
-            poll_interval_ms: None,
+            poll_scale: None,
             poll_timers: HashMap::new(),
             poll_physical: HashMap::new(),
             next_id: 1,
@@ -567,7 +568,7 @@ impl<P> Io<P> {
 
     fn arm_poll(&mut self, now: f64, logical: TimerId) {
         let poll = &self.poll_timers[&logical];
-        let interval = self.poll_interval_ms.unwrap_or(poll.default_interval_ms);
+        let interval = poll.default_interval_ms * self.poll_scale.unwrap_or(1.);
         // Never hand an infinite/invalid deadline to a host. Infinity policy
         // retains the registration so a finite update can resume it.
         if !interval.is_finite()
@@ -599,22 +600,23 @@ impl<P> Io<P> {
         }
     }
 
-    fn set_poll_interval(&mut self, now: f64, interval_ms: f64) {
-        if self.poll_interval_ms == Some(interval_ms) {
+    fn set_poll_scale(&mut self, now: f64, scale: f64) {
+        if self.poll_scale == Some(scale) {
             return;
         }
-        let previous = self.poll_interval_ms.replace(interval_ms);
+        let previous = self.poll_scale.replace(scale).unwrap_or(1.);
         // Sort logical IDs so action ordering is independent of HashMap seeds.
         let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
         logicals.sort_unstable_by_key(|timer| timer.0);
         for logical in logicals {
             let poll = &self.poll_timers[&logical];
-            let old_interval = previous.unwrap_or(poll.default_interval_ms);
+            let old_interval = poll.default_interval_ms * previous;
+            let new_interval = poll.default_interval_ms * scale;
             if old_interval.is_finite()
                 && old_interval > 0.
-                && interval_ms.is_finite()
+                && new_interval.is_finite()
                 && old_interval.max(poll.bounds.minimum_interval_ms)
-                    == interval_ms.max(poll.bounds.minimum_interval_ms)
+                    == new_interval.max(poll.bounds.minimum_interval_ms)
             {
                 // An equivalent cadence must not postpone an already due poll.
                 continue;
@@ -1137,7 +1139,7 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
-    fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
+    fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
@@ -1453,12 +1455,12 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
-            Event::TickIntervalChanged { interval_ms } => {
-                if interval_ms.is_nan() || interval_ms <= 0. {
+            Event::PollScaleChanged { scale } => {
+                if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                cx.io.set_poll_interval(now, interval_ms);
-                self.venue.on_tick_interval(&mut cx, interval_ms)
+                cx.io.set_poll_scale(now, scale);
+                self.venue.on_poll_scale(&mut cx, scale)
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
@@ -2666,8 +2668,8 @@ mod streaming_tests {
         assert!(!engine.has_received_commands());
         engine.handle(
             1.,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         assert!(

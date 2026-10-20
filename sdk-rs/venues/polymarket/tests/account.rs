@@ -2,6 +2,9 @@ use safe_cex_engine::model::OrderSide;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions, sign};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 const KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 const SIGNER: &str = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
 const MARKETS: &str = r#"[{"conditionId":"0x123","slug":"election","question":"Who wins?","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":5,"active":true,"closed":false}]"#;
@@ -12,8 +15,8 @@ const POSITIONS: &str = r#"[{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0,"
 fn periodic_pause_keeps_dirty_snapshot_repair_active() {
     let mut h = H::new();
     h.initial();
-    h.event(Event::TickIntervalChanged {
-        interval_ms: f64::INFINITY,
+    h.event(Event::PollScaleChanged {
+        scale: f64::INFINITY,
     });
     // Opening the private stream starts reconciliation; another authenticated
     // event while it is busy makes the current snapshot dirty.
@@ -29,7 +32,12 @@ fn periodic_pause_keeps_dirty_snapshot_repair_active() {
     assert!(h.http.iter().any(|r| r.url.contains("/balance-allowance")));
     h.initial();
     // Ordinary repair completes, then returns to a parked recurring poll.
-    h.e.handle(h.now, Event::TickIntervalChanged { interval_ms: 500. });
+    h.e.handle(
+        h.now,
+        Event::PollScaleChanged {
+            scale: 500. / POLL_MS,
+        },
+    );
     let resumed: Vec<_> =
         h.e.drain_actions()
             .filter_map(|a| match a {
@@ -576,8 +584,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -593,8 +601,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -633,8 +641,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -670,8 +678,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

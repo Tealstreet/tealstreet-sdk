@@ -33,7 +33,7 @@ import bs58 from 'bs58';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
-import { exchangeMetadata } from '../../exchangeMetadata';
+import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
@@ -301,7 +301,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
-  private pollingPolicy?: { interval: number | null; promise?: Promise<void> };
+  private pollingPolicy?: { scale: number | null; promise?: Promise<void> };
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
@@ -470,12 +470,15 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.host || this.isDisposed || this.engineFailure) return;
     const resolved = this.getTickInterval();
     if (resolved === undefined) return;
-    const interval = resolved === Number.POSITIVE_INFINITY ? null : resolved;
-    if (this.pollingPolicy?.interval === interval) return this.pollingPolicy.promise;
+    // Venues keep their own reconcile cadences; the resolved tick (override,
+    // server multiplier, auth backoff) scales them relative to the metadata tick.
+    const reference = getExchangeMetadata(this._exchangeName).tickInterval;
+    const scale = resolved === Number.POSITIVE_INFINITY ? null : reference ? resolved / reference : 1;
+    if (this.pollingPolicy?.scale === scale) return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
-    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { interval };
+    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale };
     this.pollingPolicy = policy;
-    policy.promise = this.command<void>({ op: 'setTickInterval', interval }).catch((error) => {
+    policy.promise = this.command<void>({ op: 'setPollScale', scale }).catch((error) => {
       if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
       throw error;
     });

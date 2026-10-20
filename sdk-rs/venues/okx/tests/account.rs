@@ -40,14 +40,14 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         .unwrap();
     complete(&mut e, pending, ORDER);
     let expected = e.store().balance().clone();
-    for interval_ms in [f64::INFINITY, 30_000., 500.] {
-        e.handle(100., Event::TickIntervalChanged { interval_ms });
+    for scale in [f64::INFINITY, 15., 0.25] {
+        e.handle(100., Event::PollScaleChanged { scale });
         assert!(actions(&mut e).is_empty());
     }
     e.handle(
         100.,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.store_mut().set_balance(Default::default());

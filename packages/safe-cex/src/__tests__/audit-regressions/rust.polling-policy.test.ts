@@ -4,7 +4,6 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { exchangeMetadata } from '../../exchangeMetadata';
 import { RUST_VENUES, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
@@ -19,7 +18,8 @@ vi.mock('../../exchanges/bybit/bybit.types', async (original) => ({
   },
 }));
 
-type Control = { op: string; interval?: number | null };
+// Scales are the resolved tick over the metadata tick (binance 500ms, tealstreet-dex 2s).
+type Control = { op: string; scale?: number | null };
 const accounts: RustEngineExchange[] = [];
 
 beforeEach(() => vi.useFakeTimers());
@@ -51,7 +51,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
       const command: Control = JSON.parse(json);
       commands.push(command);
       events.push(command.op);
-      if (command.op === 'setTickInterval') onControl(command);
+      if (command.op === 'setPollScale') onControl(command);
       return '[]';
     },
     takeFrame: ready,
@@ -87,7 +87,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
   );
   exchange.emitter.on('error', (error: unknown) => errors.push(error));
   accounts.push(exchange);
-  const controls = () => commands.filter((command) => command.op === 'setTickInterval');
+  const controls = () => commands.filter((command) => command.op === 'setPollScale');
   const start = async () => {
     const starting = exchange.start();
     release();
@@ -112,13 +112,13 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
 
 describe('Rust periodic polling policy propagation', () => {
   it.each(Object.keys(RUST_VENUES) as ExchangeName[])(
-    '%s applies its resolved interval before native startup',
+    '%s applies its resolved polling scale before native startup',
     async (name) => {
       setTickIntervalMultipliers({ '*': 3 });
       const r = fixture(name);
       await r.start();
-      expect(r.events.slice(0, 2)).toEqual(['setTickInterval', 'start']);
-      expect(r.controls()).toEqual([{ op: 'setTickInterval', interval: exchangeMetadata[name]!.tickInterval! * 3 }]);
+      expect(r.events.slice(0, 2)).toEqual(['setPollScale', 'start']);
+      expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 3 }]);
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('tickInterval');
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
     },
@@ -127,15 +127,15 @@ describe('Rust periodic polling policy propagation', () => {
   it('pauses with explicit null and resumes after effective options change at the existing flush cadence', async () => {
     const r = fixture('tealstreet-dex', { extra: { tickInterval: Infinity } });
     await r.start();
-    expect(r.controls()).toEqual([{ op: 'setTickInterval', interval: null }]);
+    expect(r.controls()).toEqual([{ op: 'setPollScale', scale: null }]);
     r.exchange.options.extra!.tickInterval = 4000;
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.controls().at(-1)).toEqual({ op: 'setTickInterval', interval: 4000 });
+    expect(r.controls().at(-1)).toEqual({ op: 'setPollScale', scale: 2 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(r.controls()).toHaveLength(2);
     r.exchange.options.extra!.tickInterval = Infinity;
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.controls().at(-1)).toEqual({ op: 'setTickInterval', interval: null });
+    expect(r.controls().at(-1)).toEqual({ op: 'setPollScale', scale: null });
   });
 
   it('composes server slowdown before Base auth backoff and its cap, then reflects success', async () => {
@@ -143,16 +143,16 @@ describe('Rust periodic polling policy propagation', () => {
     await r.start();
     setTickIntervalMultipliers({ '*': 3 });
     r.exchange.recordAuthFailure();
-    expect(r.controls().at(-1)?.interval).toBe(6000);
+    expect(r.controls().at(-1)?.scale).toBe(12);
     for (let i = 0; i < 20; i++) r.exchange.recordAuthFailure();
-    expect(r.controls().at(-1)?.interval).toBe(60_000);
+    expect(r.controls().at(-1)?.scale).toBe(120);
     const count = r.controls().length;
     r.exchange.recordAuthFailure();
     expect(r.controls()).toHaveLength(count);
     r.exchange.recordAuthSuccess();
-    expect(r.controls().at(-1)?.interval).toBe(3000);
+    expect(r.controls().at(-1)?.scale).toBe(6);
     setTickIntervalMultipliers(undefined);
-    expect(r.controls().at(-1)?.interval).toBe(1000);
+    expect(r.controls().at(-1)?.scale).toBe(2);
   });
 
   it('uses the latest pre-host multiplier, options and auth policy after a delayed loader', async () => {
@@ -165,7 +165,7 @@ describe('Rust periodic polling policy propagation', () => {
     r.release();
     await vi.advanceTimersByTimeAsync(250);
     await starting;
-    expect(r.controls()).toEqual([{ op: 'setTickInterval', interval: 16_000 }]);
+    expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 32 }]);
   });
 
   it('does not duplicate unchanged policies or keep a disposed account subscribed when replacing it', async () => {
@@ -183,17 +183,17 @@ describe('Rust periodic polling policy propagation', () => {
     setTickIntervalMultipliers({ '*': 2 });
     await vi.advanceTimersByTimeAsync(500);
     expect(old.controls()).toHaveLength(1);
-    expect(replacement.controls().map((control) => control.interval)).toEqual([1000, 2000]);
+    expect(replacement.controls().map((control) => control.scale)).toEqual([2, 4]);
   });
 
   it('finishes a newer reentrant initialization policy before native startup', async () => {
     const r = fixture('binance', { extra: { tickInterval: 1000 } });
     r.onControl((control) => {
-      if (control.interval === 1000) setTickIntervalMultipliers({ '*': 2 });
+      if (control.scale === 2) setTickIntervalMultipliers({ '*': 2 });
     });
     await r.start();
-    expect(r.events.slice(0, 3)).toEqual(['setTickInterval', 'setTickInterval', 'start']);
-    expect(r.controls().map((control) => control.interval)).toEqual([1000, 2000]);
+    expect(r.events.slice(0, 3)).toEqual(['setPollScale', 'setPollScale', 'start']);
+    expect(r.controls().map((control) => control.scale)).toEqual([2, 4]);
   });
 
   it('rejects failed initial policy delivery before native startup and wakes public reads', async () => {
@@ -230,24 +230,24 @@ describe('Rust periodic polling policy propagation', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(r.errors).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.controls().map((control) => control.interval)).toEqual([1000, 2000, 2000]);
+    expect(r.controls().map((control) => control.scale)).toEqual([2, 4, 4]);
     await vi.advanceTimersByTimeAsync(500);
     expect(r.controls()).toHaveLength(3);
-    expect(r.commands.every((command) => ['setTickInterval', 'setTickerSymbols'].includes(command.op))).toBe(true);
+    expect(r.commands.every((command) => ['setPollScale', 'setTickerSymbols'].includes(command.op))).toBe(true);
   });
 
   it('preserves a newer reentrant policy when an older dispatch fails', async () => {
     const r = fixture('binance', { extra: { tickInterval: 1000 } });
     await r.start();
     r.onControl((control) => {
-      if (control.interval === 2000) {
+      if (control.scale === 4) {
         setTickIntervalMultipliers({ '*': 3 });
         throw new Error('obsolete policy failed');
       }
     });
     setTickIntervalMultipliers({ '*': 2 });
     await vi.advanceTimersByTimeAsync(500);
-    expect(r.controls().map((control) => control.interval)).toEqual([1000, 2000, 3000]);
+    expect(r.controls().map((control) => control.scale)).toEqual([2, 4, 6]);
     expect(r.errors).toHaveLength(1);
   });
 });

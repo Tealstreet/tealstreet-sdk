@@ -27,7 +27,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each(['setTickerSymbols', 'setTickInterval'] as const)(
+it.each(['setTickerSymbols', 'setPollScale'] as const)(
   'contains a replyless %s trap without an unhandled rejection or duplicate error',
   async (operation) => {
     vi.useFakeTimers();
@@ -76,7 +76,7 @@ it.each(['setTickerSymbols', 'setTickInterval'] as const)(
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     }));
     const exchange = new RustEngineExchange(
-      operation === 'setTickInterval' ? 'breakoutprop' : 'binance',
+      operation === 'setPollScale' ? 'breakoutprop' : 'binance',
       { key: 'fixture-user', secret: 'fixture-password', publicDataOnly: true },
       new DefaultStore(),
     );

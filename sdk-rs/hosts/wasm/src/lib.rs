@@ -1220,8 +1220,8 @@ impl WasmEngine {
                     return Ok(self.flush());
                 }
                 safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-                safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
-                    Event::TickIntervalChanged { interval_ms }
+                safe_cex_engine::command::HostInput::PollScaleChanged { scale } => {
+                    Event::PollScaleChanged { scale }
                 }
             };
             self.inner.handle(now, event);
@@ -1242,8 +1242,8 @@ impl WasmEngine {
                 return Ok(self.flush());
             }
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-            safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
-                Event::TickIntervalChanged { interval_ms }
+            safe_cex_engine::command::HostInput::PollScaleChanged { scale } => {
+                Event::PollScaleChanged { scale }
             }
         };
         self.inner.handle(now, event);
@@ -1357,13 +1357,13 @@ mod tests {
         use safe_cex_engine::command::{HostInput, decode_host_input};
 
         assert_eq!(
-            decode_host_input(r#"{"op":"setTickInterval","interval":250}"#).unwrap(),
-            HostInput::TickIntervalChanged { interval_ms: 250. }
+            decode_host_input(r#"{"op":"setPollScale","scale":2.5}"#).unwrap(),
+            HostInput::PollScaleChanged { scale: 2.5 }
         );
         assert_eq!(
-            decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).unwrap(),
-            HostInput::TickIntervalChanged {
-                interval_ms: f64::INFINITY
+            decode_host_input(r#"{"op":"setPollScale","scale":null}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: f64::INFINITY
             }
         );
     }
@@ -1403,9 +1403,7 @@ mod tests {
             fn handle(&mut self, now: f64, event: Event<'_>) {
                 let input = match event {
                     Event::Command(command) => HostInput::Command(command),
-                    Event::TickIntervalChanged { interval_ms } => {
-                        HostInput::TickIntervalChanged { interval_ms }
-                    }
+                    Event::PollScaleChanged { scale } => HostInput::PollScaleChanged { scale },
                     _ => panic!("command boundary"),
                 };
                 self.events.borrow_mut().push((now, input));
@@ -1438,8 +1436,8 @@ mod tests {
             r#"{"op":"subscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
             r#"{"op":"unsubscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
             r#"{"op":"setTickerSymbols","symbols":["BTCUSDT"]}"#,
-            r#"{"op":"setTickInterval","interval":2000}"#,
-            r#"{"op":"setTickInterval","interval":null}"#,
+            r#"{"op":"setPollScale","scale":4}"#,
+            r#"{"op":"setPollScale","scale":null}"#,
             r#"{"op":"publicFeedUpdate","tickers":[]}"#,
         ];
         let mut dispatched = 0;

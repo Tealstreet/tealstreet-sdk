@@ -2,6 +2,9 @@ mod support;
 use safe_cex_engine::Notice;
 use safe_cex_venue_breakoutprop::Options;
 use support::{QUOTES, Rig};
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const PORTFOLIO: &str = r#"{"portfolios":[{"account":"default:00002","version":86,"balances":[{"account":"default:00002","currency":"USD","value":4999.96}],"positions":[{"account":"default:00002","positionCode":"76515503","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3656.01,"marginRate":0.2,"lastUpdateTime":"2024-12-11T06:00:49.087Z"},{"account":"default:00002","positionCode":"76515542","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3660,"marginRate":0.2,"lastUpdateTime":"2024-12-11T05:56:26.400Z"}],"orders":[]}]}"#;
 
 #[test]
@@ -11,10 +14,15 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
         let mut h = Rig::new(Options {
             key: "example-user".into(),
             secret: "example-password".into(),
-            tick_interval: f64::INFINITY,
             public_data_only,
             ..Default::default()
         });
+        h.engine.handle(
+            h.now,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
+            },
+        );
         h.boot();
         if !public_data_only {
             for _ in 0..2 {
@@ -31,8 +39,8 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
         for interval in [20_000., 500.] {
             h.engine.handle(
                 h.now,
-                Event::TickIntervalChanged {
-                    interval_ms: interval,
+                Event::PollScaleChanged {
+                    scale: interval / POLL_MS,
                 },
             );
             h.collect();
@@ -54,8 +62,8 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
         // Completion must register against the current paused policy.
         h.engine.handle(
             h.now,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         h.collect();
@@ -70,8 +78,12 @@ fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles(
             h.reply(&quote, 200, QUOTES);
         }
         assert!(h.timers.is_empty());
-        h.engine
-            .handle(h.now, Event::TickIntervalChanged { interval_ms: 1000. });
+        h.engine.handle(
+            h.now,
+            Event::PollScaleChanged {
+                scale: 1000. / POLL_MS,
+            },
+        );
         h.collect();
         assert_eq!(
             h.timers.values().copied().collect::<Vec<_>>(),

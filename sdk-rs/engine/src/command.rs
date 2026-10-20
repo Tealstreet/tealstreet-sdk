@@ -405,7 +405,10 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 pub enum HostInput {
     Command(Command),
     PublicFeedUpdate(crate::PublicFeedUpdate),
-    TickIntervalChanged { interval_ms: f64 },
+    /// Factor on each venue poll's own cadence; infinity pauses polling.
+    PollScaleChanged {
+        scale: f64,
+    },
 }
 
 /// Decode startup subscriptions without compiling the trading/query parser.
@@ -479,28 +482,28 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         }));
     }
     #[cfg(feature = "polling-control")]
-    if header.op == "setTickInterval" {
+    if header.op == "setPollScale" {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum Interval {
-            Millis(f64),
+        enum Scale {
+            Factor(f64),
             Paused(()),
         }
         #[derive(Deserialize)]
         struct Control {
-            interval: Interval,
+            scale: Scale,
         }
         let control: Control = serde_json::from_str(json)?;
-        let interval_ms = match control.interval {
-            Interval::Millis(ms) => ms,
-            Interval::Paused(()) => f64::INFINITY,
+        let scale = match control.scale {
+            Scale::Factor(factor) => factor,
+            Scale::Paused(()) => f64::INFINITY,
         };
-        if interval_ms.is_nan() || interval_ms <= 0.0 {
+        if scale.is_nan() || scale <= 0.0 {
             return Err(serde::de::Error::custom(
-                "Polling interval must be positive or null to pause",
+                "Polling scale must be positive or null to pause",
             ));
         }
-        return Ok(HostInput::TickIntervalChanged { interval_ms });
+        return Ok(HostInput::PollScaleChanged { scale });
     }
     decode_command(json).map(HostInput::Command)
 }
@@ -696,37 +699,37 @@ mod tests {
     #[test]
     #[cfg(not(feature = "polling-control"))]
     fn polling_controls_are_excluded_from_ordinary_command_parsers() {
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":4}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":null}"#).is_err());
     }
 
     #[test]
     #[cfg(feature = "polling-control")]
-    fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
+    fn host_configuration_accepts_a_positive_scale_and_explicit_pause() {
         assert_eq!(
-            decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
-            HostInput::TickIntervalChanged { interval_ms: 123.5 }
+            decode_host_input(r#"{"op":"setPollScale","scale":1.5}"#).unwrap(),
+            HostInput::PollScaleChanged { scale: 1.5 }
         );
         assert_eq!(
-            decode_host_input(r#"{"op":"setTick\u0049nterval","interval":null}"#).unwrap(),
-            HostInput::TickIntervalChanged {
-                interval_ms: f64::INFINITY
+            decode_host_input(r#"{"op":"setPoll\u0053cale","scale":null}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: f64::INFINITY
             }
         );
     }
 
     #[test]
-    fn host_configuration_requires_a_typed_positive_interval_or_null() {
+    fn host_configuration_requires_a_typed_positive_scale_or_null() {
         for json in [
-            r#"{"op":"setTickInterval"}"#,
-            r#"{"op":"setTickInterval","interval":0}"#,
-            r#"{"op":"setTickInterval","interval":-0.0}"#,
-            r#"{"op":"setTickInterval","interval":-1}"#,
-            r#"{"op":"setTickInterval","interval":"1000"}"#,
-            r#"{"op":"setTickInterval","interval":false}"#,
-            r#"{"op":"setTickInterval","interval":{}}"#,
-            r#"{"op":"setTickInterval","interval":NaN}"#,
-            r#"{"op":"setTickInterval","interval":1e309}"#,
+            r#"{"op":"setPollScale"}"#,
+            r#"{"op":"setPollScale","scale":0}"#,
+            r#"{"op":"setPollScale","scale":-0.0}"#,
+            r#"{"op":"setPollScale","scale":-1}"#,
+            r#"{"op":"setPollScale","scale":"4"}"#,
+            r#"{"op":"setPollScale","scale":false}"#,
+            r#"{"op":"setPollScale","scale":{}}"#,
+            r#"{"op":"setPollScale","scale":NaN}"#,
+            r#"{"op":"setPollScale","scale":1e309}"#,
         ] {
             assert!(decode_host_input(json).is_err(), "must reject {json}");
         }
@@ -748,7 +751,7 @@ mod tests {
         );
         assert!(decode_host_input(r#"{"op":"setLeverage","command":"37"}"#).is_err());
         assert!(decode_host_input(r#"{"op":"unknown"}"#).is_err());
-        assert!(decode_command(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
+        assert!(decode_command(r#"{"op":"setPollScale","scale":4}"#).is_err());
     }
 
     #[test]
