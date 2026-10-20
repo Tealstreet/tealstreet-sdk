@@ -1,4 +1,4 @@
-//! GRVT orderbook derivatives: deterministic market, account and order state machines.
+//! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
 mod history;
 mod sign;
@@ -6,9 +6,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{
-    Candle, DerivativeProduct, Limits, Market, MinMax, Precision, Ticker,
-};
+use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -25,35 +23,8 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProductKind {
-    Perpetual,
-    Future,
-    Call,
-    Put,
-}
-impl ProductKind {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "PERPETUAL" => Some(Self::Perpetual),
-            "FUTURE" => Some(Self::Future),
-            "CALL" => Some(Self::Call),
-            "PUT" => Some(Self::Put),
-            _ => None,
-        }
-    }
-    fn native(self) -> &'static str {
-        match self {
-            Self::Perpetual => "PERPETUAL",
-            Self::Future => "FUTURE",
-            Self::Call => "CALL",
-            Self::Put => "PUT",
-        }
-    }
-}
 #[derive(Clone)]
 pub struct InstrumentInfo {
-    pub(crate) kind: ProductKind,
     pub hash: String,
     pub base_decimals: Option<i32>,
     pub quote_decimals: Option<i32>,
@@ -756,11 +727,9 @@ impl Venue for Grvt {
                     *failed = true;
                     return;
                 };
-                let Some(kind) = ProductKind::parse(&i.kind) else {
-                    cx.log(LogLevel::Warning, "Unsupported GRVT instrument kind");
-                    *failed = true;
+                if i.kind != "PERPETUAL" {
                     return;
-                };
+                }
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
                     *failed = true;
                     return;
@@ -768,7 +737,6 @@ impl Venue for Grvt {
                 metadata.insert(
                     i.id.to_string(),
                     InstrumentInfo {
-                        kind,
                         hash: i.hash.into_owned(),
                         base_decimals: i.base_decimals,
                         quote_decimals: i.quote_decimals,
@@ -794,10 +762,10 @@ impl Venue for Grvt {
                         price: None,
                     },
                     contract_size: None,
-                    is_expiring: (kind != ProductKind::Perpetual).then_some(true),
+                    is_expiring: None,
                     is_inverse: None,
                     is_spot: Some(false),
-                    is_perpetual: Some(kind == ProductKind::Perpetual),
+                    is_perpetual: Some(true),
                     is_read_only: None,
                     taker_fee: None,
                     maker_fee: None,
@@ -896,33 +864,8 @@ impl Venue for Grvt {
                             .unwrap_or_default()
                     })
                     .collect();
-                let products = rows
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, market)| {
-                        let kind = match metadata.get(&market.id)?.kind {
-                            ProductKind::Perpetual => return None,
-                            ProductKind::Future => safe_cex_engine::model::ProductKind::Future,
-                            ProductKind::Call => safe_cex_engine::model::ProductKind::Call,
-                            ProductKind::Put => safe_cex_engine::model::ProductKind::Put,
-                        };
-                        Some(DerivativeProduct {
-                            market: index as u32,
-                            kind,
-                            underlying: market.base.clone(),
-                            // InstrumentDisplay supplies no expiry timestamp or option terms.
-                            expiry: None,
-                            strike: None,
-                            settlement_asset: None,
-                            premium_asset: None,
-                            style: None,
-                            settlement: None,
-                        })
-                    })
-                    .collect();
                 self.metadata = metadata;
                 cx.store.set_markets(rows);
-                cx.store.set_derivative_products(products);
                 cx.store.set_tickers(tickers);
                 self.connect(cx);
                 if first {
@@ -1235,10 +1178,7 @@ impl Venue for Grvt {
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. }
-            | Command::FetchOptionChain { command, .. }
-            | Command::FetchOptionExpiries { command, .. }
-            | Command::FetchAccountGreeks { command } => {
+            | Command::FetchOrderBook { command, .. } => {
                 cx.done(command, Err("Unsupported GRVT command".into()))
             }
         }

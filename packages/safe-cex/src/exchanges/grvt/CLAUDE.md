@@ -500,19 +500,6 @@ rejection, not signer-address inequality.
 
 ## Symbol Format
 
-The Rust crate retains the native orderbook catalog kinds `PERPETUAL`,
-`FUTURE`, `CALL` and `PUT`, including each instrument's signing hash/decimal
-snapshot. Typed derivative metadata preserves kind and underlying. The native
-InstrumentDisplay response has no expiry timestamp or strike fields, so these
-remain unknown rather than being guessed from a name. Nonperpetual histories
-use their own native kind and omit perpetual-only funding reads. Symbol cancel
-for dated products first reads authoritative open orders, then cancels exact
-matching identities; sibling expiries/strikes remain live.
-
-This does not add the separate `STABLE_PERP` RFQ protocol, strategy/multileg
-orders, option-chain/expiry/Greek APIs or IV pricing. TS venues remain in place;
-no product retirement or default cutover is implied.
-
 GRVT uses underscore-separated format:
 
 - **Perpetual**: `{BASE}_{QUOTE}_Perp` (e.g., `BTC_USDT_Perp`)

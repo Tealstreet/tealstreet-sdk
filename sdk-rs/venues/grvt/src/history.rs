@@ -1,7 +1,7 @@
 //! Bounded reverse-cursor reads. Incomplete account history never returns partial fills.
 use crate::account::decode_order;
 use crate::wire::{Number, Str, Text};
-use crate::{Grvt, Job, Pending, ProductKind};
+use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{CommandId, Cx, Query, Response};
@@ -26,7 +26,6 @@ pub(crate) struct Request {
     kind: Kind,
     symbol: Option<String>,
     instrument: Option<String>,
-    product: Option<ProductKind>,
     base: Option<String>,
     quote: Option<String>,
     account: Option<String>,
@@ -308,82 +307,81 @@ impl Grvt {
         command: CommandId,
         query: Query,
     ) {
-        let (mut kind, symbol, order_id, from, to, limit, income_kind, mut combine_income) =
-            match query {
-                Query::Fills {
-                    symbol,
-                    order_id,
-                    from_ms,
-                    to_ms,
-                    limit,
-                } => (
-                    Kind::Fills,
-                    symbol,
-                    order_id,
-                    from_ms,
-                    to_ms,
-                    limit,
-                    None,
-                    false,
-                ),
-                Query::OrderHistory {
-                    symbol,
-                    from_ms,
-                    to_ms,
-                    limit,
-                } => (
-                    Kind::Orders,
-                    symbol,
-                    None,
-                    from_ms,
-                    to_ms,
-                    limit,
-                    None,
-                    false,
-                ),
-                Query::Income {
-                    symbol,
-                    kind,
-                    from_ms,
-                    to_ms,
-                    limit,
-                } => {
-                    let k = kind.map(|s| s.to_ascii_uppercase());
-                    let selected = match k.as_deref() {
-                        None | Some("FUNDING_FEE") => Kind::Funding,
-                        Some("COMMISSION" | "REALIZED_PNL") => Kind::IncomeFills,
-                        _ => {
-                            cx.done(command, Err("Unsupported GRVT income category".into()));
-                            return;
-                        }
-                    };
-                    let combine = k.is_none();
-                    (selected, symbol, None, from_ms, to_ms, limit, k, combine)
-                }
-                Query::PublicTrades { symbol, limit } => (
-                    Kind::Trades,
-                    Some(symbol),
-                    None,
-                    None,
-                    None,
-                    limit,
-                    None,
-                    false,
-                ),
-                Query::OrderByClientId {
-                    symbol,
-                    client_order_id,
-                } => (
-                    Kind::Lookup,
-                    Some(symbol),
-                    Some(client_order_id),
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                ),
-            };
+        let (kind, symbol, order_id, from, to, limit, income_kind, combine_income) = match query {
+            Query::Fills {
+                symbol,
+                order_id,
+                from_ms,
+                to_ms,
+                limit,
+            } => (
+                Kind::Fills,
+                symbol,
+                order_id,
+                from_ms,
+                to_ms,
+                limit,
+                None,
+                false,
+            ),
+            Query::OrderHistory {
+                symbol,
+                from_ms,
+                to_ms,
+                limit,
+            } => (
+                Kind::Orders,
+                symbol,
+                None,
+                from_ms,
+                to_ms,
+                limit,
+                None,
+                false,
+            ),
+            Query::Income {
+                symbol,
+                kind,
+                from_ms,
+                to_ms,
+                limit,
+            } => {
+                let k = kind.map(|s| s.to_ascii_uppercase());
+                let selected = match k.as_deref() {
+                    None | Some("FUNDING_FEE") => Kind::Funding,
+                    Some("COMMISSION" | "REALIZED_PNL") => Kind::IncomeFills,
+                    _ => {
+                        cx.done(command, Err("Unsupported GRVT income category".into()));
+                        return;
+                    }
+                };
+                let combine = k.is_none();
+                (selected, symbol, None, from_ms, to_ms, limit, k, combine)
+            }
+            Query::PublicTrades { symbol, limit } => (
+                Kind::Trades,
+                Some(symbol),
+                None,
+                None,
+                None,
+                limit,
+                None,
+                false,
+            ),
+            Query::OrderByClientId {
+                symbol,
+                client_order_id,
+            } => (
+                Kind::Lookup,
+                Some(symbol),
+                Some(client_order_id),
+                None,
+                None,
+                None,
+                None,
+                false,
+            ),
+        };
         if kind != Kind::Trades && (self.options.public_data_only || self.account.session.is_none())
         {
             cx.done(
@@ -426,20 +424,11 @@ impl Grvt {
         let target_created = order_id
             .as_deref()
             .and_then(|id| self.account.order_created(id));
-        if kind == Kind::Funding && selected.is_some_and(|m| m.is_perpetual == Some(false)) {
-            if !combine_income {
-                cx.done(command, Ok("[]".into()));
-                return;
-            }
-            kind = Kind::IncomeFills;
-            combine_income = false;
-        }
         let request = Request {
             command,
             kind,
             symbol,
             instrument: selected.map(|m| m.id.clone()),
-            product: selected.and_then(|m| self.metadata.get(&m.id).map(|info| info.kind)),
             base: selected.map(|m| m.base.clone()),
             quote: selected.map(|m| m.quote.clone()),
             account,
@@ -493,13 +482,7 @@ impl Grvt {
                 } else {
                     None
                 },
-                k: if public {
-                    None
-                } else if request.kind == Kind::Funding {
-                    Some(["PERPETUAL"])
-                } else {
-                    request.product.map(|kind| [kind.native()])
-                },
+                k: (!public).then_some(["PERPETUAL"]),
                 b: if public {
                     None
                 } else {

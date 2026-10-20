@@ -18,15 +18,11 @@ Rust opt-in. Follow `VENUE_PORT_BRIEF.md`; full-auto execution is authorized.
 3. Extend OKX's existing crate to native inverse swaps and EU xperp futures,
    preserving account/host/demo routing, native quantities, quote valuation,
    subscriptions, commands and histories. Test product and consumer sizing.
-4. Resolve GRVT Future/Call/Put catalog and product semantics explicitly.
-   Retain supported native orderbook products with typed identity and correct
-   signing/account/query/cancel behavior. Do not infer RFQ support or a Sam
-   retirement decision. Document any separately unsupported product precisely.
-5. Run independent adversarial phase reviews and repair findings. Run bans,
+4. Run independent adversarial phase reviews and repair findings. Run bans,
    format, strict Clippy, native/host/frame/CLI tests, root typecheck/lint/tests,
    fresh public/private replay gates for touched venues and Binance profiles.
    Record correctness, request coverage, CPU, retained memory and artifact size.
-6. Update phase-9 readiness rows; push a PR into `feat/rust-rewrite`, publish
+5. Update phase-9 readiness rows; push a PR into `feat/rust-rewrite`, publish
    correctness reviews, fix and repeat. Merge only after green CI on the final
    head, then cut a fresh branch from the landing branch.
 
@@ -52,7 +48,7 @@ Implementation, phase audits and gate results are appended at stable commits.
   landing `0063068241` in `a7ce59126b`; no stash or rebase was used.
 - Shared engine tests: 74 PASS. Existing Binance native control: 99 PASS.
   Bybit: 137 PASS (123 existing plus 14 product regressions), strict Clippy
-  PASS. GRVT: 93 PASS, strict Clippy PASS. OKX: 77 PASS before the live
+  PASS. OKX: 77 PASS before the live
   optional-cap regression described below. The combined native matrix passes.
 - Root typecheck: 44 tasks PASS; lint: 28 tasks PASS; full repository tests:
   27 tasks PASS, including 505 safe-cex files / 7,329 tests. Focused current
@@ -68,10 +64,19 @@ Implementation, phase audits and gate results are appended at stable commits.
   Bybit discovery, worker frame application, actual buffer transfer, main frame
   application and `prepareCliOrder`: stock/ETF/commodity/FX refuse, empty and
   innovation crypto pass, absent and future labels remain unknown.
-- First fresh 20-second public captures: Bybit 17,591 frames / 912 markets,
-  GRVT 4,412 frames. OKX/EEA captures expose empty optional order-type caps on
+- First fresh 20-second public capture: Bybit 17,591 frames / 912 markets.
+  OKX/EEA captures expose empty optional order-type caps on
   inactive preopen rows; native parsing and the independent TS reference are
   being corrected before the public gate is accepted.
 - Final native/combined WASM, public/private replay, artifact-size, adversarial
   PR review and exact-head CI evidence are still required. Live private
   credentials, Hyro origins and combined options connectivity are not claimed.
+
+### Scope reassignment
+
+The user moved item 4 (GRVT non-perpetual products) to
+`feat/rust-grvt-products`. All GRVT product changes, reference hooks, tapes,
+fixtures and product tests were removed from this branch. GRVT retains only
+mechanical absent-IV initializers required by the shared order type. Its
+non-perpetual readiness blocker remains assigned to the separate lane; this PR
+implements items 1–3 only and makes no GRVT retirement decision.
