@@ -5,7 +5,9 @@ use crate::{
     sign,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -30,6 +32,8 @@ struct Job {
     amend_source: Option<String>,
     amend_filled: bool,
     builder_checked: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 enum Step {
     Place(PlaceOrderOpts),
@@ -141,27 +145,23 @@ impl Hyperliquid {
                 Command::SetLeverage {
                     command, leverage, ..
                 } => {
-                    cx.done(
-                        *command,
-                        if *leverage == 1.0 {
-                            Ok("[]".into())
-                        } else {
-                            Err("Hyperliquid spot supports 1x leverage only".into())
-                        },
-                    );
+                    if *leverage == 1.0 {
+                        cx.done(*command, Ok("[]".into()));
+                    } else {
+                        let error = not_sent("Hyperliquid spot supports 1x leverage only");
+                        cx.fail(*command, error.kind(ErrorKind::Unsupported));
+                    }
                     return;
                 }
                 Command::SetMarginType {
                     command, isolated, ..
                 } => {
-                    cx.done(
-                        *command,
-                        if !isolated {
-                            Ok("[]".into())
-                        } else {
-                            Err("Hyperliquid spot supports cross margin only".into())
-                        },
-                    );
+                    if !isolated {
+                        cx.done(*command, Ok("[]".into()));
+                    } else {
+                        let error = not_sent("Hyperliquid spot supports cross margin only");
+                        cx.fail(*command, error.kind(ErrorKind::Unsupported));
+                    }
                     return;
                 }
                 _ => {}
@@ -172,7 +172,7 @@ impl Hyperliquid {
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = self.preflight(cx, &orders) {
-                    cx.done(command, Err(error));
+                    cx.fail(command, not_sent(error));
                     return;
                 }
                 (command, orders.into_iter().map(Step::Place).collect())
@@ -189,7 +189,7 @@ impl Hyperliquid {
                 let orders = match orders {
                     Ok(orders) => orders,
                     Err(error) => {
-                        cx.done(command, Err(error));
+                        cx.fail(command, not_sent(error));
                         return;
                     }
                 };
@@ -219,20 +219,20 @@ impl Hyperliquid {
                     .chain(self.trading.queue.iter())
                     .any(|job| job.amend_source.as_deref() == Some(id.as_str()))
                 {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Hyperliquid order already has an amendment pending".into()),
+                        not_sent("Hyperliquid order already has an amendment pending"),
                     );
                     return;
                 }
                 let Some(old) = cx.store.order(&id).cloned() else {
-                    cx.done(command, Err("Order not found".into()));
+                    cx.fail(command, not_sent("Order not found"));
                     return;
                 };
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Hyperliquid order is not available for amendment".into()),
+                        not_sent("Hyperliquid order is not available for amendment"),
                     );
                     return;
                 }
@@ -282,14 +282,14 @@ impl Hyperliquid {
                 let cloid = match mint_cloid() {
                     Ok(c) => c,
                     Err(e) => {
-                        cx.done(command, Err(e));
+                        cx.fail(command, not_sent(e));
                         return;
                     }
                 };
                 opts.client_order_id = Some(cloid.clone());
                 replacement = Some(cloid);
                 if let Err(error) = self.preflight(cx, std::slice::from_ref(&opts)) {
-                    cx.done(command, Err(error));
+                    cx.fail(command, not_sent(error));
                     return;
                 }
                 amend_source = Some(id);
@@ -329,9 +329,10 @@ impl Hyperliquid {
                 symbol: _,
             } => {
                 if hedged {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Hyperliquid supports one-way positions only".into()),
+                        not_sent("Hyperliquid supports one-way positions only")
+                            .kind(ErrorKind::Unsupported),
                     );
                 } else {
                     cx.store.set_hedged(false);
@@ -343,7 +344,10 @@ impl Hyperliquid {
         };
         if self.options.public_data_only || self.options.secret.as_deref().is_none_or(str::is_empty)
         {
-            cx.done(command, Err("Hyperliquid signing key is missing".into()));
+            cx.fail(
+                command,
+                not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         self.trading.queue.push_back(Job {
@@ -354,6 +358,7 @@ impl Hyperliquid {
             amend_source,
             amend_filled: false,
             builder_checked: false,
+            effective: false,
         });
         self.pump_trades(cx);
     }
@@ -549,7 +554,7 @@ impl Hyperliquid {
             return;
         }
         if job.amend_filled {
-            self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
+            self.finish_trade(cx, Err(not_sent("Hyperliquid amendment source was filled")));
             return;
         }
         if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
@@ -565,7 +570,7 @@ impl Hyperliquid {
         {
             self.finish_trade(
                 cx,
-                Err("Hyperliquid amendment source is no longer open".into()),
+                Err(not_sent("Hyperliquid amendment source is no longer open")),
             );
             return;
         }
@@ -591,7 +596,7 @@ impl Hyperliquid {
         let (action, effect) = match prepared {
             Ok(v) => v,
             Err(error) => {
-                self.finish_trade(cx, Err(error));
+                self.finish_trade(cx, Err(not_sent(error)));
                 return;
             }
         };
@@ -620,7 +625,7 @@ impl Hyperliquid {
             Ok(s) => s,
             Err(error) => {
                 self.restore_cancel(cx, &effect);
-                self.finish_trade(cx, Err(error));
+                self.finish_trade(cx, Err(not_sent(error)));
                 return;
             }
         };
@@ -855,6 +860,7 @@ impl Hyperliquid {
         }
         self.trading.inflight = false;
         let idempotent_cancel = self.trading.active.as_ref().unwrap().amend_source.is_none();
+        let status = result.as_ref().ok().map(|r| r.status);
         let parsed = result.map_err(ReplyError::uncertain).and_then(|r| {
             if (200..300).contains(&r.status) {
                 parse_reply(r.body)
@@ -887,7 +893,20 @@ impl Hyperliquid {
                         self.mark_settings_uncertain(cx, &request.effect);
                     }
                     self.schedule_orders(cx);
-                    self.finish_trade(cx, Err(e.message));
+                    let error = VenueError::new(e.message);
+                    let rejected =
+                        |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+                    let error = match status {
+                        None => error.kind(ErrorKind::Network).outcome(Outcome::Unknown),
+                        // A top-level `status: "err"` is Hyperliquid's explicit refusal.
+                        Some(200..=299) if !e.uncertain => rejected(error, ErrorKind::Rejected),
+                        Some(401) => rejected(error, ErrorKind::AuthInvalid),
+                        Some(403) => rejected(error, ErrorKind::AuthPermission),
+                        Some(429) => rejected(error, ErrorKind::RateLimited),
+                        Some(400..=407 | 409..=499) => rejected(error, ErrorKind::Rejected),
+                        _ => error.outcome(Outcome::Unknown),
+                    };
+                    self.finish_trade(cx, Err(error));
                     return;
                 }
             }
@@ -908,7 +927,7 @@ impl Hyperliquid {
             self.restore_cancel(cx, &request.effect);
             self.mark_settings_uncertain(cx, &request.effect);
             self.schedule_orders(cx);
-            self.finish_trade(cx, Err("Invalid Hyperliquid command response".into()));
+            self.finish_trade(cx, Err(unproven("Invalid Hyperliquid command response")));
             return;
         }
         let errors = statuses
@@ -928,7 +947,15 @@ impl Hyperliquid {
         {
             self.restore_cancel(cx, &request.effect);
             self.schedule_orders(cx);
-            self.finish_trade(cx, Err(errors.join(", ")));
+            // Per-order refusals; other orders in the same answer may have been accepted.
+            let accepted = statuses.iter().any(|s| !matches!(s, Status::Error { .. }));
+            let error = VenueError::new(errors.join(", ")).kind(ErrorKind::Rejected);
+            let error = if accepted {
+                error
+            } else {
+                error.outcome(Outcome::Rejected)
+            };
+            self.finish_trade(cx, Err(error));
             return;
         }
         match request.effect {
@@ -936,7 +963,7 @@ impl Hyperliquid {
                 self.trading.active.as_mut().unwrap().builder_checked = false;
                 if statuses.is_empty() {
                     self.schedule_orders(cx);
-                    self.finish_trade(cx, Err("Invalid response from Hyperliquid API".into()));
+                    self.finish_trade(cx, Err(unproven("Invalid response from Hyperliquid API")));
                     return;
                 }
                 for (index, status) in statuses.into_iter().enumerate() {
@@ -948,7 +975,10 @@ impl Hyperliquid {
                         }
                         _ => {
                             self.schedule_orders(cx);
-                            self.finish_trade(cx, Err("Unknown Hyperliquid order status".into()));
+                            self.finish_trade(
+                                cx,
+                                Err(unproven("Unknown Hyperliquid order status")),
+                            );
                             return;
                         }
                     };
@@ -1020,6 +1050,9 @@ impl Hyperliquid {
                 });
             }
         }
+        if let Some(job) = self.trading.active.as_mut() {
+            job.effective = true;
+        }
         if self.spot {
             self.refresh_account(cx);
         }
@@ -1060,9 +1093,22 @@ impl Hyperliquid {
             }
         }
     }
-    fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), String>) {
+    fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
         self.trading.inflight = false;
         if let Some(job) = self.trading.active.take() {
+            let result = match result {
+                Ok(()) => Ok(()),
+                Err(mut error) => {
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(job.command, error);
+                    self.pump_trades(cx);
+                    return;
+                }
+            };
             cx.done(
                 job.command,
                 result.map(|_| {
@@ -1188,6 +1234,16 @@ fn price_wire(price: f64, amount_step: f64, spot: bool) -> Result<String, String
     let significant = num::adjust(price, significant_step);
     let decimals = (if spot { 8 } else { 6 }) - num::decimals(amount_step) as i32;
     float_wire(num::adjust(significant, 10f64.powi(-decimals)))
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A 2xx answer that does not prove what happened.
+fn unproven(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
 
 #[cfg(test)]

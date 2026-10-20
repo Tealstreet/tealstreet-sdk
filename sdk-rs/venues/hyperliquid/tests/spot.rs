@@ -7,6 +7,7 @@ use safe_cex_engine::{
     SocketId, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::Plain;
 const META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0},{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"0.00093722","markPx":"0.00094","prevDayPx":"0.0009","dayNtlVlm":"937.22"},{"coin":"PURR/USDC","midPx":"0.209265","markPx":"0.14","prevDayPx":"0.20432","dayNtlVlm":"8906.0"}]]"#;
 fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_policy(private, PublicFeedPolicy::Direct)
@@ -25,7 +26,7 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
     assert_eq!(support::kind(&r), "spotMetaAndAssetCtxs");
     support::reply(&mut e, &r, 200, META);
     let mut socket = None;
-    for a in e.drain_actions().collect::<Vec<_>>() {
+    for a in e.drain_plain().collect::<Vec<_>>() {
         match a {
             Action::WsConnect {
                 socket: s, channel, ..
@@ -60,7 +61,7 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
     (e, s)
 }
 fn take_http(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
+    e.drain_plain()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -92,7 +93,7 @@ fn metadata_joins_by_coin_and_uses_token_size_precision() {
 fn spot_subscriptions_exclude_perpetual_channels() {
     let (mut e, _) = ready(true);
     let messages = e
-        .drain_actions()
+        .drain_plain()
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(text)
@@ -172,7 +173,7 @@ fn order(symbol: &str) -> PlaceOrderOpts {
 #[test]
 fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         2000.,
         Event::Command(Command::PlaceOrders {
@@ -180,7 +181,7 @@ fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     let (at, receipts) = actions
         .iter()
         .enumerate()
@@ -215,7 +216,7 @@ fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
 #[test]
 fn signed_spot_order_uses_shifted_asset_and_eight_decimal_cap() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         2000.0,
         Event::Command(Command::PlaceOrders {
@@ -240,7 +241,7 @@ fn signed_spot_order_uses_shifted_asset_and_eight_decimal_cap() {
 #[test]
 fn standalone_spot_triggers_are_rejected_before_write() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     let mut o = order("HFUN/USDC");
     o.kind = OrderType::StopLoss;
     e.handle(
@@ -250,7 +251,7 @@ fn standalone_spot_triggers_are_rejected_before_write() {
             orders: vec![o],
         }),
     );
-    assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(!e.drain_plain().any(|a| matches!(a, Action::Http(_))));
 }
 
 #[test]
@@ -273,7 +274,7 @@ fn documented_contexts_without_coin_follow_metadata_order() {
 #[test]
 fn spot_books_subscribe_all_tiers_and_append_only_worse_levels() {
     let (mut e, s) = ready(false);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         2000.0,
         Event::Command(Command::SubscribeOrderBook {
@@ -281,7 +282,7 @@ fn spot_books_subscribe_all_tiers_and_append_only_worse_levels() {
         }),
     );
     let subscriptions = e
-        .drain_actions()
+        .drain_plain()
         .filter(|a| matches!(a, Action::WsSend { .. }))
         .count();
     assert_eq!(subscriptions, 5);
@@ -335,7 +336,7 @@ fn spot_currency_valuation_resolves_native_token_id_aliases() {
 #[test]
 fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     let mut o = order("HFUN/USDC");
     o.reduce_only = Some(true);
     o.stop_loss = Some(0.0008);
@@ -366,7 +367,7 @@ fn spot_zero_bracket_prices_disable_only_the_requested_child() {
         (0.18, 0.0, vec!["sl"]),
     ] {
         let (mut e, _) = ready(true);
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         let mut o = order("PURR/USDC");
         o.stop_loss = Some(stop);
         o.take_profit = Some(take);
@@ -406,7 +407,7 @@ fn spot_zero_bracket_prices_disable_only_the_requested_child() {
 fn spot_invalid_bracket_prices_still_reject_the_batch_before_writes() {
     for trigger in [-0.1, f64::NAN, f64::INFINITY] {
         let (mut e, _) = ready(true);
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         let mut bad = order("PURR/USDC");
         bad.stop_loss = Some(trigger);
         e.handle(
@@ -416,7 +417,7 @@ fn spot_invalid_bracket_prices_still_reject_the_batch_before_writes() {
                 orders: vec![order("PURR/USDC"), bad],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
@@ -427,7 +428,7 @@ fn spot_invalid_bracket_prices_still_reject_the_batch_before_writes() {
 #[test]
 fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     let mut o = order("PURR/USDC");
     o.kind = OrderType::Market;
     o.amount = 10.0;
@@ -447,7 +448,7 @@ fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
 #[test]
 fn spot_history_matches_inherited_empty_capabilities_without_private_reads() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     for query in [
         Query::Fills {
             symbol: None,
@@ -471,7 +472,7 @@ fn spot_history_matches_inherited_empty_capabilities_without_private_reads() {
         },
     ] {
         e.handle(3000.0, Event::Command(Command::Query { command: 1, query }));
-        let a = e.drain_actions().collect::<Vec<_>>();
+        let a = e.drain_plain().collect::<Vec<_>>();
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             a.iter().any(
@@ -483,7 +484,7 @@ fn spot_history_matches_inherited_empty_capabilities_without_private_reads() {
 #[test]
 fn spot_fixed_settings_do_not_issue_perpetual_leverage_actions() {
     let (mut e, _) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     for command in [
         Command::SetLeverage {
             command: 1,
@@ -498,7 +499,7 @@ fn spot_fixed_settings_do_not_issue_perpetual_leverage_actions() {
         },
     ] {
         e.handle(3000.0, Event::Command(command));
-        let a = e.drain_actions().collect::<Vec<_>>();
+        let a = e.drain_plain().collect::<Vec<_>>();
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(a.iter().any(|a| matches!(
             a,
@@ -510,7 +511,7 @@ fn spot_fixed_settings_do_not_issue_perpetual_leverage_actions() {
 #[test]
 fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
     let (mut e, _) = ready(false);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         10_000.0,
         Event::Command(Command::FetchCandles {
@@ -532,7 +533,7 @@ fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
         200,
         r#"[{"t":1000,"o":"1","h":"2","l":"0.5","c":"1.5","v":"10"}]"#,
     );
-    assert!(e.drain_actions().any(
+    assert!(e.drain_plain().any(
         |a| matches!(a,Action::Notice(Notice::CommandDone{result:Ok(s),..})if s.contains("1.5"))
     ));
 }
@@ -551,7 +552,7 @@ fn acknowledge(e: &mut Engine<Hyperliquid>, r: &HttpRequest, now: f64, body: &st
 }
 fn placed() -> (Engine<Hyperliquid>, SocketId) {
     let (mut e, s) = ready(true);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         3000.0,
         Event::Command(Command::PlaceOrders {
@@ -566,7 +567,7 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
         3001.0,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":101}}]}}}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     (e, s)
 }
 #[test]
@@ -612,7 +613,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
     let timer = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
@@ -664,7 +665,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
         5002.0,
         r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
     );
-    let a = e.drain_actions().collect::<Vec<_>>();
+    let a = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !a.iter()
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("/exchange")))
@@ -699,7 +700,7 @@ fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
             },
         );
         assert!(e.store().markets().is_empty());
-        let timer = e.drain_actions().find_map(|a| {
+        let timer = e.drain_plain().find_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
             } else {
@@ -719,7 +720,7 @@ fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
 fn fills_before_resting_ack_preserve_native_executed_quantity() {
     for (sizes, remaining) in [(vec![6208.0], 0.0), (vec![1000.0, 2000.0], 3208.0)] {
         let (mut e, s) = ready(true);
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         e.handle(
             3000.0,
             Event::Command(Command::PlaceOrders {
@@ -761,7 +762,7 @@ fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values(
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
     let socket = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::WsConnect { socket, url, .. } = a {
                 assert_eq!(url, "wss://api.hyperliquid.xyz/ws");
@@ -772,7 +773,7 @@ fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values(
         })
         .unwrap();
     e.handle(1000.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         2000.0,
         Event::Command(Command::SubscribeOrderBook {
@@ -780,7 +781,7 @@ fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values(
         }),
     );
     let messages = e
-        .drain_actions()
+        .drain_plain()
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(serde_json::from_str::<serde_json::Value>(&text).unwrap())
@@ -848,7 +849,7 @@ fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, meta);
     let socket = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
                 Some(socket)
@@ -858,7 +859,7 @@ fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
         })
         .unwrap();
     e.handle(1000.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     (e, socket)
 }
 #[test]
@@ -881,7 +882,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
             }),
         );
         let messages = e
-            .drain_actions()
+            .drain_plain()
             .filter_map(|a| {
                 if let Action::WsSend { text, .. } = a {
                     Some(serde_json::from_str::<serde_json::Value>(&text).unwrap())
@@ -899,7 +900,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 interval: safe_cex_engine::model::Interval::M1,
             }),
         );
-        assert!(e.drain_actions().any(|a|matches!(a,Action::WsSend{text,..}if serde_json::from_str::<serde_json::Value>(&text).unwrap()["subscription"]["coin"]==coin)));
+        assert!(e.drain_plain().any(|a|matches!(a,Action::WsSend{text,..}if serde_json::from_str::<serde_json::Value>(&text).unwrap()["subscription"]["coin"]==coin)));
         e.handle(
             2000.0,
             Event::Command(Command::FetchCandles {
@@ -1043,7 +1044,7 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
             ..Options::default()
         }));
         e.start(1000.0);
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(
             actions
                 .iter()
@@ -1071,7 +1072,7 @@ fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
     e.start(1000.0);
     let request = take_http(&mut e);
     support::reply(&mut e, &request, 200, META);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -1113,7 +1114,7 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
         e.start(1000.0);
         let r = take_http(&mut e);
         support::reply(&mut e, &r, 200, META);
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(
             !actions
                 .iter()
@@ -1180,7 +1181,7 @@ fn spot_fill_frames_keep_native_order_identity_and_each_distinct_execution() {
 fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only() {
     for policy in [PublicFeedPolicy::Disabled, PublicFeedPolicy::Shared] {
         let (mut e, socket) = ready_with_policy(true, policy);
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.drain_plain().collect();
         let assert_topics = |actions: &[Action]| {
             let mut topics: Vec<String> = actions
                 .iter()
@@ -1221,7 +1222,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
         ] {
             e.handle(2000., Event::Command(command));
         }
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = e.drain_plain().collect();
         assert!(
             !actions
                 .iter()
@@ -1249,7 +1250,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
         {
             let (timer, at) = timers.swap_remove(index);
             e.handle(at, Event::TimerFired { timer });
-            for a in e.drain_actions() {
+            for a in e.drain_plain() {
                 match a {
                     Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                     Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
@@ -1261,7 +1262,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
         assert!(pinged);
         e.handle(17000., Event::WsClosed { socket, code: 1006 });
         let (reconnect, at) = e
-            .drain_actions()
+            .drain_plain()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if (17750. ..=18000.).contains(&at_ms) => {
                     Some((timer, at_ms))
@@ -1271,7 +1272,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             .unwrap();
         e.handle(at, Event::TimerFired { timer: reconnect });
         let next = e
-            .drain_actions()
+            .drain_plain()
             .find_map(|a| match a {
                 Action::WsConnect {
                     socket,
@@ -1283,7 +1284,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             })
             .unwrap();
         e.handle(at, Event::WsOpened { socket: next });
-        assert_topics(&e.drain_actions().collect::<Vec<_>>());
+        assert_topics(&e.drain_plain().collect::<Vec<_>>());
     }
 }
 
@@ -1292,7 +1293,7 @@ fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings
     let state = r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"USDC","token":0,"hold":"3","total":"20"},{"coin":"UPURR","token":1,"hold":"1","total":"10"}]}}}"#;
     for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Shared] {
         let (mut e, socket) = ready_with_policy(true, policy);
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         let balance = e.store().balance().clone();
         let raw = e.store().currency_balances().unwrap().to_vec();
         if policy == PublicFeedPolicy::Direct {
@@ -1364,7 +1365,7 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
     support::reply(&mut e, &r, 200, META);
     let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":77,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
     let mut sync = None;
-    for a in e.drain_actions().collect::<Vec<_>>() {
+    for a in e.drain_plain().collect::<Vec<_>>() {
         match a {
             Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
                 support::reply(&mut e, &r, 200, rows);
@@ -1387,7 +1388,7 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
         },
     );
     let reads: Vec<_> = e
-        .drain_actions()
+        .drain_plain()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1416,7 +1417,7 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
     support::reply(&mut e, &r, 200, META);
     let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":78,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
     let (mut sync, mut socket) = (None, None);
-    for a in e.drain_actions().collect::<Vec<_>>() {
+    for a in e.drain_plain().collect::<Vec<_>>() {
         match a {
             Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
                 support::reply(&mut e, &r, 200, rows);
@@ -1432,7 +1433,7 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
     }
     let socket = socket.unwrap();
     e.handle(1000.0, Event::WsOpened { socket });
-    for a in e.drain_actions().collect::<Vec<_>>() {
+    for a in e.drain_plain().collect::<Vec<_>>() {
         match a {
             Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
                 support::reply(&mut e, &r, 200, rows);
@@ -1449,7 +1450,7 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
         },
     );
     let stale = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => Some(r),
             _ => None,

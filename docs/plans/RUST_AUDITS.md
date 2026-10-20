@@ -936,7 +936,7 @@ Mostly matches TS.
   real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
+- Per-coin balances missing on ~~Bybit~~ (#1379), ~~Crypto.com~~, ~~Bitrue~~;
   ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
   balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - ~~Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
@@ -944,7 +944,11 @@ Mostly matches TS.
   `engine::fence::StaleGuard` (commit after two consecutive discards, then re-read)
   on Bitrue, Backpack, BingX (balance, position mode), Kraken Spot, KuCoin Spot,
   Orderly (balance only), Polymarket and WOO; WEEX balance reads no longer fence.
-  Bybit Hyro is fixed by its owning lane.
+  - ~~Bybit Hyro: a ready session's periodic snapshot is discarded on every order/position
+    frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
+    reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
+    admitted with a warning instead of reconnecting, in initial recovery too, and the
+    next tick reconciles again.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
