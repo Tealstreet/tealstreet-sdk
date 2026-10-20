@@ -363,7 +363,7 @@ impl Lighter {
             }
             Err(error) => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()))
+                    cx.done(c, Err(error))
                 }
             }
         }

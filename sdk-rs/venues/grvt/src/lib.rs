@@ -990,7 +990,7 @@ impl Venue for Grvt {
             .candle_sockets
             .iter()
             .find(|(_, c)| c.supervisor.owns_timer(timer))
-            .map(|(i, _)| i.clone())
+            .map(|(i, _)| *i)
         {
             let c = self
                 .candle_sockets
@@ -1175,7 +1175,7 @@ impl Venue for Grvt {
                 let body = serde_json::to_string(&Body {
                     i: &m.id,
                     t: "TRADE",
-                    interval: &i,
+                    interval: i,
                     st: from_ms.map(|v| format!("{:.0}", v * 1e6)),
                     et: to_ms.map(|v| format!("{:.0}", v * 1e6)),
                     l: limit.unwrap_or(500).clamp(1, 1000),

@@ -2,8 +2,8 @@
 //! embedding application; clients can neither create accounts nor set credentials.
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::model::Interval;
 use safe_cex_engine::command::HostInput;
+use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};

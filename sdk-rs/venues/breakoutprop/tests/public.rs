@@ -550,7 +550,7 @@ fn synthetic_candle_interval(interval: &str, seconds: f64) {
     let mut rig = Rig::defaults();
     rig.command(Command::SubscribeCandles {
         symbol: "ETHUSD".into(),
-        interval: interval.into(),
+        interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
     });
     rig.boot();
     assert!(
@@ -607,7 +607,7 @@ fn synthetic_candle_interval(interval: &str, seconds: f64) {
     );
     rig.command(Command::UnsubscribeCandles {
         symbol: "ETHUSD".into(),
-        interval: interval.into(),
+        interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
     });
     let request = rig.next_request();
     rig.reply(&request, 200, QUOTES);

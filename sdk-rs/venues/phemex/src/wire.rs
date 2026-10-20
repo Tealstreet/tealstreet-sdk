@@ -252,8 +252,11 @@ pub struct Envelope<'a> {
 /// Phemex kline resolution in seconds.
 pub fn resolution(i: Interval) -> Option<u32> {
     use Interval::*;
-    matches!(i, M1 | M3 | M5 | M15 | M30 | H1 | H2 | H3 | H4 | H6 | H12 | D1 | W1 | Mo1)
-        .then(|| (i.ms() / 1000.0) as u32)
+    matches!(
+        i,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H3 | H4 | H6 | H12 | D1 | W1 | Mo1
+    )
+    .then(|| (i.ms() / 1000.0) as u32)
 }
 
 /// Encode venue-native symbols without letting a command add query parameters.

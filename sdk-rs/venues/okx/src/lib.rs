@@ -546,10 +546,7 @@ impl Okx {
             };
             if let Some(m) = cx.store.market_by_id(message.arg.inst_id) {
                 let symbol = m.symbol.clone();
-                if !self
-                    .candles
-                    .contains_key(&(symbol.clone(), interval))
-                {
+                if !self.candles.contains_key(&(symbol.clone(), interval)) {
                     return;
                 }
                 let _ = json::each::<Vec<&str>>(data.get(), |row| {
@@ -1144,10 +1141,7 @@ impl Venue for Okx {
                     cx.log(LogLevel::Error, interval.unsupported("OKX"));
                     return;
                 };
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval))
-                    .or_default();
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(m) = cx.store.market(&symbol)
@@ -1202,10 +1196,7 @@ impl Venue for Okx {
                 let limit = explicit_limit.unwrap_or(300).min(300);
                 let end = to_ms.unwrap_or(cx.now);
                 let Some(default_start) = subtract_bars(end, interval, limit) else {
-                    cx.done(
-                        command,
-                        Err(interval.unsupported("OKX")),
-                    );
+                    cx.done(command, Err(interval.unsupported("OKX")));
                     return;
                 };
                 let before = if explicit_limit.is_none() {
@@ -1316,7 +1307,9 @@ const BARS: [(Interval, &str); 13] = [
     (Interval::Mo1, "1Mutc"),
 ];
 fn bar(interval: Interval) -> Option<&'static str> {
-    BARS.iter().find(|(i, _)| *i == interval).map(|(_, bar)| *bar)
+    BARS.iter()
+        .find(|(i, _)| *i == interval)
+        .map(|(_, bar)| *bar)
 }
 fn interval_for_bar(value: &str) -> Option<Interval> {
     BARS.iter().find(|(_, bar)| *bar == value).map(|(i, _)| *i)

@@ -36,7 +36,7 @@ fn seconds_and_three_minute_streams_use_trades_and_roll_over() {
             1000.,
             Event::Command(Command::SubscribeCandles {
                 symbol: SYMBOL.into(),
-                interval: interval.into(),
+                interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
             }),
         );
         let subscriptions: Vec<_> = e
@@ -126,7 +126,7 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
             Event::Command(Command::FetchCandles {
                 command: 42,
                 symbol: SYMBOL.into(),
-                interval: interval.into(),
+                interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
                 limit: Some(2),
                 from_ms: None,
                 to_ms: None,

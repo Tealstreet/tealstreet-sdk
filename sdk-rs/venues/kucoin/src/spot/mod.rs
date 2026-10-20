@@ -585,7 +585,7 @@ impl KucoinSpot {
                 .candles
                 .keys()
                 .find(|(s, i)| s == symbol && interval(*i).is_ok_and(|(_, v)| v == native))
-                .map(|(_, i)| i.clone())
+                .map(|(_, i)| *i)
             else {
                 return;
             };
@@ -1243,10 +1243,7 @@ impl Venue for KucoinSpot {
                 to_ms,
             } => {
                 let Ok((minutes, native)) = interval(i) else {
-                    cx.done(
-                        command,
-                        Err(i.unsupported("KuCoin Spot")),
-                    );
+                    cx.done(command, Err(i.unsupported("KuCoin Spot")));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);

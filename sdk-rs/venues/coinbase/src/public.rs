@@ -1,7 +1,7 @@
 use crate::{Coinbase, Pending, ProductKind, wire::*};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
@@ -65,7 +65,7 @@ pub(crate) struct Public {
     retry: Option<TimerId>,
     kind: Option<ProductKind>,
     pub books: HashMap<String, Depth>,
-    candles: HashMap<(String, String), (u32, Option<Candle>)>,
+    candles: HashMap<(String, Interval), (u32, Option<Candle>)>,
     products: HashMap<String, (f64, f64)>,
     daily: HashMap<String, Daily>,
     daily_generation: u64,
@@ -134,18 +134,21 @@ pub(crate) fn ws_symbol(symbol: &str) -> String {
         symbol.into()
     }
 }
-fn interval(s: &str) -> Option<(&'static str, f64)> {
-    Some(match s {
-        "1m" => ("ONE_MINUTE", 60.),
-        "5m" => ("FIVE_MINUTE", 300.),
-        "15m" => ("FIFTEEN_MINUTE", 900.),
-        "30m" => ("THIRTY_MINUTE", 1800.),
-        "1h" => ("ONE_HOUR", 3600.),
-        "2h" => ("TWO_HOUR", 7200.),
-        "6h" => ("SIX_HOUR", 21600.),
-        "1d" => ("ONE_DAY", 86400.),
+/// Coinbase REST granularity and its seconds.
+fn interval(i: Interval) -> Option<(&'static str, f64)> {
+    use Interval::*;
+    let granularity = match i {
+        M1 => "ONE_MINUTE",
+        M5 => "FIVE_MINUTE",
+        M15 => "FIFTEEN_MINUTE",
+        M30 => "THIRTY_MINUTE",
+        H1 => "ONE_HOUR",
+        H2 => "TWO_HOUR",
+        H6 => "SIX_HOUR",
+        D1 => "ONE_DAY",
         _ => return None,
-    })
+    };
+    Some((granularity, i.ms() / 1000.))
 }
 fn candle(row: CandleRow) -> Option<Candle> {
     (row.start >= 0.
@@ -521,9 +524,9 @@ impl Coinbase {
         }
         // Longer chart intervals retain TS's daily source-candle contract.
         for ((market, interval), (_, last)) in &mut self.public.candles {
-            if market == symbol && interval_seconds(interval).is_some_and(|s| s >= 86400.) {
+            if market == symbol && interval_seconds(*interval) >= 86400. {
                 *last = Some(total);
-                cx.candle(symbol, interval, total);
+                cx.candle(symbol, *interval, total);
             }
         }
     }
@@ -1249,7 +1252,7 @@ impl Coinbase {
                             .cloned()
                             .collect();
                         for (symbol, interval) in keys {
-                            let seconds = interval_seconds(&interval).unwrap_or(0.);
+                            let seconds = interval_seconds(interval);
                             if seconds < 300. {
                                 continue;
                             }
@@ -1258,10 +1261,10 @@ impl Coinbase {
                             } else {
                                 self.public
                                     .candles
-                                    .get_mut(&(symbol.clone(), interval.clone()))
+                                    .get_mut(&(symbol.clone(), interval))
                                     .unwrap()
                                     .1 = Some(c);
-                                cx.candle(&symbol, &interval, c);
+                                cx.candle(&symbol, interval, c);
                             }
                         }
                     }
@@ -1287,7 +1290,7 @@ impl Coinbase {
                             continue;
                         }
                         for ((symbol, interval), (count, last)) in &mut self.public.candles {
-                            let seconds = interval_seconds(interval).unwrap_or(0.);
+                            let seconds = interval_seconds(*interval);
                             if *count == 0
                                 || seconds == 0.
                                 || seconds >= 86400.
@@ -1309,7 +1312,7 @@ impl Coinbase {
                                     ..old
                                 };
                                 *last = Some(next);
-                                cx.candle(symbol, interval, next);
+                                cx.candle(symbol, *interval, next);
                                 continue;
                             }
                             let bucket = (time / seconds).floor() * seconds;
@@ -1332,7 +1335,7 @@ impl Coinbase {
                                 },
                             };
                             *last = Some(next);
-                            cx.candle(symbol, interval, next);
+                            cx.candle(symbol, *interval, next);
                         }
                     }
                 }
@@ -1433,15 +1436,13 @@ impl Coinbase {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if interval_seconds(&interval).is_none() || cx.store.market(&symbol).is_none() {
-                    return None;
-                }
+                cx.store.market(&symbol)?;
                 let first = !self
                     .public
                     .candles
                     .keys()
                     .any(|(s, _)| ws_symbol(s) == ws_symbol(&symbol));
-                let daily = interval_seconds(&interval).is_some_and(|s| s >= 86400.);
+                let daily = interval_seconds(interval) >= 86400.;
                 self.public
                     .candles
                     .entry((symbol.clone(), interval))
@@ -1474,10 +1475,9 @@ impl Coinbase {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.public.candles.remove(&key);
-                        if interval_seconds(&key.1).is_some_and(|s| s >= 86400.)
+                        if interval_seconds(key.1) >= 86400.
                             && !self.public.candles.keys().any(|(market, interval)| {
-                                market == &symbol
-                                    && interval_seconds(interval).is_some_and(|s| s >= 86400.)
+                                market == &symbol && interval_seconds(*interval) >= 86400.
                             })
                             && let Some(state) = self.public.daily.remove(&symbol)
                             && let Some(timer) = state.retry
@@ -1504,7 +1504,7 @@ impl Coinbase {
                 from_ms,
                 to_ms,
             } => {
-                let Some((granularity, seconds)) = interval(&timeframe) else {
+                let Some((granularity, seconds)) = interval(timeframe) else {
                     cx.done(command, Err("Unsupported Coinbase candle interval".into()));
                     return None;
                 };
@@ -1548,29 +1548,9 @@ impl Coinbase {
         None
     }
 }
-fn interval_seconds(s: &str) -> Option<f64> {
-    Some(match s {
-        "1s" => 1.,
-        "5s" => 5.,
-        "15s" => 15.,
-        "30s" => 30.,
-        "3m" => 180.,
-        "3h" => 10800.,
-        "4h" => 14400.,
-        "5h" => 18000.,
-        "7h" => 25200.,
-        "8h" => 28800.,
-        "9h" => 32400.,
-        "10h" => 36000.,
-        "11h" => 39600.,
-        "12h" => 43200.,
-        "24h" => 86400.,
-        "2d" => 172800.,
-        "3d" => 259200.,
-        "1w" => 604800.,
-        "1M" => 2592000.,
-        _ => return interval(s).map(|(_, seconds)| seconds),
-    })
+// Live candles are built from the ticker, so every interval is served.
+fn interval_seconds(i: Interval) -> f64 {
+    i.ms() / 1000.
 }
 
 fn display_round(value: f64) -> f64 {

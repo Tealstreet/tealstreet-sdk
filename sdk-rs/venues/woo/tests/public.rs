@@ -567,23 +567,17 @@ fn failed_market_page_cannot_poison_price_caps_after_retry() {
     assert_eq!(e.venue().price_range("BTCUSDT"), None);
     assert_eq!(e.store().markets().len(), 1);
 }
+// Unknown spellings never reach the venue: the command decoder rejects them.
 #[test]
-fn unicode_and_invalid_candle_inputs_do_not_panic_or_write() {
+fn unicode_and_invalid_candle_inputs_are_rejected_before_the_venue() {
     for interval in ["日", "", "0m", "NaNm"] {
-        let (mut e, _) = started();
-        e.drain_actions().for_each(drop);
-        e.handle(
-            40.0,
-            Event::Command(Command::FetchCandles {
-                command: 9,
-                symbol: "BTCUSDT".into(),
-                interval: interval.into(),
-                limit: None,
-                from_ms: None,
-                to_ms: None,
-            }),
+        let json = format!(
+            r#"{{"op":"fetchCandles","command":9,"symbol":"BTCUSDT","interval":"{interval}"}}"#
         );
-        assert!(result(&mut e).is_err());
+        assert!(
+            safe_cex_engine::command::decode_command(&json).is_err(),
+            "{interval}"
+        );
     }
 }
 #[test]

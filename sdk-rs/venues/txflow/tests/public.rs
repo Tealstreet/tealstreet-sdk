@@ -665,7 +665,7 @@ fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
             3000.0,
             Event::Command(Command::SubscribeCandles {
                 symbol: "BTC-USDC".into(),
-                interval: interval.into(),
+                interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
             }),
         );
     }
@@ -803,7 +803,7 @@ fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnec
                 3000.0,
                 Event::Command(Command::SubscribeCandles {
                     symbol: "BTC-USDC".into(),
-                    interval: interval.into(),
+                    interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
                 }),
             );
         }

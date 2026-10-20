@@ -723,12 +723,7 @@ impl Paradex {
                     .candles
                     .iter()
                     .map(|((symbol, interval), state)| {
-                        (
-                            symbol.clone(),
-                            interval,
-                            state.generation,
-                            state.revision,
-                        )
+                        (symbol.clone(), interval, state.generation, state.revision)
                     })
                     .collect();
                 for (symbol, interval, generation, revision) in queued {
@@ -937,7 +932,7 @@ impl Paradex {
                 let Some(state) = self
                     .public
                     .candles
-                    .get_mut(&(symbol.into(), interval.into()))
+                    .get_mut(&(symbol.into(), interval))
                     .filter(|s| s.generation == generation)
                 else {
                     return;
@@ -1024,7 +1019,7 @@ impl Paradex {
             self.public.candles.iter_mut().find_map(|((s, i), state)| {
                 if state.timer == Some(timer) {
                     state.timer = None;
-                    Some((s.clone(), i.clone(), state.generation, state.revision))
+                    Some((s.clone(), *i, state.generation, state.revision))
                 } else {
                     None
                 }
@@ -1096,11 +1091,7 @@ impl Paradex {
                     );
                     return None;
                 }
-                if let Some(state) = self
-                    .public
-                    .candles
-                    .get_mut(&(symbol.clone(), interval))
-                {
+                if let Some(state) = self.public.candles.get_mut(&(symbol.clone(), interval)) {
                     state.subscribers += 1;
                     return None;
                 }

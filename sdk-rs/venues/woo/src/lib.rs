@@ -7,7 +7,7 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
     num,
@@ -90,7 +90,7 @@ pub struct Woo {
     rest: &'static str,
     public: Connection,
     depth: HashMap<String, Depth>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
     funding: Option<TimerId>,
     seed_retry: Option<(TimerId, bool)>,
@@ -468,7 +468,9 @@ impl Woo {
             }
             let ms = interval.ms();
             let start = (time / ms).floor() * ms / 1000.0;
-            if interval.as_str().ends_with('s') && state.last.as_ref().is_none_or(|c| c.timestamp != start) {
+            if interval.as_str().ends_with('s')
+                && state.last.as_ref().is_none_or(|c| c.timestamp != start)
+            {
                 if state.last.as_ref().is_some_and(|c| c.timestamp > start) {
                     continue;
                 }
@@ -671,7 +673,8 @@ impl Venue for Woo {
                 let symbol = compact(symbol);
                 if kind == "orderbookupdate" {
                     self.depth_message(cx, &symbol, msg.ts, data.get());
-                } else if let Some(interval) = kind.strip_prefix("kline_").and_then(Interval::parse) {
+                } else if let Some(interval) = kind.strip_prefix("kline_").and_then(Interval::parse)
+                {
                     if let Ok(raw) = serde_json::from_str(data.get()) {
                         self.stream_candle(cx, &symbol, interval, raw);
                     }
@@ -1095,10 +1098,7 @@ impl Venue for Woo {
                     return;
                 };
                 let trade = self.candles.keys().any(|(s, _)| s == &symbol);
-                let state = self
-                    .candles
-                    .entry((symbol.clone(), interval))
-                    .or_default();
+                let state = self.candles.entry((symbol.clone(), interval)).or_default();
                 state.count += 1;
                 if state.count > 1 {
                     return;
