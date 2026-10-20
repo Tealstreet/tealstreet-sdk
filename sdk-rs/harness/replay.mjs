@@ -683,7 +683,7 @@ writeFileSync(
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands.map((result, index) => venue.commandResult?.(result,
-      records.filter((record) => record.type === 'command')[index]) ?? result),
+      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
   }),
 );
 realClearTimeout(replayDeadline);

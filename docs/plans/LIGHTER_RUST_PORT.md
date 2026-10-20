@@ -134,3 +134,22 @@ bans pass. Harness coverage is 158 tests, including 11 Lighter verifier/oracle
 regressions. All four original public-review regressions are retained alongside
 the new candle race test in its own file. Remaining work is final replay and
 workspace gates, PR adversarial reviews, CI and merge.
+
+### Harness phase accepted
+
+Independent harness review found and fixed two P1 issues: command results could
+reuse another command's acknowledged generated ID, and the fill oracle could
+lose inherited market identity or ignore trades beside an empty fills array.
+Results now bind exact ID order/cardinality to each command's acknowledged
+creations. The oracle derives canonical identity only from recorded metadata and
+execution rows, combines both sources and preserves lossless trade IDs. Query
+and header auth are verified independently before matching. All 163 harness
+regressions pass, including prior-command IDs, reversed/missing/extra batch IDs,
+actual Tape command ordinals and forged signatures. Review accepted.
+
+Public gate PASS: 8,875 replayed WS frames, 213 markets/tickers, two books;
+TS/Rust CPU 590.3/434.2 ms (1.36x), steady 407.4/280.5 ms (1.45x), retained
+3.0/1.8 MB (1.66x). Single-venue Wasm: 961,231 bytes against 1,258,291.
+Private latest PASS: 14 events, eight commands, 11 tx in ten writes;
+TS/Rust CPU 164.2/171.8 ms (private correctness only), retained 1.2/0.9 MB.
+Landing advanced to Bitrue/transport integration; merge it before final proof.

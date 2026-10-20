@@ -168,7 +168,7 @@ export const VENUES = {
     verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
     verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
     validateMatchedRequest: (record, request) => lighterVerifier?.matched(record, request),
-    commandResult: (result, command) => lighterVerifier?.commandResult(result, command) ?? result,
+    commandResult: (result, command, index) => lighterVerifier?.commandResult(result, command, index) ?? result,
     compareFillPrices: true,
     compareWriteOrder: true,
   },

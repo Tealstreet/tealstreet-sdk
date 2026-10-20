@@ -39,7 +39,7 @@ test('only matched successful acknowledgements consume generated order identity'
  assert.equal(v.request({method:'POST',url,body,now}),false);
  assert.throws(()=>v.matched({url,body:'{"code":200,"tx_hash":"ack"}'},{body}),/reused/);
  assert.deepEqual(v.commandResult({ok:['123']},{op:'placeOrders'}),{ok:['<generated>']});
- assert.throws(()=>v.commandResult({ok:['999']},{op:'placeOrders'}),/never signed/);
+ assert.throws(()=>v.commandResult({ok:['999']},{op:'placeOrders'}),/this command/);
 });
 test('private REST auth and authenticated subscription require real valid tokens',()=>{
  const v=verifier(),token=sample('auth').result;
@@ -80,7 +80,7 @@ test('fill oracle uses recorded execution IDs and remains independent of incorre
 test('malformed acknowledgements cannot validate generated command result IDs',()=>{
  for(const reply of [{code:200},{code:200,tx_hash:''},{code:200,tx_hash:[]},{code:200,tx_hash:['one','two']}]){
   const v=verifier(),body=form();v.matched({url,body:JSON.stringify(reply)},{body});
-  assert.throws(()=>v.commandResult({ok:['123']},{op:'placeOrders'}),/never signed/);
+  assert.throws(()=>v.commandResult({ok:['123']},{op:'placeOrders'}),/this command/);
  }
 });
 test('batch identity reuse is rejected before response matching or consumption',()=>{
@@ -101,4 +101,65 @@ test('execution oracle deduplicates snapshot overlap but keeps distinct same-siz
  fixLighterFills(account,[record('subscribed/account_all',[fill('old')]),record('update/account_all',[fill('old'),fill('one'),fill('two')]),record('update/account_all',[{...fill('one'),fillId:undefined}])]);
  assert.equal(account.fills.length,2);
  assert.equal(account.fills.reduce((n,fill)=>n+fill.amount,0),1);
+});
+test('account-scoped history must carry valid auth bound to the requested account',()=>{
+ const v=verifier(),token=sample('auth').result;
+ for(const route of ['trades','positionFunding','accountInactiveOrders']){
+  const url='https://mainnet.zklighter.elliot.ai/api/v1/'+route+'?account_index=42';
+  assert.equal(v.request({method:'GET',url,now}),false);
+  assert.equal(v.request({method:'GET',url,headers:{authorization:token},now}),true);
+  assert.equal(v.request({method:'GET',url:url.replace('42','43'),headers:{authorization:token},now}),false);
+ }
+ assert.equal(v.request({method:'GET',url:'https://mainnet.zklighter.elliot.ai/api/v1/trades?market_id=1',now}),true);
+});
+test('each command result binds its own acknowledged IDs, cardinality and order',()=>{
+ const v=verifier();
+ const batch=new URLSearchParams(form('create-batch'));
+ const second=new URLSearchParams({tx_type:'14',tx_info:JSON.parse(batch.get('tx_infos'))[1]}).toString();
+ const ack={url,body:'{"code":200,"tx_hash":"ack"}'};
+ v.matched(ack,{body:form(),commandIndex:2});v.matched(ack,{body:second,commandIndex:3});
+ const command={op:'placeOrders'};
+ assert.deepEqual(v.commandResult({ok:['123']},command,2),{ok:['<generated>']});
+ assert.deepEqual(v.commandResult({ok:['124']},command,3),{ok:['<generated>']});
+ for(const ids of [['123'],[],['124','124']])assert.throws(()=>v.commandResult({ok:ids},command,3),/this command/);
+ const b=verifier();b.matched({url:url+'Batch',body:'{"code":200,"tx_hash":["one","two"]}'},{body:form('create-batch'),commandIndex:4});
+ assert.deepEqual(b.commandResult({ok:['123','124']},command,4),{ok:['<generated>','<generated>']});
+ assert.throws(()=>b.commandResult({ok:['124','123']},command,4),/this command/);
+ assert.deepEqual(b.commandResult({ok:[]},command,9),{ok:[]});
+});
+test('fill oracle inherits market keys and combines both execution sources by canonical market',()=>{
+ const metadata={type:'http',method:'GET',url:'https://example.test/api/v1/orderBookDetails',status:200,body:'{"order_book_details":[{"market_id":1,"symbol":"ETH"}]}'};
+ const trade={trade_id_str:'9007199254740993',trade_id:9007199254740992,order_id:'7',side:'BUY',price:'100',size:'0.5'};
+ const ws=(payload)=>({type:'ws',text:JSON.stringify({type:'update/account_all',channel:'account_all:42',data:payload})});
+ for(const payload of [
+  {trades:{1:[trade]}},
+  {fills:[],trades:{1:[trade]}},
+  {fills:[{...trade,symbol:'ETH'}],trades:{1:[trade]}},
+ ]){
+  const account={fills:[]};fixLighterFills(account,[metadata,ws(payload)]);
+  assert.deepEqual(account.fills,[{id:'7',symbol:'ETH',side:'buy',amount:0.5,price:100}]);
+ }
+});
+test('actual transport carries command ownership to acknowledgement validation',async()=>{
+ const v=verifier();
+ const batch=new URLSearchParams(form('create-batch'));
+ const bodies=[form(),new URLSearchParams({tx_type:'14',tx_info:JSON.parse(batch.get('tx_infos'))[1]}).toString()];
+ const records=[...bodies.map((requestBody)=>({type:'http',method:'POST',url,requestBody,status:200,body:'{"code":200,"tx_hash":"ack"}'})),{type:'command',t:0,op:'placeOrders'},{type:'command',t:0,op:'placeOrders'}];
+ const tape=new Tape(records,{requestBody:lighterRequestBody,verifyRequest:r=>v.request({...r,now}),validateMatchedRequest:(record,r)=>v.matched(record,r)},true);
+ await tape.play(undefined,async()=>{},async()=>{const index=tape.commandIndex-1;tape.respond('POST',url,bodies[index]);return [String(123+index)];});
+ tape.assertWritesConsumed();
+ assert.deepEqual(v.commandResult(tape.results[1],records.at(-1),2),{ok:['<generated>']});
+ assert.throws(()=>v.commandResult(tape.results[0],records.at(-1),2),/this command/);
+});
+test('auth validates canonical integer components and every supplied token',()=>{
+ const v=verifier(),token=sample('auth').result;
+ for(const index of ['3.0','3e0']){
+  const message='1700003600:42:'+index,bytes=Buffer.from(message),padded=Buffer.alloc(Math.ceil(bytes.length/8)*8);bytes.copy(padded);
+  const forged=message+':'+oracle.schnorrSign(padded.toString('hex'),options.secret);
+  assert.equal(v.auth(forged,now),false);
+ }
+ const url='https://mainnet.zklighter.elliot.ai/api/v1/accountLimits?account_index=42&auth='+token;
+ assert.equal(v.request({method:'GET',url,headers:{authorization:token},now}),true);
+ assert.equal(v.request({method:'GET',url,headers:{authorization:'invalid'},now}),false);
+ assert.equal(v.request({method:'GET',url,headers:{Authorization:token,authorization:'invalid'},now}),false);
 });

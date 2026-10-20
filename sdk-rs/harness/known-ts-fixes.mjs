@@ -61,13 +61,18 @@ export function fixBlofinAccount(account) {
 // Build its corrected fill oracle from recorded execution IDs and quantities.
 export function fixLighterFills(account, records) {
   const markets = new Map();
+  const marketIds = new Map();
   for (const record of records) {
     if (record.type !== 'http' || !/\/orderBook(?:Details|s)$/.test(new URL(record.url).pathname) || record.status !== 200) continue;
     const payload = parse(record.body);
-    for (const market of payload.order_book_details ?? payload.order_books ?? []) markets.set(String(market.market_id), market.symbol);
+    for (const market of payload.order_book_details ?? payload.order_books ?? []) {
+      markets.set(String(market.market_id), market.symbol);
+      marketIds.set(market.symbol, String(market.market_id));
+    }
   }
-  const flatten = (value) => Array.isArray(value) ? value.flatMap(flatten) : value && typeof value === 'object'
-    ? ('price' in value && ('size' in value || 'amount' in value)) ? [value] : Object.values(value).flatMap(flatten) : [];
+  const flatten = (value, market) => Array.isArray(value) ? value.flatMap((row) => flatten(row, market)) : value && typeof value === 'object'
+    ? ('price' in value && ('size' in value || 'amount' in value)) ? [{fill:value,market}]
+      : Object.entries(value).flatMap(([key,row]) => flatten(row,key)) : [];
   const fills = new Map();
   const seen = new Set();
   let observed = false;
@@ -80,16 +85,16 @@ export function fixLighterFills(account, records) {
     const payload = message.data ?? message;
     if (payload.fills === undefined && payload.trades === undefined) continue;
     observed = true;
-    for (const fill of flatten(payload.fills ?? payload.trades)) {
-      const execution = fill.tradeId ?? fill.trade_id ?? fill.fillId ?? fill.fill_id;
-      const market = String(fill.market_id ?? fill.marketId ?? '');
+    for (const {fill,market:hint} of [payload.fills,payload.trades].flatMap((source) => flatten(source))) {
+      const execution = fill.trade_id_str ?? fill.tradeId ?? fill.trade_id ?? fill.fillId ?? fill.fill_id;
+      const market = String(fill.market_id ?? fill.marketId ?? hint ?? '');
       const symbol = fill.symbol || markets.get(market);
       const side = String(fill.ask_account_id ?? '') === String(accountId) ? 'sell'
         : String(fill.bid_account_id ?? '') === String(accountId) ? 'buy' : String(fill.side ?? '').toLowerCase();
       const id = fill.orderId ?? fill.order_id ?? (side === 'sell' ? fill.ask_id : fill.bid_id);
       const amount = Number(fill.size ?? fill.amount), price = Number(fill.price);
-      if (execution == null || !symbol || !['buy','sell'].includes(side) || id == null || !(amount > 0) || !(price > 0)) continue;
-      const key = `${market || symbol}:${execution}`;
+      if (execution == null || String(execution) === '' || !symbol || !['buy','sell'].includes(side) || id == null || !(amount > 0) || !(price > 0)) continue;
+      const key = `${marketIds.get(symbol) ?? (market || symbol)}:${execution}`;
       if (seen.has(key)) continue;
       seen.add(key);
       if (kind.startsWith('subscribed')) continue;

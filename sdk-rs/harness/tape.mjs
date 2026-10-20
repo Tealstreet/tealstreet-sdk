@@ -270,7 +270,7 @@ export class Tape {
     const response = this.bitget || this.venue.validateMatchedRequest
       ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
         this.validateBitgetMatch(record, method, url, body);
-        this.venue.validateMatchedRequest?.(record, { method, url, body, headers });
+        this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
       }, elapsed)
       : this.responses.respond(method, url, body, this.commandIndex, elapsed);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();

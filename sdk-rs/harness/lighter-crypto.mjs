@@ -64,10 +64,11 @@ export function createLighterVerifier(options, oracle = crypto) {
   const apiKey = Number(options.apiKeyIndex);
   const publicKey = result(oracle.schnorrPkFromSk(options.secret));
   const generated = new Set();
+  const commandIds = new Map();
   const auth = (token, now = Date.now()) => {
     if (typeof token !== 'string') return false;
     const parts = token.split(':');
-    if (parts.length !== 4 || !/^\d+$/.test(parts[0]) || parts[1] !== account || Number(parts[2]) !== apiKey || !/^[a-f\d]{160}$/i.test(parts[3])) return false;
+    if (parts.length !== 4 || !/^\d+$/.test(parts[0]) || parts[1] !== account || parts[2] !== String(apiKey) || !/^[a-f\d]{160}$/i.test(parts[3])) return false;
     const deadline = Number(parts[0]);
     if (!Number.isSafeInteger(deadline) || deadline < now / 1000 || deadline > now / 1000 + 3600) return false;
     const message = Buffer.from(parts.slice(0,3).join(':'));
@@ -115,9 +116,13 @@ export function createLighterVerifier(options, oracle = crypto) {
     request({method,url,body,headers={},now=Date.now()}) {
       try {
         const parsed = new URL(url);
-        const token = parsed.searchParams.get('auth') ?? Object.entries(headers).find(([key]) => key.toLowerCase() === 'authorization')?.[1];
-        if (token !== undefined && token !== null && !auth(token,now)) return false;
-        if (/\/(accountActiveOrders|accountInactiveOrders|accountLimits|accountTxs)$/.test(parsed.pathname) && !token) return false;
+        const entries = Array.isArray(headers) ? headers : Object.entries(headers);
+        const tokens = [...parsed.searchParams.getAll('auth'), ...entries.filter(([key]) => key.toLowerCase() === 'authorization').map(([,token]) => token)];
+        if (tokens.some((token) => !auth(token,now))) return false;
+        if (tokens.length && parsed.searchParams.has('account_index') && parsed.searchParams.get('account_index') !== account) return false;
+        const privateRead = /\/(accountActiveOrders|accountInactiveOrders|accountLimits|accountTxs|positionFunding)$/.test(parsed.pathname)
+          || (parsed.pathname.endsWith('/trades') && parsed.searchParams.has('account_index'));
+        if (privateRead && !tokens.length) return false;
         if (!/\/sendTx(?:Batch)?$/.test(parsed.pathname)) return method === 'GET';
         const transactions = decodeLighterTransactions(body);
         const ids = transactions.filter(({type}) => type === 14).map(({info}) => String(info.ClientOrderIndex));
@@ -131,7 +136,7 @@ export function createLighterVerifier(options, oracle = crypto) {
       if (channel.startsWith('account_all/')) return channel === `account_all/${account}`;
       return true;
     },
-    matched(record,{body}) {
+    matched(record,{body,commandIndex=1}) {
       if (!/\/sendTx(?:Batch)?$/.test(new URL(record.url).pathname) || Number(JSON.parse(record.body).code) !== 200) return;
       const transactions = decodeLighterTransactions(body);
       const payload = JSON.parse(record.body);
@@ -144,15 +149,20 @@ export function createLighterVerifier(options, oracle = crypto) {
         for (const id of ids) {
           if (generated.has(String(id))) throw new Error('Lighter generated order index reused');
           generated.add(String(id));
+          const created = commandIds.get(commandIndex) ?? [];
+          created.push(String(id));
+          commandIds.set(commandIndex, created);
         }
       }
     },
-    commandResult(result, command) {
+    commandResult(result, command, commandIndex=1) {
       if (!['placeOrders','amendOrder'].includes(command?.op) || !result?.ok) return result;
-      const normalize = (ids) => ids.map((id) => {
-        if (!generated.has(String(id))) throw new Error('Lighter returned order index was never signed and acknowledged');
-        return '<generated>';
-      });
+      const normalize = (ids) => {
+        const expected = commandIds.get(commandIndex) ?? [];
+        if (!Array.isArray(ids) || ids.length !== expected.length || ids.some((id,index) => String(id) !== expected[index]))
+          throw new Error('Lighter returned order indexes do not match this command\'s signed and acknowledged creations');
+        return ids.map(() => '<generated>');
+      };
       return {ok: Array.isArray(result.ok) ? normalize(result.ok) : {...result.ok,orderIds:normalize(result.ok.orderIds)}};
     },
   };
