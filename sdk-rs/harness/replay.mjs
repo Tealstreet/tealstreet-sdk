@@ -709,7 +709,7 @@ async function runTs() {
       while (venue.initialBookSnapshots && !replayBooksReady(bookSymbols, Object.keys(finalBooks))) await new Promise((r) => realTimeout(r, 5));
       const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean)
         : store.loaded.markets && store.loaded.tickers;
-      while (isPrivate && !loaded()) await new Promise((r) => realTimeout(r, 5));
+      while ((!accountReady || isPrivate) && !loaded()) await new Promise((r) => realTimeout(r, 5));
     },
     (record) => runTsCommand(exchange, store, record, { candleListeners, candleUpdates }),
     clock,

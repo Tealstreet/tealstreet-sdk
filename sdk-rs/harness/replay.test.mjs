@@ -178,3 +178,27 @@ test('production Orderly send correlates a taped snapshot before its sole consum
   const next = tape.connect(url, () => {}, () => {});
   assert.throws(() => tape.send(next, JSON.stringify({ event: 'request', id: 'replacement-id', params })), /unrecorded/);
 });
+
+
+test('production Hyro partial readiness waits for both public seed flags in public and private replays', async () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('    async (accountReady = true) => {', source.indexOf('async function runTs()'));
+  const end = source.indexOf('\n    (record) => runTsCommand', start);
+  assert(start >= 0 && end > start);
+  for (const isPrivate of [false, true]) {
+    const store = { loaded: { markets: true, tickers: false, balance: false, orders: false, positions: false } };
+    const ready = new Function('prepared', 'subscribed', 'venue', 'exchange', 'bookSymbols', 'realTimeout',
+      'replayBooksReady', 'finalBooks', 'store', 'isPrivate',
+      `return (${source.slice(start, end).trim().replace(/,$/, '')});`)(
+      Promise.resolve(), Promise.resolve(), { tsBooksSubscribed: () => true }, {}, [], setTimeout,
+      () => true, {}, store, isPrivate,
+    );
+    let done = false;
+    const pending = ready(false).then(() => { done = true; });
+    await new Promise(setImmediate);
+    assert.equal(done, false, 'market subscription readiness must not bypass an unfinished ticker seed');
+    store.loaded.tickers = true;
+    await pending;
+    assert.equal(done, true, 'partial readiness does not require private account state');
+  }
+});

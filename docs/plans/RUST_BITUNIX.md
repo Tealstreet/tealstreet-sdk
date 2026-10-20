@@ -876,3 +876,12 @@ ID, rather than relaxing validation. Actual TS Hyro private13frames/3commands
 PASS with zero unserved/unused/protocol errors. Memory/requests helpers retain
 our audited policy verbatim. Independent final aggregate and exact-head CI
 follow this checkpoint; all20public/37private+4Bitget cases must pass to merge.
+
+Final readiness audit tightens Hyro's public-first phase: both public and
+private ready(false) calls wait for markets+tickers, while full private readiness
+still requires account flags. Native already waits symmetrically. The actual
+production callback regression fails before/passes after, with no timeout or
+output normalization. Independent311helper aggregate plus this regression
+PASS (312total); signed request/socket/generated-ID/frame controls have no
+remaining findings. Checkpoint this two-file follow-up before final exact-head
+CI; no further source changes planned absent a proven failure.
