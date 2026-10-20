@@ -624,3 +624,32 @@ fn absent_terminal_regular_rows_are_removed_and_tombstones_cannot_be_restored_by
     }
     assert!(e.store().order("739113577038255617").is_none());
 }
+
+#[test]
+fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
+    use safe_cex_engine::Notice;
+    let (mut e, _, _, _) = private_started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        200.0,
+        Event::Command(Command::FetchLeverage {
+            command: 91,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    e.handle(
+        201.0,
+        Event::HttpFailed {
+            request: request.id,
+            error: "failed leverage transport",
+        },
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    let error=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command:91,message}) if message=="failed leverage transport")).unwrap();
+    let done=out.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command:91,result:Err(message)}) if message=="failed leverage transport")).unwrap();
+    assert!(error < done);
+    assert!(!out.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message=="failed leverage transport")));
+    // Correlation does not initiate another request.
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+}

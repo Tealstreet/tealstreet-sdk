@@ -1004,7 +1004,7 @@ impl Venue for Okx {
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
-            cx.log(LogLevel::Error, error);
+            cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
         } else {
             cx.log(LogLevel::Error, error);

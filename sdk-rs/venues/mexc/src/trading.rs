@@ -5,7 +5,7 @@ use crate::{
     wire::*,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -809,7 +809,7 @@ impl MexcFutures {
             _ => return,
         };
         if let Err(error) = &steps {
-            cx.log(LogLevel::Error, error);
+            cx.command_error(command, error);
             cx.done(command, Err(error.clone()));
             return;
         }
@@ -819,7 +819,7 @@ impl MexcFutures {
         }
         match steps {
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(command, &error);
                 cx.done(command, Err(error));
             }
             Ok(steps) => {
@@ -1453,7 +1453,7 @@ impl MexcFutures {
         match result {
             Ok(()) => self.advance_trade(cx),
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(request.command, &error);
                 self.trade_failed(cx, request.command, &error);
             }
         }

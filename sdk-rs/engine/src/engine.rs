@@ -107,6 +107,11 @@ pub enum Notice {
         level: LogLevel,
         message: String,
     },
+    /// Error diagnostic attributed to a command; completion owns its outcome.
+    CommandError {
+        command: CommandId,
+        message: String,
+    },
     /// `Ok` carries the command's JSON result.
     CommandDone {
         command: CommandId,
@@ -798,6 +803,17 @@ impl<P> Cx<'_, P> {
                     command,
                     receipts,
                 }));
+        }
+    }
+
+    pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
+        let message = message.into();
+        if command == 0 {
+            self.log(LogLevel::Error, message);
+        } else {
+            self.io
+                .actions
+                .push(Action::Notice(Notice::CommandError { command, message }));
         }
     }
 
@@ -1662,6 +1678,29 @@ fn apply_signature(
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
+
+    #[test]
+    fn command_errors_are_attributed_before_done_but_replyless_errors_stay_visible() {
+        let mut engine = frame_engine();
+        let before = engine.snapshot_frame(0.).to_vec();
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.command_error(0, "background error");
+            cx.command_error(7, "command error");
+            cx.done(7, Err("command error".into()));
+        }
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(matches!(actions.as_slice(), [
+            Action::Notice(Notice::Log { level: LogLevel::Error, message: background }),
+            Action::Notice(Notice::CommandError { command: 7, message }),
+            Action::Notice(Notice::CommandDone { command: 7, result: Err(result) }),
+        ] if background == "background error" && message == "command error" && result == message));
+        assert_eq!(before, engine.snapshot_frame(0.));
+    }
 
     #[test]
     fn command_progress_skips_empty_batches_and_precedes_io_without_store_changes() {

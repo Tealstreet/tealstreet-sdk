@@ -687,7 +687,11 @@ impl Venue for Bingx {
                 }
                 return;
             }
-            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Candles { command, .. } => {
+                cx.command_error(command, error);
+                cx.done(command, Err(error.into()));
+                return;
+            }
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
             Pending::Premium { .. } => self.retry_list(cx, List::Premium),

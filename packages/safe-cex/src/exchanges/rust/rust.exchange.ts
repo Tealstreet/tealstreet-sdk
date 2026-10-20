@@ -30,6 +30,7 @@ import bs58 from 'bs58';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
@@ -686,6 +687,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.engineFailure) return;
     this.engineFailure = error;
     this.startupFailure = error;
+    markErrorReported(error);
     for (const wake of this.startupWaiters) wake();
     try {
       this.emitAndLogError(error);
@@ -937,25 +939,44 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
-    if (this.engineFailure) return Promise.reject(this.engineFailure);
-    if (this.isDisposed) return Promise.reject(new Error(`${this.name} engine disposed`));
-    if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
-    if (['coinbase', 'coinbasespot'].includes(this.name)) {
-      const invalid = (value: unknown): boolean =>
-        typeof value === 'number'
-          ? !Number.isFinite(value)
-          : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
-      if (invalid(command)) return Promise.reject(new Error('Coinbase command numbers must be finite'));
+  private reportCommandError = (error: unknown): void => {
+    // The terminal engine notification already reports all interrupted commands.
+    if (this.engineFailure) {
+      markErrorReported(error);
+      return;
     }
-    return this.host.command(command) as Promise<T>;
+    if (this.isDisposed || isErrorReported(error)) return;
+    markErrorReported(error);
+    try {
+      this.emitAndLogError(error instanceof Error ? error : String(error));
+    } catch {
+      /* Diagnostic listeners cannot replace the original write outcome. */
+    }
+  };
+
+  private command = async <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+    try {
+      if (this.engineFailure) throw this.engineFailure;
+      if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
+      if (!this.host) throw new Error(`${this.name} engine is not started`);
+      if (['coinbase', 'coinbasespot'].includes(this.name)) {
+        const invalid = (value: unknown): boolean =>
+          typeof value === 'number'
+            ? !Number.isFinite(value)
+            : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
+        if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
+      }
+      return (await this.host.command(command)) as T;
+    } catch (error) {
+      this.reportCommandError(error);
+      throw error;
+    }
   };
 
   private subscriptionCommand = (command: { op: string; [field: string]: unknown }): void => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
-    void this.command(command).catch((error: unknown) => {
-      if (!this.isDisposed && !this.engineFailure)
-        this.emitAndLogError(error instanceof Error ? error : String(error));
+    void this.command(command).catch(() => {
+      /* command() owns error reporting. */
     });
   };
 

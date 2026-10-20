@@ -20,6 +20,8 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub command_errors: Vec<(u32, String)>,
+    pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
 }
@@ -49,6 +51,8 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             logs: Vec::new(),
+            command_errors: Vec::new(),
+            command_notices: Vec::new(),
             progress: Vec::new(),
             progress_at_request: Vec::new(),
         };
@@ -90,7 +94,13 @@ impl Harness {
                 Action::Notice(Notice::CommandProgress { command, receipts }) => {
                     self.progress.push((command, receipts))
                 }
+                Action::Notice(Notice::CommandError { command, message }) => {
+                    self.logs.push(message.clone());
+                    self.command_errors.push((command, message));
+                    self.command_notices.push((command, "error"));
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.command_notices.push((command, "done"));
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),

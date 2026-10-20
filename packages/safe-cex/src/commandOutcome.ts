@@ -1,5 +1,34 @@
 import type { OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
 
+// Frozen errors must retain their identity and command outcome. Weak membership
+// carries only reporting state and cannot keep completed operations alive.
+const reportedErrors = new WeakSet<object>();
+
+export const markErrorReported = (value: unknown): void => {
+  if (value === null || typeof value !== 'object') return;
+  reportedErrors.add(value);
+  try {
+    Object.defineProperty(value, 'errorReported', {
+      value: true,
+      configurable: true,
+      writable: true,
+      enumerable: true,
+    });
+  } catch {
+    /* Frozen/native errors retain reporting state through the WeakSet. */
+  }
+};
+
+export const isErrorReported = (value: unknown): boolean => {
+  if (value === null || typeof value !== 'object') return false;
+  if (reportedErrors.has(value)) return true;
+  try {
+    return (value as { errorReported?: unknown }).errorReported === true;
+  } catch {
+    return false;
+  }
+};
+
 /** Cloneable command failure details shared by SDK workers and CLI consumers. */
 export type SerializedCommandError = {
   message: string;
@@ -21,6 +50,7 @@ export type SerializedCommandError = {
   partialOrderCount?: number;
   totalOrderCount?: number;
   failedOrderIndex?: number;
+  errorReported?: boolean;
 };
 
 /** Preserve known command attribution without copying arbitrary error properties. */
@@ -29,6 +59,8 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   const result: SerializedCommandError = {
     message: typeof source.message === 'string' ? source.message : String(value),
   };
+  const errorReported = isErrorReported(value) ? true : source.errorReported;
+  if (typeof errorReported === 'boolean') result.errorReported = errorReported;
   for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey'] as const) {
     const field = source[key];
     if (typeof field === 'string') result[key] = field;

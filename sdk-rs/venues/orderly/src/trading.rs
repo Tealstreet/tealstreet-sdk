@@ -3,7 +3,7 @@ use crate::{
     wire::{Id, N, checked},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -1056,7 +1056,7 @@ impl Orderly {
                 self.trade_next(cx);
             }
             Err(e) => {
-                cx.log(LogLevel::Error, &e);
+                cx.command_error(id, &e);
                 cx.done(id, Err(e));
                 self.trade_queued(cx);
             }
@@ -1502,7 +1502,7 @@ impl Orderly {
             }
             _ => {}
         }
-        cx.log(LogLevel::Error, error);
+        cx.command_error(request.command, error);
         let Some(job) = self
             .trading
             .active

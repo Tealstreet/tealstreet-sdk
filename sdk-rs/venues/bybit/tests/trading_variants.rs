@@ -1027,6 +1027,24 @@ fn ordinary_bybit_receipts_preserve_absence_and_caller_identity_through_batch_fa
     let second = h.take("/v5/order/create");
     assert!(!body(&second).contains("orderLinkId"));
     assert_eq!(h.progress.len(), 2);
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"second"}}"#,
+    );
+    assert_eq!(h.result(91), Some(&Ok("[\"first\",\"second\"]".into())));
+    assert_eq!(
+        h.command_errors.len(),
+        1,
+        "partial success keeps its diagnostic"
+    );
+    assert_eq!(h.command_errors[0].0, 91);
+    assert!(
+        h.command_errors[0]
+            .1
+            .contains("Failed to place batch orders")
+    );
+    assert_eq!(h.command_notices, [(91, "error"), (91, "done")]);
 }
 
 #[test]
@@ -1084,5 +1102,48 @@ fn spot_single_create_receipt_preserves_exact_caller_identity() {
             .unwrap()
             .1,
         1
+    );
+}
+
+#[test]
+fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0)];
+    place(&mut h, 91, orders.clone());
+    place(&mut h, 92, orders);
+    let write = h.take("/v5/order/create");
+    h.reply(
+        write.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    assert_eq!(h.command_errors.len(), 2);
+    assert_eq!(h.command_errors[0].0, 91);
+    assert_eq!(h.command_errors[1].0, 92);
+    assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    assert_eq!(
+        h.command_notices,
+        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
+    );
+    assert!(h.result(91).unwrap().is_err());
+    assert!(h.result(92).unwrap().is_err());
+}
+
+#[test]
+fn identical_independent_validation_failures_keep_distinct_command_owners() {
+    let mut h = ready(Variant::Spot);
+    for command in [91, 92] {
+        let mut opts = order("BTCUSDT", 1.0);
+        opts.client_order_id = Some("invalid whitespace".into());
+        place(&mut h, command, vec![opts]);
+    }
+    assert!(h.requests.is_empty());
+    assert_eq!(h.command_errors.len(), 2);
+    assert_eq!(h.command_errors[0].0, 91);
+    assert_eq!(h.command_errors[1].0, 92);
+    assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    assert_eq!(
+        h.command_notices,
+        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
     );
 }

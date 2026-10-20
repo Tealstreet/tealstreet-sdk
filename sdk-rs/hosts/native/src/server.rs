@@ -353,6 +353,19 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
+                Notice::CommandError { command, message } => {
+                    if let Some(pending) = self.pending.get(&command)
+                        && let Some(client) = pending.client
+                    {
+                        self.send(
+                            client,
+                            Outgoing::Text(encode_notice(ServerNotice::CommandError {
+                                command: pending.original,
+                                message: &message,
+                            })),
+                        );
+                    }
+                }
                 Notice::Log { level, message } => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
                         level: match level {
@@ -676,6 +689,10 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ServerNotice<'a> {
+    CommandError {
+        command: u32,
+        message: &'a str,
+    },
     CommandProgress {
         command: u32,
         receipts: &'a [safe_cex_engine::OrderIdentityReceipt],
@@ -888,6 +905,11 @@ mod tests {
             cx.done(socket.0, Ok("[]".into()));
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            if let Some(command) = text.strip_prefix("error:") {
+                let command = command.parse().expect("error command");
+                cx.command_error(command, "placement rejected");
+                return;
+            }
             let command: u32 = text.parse().expect("receipt command");
             cx.command_progress(
                 command,
@@ -918,6 +940,80 @@ mod tests {
             mpsc::unbounded_channel().0
         }
         fn request(&self, _: HttpRequest, _: Events) {}
+    }
+
+    #[test]
+    fn command_errors_keep_original_client_id_and_cannot_leak_after_completion() {
+        let mut actor = Account::new(
+            Host::new(
+                Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let mut receivers = Vec::new();
+        for client in [1, 2] {
+            let (outgoing, receiver) = mpsc::channel(8);
+            let (cancel, _) = watch::channel(false);
+            actor.peers.insert(
+                client,
+                Peer {
+                    outgoing,
+                    cancel,
+                    books: HashSet::new(),
+                    candles: HashSet::new(),
+                    tickers: None,
+                },
+            );
+            receivers.push(receiver);
+            actor.command(
+                client,
+                Command::FetchLeverage {
+                    command: 77,
+                    symbol: "BTC-USD".into(),
+                },
+            );
+        }
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "error:1",
+            },
+        );
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        let Ok(Outgoing::Text(message)) = receivers[0].try_recv() else {
+            panic!("command error")
+        };
+        assert_eq!(
+            message.as_ref(),
+            r#"{"type":"commandError","command":77,"message":"placement rejected"}"#
+        );
+        let Ok(Outgoing::Text(done)) = receivers[0].try_recv() else {
+            panic!("command done")
+        };
+        assert_eq!(
+            done.as_ref(),
+            r#"{"type":"done","command":77,"result":"[]"}"#
+        );
+        assert!(receivers[1].try_recv().is_err());
+        assert_eq!(actor.pending.len(), 1);
+        actor.host.engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "error:1",
+            },
+        );
+        actor.execute();
+        assert!(receivers[0].try_recv().is_err());
+        assert!(receivers[1].try_recv().is_err());
     }
 
     #[test]

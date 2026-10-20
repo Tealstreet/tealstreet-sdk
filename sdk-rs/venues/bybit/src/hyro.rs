@@ -5,7 +5,7 @@ use crate::sign::{Body, Query};
 use crate::wire::{OrderRow, Placed, Status, present};
 use crate::{BybitLinear, Pending, Rest, venue_error};
 use safe_cex_engine::model::{Order, OrderStatus, OrderType, PlaceOrderOpts};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Response};
+use safe_cex_engine::{CommandId, Cx, Response};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -403,8 +403,8 @@ impl BybitLinear {
                 create.link
             )
         };
-        cx.log(LogLevel::Error, message.clone());
         for command in group.waiters.drain(..) {
+            cx.command_error(command, message.clone());
             cx.done(command, Err(message.clone()));
         }
         group.running = false;

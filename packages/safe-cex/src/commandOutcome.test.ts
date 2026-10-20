@@ -1,9 +1,52 @@
 import { describe, expect, it } from 'vitest';
 
-import { deserializeCommandError, serializeCommandError } from './commandOutcome';
+import { deserializeCommandError, isErrorReported, markErrorReported, serializeCommandError } from './commandOutcome';
 
 // The worker and normal CLI share this exact allowlist at their clone boundary.
 describe('command outcome serialization', () => {
+  it('preserves reporting state through the shared worker and CLI allowlist', () => {
+    const original = new Error('reported');
+    markErrorReported(original);
+    expect(original).toHaveProperty('errorReported', true);
+    expect(isErrorReported(original)).toBe(true);
+    const restored = deserializeCommandError(structuredClone(serializeCommandError(original)));
+    expect(restored).toHaveProperty('errorReported', true);
+    expect(isErrorReported(restored)).toBe(true);
+  });
+
+  it('records frozen-error reporting without replacing or mutating its command outcome', () => {
+    const original = Object.freeze(
+      Object.assign(new Error('interrupted'), {
+        outcome: 'unknown',
+        clientOrderIds: ['requested'],
+        actualClientOrderIds: ['actual'],
+        partialOrderIds: ['accepted'],
+      }),
+    );
+    markErrorReported(original);
+    expect(original).not.toHaveProperty('errorReported');
+    expect(isErrorReported(original)).toBe(true);
+    expect(serializeCommandError(original)).toMatchObject({
+      errorReported: true,
+      outcome: 'unknown',
+      clientOrderIds: ['requested'],
+      actualClientOrderIds: ['actual'],
+      partialOrderIds: ['accepted'],
+    });
+    expect(isErrorReported(new Error('interrupted'))).toBe(false);
+    expect(serializeCommandError({ message: 'unreported', errorReported: 'true' })).toEqual({ message: 'unreported' });
+    expect(serializeCommandError({ message: 'unreported', errorReported: false })).toEqual({
+      message: 'unreported',
+      errorReported: false,
+    });
+  });
+
+  it('keeps primitive failures out of the reporting ledger', () => {
+    for (const value of ['same text', undefined, null, 1]) {
+      markErrorReported(value);
+      expect(isErrorReported(value)).toBe(false);
+    }
+  });
   it.each(['ENGINE_DEAD', 'COMMAND_TIMEOUT', 'ENGINE_DISPOSED'])(
     'round trips %s attribution through structured clone',
     (code) => {

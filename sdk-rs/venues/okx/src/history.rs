@@ -1043,7 +1043,7 @@ impl Okx {
     }
 
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.log(LogLevel::Error, format!("OKX history: {error}"));
+        cx.command_error(r.command, format!("OKX history: {error}"));
         cx.done(
             r.command,
             if r.is_lookup() {

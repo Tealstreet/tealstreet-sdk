@@ -103,6 +103,57 @@ describe('shipping Orderly Rust family', () => {
       amount: 1, clientOrderId: 'caller', stopLoss: 49000 })).rejects.toThrow(/clientOrderId cannot be honored/);
     expect(tape.writes).toHaveLength(1);
   });
+  it('reports each native rejection once and preserves partial acknowledgements and receipts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'trace').mockImplementation(() => {});
+    const tape = transport();
+    const request = tape.native.request;
+    let submissions = 0;
+    tape.native.request = (input) => {
+      if (input.method === 'POST' && new URL(input.url).pathname === '/v1/order' && ++submissions === 2) {
+        tape.writes.push(input);
+        return Promise.resolve({ status: 200, body: new TextEncoder().encode(JSON.stringify({
+          success: false, message: 'Second fixture order refused',
+        })) });
+      }
+      return request(input);
+    };
+    setRustEngineTransport(() => tape.native);
+    exchange = await createExchange('tealstreet-dex', {
+      key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
+      secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
+      applicationId: 'documented-test-account',
+    }) as RustEngineExchange;
+    const errors: string[] = [];
+    const logs: string[] = [];
+    exchange.on('error', (message: string) => errors.push(message));
+    exchange.on('log', (message: string) => logs.push(message));
+    await exchange.start();
+    const order = { symbol: 'BTCUSDC', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 50000 };
+    // Finite zero reaches native validation, which emits a diagnostic plus DoneErr.
+    for (let count = 1; count <= 2; count++) {
+      await expect(exchange.placeOrder({ ...order, amount: 0 })).rejects.toThrow(/market minimum/);
+      expect(errors).toHaveLength(count);
+    }
+    expect(errors[0]).toBe(errors[1]);
+    expect(tape.writes).toHaveLength(0);
+    const failure = await exchange.placeOrders([
+      { ...order, clientOrderId: 'receipt-first' },
+      { ...order, clientOrderId: 'receipt-second' },
+    ]).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      message: expect.stringContaining('Second fixture order refused'),
+      partialOrderIds: ['9007199254740995'], partialOrderCount: 1, totalOrderCount: 2,
+      actualClientOrderIds: ['receipt-first', 'receipt-second'],
+    });
+    expect(failure).not.toHaveProperty('outcome');
+    expect(errors).toHaveLength(3);
+    expect(errors[2]).toContain('Second fixture order refused');
+    expect(logs.some((line) => line.includes('Second fixture order refused'))).toBe(true);
+    expect(tape.writes).toHaveLength(2);
+    expect(exchange.isEngineDead).toBe(false);
+  }, 20000);
+
   it('rejects terminal startup and releases its subscription', async () => {
     const tape = transport(401);
     setRustEngineTransport(() => tape.native);

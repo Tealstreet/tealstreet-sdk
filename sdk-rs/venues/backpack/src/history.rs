@@ -420,7 +420,7 @@ impl Backpack {
         })();
         if let Err(e) = result {
             r.invalid = true;
-            cx.log(safe_cex_engine::LogLevel::Error, e);
+            cx.command_error(r.command, e);
         }
     }
     pub(crate) fn history_response(

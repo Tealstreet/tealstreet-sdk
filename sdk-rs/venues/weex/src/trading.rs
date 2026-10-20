@@ -325,7 +325,7 @@ fn price(value: Option<f64>, step: f64) -> Result<Option<String>, String> {
     value.map(|v| rounded(v, step).map(num::format)).transpose()
 }
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.log(LogLevel::Error, &error);
+    cx.command_error(command, &error);
     cx.done(command, Err(error));
 }
 fn post(path: &'static str, body: String, call: Call) -> Step {

@@ -55,6 +55,9 @@ function validateNotice(text: string): void {
   const value: unknown = JSON.parse(text);
   if (!record(value)) throw error();
   switch (value.type) {
+    case 'commandError':
+      if (keys(value, ['type', 'command', 'message']) && uint32(value.command) && typeof value.message === 'string') return;
+      break;
     case 'commandProgress':
       if (keys(value, ['type', 'command', 'receipts']) && uint32(value.command) && Array.isArray(value.receipts) && value.receipts.every((receipt) =>
         record(receipt) && keys(receipt, ['symbol', 'kind', 'identity']) && typeof receipt.symbol === 'string' && typeof receipt.identity === 'string' &&

@@ -349,7 +349,7 @@ impl BinanceFutures {
                 self.advance(cx, id);
             }
             Err(message) => {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(id, message.clone());
                 cx.done(id, Err(message));
             }
         }
@@ -509,7 +509,7 @@ impl BinanceFutures {
                                 }
                                 if code != POST_ONLY_REJECTED {
                                     let msg = item.msg.as_deref().unwrap_or("batch order rejected");
-                                    cx.log(LogLevel::Error, msg.to_owned());
+                                    cx.command_error(command, msg.to_owned());
                                 }
                             }
                         }
@@ -587,7 +587,7 @@ impl BinanceFutures {
         };
         if let Some((code, message)) = error {
             if !SILENT_CODES.contains(&code) {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(command, message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 job.error.get_or_insert(message);

@@ -343,7 +343,7 @@ impl Cryptocom {
                 self.drive_trading(cx);
             }
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(command, &error);
                 cx.done(command, Err(error));
             }
         }
@@ -484,7 +484,7 @@ impl Cryptocom {
             Ok(Some(id)) => job.ids.push(id),
             Ok(None) => {}
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(request.command, &error);
                 job.first_error.get_or_insert(error);
                 if !job.best_effort {
                     job.steps.clear();

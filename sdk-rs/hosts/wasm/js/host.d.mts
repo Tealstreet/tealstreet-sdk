@@ -55,6 +55,10 @@ export interface EngineHandlers {
   onDeactivate?(): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
+  /** Associated native command errors arrive as warning diagnostics. Known
+   * successful partial/best-effort commands promote the first diagnostic once
+   * after settlement; rejected commands report at the SDK promise boundary.
+   * Late diagnostics remain warnings. Background logs keep their native level. */
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
   /** Native identities are delivered before the corresponding I/O. Late events
    * retain the same key after a deadline; consumers may merge receipt tuples.

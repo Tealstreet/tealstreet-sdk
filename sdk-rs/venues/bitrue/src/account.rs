@@ -1141,6 +1141,16 @@ impl Bitrue {
         self.refresh_account(cx);
         true
     }
+    fn report_leverage_error(&self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
+        let message = message.into();
+        if self.account.leverage_queries.is_empty() {
+            cx.log(LogLevel::Error, message);
+        } else {
+            for (command, _) in &self.account.leverage_queries {
+                cx.command_error(*command, message.clone());
+            }
+        }
+    }
     fn finish_leverage(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1302,11 +1312,11 @@ impl Bitrue {
                 let schema = serde_json::from_str::<SnapshotEnvelope>(response.body)
                     .is_ok_and(|v| v.data.account.is_empty());
                 if !schema || data.invalid || data.balances.is_empty() {
-                    self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
-                    cx.log(
-                        LogLevel::Error,
+                    self.report_leverage_error(
+                        cx,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
+                    self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
                 } else if revision == self.account.settings_revision {
                     let closed: Vec<String> = cx
                         .store
@@ -1463,24 +1473,20 @@ impl Bitrue {
                 self.restart_private(cx);
             }
             Request::Snapshot { .. } => {
+                self.report_leverage_error(cx, format!("Bitrue account read failed: {error}"));
                 self.finish_leverage(cx, None, error);
                 self.account.snapshot_pending = false;
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue account read failed: {error}"),
-                );
                 if std::mem::take(&mut self.account.snapshot_again) {
                     self.refresh_account(cx);
                 }
             }
             Request::Orders { symbol, lookup, .. } => {
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue order read failed: {error}"),
-                );
+                let message = format!("Bitrue order read failed: {error}");
                 if let Some((command, client_order_id)) = lookup {
+                    cx.command_error(command, message);
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
+                    cx.log(LogLevel::Error, message);
                     self.order_finished(cx, symbol, false);
                 }
             }

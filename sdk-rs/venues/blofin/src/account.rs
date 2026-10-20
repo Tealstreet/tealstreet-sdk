@@ -1081,7 +1081,9 @@ impl Blofin {
     ) {
         match request {
             Request::Leverage { command, .. } => {
+                cx.command_error(command, error);
                 cx.done(command, Err(error.to_owned()));
+                return;
             }
             Request::Orders { attempt, .. } => {
                 self.account.orders_busy = false;

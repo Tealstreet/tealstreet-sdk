@@ -1,7 +1,7 @@
 //! Sequenced trading jobs; preflight and signatures complete before any placement.
 use crate::{ApexOmni, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Response, TimerId, num};
 use serde::Deserialize;
 use std::collections::{HashSet, VecDeque};
 
@@ -520,7 +520,7 @@ impl ApexOmni {
         let (command, steps, placements) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = validate(&orders, cx) {
-                    cx.log(LogLevel::Error, &error);
+                    cx.command_error(command, &error);
                     cx.done(command, Err(error));
                     return Ok(());
                 }
@@ -548,7 +548,7 @@ impl ApexOmni {
                     let id = parent_id(&id).to_owned();
                     if !valid_id(&id) {
                         let error = "ApeX Omni cancel requires an order ID".to_owned();
-                        cx.log(LogLevel::Error, &error);
+                        cx.command_error(command, &error);
                         cx.done(command, Err(error));
                         return Ok(());
                     }
@@ -659,7 +659,7 @@ impl ApexOmni {
             || self.options.passphrase.as_deref().is_none_or(str::is_empty)
         {
             let error = "ApeX Omni private commands require API credentials".to_owned();
-            cx.log(LogLevel::Error, &error);
+            cx.command_error(command, &error);
             cx.done(command, Err(error));
             return Ok(());
         }
@@ -725,7 +725,7 @@ impl ApexOmni {
                     let amendment = match result {
                         Ok(amendment) => amendment,
                         Err(error) => {
-                            cx.log(LogLevel::Error, &error);
+                            cx.command_error(job.command, &error);
                             cx.done(job.command, Err(error));
                             continue;
                         }
@@ -755,7 +755,7 @@ impl ApexOmni {
                             .map(|steps| prepared.extend(steps))
                     });
                     if let Err(error) = result {
-                        cx.log(LogLevel::Error, &error);
+                        cx.command_error(job.command, &error);
                         cx.done(job.command, Err(error));
                         continue;
                     }
@@ -792,7 +792,7 @@ impl ApexOmni {
         self.trading.waiting = false;
         self.trading.amendment = None;
         if let Some(job) = self.trading.active.take() {
-            cx.log(LogLevel::Error, error);
+            cx.command_error(job.command, error);
             cx.done(job.command, Err(error.into()));
         }
         self.drive_trading(cx);

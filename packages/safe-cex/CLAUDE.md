@@ -123,6 +123,15 @@ partial counts, instead of flattening them or copying arbitrary error objects.
 Cancellation commands retain the caller's id, symbol and type alongside legacy
 ID dispatch; venue unknown-ID behavior is a separate native contract.
 
+Rust command rejections report once at the SDK command boundary. Explicitly
+correlated native diagnostics remain warning logs while pending or late; a
+known partial success still emits its first associated error. Background logs
+retain their normal visibility. Reporting preserves the original rejection and
+all outcome/receipt fields even when listeners throw. The shared command-error
+allowlist carries `errorReported`; frozen errors use weak object metadata rather
+than message matching or a retained operation ledger. Subscription commands own
+their rejected promises without reporting the same failure a second time.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

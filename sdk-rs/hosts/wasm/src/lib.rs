@@ -477,6 +477,10 @@ enum ActionOut<'a> {
         level: &'static str,
         message: &'a str,
     },
+    CommandError {
+        command: u32,
+        message: &'a str,
+    },
     Done {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -572,6 +576,10 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
             Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
+            Action::Notice(Notice::CommandError { command, message }) => ActionOut::CommandError {
+                command: *command,
+                message,
+            },
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -1301,6 +1309,25 @@ mod tests {
         assert_eq!(
             encoded,
             r#"[{"op":"commandProgress","command":19,"receipts":[{"symbol":"BTC-USD","kind":"clientOrderId","identity":"client"},{"symbol":"BTC-USD","kind":"clientOrderIndex","identity":"9007199254740993"},{"symbol":"BTC-USD","kind":"orderCode","identity":"code"}]},{"op":"done","command":19,"result":"[]"}]"#
+        );
+    }
+
+    #[test]
+    fn attributed_command_errors_preserve_command_and_precede_result() {
+        use safe_cex_engine::{Action, Notice};
+        let encoded = super::encode(&[
+            Action::Notice(Notice::CommandError {
+                command: 19,
+                message: "placement rejected".into(),
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 19,
+                result: Err("placement rejected".into()),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected"}]"#
         );
     }
 

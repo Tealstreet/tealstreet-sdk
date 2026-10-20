@@ -3,7 +3,7 @@ use crate::wire::{Envelope, Number};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -759,7 +759,7 @@ impl Kucoin {
             && self.account_order_filled(id) > *filled
         {
             let error = "KuCoin newer fills invalidated cancellation proof";
-            cx.log(LogLevel::Error, error);
+            cx.command_error(request.command, error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
             job.error = Some(error.into());
             job.steps.clear();
@@ -1046,7 +1046,7 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(100.0));
                 return;
             }
-            cx.log(LogLevel::Error, &error);
+            cx.command_error(request.command, &error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
             job.error = Some(error);
             job.steps.clear();

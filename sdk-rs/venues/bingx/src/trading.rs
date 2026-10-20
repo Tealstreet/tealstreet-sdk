@@ -5,7 +5,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
 use serde::Deserialize;
 use std::{
     borrow::Cow,
@@ -338,7 +338,7 @@ impl Trading {
                 self.advance(cx, credentials, id);
             }
             Err(error) => {
-                cx.log(LogLevel::Error, error.clone());
+                cx.command_error(id, error.clone());
                 cx.done(id, Err(error));
             }
         }
@@ -531,7 +531,7 @@ impl Trading {
         match result {
             Ok(ids) => job.ids.extend(ids),
             Err(error) => {
-                cx.log(LogLevel::Error, error.clone());
+                cx.command_error(command, error.clone());
                 job.error.get_or_insert(error);
             }
         }

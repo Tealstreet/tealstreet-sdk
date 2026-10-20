@@ -661,10 +661,7 @@ impl BinanceFutures {
                     self.next_fills_window(cx, command);
                 }
                 Err(message) => {
-                    cx.log(
-                        LogLevel::Error,
-                        format!("Error fetching executions: {message}"),
-                    );
+                    cx.command_error(command, format!("Error fetching executions: {message}"));
                     self.history.reads.remove(&command);
                     cx.done(command, Ok("[]".into()));
                 }
@@ -712,7 +709,7 @@ impl BinanceFutures {
                         );
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, message);
+                        cx.command_error(command, message);
                         cx.done(command, Ok("[]".into()));
                     }
                 }
@@ -739,8 +736,8 @@ impl BinanceFutures {
                         let result = match parsed {
                             Ok(()) => serde_json::to_string(&page).unwrap_or_default(),
                             Err(message) => {
-                                cx.log(
-                                    LogLevel::Error,
+                                cx.command_error(
+                                    command,
                                     format!("Error fetching income history: {message}"),
                                 );
                                 "[]".into()

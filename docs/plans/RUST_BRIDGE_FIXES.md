@@ -457,3 +457,50 @@ partial-success errors visible without string matching or a permanent ledger.
   followed by late error, and throwing diagnostic listeners. Update native and
   TS session protocol validation if an additive notice is used. Independent
   review and scoped checks precede the command-error checkpoint.
+
+Phase 3c review checkpoints (not final acceptance): core/native 168 cases,
+one WASM encoding case and 106 TS native-session cases pass; core strict Clippy,
+server types/lint pass. Independent core/server review passes. Host review fixed
+an extra error-level report when a diagnostic listener throws; all 141 host
+package cases now pass, including 11 diagnostic cases. SDK focused 41 cases,
+types/lint pass. Independent review additionally found Bitrue mixed snapshot
+reads completing leverage waiters before a global error, and CLI executor
+printing a rejection already shown by the exchange listener. Both get scoped
+fixes and regression controls before closure. Native source refroze after the
+Bitrue fix; a second official combined build is required and underway rather
+than using the earlier artifact as proof of that fix. Broad venue proof and
+real Orderly WASM rejection/partial-result coverage remain pending.
+
+Those review findings are fixed and independently rereviewed PASS. SDK focused
+67 cases, CLI actual-command/error/router 29 cases, SDK/CLI typechecks and scoped
+strict lint pass. The CLI actual Buy controls cover reported, frozen and
+unreported failures while retaining unknown/partial/requested/actual identity
+metadata. Native Bitrue corrected-source account run passes all 17 cases,
+including shared-waiter transport/malformed failures and no-waiter background
+controls through the existing safe-read retry budget.
+
+Second official combined artifact is 12,210,708 bytes, identical web/Node SHA256
+`36bc620b0c33ff60c3163242a732139f6a6001f2b5d55ed879b7d22fced2ea4e`.
+All 452 SDK WASM cases in 18 files pass. The 27-case actual Orderly/Coinbase
+subset independently passes: two same-text native validation failures emit
+two errors, then a partially rejected batch emits exactly one additional
+error while preserving its accepted large-string order ID and both identities.
+Full SDK unit and final all-feature venue verification remain in progress.
+
+Phase 3c acceptance PASS: all 7,830 SDK unit cases in 530 files, all 452 SDK
+WASM cases, all 141 JS host-package cases, 2,637 all-feature venue native cases
+across 26 crates, 168 engine/native-host cases, one focused WASM encoder case,
+106 TS native-session cases, and 29 focused CLI cases pass. The 67-case SDK
+focused run overlaps the full unit run; Bitrue's 17 cases are included in the
+2,637 and are not additional. Native all-target/all-feature strict Clippy,
+selected core and wasm32 strict Clippy, bans, scoped fmt, SDK/server/CLI types
+and scoped strict lint pass. All independent reviews pass after the host
+diagnostic fallback, Bybit transfer, Bitrue waiter and CLI printer corrections.
+The native scope adds 49 explicit command-error sites across 16 venue crates;
+ordinary background and duplicate-inflight diagnostics remain uncorrelated.
+No payload, signing, entropy, retry or native result semantics changed.
+
+Next: merge latest landing (`702a62050c` at the last fetch), retaining its
+broker/cancel repairs, then refine account-query and polling/resync dependencies.
+Phases 4–7 and the queued RUST_QUALITY follow-ups remain outstanding. No PR,
+all-harness acceptance, or cutover claim is made at this checkpoint.

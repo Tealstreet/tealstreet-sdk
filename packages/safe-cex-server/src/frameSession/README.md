@@ -92,7 +92,12 @@ These are selected native identities, not placement acknowledgements. Kinds
 `clientOrderId`, `clientOrderIndex` and `orderCode` remain distinct; values stay
 strings. Progress retains the initiating client's command ID and can arrive
 after that application's waiting deadline until native completion. It is not
-broadcast to other clients or replayed across disconnect. Other notices are
+broadcast to other clients or replayed across disconnect. Command diagnostics use
+`{"type":"commandError","command":7,"message":"placement rejected"}` with the
+same client ownership. They do not settle the command: `done` remains its result.
+Consumers should combine diagnostics with that result for one visible failure
+per command, preserving a partial-success diagnostic and an unknown timeout.
+Other notices are
 `error`, `log` and `deactivate`, relayed as JSON.
 Native typed decoding and venue capability checks remain authoritative.
 

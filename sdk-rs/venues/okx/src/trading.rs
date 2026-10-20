@@ -1,7 +1,7 @@
 //! Commands are preflighted once, then executed as ordered, non-retried writes.
 use crate::{Okx, Pending, wire};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -856,7 +856,7 @@ impl Okx {
                 return;
             }
             for error in errors {
-                cx.log(LogLevel::Error, error);
+                cx.command_error(request.command, error);
             }
         }
         if step.expected > 0 && acks.len() != step.expected {

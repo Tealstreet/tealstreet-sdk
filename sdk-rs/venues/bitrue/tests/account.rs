@@ -404,3 +404,99 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
+
+#[test]
+fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broadcast_log() {
+    for malformed in [false, true] {
+        let mut h = Harness::new();
+        h.seed();
+        for command in [91, 92] {
+            h.e.handle(
+                h.now,
+                Event::Command(Command::FetchLeverage {
+                    command,
+                    symbol: "E-BTC-USDT".into(),
+                }),
+            );
+            h.collect();
+        }
+        let snapshot = h.take("/account");
+        h.actions.clear();
+        if malformed {
+            h.respond(snapshot, r#"{"code":"0","data":{"account":[]}}"#);
+        } else {
+            exhaust_snapshot_transport(&mut h, snapshot);
+        }
+        let expected = if malformed {
+            "Malformed Bitrue account snapshot; retaining previous state"
+        } else {
+            "Bitrue account read failed: snapshot transport failed"
+        };
+        let errors: Vec<_> = h
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandError { command, message }) => {
+                    Some((*command, message.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors, [(91, expected), (92, expected)]);
+        for owner in [91, 92] {
+            let error=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandError{command,..}) if *command==owner)).unwrap();
+            let done=h.actions.iter().position(|a| matches!(a,Action::Notice(Notice::CommandDone{command,result:Err(_)}) if *command==owner)).unwrap();
+            assert!(error < done);
+        }
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message==expected))
+        );
+    }
+}
+
+#[test]
+fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_ownership() {
+    for malformed in [false, true] {
+        let mut h = Harness::new();
+        let snapshot = h.take("/account");
+        h.actions.clear();
+        if malformed {
+            h.respond(snapshot, r#"{"code":"0","data":{"account":[]}}"#);
+        } else {
+            exhaust_snapshot_transport(&mut h, snapshot);
+        }
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandError { .. })))
+        );
+        let expected = if malformed {
+            "Malformed Bitrue account snapshot; retaining previous state"
+        } else {
+            "Bitrue account read failed: snapshot transport failed"
+        };
+        assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) if message==expected)).count(),1);
+    }
+}
+
+fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
+    for attempt in 0..4 {
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: snapshot.id,
+                error: "snapshot transport failed",
+            },
+        );
+        h.collect();
+        if attempt < 3 {
+            assert!(!h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandError { .. } | Notice::CommandDone { .. })
+            )));
+            snapshot = h.take("/account");
+        }
+    }
+}

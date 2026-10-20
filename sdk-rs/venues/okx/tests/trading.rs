@@ -405,7 +405,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = actions(&mut e);
     assert!(out.iter().any(
-        |a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("51400"))
+        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51400"))
     ));
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders")));

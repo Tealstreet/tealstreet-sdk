@@ -9,7 +9,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Response, SocketId, TimerId, num};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -581,7 +581,7 @@ impl BybitLinear {
                 self.advance(cx, id);
             }
             Err(message) => {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(id, message.clone());
                 cx.done(id, Err(message));
             }
         }
@@ -746,7 +746,7 @@ impl BybitLinear {
                         self.on_trade_command(cx, *deferred);
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, message.clone());
+                        cx.command_error(command, message.clone());
                         cx.done(command, Err(message));
                     }
                 }
@@ -938,7 +938,7 @@ impl BybitLinear {
             (_, Ok(_)) => {}
         }
         for message in &errors {
-            cx.log(LogLevel::Error, message.clone());
+            cx.command_error(command, message.clone());
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;

@@ -23,6 +23,9 @@ const commandTimeout = (value) => {
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
 class UnknownEngineActionError extends Error {}
+class CommandDiagnosticCallbackError extends Error {
+  constructor(cause) { super('Command diagnostic callback failed', { cause }); }
+}
 class CommandProgressCallbackError extends Error {
   constructor(cause) { super('Command progress callback failed', { cause }); }
 }
@@ -248,6 +251,11 @@ export class EngineHost {
     catch (cause) { throw new CommandProgressCallbackError(cause); }
   }
 
+  commandDiagnostic(level, message) {
+    try { this.handlers.onLog?.(level, message); }
+    catch (cause) { throw new CommandDiagnosticCallbackError(cause); }
+  }
+
   /**
    * Hand everything that changed since the previous flush to `onFrame` as one
    * ArrayBuffer (read it with wire.mjs's Frame; transfer it, don't copy it).
@@ -398,29 +406,35 @@ export class EngineHost {
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
     let unknown;
-    let progressFailure;
+    let callbackFailure;
     for (const action of JSON.parse(actionsJson)) {
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
       catch (error) {
-        if (error instanceof CommandProgressCallbackError) { progressFailure ??= error; continue; }
+        if (error instanceof CommandProgressCallbackError || error instanceof CommandDiagnosticCallbackError) { callbackFailure ??= error; continue; }
         if (!(error instanceof UnknownEngineActionError)) throw error;
         unknown ??= error;
       }
     }
-    if (progressFailure) {
+    if (callbackFailure) {
       // Broken diagnostic consumers must not turn a dispatched write into an
       // ordinary rejection that a caller could mistake for a safe retry.
+      // Diagnostic listeners may have already displayed the command error
+      // before throwing. Reporting their own failure must not add another toast.
+      const level = callbackFailure instanceof CommandDiagnosticCallbackError ? 'warning' : 'error';
       let reported = false;
       try {
         if (this.handlers.onLog) {
-          this.handlers.onLog('error', progressFailure.message);
+          this.handlers.onLog(level, callbackFailure.message);
           reported = true;
         }
       } catch { /* Fall back independently of the outcome of the native command. */ }
       if (!reported) {
-        try { console.error(progressFailure); } catch { /* Diagnostics are best effort. */ }
+        try {
+          if (level === 'warning') console.warn(callbackFailure);
+          else console.error(callbackFailure);
+        } catch { /* Diagnostics are best effort. */ }
       }
     }
     if (unknown) throw unknown;
@@ -532,6 +546,14 @@ export class EngineHost {
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;
+      case 'commandError': {
+        // Only an explicitly attributed native error participates in command
+        // reporting. Background warnings/errors retain their ordinary path.
+        const pending = this.commands.get(action.command);
+        if (pending && pending.firstCommandError === undefined) pending.firstCommandError = action.message;
+        this.commandDiagnostic('warning', action.message);
+        break;
+      }
       case 'commandProgress': {
         const pending = this.commands.get(action.command);
         const receipts = [];
@@ -584,7 +606,16 @@ export class EngineHost {
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
           this.settleCommand(action.command, result);
         }
-        this.commandProgress(action.command, [], true, false);
+        // Settlement wins before any consumer runs: a broken toast/log handler
+        // cannot turn known acceptance into a retryable failure or skip the tail.
+        let callbackFailure;
+        try { this.commandProgress(action.command, [], true, false); }
+        catch (error) { callbackFailure = error; }
+        if (action.error === undefined && pending.firstCommandError !== undefined) {
+          try { this.commandDiagnostic('error', pending.firstCommandError); }
+          catch (error) { callbackFailure ??= error; }
+        }
+        if (callbackFailure) throw callbackFailure;
         break;
       }
       default:

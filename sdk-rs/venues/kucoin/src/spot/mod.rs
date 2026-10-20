@@ -1057,16 +1057,26 @@ impl Venue for KucoinSpot {
             Pending::Symbols { .. } => self.orders_loading = false,
             Pending::Orders(r) => {
                 if let Some((command, id)) = r.lookup {
+                    cx.command_error(command, error);
                     let out = lookup_output(&r.symbol, &id, cx.store.orders());
                     cx.done(command, Ok(out));
+                    return;
                 } else {
                     self.orders_loading = false;
                 }
             }
-            Pending::Write(j) => cx.done(j.command, Err(error.into())),
+            Pending::Write(j) => {
+                cx.command_error(j.command, error);
+                cx.done(j.command, Err(error.into()));
+                return;
+            }
             Pending::Candles { command, .. }
             | Pending::Fills(command)
-            | Pending::Account(command) => cx.done(command, Err(error.into())),
+            | Pending::Account(command) => {
+                cx.command_error(command, error);
+                cx.done(command, Err(error.into()));
+                return;
+            }
             _ => {}
         }
         cx.log(LogLevel::Error, error);
