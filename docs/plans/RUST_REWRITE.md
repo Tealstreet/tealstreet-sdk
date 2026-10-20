@@ -555,7 +555,11 @@ cutover or deletion:
   `handle.exchange` after successful persistence. Failed refresh retains the
   previous good engine/catalog. Callers re-read `handle.exchange` after refresh;
   bounded cold startup, lazy recovery from failed starts, delayed cache reads,
-  concurrent/hour-rollover/disposal paths have native/unit coverage.
+  concurrent/hour-rollover/disposal paths have native/unit coverage. Native
+  product/environment selectors also isolate current/latest cache and lock keys,
+  including registry-default Rust venues. Shared catalog validation preserves
+  typed classification, future and option identity while private metadata stays
+  native.
 - GRVT's apparent Future/Call/Put catalog gap has an [explicit retirement
   decision](GRVT_PRODUCTS_DECISION.md): TS discovery sends `{}`, which defaults
   to `PERPETUAL`; injected non-perpetual mapper rows are not currently exposed

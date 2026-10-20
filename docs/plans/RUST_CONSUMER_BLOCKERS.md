@@ -348,40 +348,70 @@ publish an empty snapshot or dispose the previous good engine.
   runner image. One unchanged-job rerun passed; no fixture/threshold change.
   Fresh integrated-head CI and replay acceptance are still required.
 
+- Final integrated acceptance: 21 public CPU/memory profiles and 36 private
+  correctness controls PASS on Node 22.23.3. Fifteen public/32 private controls
+  use the actual combined SDK artifact; six public/four private profiles use
+  canonical solo builds. All five solo selections remain within the unchanged
+  1,258,291-byte budget. The additional local OKX EU solo CPU miss and passing
+  combined comparison are retained explicitly below; no native code, thresholds
+  or fixtures were changed to resolve that artifact comparison.
+- Cache correction `1bad4d499e` uses the resolved native instance, covering
+  default Rust selection and actual TS fallback keys. Two default-selection
+  regressions prove-fail the old guard; three product-profile regressions
+  prove-fail unpartitioned keys. Final server unit 143 / WASM 11, types/lint
+  PASS. Independent full integration re-review PASS, no open findings. Root
+  typecheck 44 / lint 28 and all fresh artifact consumer/native/store proofs
+  recorded above PASS. Fresh exact-head CI remains required before merge.
+
 ## Final public replay metrics
 
-CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current
-`d1fdda29…8e7b88` combined binary; Hyperliquid Spot, Kraken Spot/futures and
-Paradex use canonical single-venue builds. Values are TypeScript → Rust.
-Gates enforce main-thread CPU, steady CPU and retained memory; process CPU is
-an additional diagnostic. Private replay controls enforce correctness only.
-Existing documented/live fixtures are reused; this lane adds no live capture,
-TS protocol correction or threshold change. Node 24's short Hyperliquid Spot
-CPU miss is recorded above and is not represented as a passing control here.
+CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
+use the current `6afa3acf…94c34` combined SDK binary; Hyperliquid Spot, Kraken
+Spot/futures, Paradex, Bybit and global OKX use canonical solo builds. Values
+are TypeScript → Rust. Gates enforce main-thread CPU, steady CPU and retained
+memory; process CPU is an additional diagnostic. Private controls enforce
+correctness only. Existing fixtures, thresholds and protocol oracles remain
+unchanged.
+
+The supplementary OKX EU solo build missed CPU on this Mac/Node 22 run
+(main 3,121.0 vs TS 2,637.6 ms; steady 2,252.8 vs 2,117.6), while correctness,
+memory and its size budget passed. A controlled comparison of the actual SDK
+combined artifact passes (main 2,079.8 vs 2,250.5 ms; steady 1,596.3 vs 1,699.3),
+matching landing's combined baseline (Rust main 2,081.7 / steady 1,596.1).
+Independent source review found no new Direct-mode scan/allocation/repricing
+loop. This is retained as a build/runtime limitation; canonical solo Linux CI
+remains a separate required gate. The earlier Node 24 short Hyperliquid Spot
+CPU miss also remains documented. Neither miss is normalized away or counted
+as a passing trial.
 
 | Profile | Main CPU ms | Steady CPU ms | Process CPU ms | Retained MB |
 | --- | ---: | ---: | ---: | ---: |
-| binance | 199.7 → 95.4 | 109.7 → 38.1 | 255.8 → 155.5 | 18.2 → 4.8 |
-| binancespot | 583.0 → 381.8 | 247.7 → 113.5 | 869.6 → 572.5 | 27.6 → 11.7 |
-| binanceinverse | 165.8 → 65.8 | 108.7 → 35.5 | 199.3 → 95.2 | 13.8 → 2.7 |
-| binancepm | 191.8 → 92.4 | 107.5 → 36.5 | 248.6 → 152.2 | 17.9 → 4.8 |
-| hyperliquid | 323.9 → 50.0 | 26.4 → 14.7 | 445.1 → 134.1 | 24.3 → 3.4 |
-| hyperliquidspot | 39.8 → 35.5 | 11.5 → 9.9 | 69.5 → 86.9 | 18.7 → 6.0 |
-| krakenspot | 248.6 → 120.2 | 186.7 → 67.0 | 368.2 → 264.5 | 16.5 → 4.3 |
-| kraken | 963.7 → 167.7 | 703.0 → 93.8 | 1131.4 → 316.6 | 16.8 → 2.7 |
-| coinbase | 835.0 → 338.4 | 499.6 → 110.1 | 1134.5 → 462.7 | 38.5 → 21.4 |
-| phemex | 392.8 → 102.5 | 264.6 → 35.0 | 469.0 → 157.8 | 20.1 → 5.3 |
-| asterdex | 165.7 → 88.7 | 60.1 → 39.3 | 280.6 → 168.6 | 27.9 → 7.0 |
-| txflow | 109.2 → 64.8 | 20.7 → 12.6 | 151.9 → 101.8 | 17.3 → 2.2 |
-| grvt | 175.8 → 121.2 | 95.1 → 67.0 | 276.4 → 270.8 | 26.5 → 2.6 |
-| lighter | 308.0 → 194.2 | 194.6 → 109.6 | 460.2 → 370.4 | 17.3 → 3.7 |
-| lighter-robinhood | 240.4 → 85.1 | 165.9 → 36.9 | 307.1 → 183.3 | 19.9 → 5.8 |
-| apexomni | 81.3 → 34.8 | 48.8 → 5.6 | 118.0 → 72.5 | 21.3 → 3.2 |
-| breakoutprop | 16.4 → 16.0 | 6.5 → 4.3 | 16.6 → 20.1 | 11.9 → 1.7 |
-| paradex | 530.1 → 477.8 | 231.9 → 173.9 | 723.3 → 602.5 | 19.0 → 2.1 |
+| binance | 194.1 → 91.4 | 107.0 → 37.1 | 246.1 → 152.8 | 18.1 → 4.9 |
+| binancespot | 585.0 → 405.0 | 242.9 → 122.1 | 890.6 → 613.9 | 27.6 → 11.7 |
+| binanceinverse | 172.2 → 67.4 | 112.8 → 37.4 | 205.7 → 99.7 | 13.9 → 2.7 |
+| binancepm | 261.8 → 139.3 | 156.4 → 71.3 | 308.8 → 207.4 | 17.9 → 4.9 |
+| hyperliquid | 442.6 → 75.1 | 44.9 → 31.0 | 524.3 → 179.8 | 24.5 → 3.4 |
+| hyperliquidspot | 47.4 → 44.5 | 18.2 → 15.1 | 60.2 → 106.9 | 18.8 → 6.0 |
+| krakenspot | 244.4 → 133.0 | 188.9 → 72.4 | 364.6 → 277.7 | 16.5 → 4.3 |
+| kraken | 979.5 → 165.6 | 743.6 → 90.3 | 1091.6 → 304.1 | 16.9 → 2.7 |
+| coinbase | 909.6 → 390.4 | 554.4 → 123.8 | 1121.0 → 489.4 | 38.5 → 21.5 |
+| phemex | 468.3 → 155.7 | 318.8 → 70.0 | 520.9 → 220.4 | 20.1 → 5.3 |
+| asterdex | 254.3 → 142.3 | 112.2 → 77.0 | 369.9 → 245.2 | 28.1 → 7.1 |
+| txflow | 131.1 → 88.3 | 35.9 → 23.9 | 170.0 → 129.1 | 17.4 → 2.2 |
+| grvt | 137.6 → 121.3 | 80.7 → 69.1 | 233.2 → 268.4 | 26.6 → 2.6 |
+| lighter | 313.3 → 212.8 | 200.9 → 113.8 | 467.3 → 400.7 | 17.4 → 3.7 |
+| lighter-robinhood | 329.8 → 119.6 | 228.5 → 59.5 | 400.5 → 231.7 | 20.0 → 5.8 |
+| apexomni | 95.9 → 40.0 | 57.7 → 8.2 | 111.0 → 84.7 | 21.3 → 3.2 |
+| breakoutprop | 26.2 → 17.5 | 10.9 → 6.8 | 28.3 → 22.5 | 11.9 → 1.7 |
+| paradex | 558.0 → 457.0 | 263.0 → 168.8 | 720.1 → 575.8 | 18.9 → 2.1 |
+| bybit | 181.2 → 141.9 | 86.3 → 49.1 | 286.6 → 338.0 | 22.2 → 5.0 |
+| okx | 1121.0 → 998.2 | 841.1 → 743.2 | 1391.0 → 1252.9 | 19.3 → 5.3 |
+| okxeu | 2250.5 → 2079.8 | 1699.3 → 1596.3 | 2534.6 → 2375.6 | 21.8 → 7.6 |
 
-All 18 public controls PASS. Process CPU is higher for hyperliquidspot, breakoutprop;
-their gated main/steady CPU and retained memory remain below TS. Public
-main-thread speedups range from 1.03× to 6.47×; retained memory reductions
-range from 1.79× to 10.08×. No builds/tests ran concurrently with these
-accepted public measurements in this lane.
+All 21 accepted public profiles PASS on the artifacts identified above.
+Process CPU is higher for hyperliquidspot, grvt, bybit; their gated main/steady CPU and
+retained memory pass. Main-thread speedups range from 1.07× to
+5.91×; retained memory reductions from 1.79× to
+10.23×. Public measurements ran sequentially with no other owned
+build/test processes. All 36 private controls PASS. Combined browser/Node
+bindings restore exactly to SHA `6afa3acf…94c34` after solo trials.
