@@ -39,7 +39,12 @@ impl OrderLocks {
             || self.waiting.iter().any(|(c, _)| matches!(c, Command::CancelSymbolOrders { command: id, .. } if *id == command))
     }
 
-    pub fn acquire(&mut self, command: &Command, store: &Store) -> Result<(), CommandId> {
+    pub fn acquire(
+        &mut self,
+        command: &Command,
+        store: &Store,
+        fence_uncertain: bool,
+    ) -> Result<(), CommandId> {
         let mut scope = Scope {
             ids: Vec::new(),
             symbols: Vec::new(),
@@ -111,10 +116,11 @@ impl OrderLocks {
                     .as_ref()
                     .is_some_and(|s| s.is_empty() || s == all)
         };
-        if scope
-            .all_symbol
-            .as_deref()
-            .is_some_and(|symbol| self.uncertain(symbol))
+        if fence_uncertain
+            && scope
+                .all_symbol
+                .as_deref()
+                .is_some_and(|symbol| self.uncertain(symbol))
             || self.active.len() >= 64
             || self.active.iter().any(|(_, held)| {
                 scope.ids.iter().any(|id| held.ids.contains(id))

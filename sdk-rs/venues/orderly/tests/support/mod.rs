@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_orderly::{Options, Orderly};
 pub type Driver = Engine<Orderly>;
 pub const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01},{"symbol":"PERP_ETH_USDC","base_tick":0.001,"quote_tick":0.01,"base_min":0.001,"base_max":100,"base_imr":0.02}]}}"#;
@@ -49,9 +49,15 @@ pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
 pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketId) {
+    let (e, socket, _) = ready_ticking(order, algos, positions);
+    (e, socket)
+}
+/// Like `ready_with`, also returning the account poll tick timer.
+pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, SocketId, TimerId) {
     let mut e = Engine::new(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
+    let mut tick = None;
     for _ in 0..10 {
         let out = actions(&mut e);
         if out.is_empty() {
@@ -85,6 +91,10 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
+                Action::SetTimer {
+                    timer,
+                    at_ms: 3000.0,
+                } => tick = Some(timer),
                 _ => {}
             }
         }
@@ -93,7 +103,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
     e.handle(1000.0, Event::WsOpened { socket });
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
-    (e, socket)
+    (e, socket, tick.unwrap())
 }
 pub fn fill_amounts(e: &mut Driver) -> Vec<f64> {
     let Some(bytes) = e.take_frame(2000.0) else {

@@ -305,3 +305,35 @@ fn genuinely_unknown_historical_instrument_still_fails_instead_of_fabricating_sy
     );
     assert!(done(&mut e).is_err());
 }
+
+/// Pins the exact request bodies of an offset-paged read. Paging refactors
+/// keep them.
+#[test]
+fn offset_paged_request_sequence_is_pinned() {
+    let mut e = ready();
+    let mut sent = Vec::new();
+    let r = query(&mut e, fills(None, None));
+    sent.push(r.body.clone().unwrap());
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[execution(1,NOW)],"hasMore":true}})
+            .to_string(),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    sent.push(r.body.clone().unwrap());
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[execution(2,NOW)],"hasMore":false}})
+            .to_string(),
+    );
+    assert!(done(&mut e).is_ok());
+    assert_eq!(
+        sent,
+        [
+            "{\"type\":\"userFills\",\"user\":\"0x0000000000000000000000000000000000000001\",\"accountType\":[\"perp\"],\"coin\":\"1\",\"endTimeMs\":1700000010000,\"offset\":0,\"limit\":2000}",
+            "{\"type\":\"userFills\",\"user\":\"0x0000000000000000000000000000000000000001\",\"accountType\":[\"perp\"],\"coin\":\"1\",\"endTimeMs\":1700000010000,\"offset\":2000,\"limit\":2000}",
+        ]
+    );
+}
