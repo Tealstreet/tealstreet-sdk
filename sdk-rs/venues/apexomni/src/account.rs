@@ -452,7 +452,11 @@ impl ApexOmni {
             .market_by_id(&raw.symbol)
             .or_else(|| store.market(&raw.symbol))
         else {
-            return Ok(None);
+            return if raw.size == Some(0.0) {
+                Ok(None)
+            } else {
+                Err("ApeX owned position has unavailable market metadata".into())
+            };
         };
         let side = match raw.side.as_ref() {
             "LONG" => PositionSide::Long,
@@ -494,6 +498,11 @@ impl ApexOmni {
         if !leverage.is_finite() {
             return Err("invalid position leverage".into());
         }
+        let unrealized_pnl = raw
+            .unrealised_pnl
+            .or_else(|| store.position(&id).map(|p| p.unrealized_pnl))
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
         Ok(Some(Position {
             id,
             symbol: market.symbol.clone(),
@@ -503,7 +512,7 @@ impl ApexOmni {
             leverage,
             margin_type: Some(MarginType::Cross),
             position_mode: Some(PositionMode::Hedged),
-            unrealized_pnl: raw.unrealised_pnl.unwrap_or(0.0),
+            unrealized_pnl,
             realized_pnl: Some(raw.cur_realised_pnl.or(raw.realized_pnl).unwrap_or(0.0)),
             contracts,
             liquidation_price: raw.liq_price.unwrap_or(0.0),
@@ -803,8 +812,15 @@ impl ApexOmni {
             Request::Positions { rows, skipped, .. } => {
                 match serde_json::from_str::<wire::PositionRow<'_>>(item)
                     .map_err(|e| e.to_string())
-                    .and_then(|raw| self.map_position(cx.store, &raw, cx.now))
-                {
+                    .and_then(|raw| {
+                        if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
+                            cx.log(
+                                LogLevel::Warning,
+                                "ApeX position PnL unavailable; retaining prior valuation",
+                            );
+                        }
+                        self.map_position(cx.store, &raw, cx.now)
+                    }) {
                     Ok(Some(row)) => rows.push(row),
                     Ok(None) => {}
                     Err(_) => {
@@ -821,7 +837,14 @@ impl ApexOmni {
             Request::Orders { rows, skipped, .. } => {
                 match serde_json::from_str::<wire::OrderRow<'_>>(item)
                     .map_err(|e| e.to_string())
-                    .and_then(|raw| map_order(cx.store, &raw, cx.now))
+                    .and_then(|raw| {
+                        if cx.store.market_by_id(&raw.symbol)
+                            .or_else(|| cx.store.market(&raw.symbol)).is_none() {
+                            cx.log(LogLevel::Warning, "ApeX owned order has unavailable market metadata; preserving previous orders");
+                            return Err("unknown owned order market".into());
+                        }
+                        map_order(cx.store, &raw, cx.now)
+                    })
                 {
                     Ok(mapped) => rows.extend(mapped),
                     Err(_) => skipped.note(&wire::row_key(item).id),
@@ -971,22 +994,17 @@ impl ApexOmni {
                     );
                     return;
                 };
-                let upnl: f64 = cx
-                    .store
-                    .positions()
-                    .iter()
-                    .filter_map(|p| {
-                        cx.store.ticker(&p.symbol).map(|t| {
-                            (t.last - p.entry_price)
-                                * p.contracts
-                                * if p.side == PositionSide::Long {
-                                    1.0
-                                } else {
-                                    -1.0
-                                }
-                        })
-                    })
-                    .sum();
+                let upnl = cx.store.positions().iter().try_fold(0.0, |sum, p| {
+                    let value = sum + p.unrealized_pnl;
+                    value.is_finite().then_some(value)
+                });
+                let Some(upnl) = upnl else {
+                    cx.log(
+                        LogLevel::Warning,
+                        "ApeX position PnL invalid; retaining previous balance",
+                    );
+                    return;
+                };
                 cx.store.set_balance(Balance {
                     total: balance.total_equity_value - upnl,
                     used: balance.maintenance_margin,
@@ -1301,7 +1319,17 @@ impl ApexOmni {
             let mut rows = cx.store.positions().to_vec();
             for raw in positions.rows {
                 self.note_unlisted(cx, &raw.symbol, "position");
-                if let Ok(Some(mut position)) = self.map_position(cx.store, &raw, cx.now) {
+                if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
+                    cx.log(
+                        LogLevel::Warning,
+                        "ApeX position PnL unavailable; retaining prior valuation",
+                    );
+                }
+                let mapped = self.map_position(cx.store, &raw, cx.now);
+                if let Err(error) = &mapped {
+                    cx.log(LogLevel::Warning, error);
+                }
+                if let Ok(Some(mut position)) = mapped {
                     if let Some((_, at, leverage)) =
                         self.account.leverage_versions.get(&position.symbol)
                         && cx.now - at < 5000.0
@@ -1509,10 +1537,18 @@ impl ApexOmni {
         raw: &wire::OrderRow<'_>,
         snapshot: bool,
     ) {
-        let Ok(rows) = map_order(cx.store, raw, cx.now) else {
-            return;
+        let rows = match map_order(cx.store, raw, cx.now) {
+            Ok(rows) => rows,
+            Err(error) => {
+                cx.log(LogLevel::Warning, error);
+                return;
+            }
         };
         let Some(order) = rows.first() else {
+            cx.log(
+                LogLevel::Warning,
+                "ApeX owned order has unavailable market metadata; preserving previous orders",
+            );
             return;
         };
         if raw.status == "FILLED"

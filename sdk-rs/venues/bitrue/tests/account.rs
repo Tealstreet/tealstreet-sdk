@@ -582,7 +582,8 @@ fn currency_balances_keep_both_coins_and_failed_snapshots_preserve_them() {
     assert_eq!(coins[0].currency, "USDC");
     assert_eq!(coins[0].balance.total, 30.0);
     assert_eq!(coins[0].balance.used, 10.0);
-    assert_eq!(coins[0].balance.upnl, 4.0);
+    // sumOpenRealizedAmount is realized money; no positions means no UPnL.
+    assert_eq!(coins[0].balance.upnl, 0.0);
     assert_eq!(coins[1].currency, "USDT");
     assert_eq!(h.e.store().balance().total, 100.0);
     h.fire_at(2_000.0);
@@ -650,6 +651,62 @@ fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known
             .any(|r| r.url.contains("/openOrders?contractName=E-ETH-USDT"))
     );
     assert!(h.e.store().loaded().orders);
+}
+
+#[test]
+fn a_persistently_failing_symbol_backs_off_to_a_cap_and_resets_on_success() {
+    const ETH: &str = "/openOrders?contractName=E-ETH-USDT";
+    const BTC: &str = "/openOrders?contractName=E-BTC-USDT";
+    const FAILED: &str = r#"{"code":"-1","msg":"symbol unavailable"}"#;
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let mut h = Harness::with_market(&markets);
+    h.reply("/account", EMPTY);
+    h.reply(BTC, ORDER);
+    h.fire_at(200.0);
+    h.reply(ETH, FAILED);
+    let mut at = 200.0;
+    for delay in [
+        500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0, 30_000.0, 30_000.0,
+    ] {
+        at += delay;
+        h.fire_at(at);
+        h.reply(ETH, FAILED);
+    }
+    assert_eq!(h.e.store().orders().len(), 1);
+    let errors = |h: &Harness| {
+        h.actions
+            .iter()
+            .filter(|a| {
+                matches!(a, Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Error, message }) if message.contains("E-ETH-USDT"))
+            })
+            .count()
+    };
+    assert_eq!(errors(&h), 1);
+
+    // BTC keeps its normal cadence while ETH waits out its backoff.
+    h.order(1, "NEW", "LIMIT", 100);
+    h.reply(BTC, ORDER);
+    assert!(!h.pending.iter().any(|r| r.url.contains(ETH)));
+
+    at += 30_000.0;
+    h.fire_at(at);
+    h.reply(ETH, r#"{"code":"0","data":[]}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::Log { level: safe_cex_engine::LogLevel::Info, message }) if message.contains("E-ETH-USDT recovered")
+    )));
+
+    // A fresh failure after recovery starts again from the initial delay.
+    h.e.handle(h.now, Event::WsOpened { socket: h.private });
+    h.collect();
+    h.reply("/account", EMPTY);
+    h.reply(BTC, ORDER);
+    h.fire_at(h.now + 200.0);
+    h.reply(ETH, FAILED);
+    h.fire_at(h.now + 500.0);
+    assert!(h.pending.iter().any(|r| r.url.contains(ETH)));
+    assert_eq!(errors(&h), 2);
 }
 
 #[test]

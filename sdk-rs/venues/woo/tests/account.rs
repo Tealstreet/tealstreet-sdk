@@ -20,6 +20,9 @@ fn algos(row: &str) -> String {
     )
 }
 fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
+    start_with(MARKETS)
+}
+fn start_with(markets: &str) -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     let mut e = Engine::new(Woo::new(Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
@@ -28,10 +31,18 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     }));
     e.start(0.0);
     let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 20.0, TICKERS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    response(&mut e, &r, 10.0, markets);
+    let mut early = e.drain_actions().collect::<Vec<_>>();
+    let ticker = early
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/public/futures") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    response(&mut e, &ticker, 20.0, TICKERS);
+    early.extend(e.drain_actions());
+    let actions = early;
     let socket = actions
         .iter()
         .find_map(|a| {
@@ -46,7 +57,7 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
         .iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 2020.0).then_some(*timer)
+                (*at_ms == 2010.0).then_some(*timer)
             } else {
                 None
             }
@@ -1062,6 +1073,51 @@ fn repeated_skips_and_hidden_exposure_warn_once_per_change() {
     }
     assert_eq!((skipped, hidden), (1, 1));
     assert_eq!(e.store().positions()[0].contracts, 0.01);
+}
+
+#[test]
+fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapshot() {
+    // The catalogue skipped PERP_MISSING_USDT, so its working orders are ambiguous.
+    let catalogue = MARKETS.replace("]}", r#",{"symbol":"PERP_MISSING_USDT"}]}"#);
+    for (algo_bad, terminal_children) in [(false, false), (true, false), (true, true)] {
+        let (mut e, socket, mut reads, _) = start_with(&catalogue);
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        let regular = take(&mut reads, "/v1/orders?");
+        let unknown_regular = ORDER.replace("PERP_BTC_USDT", "PERP_MISSING_USDT");
+        response(
+            &mut e,
+            &regular,
+            80.0,
+            &page(if algo_bad { "" } else { &unknown_regular }),
+        );
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        let mut unknown_algo = ALGO.replace("PERP_BTC_USDT", "PERP_MISSING_USDT").replacen(
+            "\"rootAlgoOrderId\"",
+            "\"algoStatus\":\"FILLED\",\"rootAlgoOrderId\"",
+            1,
+        );
+        if terminal_children {
+            unknown_algo =
+                unknown_algo.replace("\"algoStatus\":\"NEW\"", "\"algoStatus\":\"FILLED\"");
+        }
+        response(
+            &mut e,
+            &algo,
+            90.0,
+            &algos(if algo_bad { &unknown_algo } else { "" }),
+        );
+        if terminal_children {
+            assert!(e.store().orders().is_empty());
+        } else {
+            assert_eq!(e.store().orders(), before);
+            assert!(e.drain_actions().any(|action| matches!(action,
+                Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+        }
+    }
 }
 
 #[test]

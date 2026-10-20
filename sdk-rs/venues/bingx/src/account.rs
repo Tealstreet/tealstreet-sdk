@@ -50,12 +50,15 @@ pub enum Request {
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
         skipped: Vec<String>,
+        // An owned row outside the catalogue makes the snapshot incomplete.
+        unavailable: bool,
     },
     OpenOrders {
         revision: u64,
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
         skipped: Vec<String>,
+        unavailable: bool,
     },
 }
 
@@ -388,6 +391,7 @@ impl Account {
                 rows: Vec::new(),
                 settings: Vec::new(),
                 skipped: Vec::new(),
+                unavailable: false,
             },
             true,
         );
@@ -408,6 +412,7 @@ impl Account {
                 rows: Vec::new(),
                 metas: Vec::new(),
                 skipped: Vec::new(),
+                unavailable: false,
             },
             true,
         );
@@ -560,6 +565,7 @@ impl Account {
                 rows,
                 settings,
                 skipped,
+                unavailable,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
@@ -568,6 +574,13 @@ impl Account {
                 };
                 let symbol = row.symbol.replace('-', "");
                 if self.untracked_market(cx, &symbol) {
+                    if row.position_amt != 0.0 {
+                        *unavailable = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "BingX owned position market unavailable; preserving previous snapshot",
+                        );
+                    }
                     return;
                 }
                 let mode = mode(cx);
@@ -642,6 +655,7 @@ impl Account {
                 rows,
                 metas,
                 skipped,
+                unavailable,
                 ..
             } => {
                 let Some(order) = serde_json::from_str::<NativeOrder<'_>>(item)
@@ -652,9 +666,17 @@ impl Account {
                     return;
                 };
                 let (order, native) = order;
-                if self.untracked_market(cx, &order.symbol)
-                    || self.terminal_orders.contains_key(&order.id)
-                {
+                if self.terminal_orders.contains_key(&order.id) {
+                    return;
+                }
+                if self.untracked_market(cx, &order.symbol) {
+                    if order.status == OrderStatus::Open {
+                        *unavailable = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "BingX working order market unavailable; preserving previous orders",
+                        );
+                    }
                     return;
                 }
                 if native.complete_metadata() {
@@ -791,8 +813,13 @@ impl Account {
                 mut rows,
                 settings,
                 skipped,
+                unavailable,
             } => {
                 self.positions_in_flight = None;
+                if unavailable {
+                    crate::log_skipped(cx, "position", &skipped);
+                    return;
+                }
                 if revision == self.positions_revision {
                     let unidentified = skipped.iter().any(String::is_empty);
                     log_snapshot_skips(cx, "position", &skipped, &mut self.unidentified_positions);
@@ -823,10 +850,15 @@ impl Account {
                 mut rows,
                 metas,
                 skipped,
+                unavailable,
             } => {
                 self.orders_in_flight = None;
                 if revision != self.orders_revision {
                     self.fetch_orders(cx, credentials);
+                    return;
+                }
+                if unavailable {
+                    crate::log_skipped(cx, "open order", &skipped);
                     return;
                 }
                 log_snapshot_skips(cx, "open order", &skipped, &mut self.unidentified_orders);

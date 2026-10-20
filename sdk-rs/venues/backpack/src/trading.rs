@@ -4,7 +4,9 @@ use crate::account::Next;
 use crate::sign::Params;
 use crate::{Backpack, Pending, REST};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -123,6 +125,8 @@ struct Job {
     internal: bool,
     replaces: Option<String>,
     amendment: Option<f64>,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -493,21 +497,24 @@ impl Backpack {
                 },
             ),
             Command::SetMarginType { command, .. } => {
-                cx.done(command, Err("Backpack only supports cross margin".into()));
+                let error = not_sent("Backpack only supports cross margin");
+                cx.fail(command, error.kind(ErrorKind::Unsupported));
                 return;
             }
             Command::SetPositionMode { command, .. } => {
-                cx.done(command, Err("Backpack position mode is fixed".into()));
+                let error = not_sent("Backpack position mode is fixed");
+                cx.fail(command, error.kind(ErrorKind::Unsupported));
                 return;
             }
             _ => return,
         };
         if self.account.credentials.is_none() {
-            cx.done(id, Err("Backpack credentials unavailable".into()));
+            let error = not_sent("Backpack credentials unavailable");
+            cx.fail(id, error.kind(ErrorKind::AuthInvalid));
             return;
         }
         if self.trading.jobs.contains_key(&u64::from(id)) {
-            cx.done(id, Err("Backpack command is already active".into()));
+            cx.fail(id, not_sent("Backpack command is already active"));
             return;
         }
         match plan {
@@ -529,11 +536,12 @@ impl Backpack {
                         internal: false,
                         replaces: None,
                         amendment,
+                        effective: false,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
             }
-            Err(e) => cx.done(id, Err(e)),
+            Err(e) => cx.fail(id, not_sent(e).kind(ErrorKind::InvalidInput)),
         }
     }
     fn run_trade(&mut self, cx: &mut Cx<'_, Pending>, command: u64) {
@@ -674,8 +682,18 @@ impl Backpack {
             false,
         );
         if let Err(e) = result {
-            self.trading.jobs.remove(&command);
-            cx.done(command as CommandId, Err(e));
+            let effective = self
+                .trading
+                .jobs
+                .remove(&command)
+                .is_some_and(|job| job.effective);
+            let error = VenueError::new(e);
+            let error = if effective {
+                error
+            } else {
+                error.outcome(Outcome::NotSent)
+            };
+            cx.fail(command as CommandId, error);
         }
     }
     pub(crate) fn trade_response(
@@ -692,17 +710,7 @@ impl Backpack {
                 ));
             }
             // Some API errors are returned with HTTP 200.
-            #[derive(Deserialize)]
-            struct Failure<'a> {
-                #[serde(borrow)]
-                error: Option<&'a serde_json::value::RawValue>,
-                #[serde(borrow)]
-                code: Option<&'a serde_json::value::RawValue>,
-            }
-            if response.body.trim_start().starts_with('{')
-                && let Ok(error) = serde_json::from_str::<Failure<'_>>(response.body)
-                && (error.error.is_some() || error.code.is_some())
-            {
+            if refused_in_body(response.body) {
                 return Err(format!("Backpack write rejected: {}", response.body));
             }
             match &request.step {
@@ -884,11 +892,32 @@ impl Backpack {
             Ok(())
         })();
         match result {
-            Ok(()) => self.run_trade(cx, request.command),
-            Err(e) => self.trade_failed(cx, request, &e),
+            Ok(()) => {
+                if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+                    job.effective = true;
+                }
+                self.run_trade(cx, request.command)
+            }
+            Err(e) => {
+                let error = if !(200..300).contains(&response.status) {
+                    http_failure(response.status, e)
+                } else if refused_in_body(response.body) {
+                    // Backpack's error codes are undocumented here; leave the outcome unset.
+                    VenueError::new(e)
+                } else {
+                    // The write was answered with an acknowledgement that does not prove it.
+                    VenueError::new(e).outcome(Outcome::Unknown)
+                };
+                self.trade_failed(cx, request, error)
+            }
         }
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
         if let Step::Cancel { id, .. } = &request.step
             && self.finish_cancel(id)
             && let Some(previous) = request.previous
@@ -907,18 +936,20 @@ impl Backpack {
             request.step,
             Step::Place { optional: true, .. } | Step::Cancel { optional: true, .. }
         ) {
-            cx.log(LogLevel::Warning, error);
+            cx.log(LogLevel::Warning, &error.message);
             self.run_trade(cx, request.command);
         } else {
-            let internal = self
-                .trading
-                .jobs
-                .remove(&request.command)
-                .is_some_and(|job| job.internal);
-            if internal {
-                cx.log(LogLevel::Warning, error);
+            let job = self.trading.jobs.remove(&request.command);
+            if job.as_ref().is_some_and(|job| job.internal) {
+                cx.log(LogLevel::Warning, &error.message);
             } else {
-                cx.done(request.command as CommandId, Err(error.into()));
+                // A later refusal after a step took effect cannot mean nothing happened.
+                if job.is_some_and(|job| job.effective)
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
+                    error.outcome = None;
+                }
+                cx.fail(request.command as CommandId, error);
             }
         }
     }
@@ -1008,8 +1039,46 @@ impl Backpack {
                 internal: true,
                 replaces: Some(repair.old_id),
                 amendment: None,
+                effective: false,
             },
         );
         self.run_trade(cx, command);
     }
+}
+
+/// Backpack answers some refused writes with HTTP 200 and an error body.
+fn refused_in_body(body: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Failure<'a> {
+        #[serde(borrow)]
+        error: Option<&'a serde_json::value::RawValue>,
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+    }
+    body.trim_start().starts_with('{')
+        && serde_json::from_str::<Failure<'_>>(body)
+            .is_ok_and(|error| error.error.is_some() || error.code.is_some())
+}
+
+/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+fn http_failure(status: u16, message: String) -> VenueError {
+    let error = VenueError::new(message);
+    match status {
+        408 | 500.. => error.outcome(Outcome::Unknown),
+        401 => error
+            .kind(ErrorKind::AuthInvalid)
+            .outcome(Outcome::Rejected),
+        403 => error
+            .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        429 => error
+            .kind(ErrorKind::RateLimited)
+            .outcome(Outcome::Rejected),
+        _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
