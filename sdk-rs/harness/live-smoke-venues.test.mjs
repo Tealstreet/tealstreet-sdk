@@ -7,7 +7,7 @@ const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
 
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
-    if (['hyrotrader', 'grvt', 'breakoutprop'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -21,6 +21,13 @@ test('every registry name has an explicitly reviewed environment or fails closed
       assert.equal(profile.allowUrl(`${origin}/path?x=1`), true, `${venue} ${origin}`);
     assert.equal(profile.allowUrl('https://example.com'), false);
   }
+});
+
+test('unreviewed profiles refuse all modes before credential access', () => {
+  const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot'])
+    for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
+      assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
 
 test('production-only modes refuse before credentials can be read', () => {

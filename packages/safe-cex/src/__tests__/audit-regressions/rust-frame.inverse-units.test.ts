@@ -15,7 +15,7 @@ type OrderRow = { id: string; parentId?: string; amount: number; filled: number;
 
 // Independent encoder of the documented format-1 layout. The optional native
 // tail must not change offsets in the original seven-column ORDERS table.
-const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true } = {}) => {
+const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN } = {}) => {
   const strings = ['BTCUSD', 'BTC', 'USD', ...orders.flatMap((row) => [row.id, ...(row.parentId ? [row.parentId] : [])])];
   const ref = (s: string | undefined) => s === undefined ? 0xffffffff : strings.indexOf(s);
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
@@ -30,7 +30,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
     }
     sections.push({ kind, bytes });
   };
-  if (markets) table(2, [1, 0, 0, 1, 2, inverse ? 3 : 1], [1, 0.1, 1, 100000, 1, 100, NaN, NaN, NaN, NaN].map((n) => [n]));
+  if (markets) table(2, [1, 0, 0, 1, 2, inverse ? 3 : 1], [1, 0.1, 1, 100000, 1, 100, NaN, contractSize, NaN, NaN].map((n) => [n]));
   const columns = [
     orders.map(() => 54321), orders.map((o) => o.amount), orders.map((o) => o.filled),
     orders.map((o) => o.remaining), orders.map(() => 1234), orders.map(() => NaN), orders.map(() => NaN),
@@ -70,6 +70,43 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
 };
 
 describe('Rust frames preserve inverse native units', () => {
+  it('converts COIN-M USD notionals to native contract counts in worker and main stores', () => {
+    const value = fixture({
+      contractSize: 100,
+      native: true,
+      positions: true,
+      orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
+    });
+    const workerStore = new DefaultStore();
+    const applier = new FrameApplier(workerStore, false, false, true);
+    applier.apply(value);
+    applier.apply(
+      fixture({
+        markets: false,
+        positions: true,
+        native: true,
+        orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
+      }),
+    );
+    const mainStore = new DefaultStore();
+    const exchange = new BaseExchange('binanceinverse', { key: '', secret: '' }, mainStore);
+    exchange.applyWorkerFrame(value.buffer);
+    for (const store of [workerStore, mainStore]) {
+      expect(store.positions[0]).toMatchObject({
+        notional: 1000,
+        extra: { contractsNative: 10, unrealizedPnlNative: 0.002 },
+      });
+      expect(store.orders[0]).toMatchObject({
+        amount: 7,
+        filled: 2,
+        remaining: 5,
+        extra: { remainingNative: 5, remainingNotional: 500 },
+      });
+    }
+    exchange.dispose();
+  });
+
+
   it('decodes legacy seven-column frames and leaves unknown native quantities absent', () => {
     const frame = fixture({ orders: [{ id: 'full-stop', amount: 0, filled: 0, remaining: 0.00013 }] });
     expect(frame.orders()!.remainingNative).toBeUndefined();

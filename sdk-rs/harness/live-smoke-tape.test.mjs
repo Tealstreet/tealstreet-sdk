@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHmac } from 'node:crypto';
 import { gzipSync, gunzipSync, deflateSync, inflateSync } from 'node:zlib';
 import { createPrivateRecorder, createSmokeRedactor } from './live-smoke-tape.mjs';
 import { Tape, bodyBytes } from './tape.mjs';
@@ -114,10 +115,14 @@ test('Binance recorded signed writes replay with fresh signatures but exact amou
   assert.equal(recorder.records[3].afterCommand, 1);
   const tape = new Tape(recorder.records, venueOf('binance'), true);
   tape.commandIndex = 1;
-  const url = 'https://demo-fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&quantity=0.001&price=20000&newClientOrderId=smoke-caller-123&timestamp=88&signature=replay-signature';
-  assert.equal(tape.respond('POST', url.replace('20000', '20001')).status, 599);
-  assert.equal(tape.respond('POST', url).status, 200);
-  assert.equal(tape.respond('POST', url).status, 599);
+  const signed = (price) => {
+    const query = `symbol=BTCUSDT&quantity=0.001&price=${price}&newClientOrderId=smoke-caller-123&timestamp=${Date.now()}&recvWindow=5000`;
+    return `https://demo-fapi.binance.com/fapi/v1/order?${query}&signature=${createHmac('sha256', 'replay-secret').update(query).digest('hex')}`;
+  };
+  const headers = { 'X-MBX-APIKEY': 'replay-key' };
+  assert.equal(tape.respond('POST', signed(20001), undefined, headers).status, 599);
+  assert.equal(tape.respond('POST', signed(20000), undefined, headers).status, 200);
+  assert.equal(tape.respond('POST', signed(20000), undefined, headers).status, 599);
   assert.equal(tape.missingWrites, 0);
 });
 

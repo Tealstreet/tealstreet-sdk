@@ -24,14 +24,20 @@ fn number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::E
 pub struct SymbolInfo<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, default, alias = "contractStatus")]
     pub status: Str<'a>,
     #[serde(borrow)]
     pub base_asset: Str<'a>,
     #[serde(borrow)]
     pub quote_asset: Str<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, default)]
     pub margin_asset: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub contract_size: f64,
+    #[serde(default)]
+    pub base_asset_precision: i32,
+    #[serde(default)]
+    pub quote_asset_precision: i32,
     #[serde(borrow, default)]
     pub contract_type: Str<'a>,
     #[serde(borrow, default)]
@@ -64,8 +70,14 @@ pub struct Daily<'a> {
     pub price_change_percent: Str<'a>,
     #[serde(borrow)]
     pub volume: Str<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, default)]
     pub quote_volume: Str<'a>,
+    #[serde(borrow, default)]
+    pub base_volume: Str<'a>,
+    #[serde(borrow, default)]
+    pub bid_price: Str<'a>,
+    #[serde(borrow, default)]
+    pub ask_price: Str<'a>,
 }
 
 #[derive(Deserialize)]
@@ -114,8 +126,14 @@ pub struct TickerEvent<'a> {
     pub percentage: Str<'a>,
     #[serde(borrow)]
     pub v: Str<'a>,
-    #[serde(borrow)]
-    pub q: Str<'a>,
+    #[serde(borrow, default)]
+    pub q: Option<Str<'a>>,
+    #[serde(borrow, default, rename = "Q")]
+    pub base_volume: Option<Str<'a>>,
+    #[serde(borrow, default, rename = "b")]
+    pub bid: Option<Str<'a>>,
+    #[serde(borrow, default, rename = "a")]
+    pub ask: Option<Str<'a>>,
 }
 
 /// One element of `!markPrice@arr@1s`.
@@ -295,7 +313,7 @@ pub struct PositionRisk<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account<'a> {
-    #[serde(borrow, default)]
+    #[serde(borrow)]
     pub assets: Vec<AccountAsset<'a>>,
 }
 
@@ -596,7 +614,7 @@ pub struct PublicTrade<'a> {
     pub price: Str<'a>,
     #[serde(borrow)]
     pub qty: Str<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, alias = "baseQty")]
     pub quote_qty: Str<'a>,
     pub time: f64,
     pub is_buyer_maker: bool,
@@ -670,4 +688,14 @@ pub struct ConditionalUpdate<'a> {
     pub reduce_only: bool,
     #[serde(borrow, default)]
     pub wt: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct SubscriptionAck<'a> {
+    #[serde(default)]
+    pub id: Option<u64>,
+    #[serde(default)]
+    pub code: Option<i64>,
+    #[serde(borrow, default)]
+    pub msg: Str<'a>,
 }

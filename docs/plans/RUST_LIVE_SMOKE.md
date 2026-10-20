@@ -127,3 +127,16 @@ native network primitives provide its transport. No engine shapes change.
   PASS. Bans/fmt/current wasm clippy and secret scan pass; no size budget change.
   Pending only pushing reviewed repairs, posting their passing re-review, and
   exact-head green CI before normal merge/fresh branch.
+- Exact repaired head `e4ffa9d48f` reached 35/35 green CI, but final merge guard
+  detected the newly landed Binance variants PR #1326. Merge landing
+  `e391337054` preserving its nested workspace, all variant scripts and harness
+  protocol checks. New binancepm/inverse/spot smoke profiles explicitly refuse
+  every mode before credential access; USD-M binance stays enabled.
+- Integration review caught the incoming Binance validator rejecting signed
+  demo listen-key traffic, although both engines sign it. Regression reproduced
+  before repair; exact demo-fapi/demo-dapi origins now use full HMAC/time/window
+  validation, while production listen-key stays unsigned. Recorder unit replay
+  now supplies genuine fresh replay signatures, preserving the new oracle.
+  Full harness 533/533 and all 9 real-Wasm fake lifecycle scenarios pass. A
+  second independent merge review passed 193 scoped units plus fake lifecycle
+  replay; no remaining concrete integration finding. No real accounts used.
