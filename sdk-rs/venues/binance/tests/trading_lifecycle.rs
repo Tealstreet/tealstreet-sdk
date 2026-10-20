@@ -100,7 +100,7 @@ fn fill(h: &mut Harness, variant: Variant, filled: &str, status: &str) {
     if variant == Variant::Spot {
         h.message("ws-api/v3", &format!(r#"{{"subscriptionId":0,"event":{{"e":"executionReport","i":12,"s":"BTCUSDT","c":"maker","S":"BUY","o":"LIMIT","X":"{status}","x":"TRADE","p":"9000","L":"9100","q":"7","z":"{filled}","l":"1"}}}}"#));
     } else {
-        h.message("/ws/coin-key", &format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"{status}","p":"9000","q":"7","z":"{filled}","l":"1","L":"9100"}}}}"#));
+        h.message("/ws/coin-key", &format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"{status}","x":"TRADE","p":"9000","q":"7","z":"{filled}","l":"1","L":"9100"}}}}"#));
     }
 }
 fn quantity(url: &str) -> Option<&str> {
@@ -568,4 +568,28 @@ fn original_order_cannot_be_amended_again_while_its_replacement_post_is_in_fligh
         assert!(h.result(102).unwrap().is_err());
         assert!(h.result(91).is_none());
     }
+}
+
+#[test]
+fn inverse_closed_order_stays_closed_after_unknown_cancel_and_delayed_partial() {
+    let variant = Variant::CoinM;
+    let mut h = ready(variant);
+    fill(&mut h, variant, "7", "FILLED");
+    h.event(Event::Command(Command::CancelOrders {
+        command: 97,
+        ids: vec![id(variant).into()],
+    }));
+    let cancel = h.take(path(variant));
+    h.reply(
+        cancel.id,
+        400,
+        "",
+        r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+    );
+    fill(&mut h, variant, "4", "PARTIALLY_FILLED");
+    let order = h.engine.store().order(id(variant)).unwrap();
+    assert_eq!(
+        (order.status, order.filled, order.remaining),
+        (OrderStatus::Closed, 7.0, 0.0)
+    );
 }

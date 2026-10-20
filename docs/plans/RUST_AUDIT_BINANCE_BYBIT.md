@@ -79,3 +79,37 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   `KNOWN_TS_FIXES`, with no new comparison normalization.
 - Public live capture succeeded: 19,981 WS frames, 3 HTTP responses, both books;
   existing committed public and documented private variant gates are running.
+
+### Binance phases 1–2 review checkpoint
+
+- H1/H4 confirmed and fixed: only typed `x=TRADE` with finite positive last
+  quantity/price emits derivative fills; native trade IDs dedupe in a bounded
+  16,384-execution window across reconnects. Genuine delayed executions after
+  stop-trigger `EXPIRED` or cancellation still emit. Distinct reordered trades
+  emit independently while cumulative state remains monotonic.
+- H2 confirmed and fixed: every profile defers amend replacement planning until
+  cancellation evidence, subtracts maximum observed cumulative execution, and
+  refuses unknown/malformed/mismatched cancellation. Regular replies require
+  native identity, terminal status and quantities; USD-M algo and PM strategy
+  replies use their separate native acknowledgement contracts.
+- M5 USD-M/PM confirmed and fixed: acknowledged cancels and private terminal
+  events fence in-flight and replica-stale snapshots. PM regular and strategy
+  generations have separate native identity maps; old replies/events cannot
+  mutate a newer order reusing a caller client ID. Old native generations are
+  retired when a new one binds in a stream event or accepted REST snapshot.
+- UUID fallback confirmed and fixed: entropy failure propagates through every
+  native order formatter. Actual Engine command tests inject failures in plain,
+  conditional, trailing and bracket generation before any HTTP write.
+- Independent phase reviews found PM reused-client-ID and regular/strategy
+  namespace hazards, a malformed missing-x test, and a late partial packet
+  downgrading an already Closed inverse row after an unknown cancel. All fixed
+  with scenario regressions; final account/trading reviews have no open findings.
+- Binance full native suite passed 131 tests before the last Closed-row regression;
+  that additional targeted regression also passes. Integrated totals follow.
+- Synthetic private payloads now carry distinct native trade IDs and the
+  documented complete cancel acknowledgement, rather than duplicate default
+  IDs/status-only acknowledgements. No new gate normalization was introduced.
+- Aster reuses the public Binance wire struct. Its legacy adapter initializes
+  the two new optional fields without changing Aster behavior; 99 Aster native
+  tests and strict Clippy pass. Its replay gates are included for compatibility.
+- No crypto helper became unused: UUID and signing primitives remain called.
