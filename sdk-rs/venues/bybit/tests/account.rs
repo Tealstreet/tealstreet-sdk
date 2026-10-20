@@ -1304,3 +1304,187 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         );
     }
 }
+
+fn query_result(
+    h: &mut Harness,
+    command: u32,
+    query: Query,
+    path: &str,
+    bodies: &[&str],
+) -> String {
+    h.command(Command::Query { command, query });
+    for body in bodies {
+        let request = h.take(path);
+        h.reply(request.id, 200, body);
+    }
+    h.result(command).unwrap().clone().unwrap()
+}
+
+#[test]
+fn rest_fills_exclude_funding_settlement_and_invalid_rows() {
+    let mut h = ready();
+    let row = |id: &str, kind: &str, side: &str, price: &str, qty: &str, time: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","orderId":"o-{id}","execId":"{id}","side":"{side}","execPrice":"{price}","execQty":"{qty}","execType":"{kind}","execFee":"0.1","execTime":"{time}"}}"#
+        )
+    };
+    let rows = [
+        row("t1", "Trade", "Buy", "100", "1", "1672282722429"),
+        row("t2", "AdlTrade", "Sell", "101", "2", "1672282722430"),
+        row("t3", "BustTrade", "Buy", "102", "3", "1672282722431"),
+        row("f1", "Funding", "Buy", "100", "1", "1672282722432"),
+        row("f2", " settle ", "Buy", "100", "1", "1672282722433"),
+        row("f3", "SETTLEMENT", "Buy", "100", "1", "1672282722434"),
+        row("f4", "Delivery", "Buy", "100", "1", "1672282722435"),
+        row("f5", "SessionSettlePnL", "Buy", "100", "1", "1672282722436"),
+        row("b1", "Trade", "", "100", "1", "1672282722437"),
+        row("b2", "Trade", "Buy", "0", "1", "1672282722438"),
+        row("b3", "Trade", "Buy", "100", "", "1672282722439"),
+        row("b4", "Trade", "Buy", "100", "1", ""),
+    ];
+    let body = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"","category":"linear","list":[{}]}}}}"#,
+        rows.join(",")
+    );
+    let result = query_result(
+        &mut h,
+        31,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(100),
+        },
+        "/v5/execution/list",
+        &[&body],
+    );
+    let mut ids: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&result)
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["t1", "t2", "t3"], "{result}");
+}
+
+#[test]
+fn same_timestamp_hedge_funding_legs_both_survive_and_page_repeats_collapse() {
+    let mut h = ready();
+    let leg = |id: &str, side: &str, size: &str, funding: &str| {
+        format!(
+            r#"{{"id":"{id}","symbol":"BTCUSDT","side":"{side}","size":"{size}","funding":"{funding}","fee":"0","cashFlow":"0","transactionTime":"1672128000000","type":"SETTLEMENT","currency":"USDT","category":"linear"}}"#
+        )
+    };
+    // Legacy rows reuse one id; sides and signed sizes tell the legs apart.
+    let long = leg("592324_BTCUSDT_1", "Buy", "2", "-0.5");
+    let short = leg("592324_BTCUSDT_1", "Sell", "-2", "-0.5");
+    let page1 = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c2","list":[{long},{short}]}}}}"#
+    );
+    let page2 = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"","list":[{short}]}}}}"#
+    );
+    let result = query_result(
+        &mut h,
+        32,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1672120000000.0),
+            to_ms: Some(1672130000000.0),
+            limit: None,
+        },
+        "/v5/account/transaction-log",
+        &[&page1, &page2],
+    );
+    let rows = serde_json::from_str::<Vec<serde_json::Value>>(&result).unwrap();
+    assert_eq!(rows.len(), 2, "{result}");
+    let total: f64 = rows.iter().map(|r| r["income"].as_f64().unwrap()).sum();
+    assert_eq!(total, -1.0);
+    assert_ne!(rows[0]["tranId"], rows[1]["tranId"]);
+}
+
+#[test]
+fn omitted_order_history_limit_reads_every_page_instead_of_fifty() {
+    let mut h = ready();
+    let page = |from: usize, cursor: &str| {
+        let rows: Vec<String> = (from..from + 50)
+            .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Filled","qty":"1","cumExecQty":"1","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
+            .collect();
+        format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"{cursor}","list":[{}]}}}}"#,
+            rows.join(",")
+        )
+    };
+    let (first, second) = (page(0, "next"), page(50, ""));
+    h.command(Command::Query {
+        command: 33,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    });
+    let request = h.take("/v5/order/history");
+    assert!(request.url.contains("limit=50"), "{}", request.url);
+    h.reply(request.id, 200, &first);
+    let request = h.take("/v5/order/history");
+    assert!(request.url.contains("cursor=next"));
+    h.reply(request.id, 200, &second);
+    let rows =
+        serde_json::from_str::<Vec<serde_json::Value>>(h.result(33).unwrap().as_ref().unwrap())
+            .unwrap();
+    assert_eq!(rows.len(), 100);
+    let explicit = query_result(
+        &mut h,
+        34,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(3),
+        },
+        "/v5/order/history",
+        &[&page(0, "")],
+    );
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&explicit)
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
+    let mut h = ready();
+    h.command(Command::Query {
+        command: 35,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    });
+    for page in 0..20 {
+        let rows: Vec<String> = (page * 50..page * 50 + 50)
+            .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
+            .collect();
+        let body = format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c{}","list":[{}]}}}}"#,
+            page + 1,
+            rows.join(",")
+        );
+        let request = h.take("/v5/order/history");
+        h.reply(request.id, 200, &body);
+    }
+    assert!(!h.has_request("/v5/order/history"));
+    let rows =
+        serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
+            .unwrap();
+    assert_eq!(rows.len(), 1000);
+    assert!(h.logs.iter().any(|m| m.contains("page limit")));
+}

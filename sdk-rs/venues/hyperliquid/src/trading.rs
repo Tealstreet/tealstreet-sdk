@@ -778,12 +778,23 @@ impl Hyperliquid {
                             .into(),
                     );
                 }
-                let setting = cx.store.setting(&symbol);
-                let leverage = leverage.unwrap_or_else(|| setting.map_or(20.0, |s| s.leverage));
-                let isolated = isolated.unwrap_or_else(|| {
-                    setting.is_some_and(|s| s.margin_type == Some(MarginType::Isolated))
-                });
                 let market = cx.store.market(&symbol).ok_or("Market not found")?;
+                let isolated_only = self.isolated_only.contains(&symbol);
+                // HIP-3 assets have no activeAssetData feed, so a flat one has no setting.
+                let setting = cx.store.setting(&symbol).filter(|s| s.leverage > 0.0);
+                let leverage = leverage.unwrap_or_else(|| {
+                    setting.map_or(20f64.min(market.limits.leverage.max), |s| s.leverage)
+                });
+                let isolated = isolated.unwrap_or_else(|| {
+                    setting.map_or(isolated_only, |s| {
+                        s.margin_type == Some(MarginType::Isolated)
+                    })
+                });
+                if isolated_only && !isolated {
+                    return Err(format!(
+                        "{symbol} supports isolated margin only on Hyperliquid"
+                    ));
+                }
                 if !leverage.is_finite()
                     || leverage < 1.0
                     || leverage > market.limits.leverage.max

@@ -1287,6 +1287,14 @@ impl Venue for Lighter {
             }
         }
     }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        self.tier_action(cx, command, action);
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::SetTickerSymbols { .. } => {}
