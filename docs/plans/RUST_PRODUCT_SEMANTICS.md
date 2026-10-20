@@ -245,3 +245,10 @@ main 17.5 vs TS 20.8 ms, steady 6.0 vs 10.0 ms, retained 0.8 vs 11.8 MB. Private
 and all 4 compiled Breakout integration tests PASS; private CPU is informational.
 The CPU diagnostic used a code-identical named copy solely to inspect samples,
 without changing official bindings, measurement boundaries or benchmark input.
+
+Final combined feature build after both CI repairs passes all 16 semantic
+integrations, 406 SDK tests, 68 host tests, one frame-wire integration and
+566 harness tests. All review findings are closed with independent source
+reviews posted on PR #1341. The requested 24 replay gates and the additional
+Paradex/Breakout public/private controls pass locally. Gitleaks passes; the PR
+must still obtain green CI on this final head before merging.
