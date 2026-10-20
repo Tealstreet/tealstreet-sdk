@@ -743,8 +743,7 @@ export class RustEngineExchange extends BaseExchange {
         onDead: this.receiveEngineFailure,
         onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
-          const message = `${this.name} credentials were rejected`;
-          this.startupFailure ??= new ExchangeError(message, { message, kind: 'authInvalid' });
+          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
         },
@@ -1189,8 +1188,12 @@ export class RustEngineExchange extends BaseExchange {
         clearTimeout(timeout);
         resolve(result);
       };
+      // Venues log the reason just before StartupFailed in the same batch; let the typed failure win.
       const onError = (message: unknown) =>
-        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        queueMicrotask(() => {
+          if (this.startupFailure) return loaded();
+          finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+        });
       const loaded = () => {
         if (this.startupFailure) {
           const { kind } = this.startupFailure as { kind?: ExchangeErrorKind };

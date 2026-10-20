@@ -100,7 +100,8 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     const detail = { message, kind: 'authInvalid', venueCode: '10003' };
     const started = fixture({}, [{ op: 'startupFailed', detail }], false);
     await expect(started.exchange.start()).rejects.toMatchObject({ message, kind: 'authInvalid', venueCode: '10003' });
-    const validated = fixture({}, [{ op: 'startupFailed', detail }], false);
+    // Venues log the reason just before StartupFailed in the same batch.
+    const validated = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail }], false);
     await expect(validated.exchange.validateAccount()).resolves.toEqual({ error: message, kind: 'authInvalid' });
   });
   it('settles definitive login rejection through the shared deactivation contract', async () => {

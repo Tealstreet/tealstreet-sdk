@@ -170,10 +170,11 @@ Shared-feed accounts require a fresh provider attachment and account init;
 their closed transferred port cannot be reused. Module-wide WASM initialization
 and sibling accounts remain independent of one account's terminal state.
 
-A terminal startup failure (`StartupFailed`, or a credential deactivation)
-rejects `start()` with an `ExchangeError` that keeps the engine's `kind` and
-`venueCode`; `validateAccount` returns the same `kind` beside `error`, so
-callers can branch on `authInvalid`/`authPermission` instead of matching text.
+A terminal `StartupFailed` rejects `start()` with an `ExchangeError` that keeps
+the engine's `kind` and `venueCode`; `validateAccount` returns the same `kind`
+beside `error` (the typed failure wins over the error log venues emit just
+before it), so callers can branch on `authInvalid`/`authPermission` instead of
+matching text. A bare deactivation carries no `kind`.
 
 Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
 positive integer deadline up to 2147482647 ms; long paginated queries may need
