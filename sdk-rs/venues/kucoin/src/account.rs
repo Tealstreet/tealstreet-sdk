@@ -22,6 +22,9 @@ pub struct Request {
     positions: Vec<Position>,
     orders: Vec<Order>,
     native_ids: HashSet<String>,
+    /// Rows that failed to map; the store keeps its copy of these IDs/symbols.
+    skipped_orders: HashSet<String>,
+    skipped_symbols: HashSet<String>,
     page: u32,
     retries: u8,
     invalid: bool,
@@ -34,6 +37,8 @@ impl Request {
             positions: vec![],
             orders: vec![],
             native_ids: HashSet::new(),
+            skipped_orders: HashSet::new(),
+            skipped_symbols: HashSet::new(),
             page: 1,
             retries: 0,
             invalid: false,
@@ -649,7 +654,16 @@ impl Kucoin {
         match request.read {
             Read::Positions => match serde_json::from_str::<PositionRow>(item) {
                 Ok(row) => request.positions.push(row.position(cx.store)),
-                Err(_) => request.invalid = true,
+                Err(error) => match row_identity(item, "symbol") {
+                    Some(symbol) => {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("KuCoin skipped unmappable position {symbol}: {error}"),
+                        );
+                        request.skipped_symbols.insert(symbol);
+                    }
+                    None => request.invalid = true,
+                },
             },
             Read::Orders(_) => match serde_json::from_str::<&RawValue>(item)
                 .map_err(|e| e.to_string())
@@ -662,7 +676,17 @@ impl Kucoin {
                         request.invalid = true;
                     }
                 }
-                Err(_) => request.invalid = true,
+                Err(error) => match row_identity(item, "id") {
+                    // Still counted toward the page census so the snapshot can commit.
+                    Some(id) if request.native_ids.insert(id.clone()) => {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("KuCoin skipped unmappable order {id}: {error}"),
+                        );
+                        request.skipped_orders.insert(id);
+                    }
+                    _ => request.invalid = true,
+                },
             },
             _ => request.invalid = true,
         }
@@ -684,6 +708,8 @@ impl Kucoin {
                 request.retries += 1;
                 request.invalid = false;
                 // A failed page cannot leave rows staged from that page.
+                request.skipped_orders.clear();
+                request.skipped_symbols.clear();
                 if matches!(request.read, Read::Positions) {
                     request.positions.clear();
                 } else if matches!(request.read, Read::Orders(_)) {
@@ -774,6 +800,7 @@ impl Kucoin {
                         .copied()
                         .unwrap_or(0)
                         > request.revision
+                        || request.skipped_symbols.contains(&old.symbol)
                     {
                         if !positions.iter().any(|p| p.id == old.id) {
                             positions.push(old.clone());
@@ -839,6 +866,7 @@ impl Kucoin {
                             .unwrap_or(0)
                             <= request.revision
                         && !request.orders.iter().any(|row| row.id == old.id)
+                        && !request.skipped_orders.contains(&old.id)
                     {
                         self.account.revision += 1;
                         self.account
@@ -864,6 +892,7 @@ impl Kucoin {
                             != stop
                             || self.account.order_versions.get(&o.id).copied().unwrap_or(0)
                                 > request.revision
+                            || request.skipped_orders.contains(&o.id)
                     })
                     .cloned()
                     .collect();
@@ -1252,4 +1281,17 @@ impl Kucoin {
         }
         self.account.refresh = Some(cx.set_timer(500.0));
     }
+}
+/// The identity field of a REST row that failed to map.
+fn row_identity(item: &str, field: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow, default)]
+        id: Option<std::borrow::Cow<'a, str>>,
+        #[serde(borrow, default)]
+        symbol: Option<std::borrow::Cow<'a, str>>,
+    }
+    let row: Row<'_> = serde_json::from_str(item).ok()?;
+    let value = if field == "id" { row.id } else { row.symbol }?;
+    (!value.is_empty()).then(|| value.into_owned())
 }

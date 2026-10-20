@@ -257,3 +257,7 @@ pub struct OrderSizing<'a> {
     #[serde(borrow)]
     pub order_configuration: Configuration<'a>,
 }
+#[derive(Deserialize)]
+pub struct KeyPermissions {
+    pub portfolio_uuid: String,
+}

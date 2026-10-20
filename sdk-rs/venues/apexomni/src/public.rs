@@ -20,7 +20,8 @@ pub enum Request {
     Markets {
         rows: Vec<Market>,
         contracts: HashMap<String, ContractConfig>,
-        bad: bool,
+        /// Native and display names of malformed market rows.
+        skipped: Vec<(String, String)>,
     },
     Candles {
         command: CommandId,
@@ -32,12 +33,12 @@ impl Request {
         if let Self::Markets {
             rows,
             contracts,
-            bad,
+            skipped,
         } = self
         {
             rows.clear();
             contracts.clear();
-            *bad = false;
+            skipped.clear();
         }
     }
 }
@@ -58,6 +59,8 @@ pub struct Public {
     open: bool,
     ping_at: f64,
     seed_retry: Option<TimerId>,
+    unlisted: HashSet<String>,
+    unlisted_reported: HashSet<String>,
     supervisor: Supervisor,
 }
 impl Default for Public {
@@ -69,6 +72,8 @@ impl Default for Public {
             open: false,
             ping_at: 0.0,
             seed_retry: None,
+            unlisted: HashSet::new(),
+            unlisted_reported: HashSet::new(),
             supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 30_000.0,
                 idle_timeout_ms: 30_000.0,
@@ -81,6 +86,9 @@ impl Default for Public {
     }
 }
 impl Public {
+    pub(crate) fn has_unlisted(&self) -> bool {
+        !self.unlisted.is_empty()
+    }
     pub fn book(&self, symbol: &str) -> Option<&Book> {
         self.books.get(symbol).map(|d| &d.book)
     }
@@ -159,11 +167,25 @@ impl ApexOmni {
         }
     }
 
+    /// Account rows on a market dropped as malformed are invisible; say so once.
+    pub(crate) fn note_unlisted(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, kind: &str) {
+        if self.public.unlisted.contains(symbol)
+            && self.public.unlisted_reported.insert(symbol.to_owned())
+        {
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "ApeX {kind} on {symbol} is hidden because its market metadata is malformed"
+                ),
+            );
+        }
+    }
+
     pub(crate) fn start_public(&mut self, cx: &mut Cx<'_, Pending>) {
         let request = Pending::Public(Request::Markets {
             rows: vec![],
             contracts: HashMap::new(),
-            bad: false,
+            skipped: vec![],
         });
         if let Err(error) = self.signed(
             cx,
@@ -188,11 +210,12 @@ impl ApexOmni {
         if let Request::Markets {
             rows,
             contracts,
-            bad,
+            skipped,
         } = request
         {
             let Ok(raw) = serde_json::from_str::<wire::Contract<'_>>(item) else {
-                *bad = true;
+                let key = serde_json::from_str::<wire::ContractKey<'_>>(item).unwrap_or_default();
+                skipped.push((key.symbol.into_owned(), key.cross_symbol_name.into_owned()));
                 return;
             };
             if !raw.enable_trade {
@@ -212,7 +235,7 @@ impl ApexOmni {
                 || raw.l2_pair_id > u16::MAX as f64
                 || raw.l2_pair_id.fract() != 0.0
             {
-                *bad = true;
+                skipped.push((raw.symbol.into_owned(), raw.cross_symbol_name.into_owned()));
                 return;
             }
             contracts.insert(
@@ -272,20 +295,39 @@ impl ApexOmni {
             Request::Markets {
                 rows,
                 contracts,
-                bad,
+                skipped,
             } => {
-                if !success || bad || rows.is_empty() {
+                if !success || rows.is_empty() {
                     self.public_failed(
                         cx,
                         Request::Markets {
                             rows,
                             contracts,
-                            bad,
+                            skipped,
                         },
                         "invalid market response",
                     );
                     return;
                 }
+                if !skipped.is_empty() {
+                    let labels = skipped
+                        .iter()
+                        .map(|(id, name)| match (id.as_str(), name.as_str()) {
+                            ("", "") => "unidentified",
+                            ("", name) => name,
+                            (id, _) => id,
+                        })
+                        .collect::<Vec<_>>();
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
+                    );
+                }
+                self.public.unlisted = skipped
+                    .into_iter()
+                    .flat_map(|(id, name)| [id, name])
+                    .filter(|name| !name.is_empty())
+                    .collect();
                 let tickers = rows
                     .iter()
                     .map(|m| Ticker {

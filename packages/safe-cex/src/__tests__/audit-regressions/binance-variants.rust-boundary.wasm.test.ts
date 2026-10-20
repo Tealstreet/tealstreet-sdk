@@ -1,4 +1,5 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeOptions } from '../../types';
 
 import { createHmac } from 'node:crypto';
 
@@ -10,7 +11,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
-const setup = (spot: boolean, cancelReply?: () => Promise<unknown>) => {
+const setup = (spot: boolean, cancelReply?: () => Promise<unknown>, options: Partial<ExchangeOptions> = {}, batchReply?: unknown) => {
   let privateMessage: ((text: string) => void) | undefined;
   const symbol = spot ? 'BTCUSDT' : 'BTCUSD_PERP';
   const requests: Parameters<Transport['request']>[0][] = [];
@@ -30,6 +31,7 @@ const setup = (spot: boolean, cancelReply?: () => Promise<unknown>) => {
           subscriptions.push(message);
           if (message.method === 'userDataStream.subscribe.signature') {
             const p = message.params;
+            expect(p.recvWindow).toBe(5000);
             const payload = `apiKey=${p.apiKey}&recvWindow=${p.recvWindow}&timestamp=${p.timestamp}`;
             expect(p.signature).toBe(createHmac('sha256', 'secret').update(payload).digest('hex'));
             queueMicrotask(() =>
@@ -171,6 +173,7 @@ const setup = (spot: boolean, cancelReply?: () => Promise<unknown>) => {
             };
         return raw(reply);
       }
+      if (path.endsWith('/batchOrders') && batchReply !== undefined) return raw(batchReply);
       if (path.endsWith('/order')) return raw({ orderId: 123 });
       throw new Error(`Unexpected Binance request ${request.method} ${path}`);
     },
@@ -182,7 +185,7 @@ const setup = (spot: boolean, cancelReply?: () => Promise<unknown>) => {
   const store = new DefaultStore();
   const exchange = new RustEngineExchange(
     spot ? 'binancespot' : 'binanceinverse',
-    { key: 'key', secret: 'secret' },
+    { key: 'key', secret: 'secret', ...options },
     store,
   );
   exchange.emitter.on('error', (e: unknown) => errors.push(e));
@@ -276,6 +279,22 @@ it('preserves COIN-M USD contract placement units and coin wallet valuation thro
       }),
     ).rejects.toThrow();
     expect(t.requests).toHaveLength(before);
+  } finally {
+    t.exchange.dispose();
+  }
+});
+
+it('rejects a partial COIN-M batch with the native accepted IDs through the SDK', async () => {
+  const t = setup(false, undefined, {}, [{ orderId: 321 }, { code: -2010, msg: 'insufficient margin' }]);
+  try {
+    await t.exchange.start();
+    await expect(t.exchange.placeOrders([
+      { symbol: t.symbol, type: OrderType.Limit, side: OrderSide.Buy, amount: 2, price: 9000 },
+      { symbol: t.symbol, type: OrderType.Limit, side: OrderSide.Buy, amount: 3, price: 9000 },
+    ])).rejects.toMatchObject({ message: 'insufficient margin', partialOrderIds: ['321'] });
+    expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/batchOrders?'))).toHaveLength(1);
+    expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/order?'))).toHaveLength(0);
+    expect(t.errors).toContain('Exchange Error: insufficient margin');
   } finally {
     t.exchange.dispose();
   }
@@ -384,4 +403,23 @@ it('rejects an ambiguous Spot cancellation response before replacement across WA
   } finally {
     t.exchange.dispose();
   }
+});
+
+
+it.each([true, false])('forwards recvWindow through actual Spot/COIN-M WASM signing (spot=%s)', async (spot) => {
+  const t = setup(spot, undefined, { extra: { recvWindow: 4321 } });
+  try {
+    await t.exchange.start();
+    await t.exchange.placeOrder({ symbol: t.symbol, type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 9999 });
+    const signed = t.requests.filter((request) => new URL(request.url).searchParams.has('signature'));
+    expect(signed.some((request) => request.method === 'GET')).toBe(true);
+    expect(signed.some((request) => request.method === 'POST')).toBe(true);
+    for (const request of signed) {
+      expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual(['4321']);
+      const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
+      expect(signature).toBe(createHmac('sha256', 'secret').update(query).digest('hex'));
+      expect(request.headers['X-MBX-APIKEY']).toBe('key');
+    }
+    if (spot) expect(t.subscriptions.some((message) => message.method === 'userDataStream.subscribe.signature')).toBe(true);
+  } finally { t.exchange.dispose(); }
 });

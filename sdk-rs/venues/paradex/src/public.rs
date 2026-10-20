@@ -147,13 +147,15 @@ impl Paradex {
                 },
             )
         };
-        cx.request_streamed(
+        let id = cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.rest()),
             vec![],
             ArrayAt::Field("results"),
             Pending::Public(request),
         );
+        // Markets and tickers deserialize every row's identity first.
+        cx.venue_parses_items(id);
     }
     fn public_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {

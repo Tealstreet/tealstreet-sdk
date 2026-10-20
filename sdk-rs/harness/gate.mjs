@@ -24,6 +24,7 @@ import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { fixBitrue, BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { memoryMetricErrors } from './memory.mjs';
+import { cpuObjectiveMet } from './cpu-objective.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
@@ -145,8 +146,8 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
 //    Rust installs the seed before connecting. These cases have native regression
 //    coverage; the committed replay tapes require no normalization for them.
-//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
-//    Rust amends the existing native order ID.
+//  - Bybit Partial TP/SL now follows the owner-selected TS replacement and
+//    missing-mark fallbacks; the former amend-in-place divergence is retired.
 //  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
 //    large requests; Rust preserves the requested total in max lots + remainder.
 //  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using
@@ -196,26 +197,28 @@ const KNOWN_TS_FIXES = {
   // Native regressions cover these cases;
   // standard replay compares both outputs without rewriting either result.
   kucoinspot() {},
-  hyperliquidspot: {
-    // Paired reference fixes retain native spot IDs for coinless contexts and
-    // return string IDs for both resting and filled placement ACKs. Native
-    // tests additionally pin spot-only safety paths without rewriting economics.
-    notes: [
-      'Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.',
-      'Resolve both metadata token indices so native pairs with a shared base retain distinct quote symbols and action/book identities.',
-      'Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.',
-      'Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).',
-      'Return the SDK string-array contract for resting and immediately filled orders.',
-      'Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.',
-      'Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.',
-      'Keep absent spot oracle/funding fields finite instead of emitting NaN.',
-      'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
-      'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',
-      'Apply live full/partial executions before a delayed resting acknowledgement without resurrecting the filled native order.',
-      'Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.',
-      'Deduplicate native live executions and suppress historical fill snapshots.',
-      'Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.',
-    ],
+  // Paired reference fixes retain native spot IDs for coinless contexts and
+  // return string IDs for both resting and filled placement ACKs. Native
+  // tests additionally pin spot-only safety paths without rewriting economics.
+  // Notes:
+  // Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.
+  // Resolve both metadata token indices so native pairs with a shared base retain distinct quote symbols and action/book identities.
+  // Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.
+  // Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).
+  // Return the SDK string-array contract for resting and immediately filled orders.
+  // Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.
+  // Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.
+  // Keep absent spot oracle/funding fields finite instead of emitting NaN.
+  // Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.
+  // Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.
+  // Apply live full/partial executions before a delayed resting acknowledgement without resurrecting the filled native order.
+  // Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.
+  // Deduplicate native live executions and suppress historical fill snapshots.
+  // Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.
+  // - The TS spot fetchOrders stub never reads open orders, so external cancels
+  //   and pre-existing orders never reconcile; Rust reads frontendOpenOrders.
+  hyperliquidspot: (ts, rust) => {
+    rust.requests = rust.requests.filter((key) => !key.includes('"type":"frontendOpenOrders"'));
   },
   krakenspot: {
     // Public fixes are paired in TS; independent native tests cover stricter
@@ -576,6 +579,8 @@ const KNOWN_TS_FIXES = {
   //   instead targets c, which can be the cancellation request's client ID.
   // - Spot/COIN-M duplicate cumulative executions can emit fills again and
   //   stale NEW events reopen terminal orders; Rust fences by native order ID.
+  //   Spot also deduplicates the latest 16,384 native (symbol, order, trade) IDs,
+  //   independently of ACK totals and terminal lifecycle (native/SDK proofs).
   // - COIN-M malformed openOrders responses become authoritative empty in TS;
   //   Rust preserves the previous order state and retries reconciliation.
   // - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its
@@ -1155,8 +1160,8 @@ if (venue.family === 'coinbase')
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) {
-  if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
-  if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
+  if (!cpuObjectiveMet(r.cpuMs, t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
+  if (!cpuObjectiveMet(r.steadyCpuMs, t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
   if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
 }
 if (failures.length) {
