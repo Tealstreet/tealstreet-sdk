@@ -12,6 +12,8 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Default account HTTP adapter, resolved by the routing host. */
+  httpMode?: 'direct' | 'how';
   signPayload?(request: {
     exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
   }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };

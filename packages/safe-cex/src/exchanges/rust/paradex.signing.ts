@@ -3,6 +3,7 @@ import type { ExchangeOptions } from '../../types';
 
 import qs from 'qs';
 
+import { isNodeOrBunRuntime } from '../../utils/runtime';
 import { uuid } from '../../utils/uuid';
 
 const signedBeforeAbort = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
@@ -68,9 +69,16 @@ export const paradexSigningTransport = (options: ExchangeOptions, transport: Tra
           else delete headers[key];
         }
       }
-      const next = config.url
-        ? new URL(config.url.startsWith('/') ? `/v1${config.url}` : config.url, `${url.origin}/v1/`)
-        : new URL(url.pathname, url.origin);
+      let next: URL;
+      if (config.url?.startsWith('//') && transport.httpMode !== 'how') {
+        // Axios browser HTTP resolves against the page; Node HTTP rejects it.
+        if (isNodeOrBunRuntime()) throw new TypeError('Invalid URL');
+        next = new URL(config.url, globalThis.location?.href ?? url.origin);
+      } else {
+        next = config.url
+          ? new URL(config.url.startsWith('/') ? `/v1${config.url}` : config.url, `${url.origin}/v1/`)
+          : new URL(url.pathname, url.origin);
+      }
       if (config.params) {
         const query = qs.stringify(config.params, { arrayFormat: 'comma' });
         if (query) next.search += `${next.search ? '&' : '?'}${query}`;

@@ -512,7 +512,8 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             };
             mocks.adapter.mockClear();
             mocks.createAdapter.mockClear();
-            await createEngineTransport(exchange, resolved, raw).request(input);
+            const routed = createEngineTransport(exchange, resolved, raw);
+            await routed.request(input);
             const how =
               ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
                 ? !resolved.publicDataOnly
@@ -520,6 +521,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
                   ? resolved.tealstreetTunnel !== false
                   : !['grvt', 'blofin', 'weex', 'mexc'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
             const label = `${exchange} proxy=${tealstreetProxy} tunnel=${tealstreetTunnel} region=${proxyRegion}`;
+            expect(routed.httpMode, label).toBe(how ? 'how' : 'direct');
             expect(mocks.adapter.mock.calls.length, label).toBe(how ? 1 : 0);
             if (how) {
               expect(mocks.createAdapter.mock.calls[0][0].region, label).toBe(routing.howEgress === 'jp' ? 'JA' : 'SG');

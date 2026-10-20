@@ -256,7 +256,7 @@ const httpTransport = (
   provider: TransportProvider,
   routing: ResolvedRouting,
   publicPrefix?: string,
-): { request: Transport['request']; dispose(): void } => {
+): { mode: 'direct' | 'how'; request: Transport['request']; dispose(): void } => {
   const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
@@ -367,6 +367,7 @@ const httpTransport = (
     }
   };
   return {
+    mode: adapter ? 'how' : 'direct',
     request,
     dispose: () => {
       disposed = true;
@@ -432,6 +433,7 @@ export const createEngineTransport = (
   return {
     // Protocol negotiation must use the same resolved route as connect(),
     // including hosts (such as Workers) which construct the engine themselves.
+    httpMode: http.mode,
     engineOptions: {
       ...transport.engineOptions,
       ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),

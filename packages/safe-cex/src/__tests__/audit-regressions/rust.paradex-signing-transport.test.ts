@@ -1,13 +1,18 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSigner } from '../../types';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { paradexSigningTransport } from '../../exchanges/rust/paradex.signing';
 
-const fixture = (sign: RemoteSigner['sign']) => {
+const runtime = vi.hoisted(() => ({ node: true }));
+vi.mock('../../utils/runtime', () => ({ isNodeOrBunRuntime: () => runtime.node }));
+afterEach(() => { runtime.node = true; vi.unstubAllGlobals(); });
+
+const fixture = (sign: RemoteSigner['sign'], httpMode?: Transport['httpMode']) => {
   const request = vi.fn(async (_request: Parameters<Transport['request']>[0]) => ({ status: 200, body: new Uint8Array() }));
   const transport: Transport = {
+    httpMode,
     now: () => 0, connect: () => ({ send() {}, close() {} }),
     setTimeout, clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>), request,
   };
@@ -20,6 +25,26 @@ const input = {
 };
 
 describe('Paradex engine remote HTTP signing', () => {
+  it.each([
+    ['direct', false, 'http://signed.example/orders'],
+    ['direct', true, undefined],
+    ['how', false, 'https://api.prod.paradex.trade/v1//signed.example/orders'],
+    ['how', true, 'https://api.prod.paradex.trade/v1//signed.example/orders'],
+  ] as const)('preserves protocol-relative TS URLs for %s with node=%s', async (mode, node, expected) => {
+    runtime.node = node;
+    vi.stubGlobal('location', new URL('http://app.example/account'));
+    const { request, transport } = fixture(async ({ id }) => ({
+      id, config: { url: '//signed.example/orders', headers: {} },
+    }), mode);
+    if (expected === undefined) {
+      await expect(transport.request(input)).rejects.toThrow('Invalid URL');
+      expect(request).not.toHaveBeenCalled();
+    } else {
+      await transport.request(input);
+      expect(request.mock.calls[0][0].url).toBe(expected);
+    }
+  });
+
   it('passes the TS adapter contract and applies returned bytes before account routing', async () => {
     const sign = vi.fn<RemoteSigner['sign']>(async (request) => ({
       id: request.id, config: { url: '/orders', params: { market: 'BTC-USD-PERP' }, data: { signature: 'opaque', size: '2' }, headers: { 'x-signer': 'yes' } },
