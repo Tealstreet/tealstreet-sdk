@@ -1,7 +1,7 @@
 //! Trusted public quotes retain native private position valuation.
 mod support;
 use safe_cex_engine::{Action, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId};
-use safe_cex_venue_lighter::Lighter;
+use safe_cex_venue_lighter::{Lighter, Options};
 use support::*;
 
 const STATS: &str = r#"{"code":200,"order_book_stats":[{"market_id":1,"last_trade_price":"100","mark_price":"100","index_price":"100"},{"market_id":2,"last_trade_price":"200","mark_price":"200","index_price":"200"}]}"#;
@@ -10,10 +10,14 @@ struct Rig {
     public: Option<SocketId>,
     timers: Vec<(TimerId, f64)>,
     reads: Vec<String>,
+    sockets: Vec<(String, Option<SocketChannel>)>,
 }
 impl Rig {
     fn new(policy: PublicFeedPolicy) -> Self {
-        let mut engine = Engine::new(Lighter::new(options()));
+        Self::with_options(policy, options())
+    }
+    fn with_options(policy: PublicFeedPolicy, options: Options) -> Self {
+        let mut engine = Engine::new(Lighter::new(options));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut rig = Self {
@@ -21,6 +25,7 @@ impl Rig {
             public: None,
             timers: Vec::new(),
             reads: Vec::new(),
+            sockets: Vec::new(),
         };
         rig.drain(NOW, STATS);
         // Without a public socket Shared still owns native metadata/REST seeds.
@@ -52,6 +57,11 @@ impl Rig {
                             META
                         } else if request.url.contains("exchangeStats") {
                             stats
+                        } else if request.url.contains("accountLimits") {
+                            assert!(request.headers.iter().any(|(name, value)| {
+                                name.eq_ignore_ascii_case("authorization") && !value.is_empty()
+                            }));
+                            r#"{"code":200,"user_tier_name":"premium"}"#
                         } else if request.url.contains("accountActiveOrders") {
                             OPEN
                         } else if request.url.contains("/account?") {
@@ -62,8 +72,12 @@ impl Rig {
                         reply_at(&mut self.engine, now, &request, 200, body);
                     }
                     Action::WsConnect {
-                        socket, channel, ..
+                        socket,
+                        channel,
+                        url,
+                        ..
                     } => {
+                        self.sockets.push((url, channel.clone()));
                         if channel == Some(SocketChannel::Public) {
                             self.public = Some(socket);
                         }
@@ -189,4 +203,57 @@ fn shared_feed_does_not_mark_private_state_loaded_before_native_snapshot() {
     assert_eq!(engine.store().ticker("ETH").unwrap().mark, 120.);
     assert!(!engine.store().loaded().positions);
     assert!(!engine.store().loaded().balance);
+}
+
+#[test]
+fn robinhood_non_direct_modes_keep_own_deployment_metadata_private_state_and_shared_valuation() {
+    for testnet in [false, true] {
+        let host = if testnet {
+            "https://api.rh-testnet.lighter.xyz"
+        } else {
+            "https://api.rh.lighter.xyz"
+        };
+        let socket_url = format!("{}/stream", host.replace("https:", "wss:"));
+        for policy in [PublicFeedPolicy::Disabled, PublicFeedPolicy::Shared] {
+            let mut rig = Rig::with_options(
+                policy,
+                Options {
+                    robinhood: true,
+                    testnet,
+                    ..options()
+                },
+            );
+            assert_eq!(
+                rig.sockets,
+                vec![(socket_url.clone(), Some(SocketChannel::Private))]
+            );
+            assert!(rig.public.is_none());
+            assert!(rig.reads.iter().all(|url| url.starts_with(host)));
+            assert!(rig.reads.iter().any(|url| url.contains("orderBookDetails")));
+            assert!(rig.reads.iter().any(|url| url.contains("accountLimits")));
+            assert_eq!(rig.engine.store().market("ETH").unwrap().quote, "USDG");
+            assert_eq!(rig.engine.store().market("ETH").unwrap().id, "1");
+            assert_eq!(rig.engine.store().market("BTC").unwrap().quote, "USDG");
+            assert_eq!(rig.engine.store().orders()[0].id, "42");
+            assert_eq!(rig.engine.store().balance().free, 900.);
+            let metadata = rig.engine.store().markets().to_vec();
+            if policy == PublicFeedPolicy::Shared {
+                let balance = rig.engine.store().balance().clone();
+                rig.shared_quote(120., 120., 120.);
+                assert_eq!(rig.engine.store().positions()[0].unrealized_pnl, 40.);
+                assert_eq!(rig.engine.store().balance(), &balance);
+                rig.fire_due(NOW + 6000., &STATS.replace("100", "55"));
+                let ticker = rig.engine.store().ticker("ETH").unwrap();
+                assert_eq!((ticker.last, ticker.mark, ticker.index), (120., 120., 120.));
+                assert_eq!(rig.engine.store().positions()[0].unrealized_pnl, 40.);
+                assert_eq!(rig.engine.store().balance().upnl, 40.);
+                assert_eq!(rig.engine.store().balance().total, 960.);
+                assert_eq!(rig.engine.store().markets(), metadata);
+                assert_eq!(
+                    rig.sockets,
+                    vec![(socket_url.clone(), Some(SocketChannel::Private))]
+                );
+            }
+        }
+    }
 }
