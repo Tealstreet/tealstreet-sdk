@@ -1,7 +1,6 @@
 //! Lighter Poseidon2/Schnorr vectors captured from the venue's Go-WASM signer.
 use safe_cex_crypto::lighter::{
-    SchnorrNonce, poseidon2_hash, poseidon2_hash_fp5, poseidon2_two_to_one, public_key,
-    schnorr_sign, schnorr_verify,
+    SchnorrNonce, poseidon2_hash_fp5, public_key, schnorr_sign, schnorr_verify,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -16,7 +15,7 @@ fn decode(text: &str) -> Vec<u8> {
         .collect()
 }
 #[test]
-fn every_independent_wasm_hash_and_signature_matches_rust() {
+fn retained_wasm_fp5_and_signature_vectors_match_rust() {
     let corpus: Value = serde_json::from_str(FIXTURE).unwrap();
     let key = decode(corpus["secret"].as_str().unwrap());
     let pk = public_key(&key).unwrap();
@@ -30,17 +29,15 @@ fn every_independent_wasm_hash_and_signature_matches_rust() {
         *profiles.entry(profile).or_default() += 1;
         for call in case["crypto"].as_array().unwrap() {
             let method = call["method"].as_str().unwrap();
+            // The exchange uses Fp5 signing; other captured hashes stay historical.
+            if matches!(method, "poseidon2HashTwoToOne" | "poseidon2Hash") {
+                continue;
+            }
             *calls.entry(method.into()).or_default() += 1;
             let input = decode(call["inputs"][0].as_str().unwrap());
             let expected = call["result"].as_str().unwrap();
             let result = match method {
-                "poseidon2Hash" => poseidon2_hash(&input).unwrap().to_vec(),
                 "poseidon2HashFp5" => poseidon2_hash_fp5(&input).unwrap().to_vec(),
-                "poseidon2HashTwoToOne" => {
-                    poseidon2_two_to_one(&input, &decode(call["inputs"][1].as_str().unwrap()))
-                        .unwrap()
-                        .to_vec()
-                }
                 "schnorrSign" => {
                     // Offline fixture ONLY: Go rand.Int's big-endian 0x42 bytes are symmetric and canonical.
                     let nonce = SchnorrNonce::from_bytes(&[66; 40]).unwrap();
@@ -62,12 +59,7 @@ fn every_independent_wasm_hash_and_signature_matches_rust() {
     }
     assert_eq!(
         calls,
-        BTreeMap::from([
-            ("poseidon2Hash".into(), 100),
-            ("poseidon2HashFp5".into(), 60),
-            ("poseidon2HashTwoToOne".into(), 16),
-            ("schnorrSign".into(), 92)
-        ])
+        BTreeMap::from([("poseidon2HashFp5".into(), 60), ("schnorrSign".into(), 92)])
     );
     assert_eq!(
         profiles,

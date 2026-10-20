@@ -1,9 +1,6 @@
 //! Goldilocks Poseidon2 and ECgFp5 Schnorr, bound to checked-in Go-WASM vectors.
 use goldilocks_crypto::{Point, ScalarField};
-use poseidon_hash::{
-    Goldilocks, hash_no_pad, hash_out_from_bytes_le, hash_out_to_bytes_le,
-    hash_to_quintic_extension,
-};
+use poseidon_hash::{Goldilocks, hash_to_quintic_extension};
 use zeroize::Zeroize;
 
 fn words(input: &[u8]) -> Result<Vec<Goldilocks>, String> {
@@ -25,20 +22,9 @@ fn scalar(bytes: &[u8]) -> Result<[u8; 40], String> {
     let value = ScalarField::from_bytes_le(bytes)?;
     Ok(ScalarField::from_non_canonical_limbs(value.limbs()).to_bytes_le())
 }
-/// Poseidon2 HashNoPad; raw words and digest words are little endian.
-pub fn poseidon2_hash(input: &[u8]) -> Result<[u8; 32], String> {
-    Ok(hash_out_to_bytes_le(hash_no_pad(&words(input)?)))
-}
 /// Poseidon2 hash to the quintic extension used by Schnorr.
 pub fn poseidon2_hash_fp5(input: &[u8]) -> Result<[u8; 40], String> {
     Ok(hash_to_quintic_extension(&words(input)?).to_bytes_le())
-}
-/// Two-to-one compression of two canonical 32-byte hash outputs.
-pub fn poseidon2_two_to_one(left: &[u8], right: &[u8]) -> Result<[u8; 32], String> {
-    Ok(hash_out_to_bytes_le(poseidon_hash::hash_n_to_one(&[
-        hash_out_from_bytes_le(left)?,
-        hash_out_from_bytes_le(right)?,
-    ])))
 }
 /// Derive the compressed public key, including Go's scalar reduction semantics.
 pub fn public_key(key: &[u8]) -> Result<[u8; 40], String> {
@@ -237,10 +223,6 @@ mod tests {
                 );
             }
             assert!(
-                poseidon2_hash(&input).is_err(),
-                "unaligned hash must not discard trailing bytes"
-            );
-            assert!(
                 poseidon2_hash_fp5(&input).is_err(),
                 "unaligned Fp5 must not discard trailing bytes"
             );
@@ -262,52 +244,6 @@ mod tests {
                 .is_err(),
                 "unaligned verifier must not discard trailing bytes"
             );
-        }
-    }
-    #[test]
-    fn two_to_one_noncanonical_reference_bound_is_explicit() {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/lighter/go-wasm-two-noncanonical.json"
-        ))
-        .unwrap();
-        let cases = fixture["twoToOne"].as_array().unwrap();
-        let noncanonical = |bytes: &[u8]| {
-            bytes
-                .as_chunks::<8>()
-                .0
-                .iter()
-                .any(|word| u64::from_le_bytes(*word) >= Goldilocks::MODULUS)
-        };
-        for required in [(false, false), (true, false), (false, true), (true, true)] {
-            assert!(
-                cases.iter().any(|case| (
-                    noncanonical(&bytes(case, "left")),
-                    noncanonical(&bytes(case, "right"))
-                ) == required),
-                "two-to-one canonicality coverage missing {required:?}"
-            );
-        }
-        for case in cases {
-            let left = bytes(case, "left");
-            let right = bytes(case, "right");
-            assert_eq!(
-                bytes(case, "hash").len(),
-                32,
-                "Go cryptographic output required"
-            );
-            let actual = poseidon2_two_to_one(&left, &right);
-            if noncanonical(&left) || noncanonical(&right) {
-                assert!(
-                    actual.is_err(),
-                    "documented noncanonical two-to-one refusal"
-                );
-            } else {
-                assert_eq!(
-                    hex(&actual.unwrap()),
-                    case["hash"],
-                    "canonical two-to-one control"
-                );
-            }
         }
     }
     #[test]
@@ -356,11 +292,6 @@ mod tests {
             }
             for case in hashes {
                 assert_eq!(
-                    hex(&poseidon2_hash(&bytes(case, "input")).unwrap()),
-                    case["hash"],
-                    "Go HashNoPad mismatch"
-                );
-                assert_eq!(
                     hex(&poseidon2_hash_fp5(&bytes(case, "input")).unwrap()),
                     case["fp5"],
                     "Go Fp5 mismatch"
@@ -394,17 +325,6 @@ mod tests {
                 && sizes.contains(&136),
             "Go hash corpus must cover empty, rate boundary, and multiblock inputs"
         );
-        assert!(
-            !fixture["twoToOne"].as_array().unwrap().is_empty(),
-            "Go two-to-one corpus required"
-        );
-        for case in fixture["twoToOne"].as_array().unwrap() {
-            assert_eq!(
-                hex(&poseidon2_two_to_one(&bytes(case, "left"), &bytes(case, "right")).unwrap()),
-                case["hash"],
-                "Go two-to-one mismatch"
-            );
-        }
     }
     fn assert_signature(case: &Value) {
         let key = bytes(case, "key");
