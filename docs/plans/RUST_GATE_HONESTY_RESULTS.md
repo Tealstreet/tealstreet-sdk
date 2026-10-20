@@ -1,6 +1,6 @@
 # Strict replay results
 
-The latest complete reviewed **107-case** collection at `67cf7d9b2b` in
+A complete reviewed **107-case** collection at `67cf7d9b2b` in
 [run 39424799340](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39424799340)
 reported **27 strict PASS / 80 strict FAIL**. Its newly observed literal paths
 were independently classified and added to the manifest afterward; that run's

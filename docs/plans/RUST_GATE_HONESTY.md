@@ -321,3 +321,10 @@ never retry an unchanged failed performance measurement to obtain a pass.
   policy/verifier 9/9 PASS. Earlier declarations remain intact; no gate code,
   performance threshold or protected failure changed. Collect full run before
   the next certification push.
+- Completed `39426820375`: 107/107 reports, 27 strict PASS / 80 strict FAIL.
+  Every report assesses with zero unexpected diagnostics against the reviewed
+  fourteen-path refresh. The sole red suite was the correctly undeclared
+  Paradex result at execution time; all other Rust and repository checks passed.
+  Publish this declarations-only refresh and require green exact-head CI before
+  merge. The report document pins a complete reviewed collection and directs
+  final certification to the PR so later runs never imply universal parity.
