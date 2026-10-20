@@ -52,6 +52,10 @@ concurrent calls share the replacement startup. Keep shutdown reading
 `instance.exchange` at call time, since destructuring would retain the failed
 account. Rust accounts reject `EXCHANGE_SIGNER_HEADER` before issuing requests;
 the native signer cannot invoke that JS HMAC callback.
+Rust accounts keep their public feeds active because native ticker tools read
+the current engine store. Do not apply the TS-only public-socket suppression to
+Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
+replays actual recorded Binance socket traffic and requires changed tool quotes.
 The license generator includes the pinned engine's non-dev Cargo dependency
 closure and the existing adapted zkLink notice. Run it after building WASM so
 the offline Cargo source cache contains the crate license files. These notices

@@ -33,7 +33,7 @@ With `EXCHANGE_INVERSE=true`: the inverse markets join every tool. They carry `i
 
 Results with times also carry `<field>Utc` ISO dates, because safe-cex keeps fill and candle times in seconds and the rest in milliseconds.
 
-The server starts the exchange as soon as it connects. It opens no public websockets. TS adapters fetch when asked with background adapter polling disabled; Rust tools read the engine's current state while its native reconciliation and liveness timers continue. Starting fetches positions, orders and balance, and with local credentials most adapters also open their private websocket. Rust's venue-specific signing and product restrictions still apply; Rust accounts reject the HMAC proxy signer before starting.
+The server starts the exchange as soon as it connects. TS adapters fetch when asked with public websockets and background adapter polling disabled. Rust tools read current engine state and keep native public feeds, account reconciliation and liveness timers active so ticker reads continue updating. Starting fetches positions, orders and balance, and with local credentials most adapters also open their private websocket. Rust's venue-specific signing and product restrictions still apply; Rust accounts reject the HMAC proxy signer before starting.
 
 If native startup fails, the next tool call creates a fresh Rust account and retries startup. Concurrent calls share that startup, and subsequent tools read the replacement account.
 

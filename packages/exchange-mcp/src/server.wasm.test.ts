@@ -12,7 +12,7 @@ import { virtualClock } from '@tealstreet/safe-cex/src/utils/virtualClock';
 
 import { readConfig } from './config';
 import { createServer } from './server';
-import { rustConsumerFixture } from './testing/rustConsumerFixture';
+import { rustBinancePublicFixture, rustConsumerFixture } from './testing/rustConsumerFixture';
 
 it('rejects the HMAC proxy signer before starting a default Rust account', async () => {
   const fixture = rustConsumerFixture();
@@ -92,6 +92,40 @@ it('serves real Rust account and market reads through the MCP protocol', async (
   expect((await read('get_open_orders')).map((order: { id: string }) => order.id)).toEqual(['11', '12', '13', '21']);
   expect(fixture.failures).toEqual([]);
   expect(fixture.requests.some((request) => request.endsWith('/portfolios/replay-portfolio'))).toBe(true);
-  // The MCP server's disablePublicWebsockets policy must reach the native host.
-  expect(fixture.sockets).toEqual(['wss://advanced-trade-ws-user.coinbase.com']);
+  expect(fixture.sockets).toEqual([
+    'wss://advanced-trade-ws.coinbase.com',
+    'wss://advanced-trade-ws-user.coinbase.com',
+  ]);
+}, 15000);
+
+it('keeps native Binance ticker tools fresh through recorded public socket input', async () => {
+  const fixture = rustBinancePublicFixture();
+  setWasmEngineLoader(loadNodeEngine);
+  setRustEngineTransport(() => fixture.transport);
+  instance = await createServer(readConfig({ EXCHANGE: 'binance', EXCHANGE_ENGINE: 'rust' }), 'test');
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await instance.server.connect(serverTransport);
+  client = new Client({ name: 'native-ticker-consumer', version: '1' });
+  await client.connect(clientTransport);
+  const tickers = async (): Promise<Array<{ symbol: string; last: number; bid: number; ask: number }>> => {
+    const result = await client!.callTool({ name: 'get_tickers', arguments: {} });
+    expect(result.isError).not.toBe(true);
+    return JSON.parse((result.content as Array<{ text: string }>)[0].text);
+  };
+  const initial = new Map((await tickers()).map((ticker) => [ticker.symbol, ticker]));
+  expect(instance.exchange).toBeInstanceOf(RustEngineExchange);
+  expect(initial.size).toBeGreaterThan(0);
+  expect(fixture.sockets.length).toBeGreaterThan(0);
+  expect(await fixture.replayPublicFrames()).toBeGreaterThan(0);
+  await vi.waitFor(
+    async () => {
+      const changed = (await tickers()).some((ticker) => {
+        const before = initial.get(ticker.symbol);
+        return before && (ticker.last !== before.last || ticker.bid !== before.bid || ticker.ask !== before.ask);
+      });
+      expect(changed).toBe(true);
+    },
+    { timeout: 5000 },
+  );
+  expect(fixture.failures).toEqual([]);
 }, 15000);
