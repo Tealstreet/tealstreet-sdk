@@ -36,6 +36,7 @@ const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
 const STARTUP_RETRY_MIN_MS: f64 = 1_000.0;
 const STARTUP_RETRY_MAX_MS: f64 = 60_000.0;
+const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
 #[derive(Clone, Debug, Default)]
@@ -183,6 +184,7 @@ struct Startup {
     tickers_loaded: bool,
     trading_in_flight: bool,
     prelaunch_in_flight: bool,
+    prelaunch_grace: Option<TimerId>,
     fees_in_flight: bool,
     tickers_in_flight: bool,
     account_info: bool,
@@ -292,7 +294,7 @@ impl BybitLinear {
             candles: HashMap::new(),
             startup: Startup {
                 retry_ms: STARTUP_RETRY_MIN_MS,
-                prelaunch: (options.variant.is_spot() || options.variant.is_hyro()).then(Vec::new),
+                prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
                 ..Startup::default()
             },
@@ -552,6 +554,9 @@ impl BybitLinear {
         mut markets: Vec<Market>,
         response: Result<Response<'_>, &str>,
     ) {
+        if prelaunch && (self.startup.markets_loaded || self.startup.prelaunch.is_some()) {
+            return;
+        }
         let body = match response.map(|r| (venue_error(&r), r.body)) {
             Ok((None, body)) => body,
             Ok((Some((_, message)), _)) => return self.markets_failed(cx, prelaunch, &message),
@@ -575,11 +580,19 @@ impl BybitLinear {
         }
         let list = std::mem::take(pages);
         if prelaunch {
+            if let Some(timer) = self.startup.prelaunch_grace.take() {
+                cx.clear_timer(timer);
+            }
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch = Some(list);
         } else {
             self.startup.trading_in_flight = false;
             self.startup.trading = Some(list);
+            // The optional read gets its grace after Trading completes, as in
+            // the TS helper. A slow Trading request must not consume that grace.
+            if self.startup.prelaunch.is_none() && self.startup.prelaunch_grace.is_none() {
+                self.startup.prelaunch_grace = Some(cx.set_timer(PRELAUNCH_STARTUP_GRACE_MS));
+            }
         }
         self.try_load_markets(cx);
     }
@@ -587,6 +600,12 @@ impl BybitLinear {
     /// Trading markets are required; PreLaunch markets are optional.
     fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, prelaunch: bool, error: &str) {
         if prelaunch {
+            if self.startup.markets_loaded || self.startup.prelaunch.is_some() {
+                return;
+            }
+            if let Some(timer) = self.startup.prelaunch_grace.take() {
+                cx.clear_timer(timer);
+            }
             self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
             cx.log(
@@ -616,6 +635,19 @@ impl BybitLinear {
         let fees = startup.fees.take().unwrap_or_default();
         let mut markets = startup.trading.take().unwrap_or_default();
         markets.append(&mut startup.prelaunch.take().unwrap_or_default());
+        if self.variant.is_hyro() {
+            let mut indices = HashMap::new();
+            let mut unique = Vec::with_capacity(markets.len());
+            for market in markets {
+                if let Some(&index) = indices.get(&market.symbol) {
+                    unique[index] = market;
+                } else {
+                    indices.insert(market.symbol.clone(), unique.len());
+                    unique.push(market);
+                }
+            }
+            markets = unique;
+        }
         for market in &mut markets {
             if let Some(&(taker, maker)) = fees.get(&market.symbol) {
                 market.taker_fee = Some(taker);
@@ -1227,6 +1259,17 @@ impl Venue for BybitLinear {
         }
         if self.startup.retry == Some(timer) {
             self.request_startup(cx);
+        }
+        if self.startup.prelaunch_grace == Some(timer) {
+            self.startup.prelaunch_grace = None;
+            self.startup.prelaunch_in_flight = false;
+            self.startup.prelaunch_pages.clear();
+            self.startup.prelaunch = Some(Vec::new());
+            cx.log(
+                LogLevel::Warning,
+                "Timed out waiting for Bybit PreLaunch markets, continuing with Trading markets",
+            );
+            self.try_load_markets(cx);
         }
         for channel in [Channel::Public, Channel::Private] {
             if self.connection(channel).reconnect == Some(timer) {

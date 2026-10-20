@@ -494,3 +494,35 @@ Hyperliquid's native Bybit-control guard is proved red/green; all 58 native
 cases pass. Shared Hyperliquid wrapper regressions and client-ID contracts pass.
 Combined functional checks, per-venue size/performance gates and final-head CI
 are pending on this merge. Hyro live connectivity remains unverified.
+
+### Exact request audit follow-up
+
+The first per-venue build is 918,426 bytes, below the new fixed 1,258,291-byte
+budget. The stronger incoming cross-implementation HTTP audit exposed three
+request differences: Hyro skipped the shared optional PreLaunch instrument
+read; spot skipped account metadata; Hyro used 200-row position pages instead
+of TS's simulator-specific 50. Inverse/demo/linear private gates pass unchanged.
+Spot and Hyro fail only those request comparisons; no mutation exception was
+added. Native fixes restore the exact probes/page size and Hyro's symbol
+selection (USDT only, last duplicate value at first insertion position).
+Review also found that optional PreLaunch reads could delay startup until the
+host HTTP timeout. Add the shared TS helper's 1.5-second grace after required
+Trading pagination, with late-response fences, before re-running the matrix.
+
+Post-merge combined functional gates pass: wasm 45, host 28, frame/copier 8.
+All 811 native cases, 166 harness helpers, bans/fmt/Clippy, root typecheck/lint
+and licenses pass. The first full root test run hit cold import timeouts in
+Hyro configuration tests while running two safe-cex suites simultaneously;
+25/27 tasks completed and 6,634 safe-cex unit cases passed with one timeout.
+A serial root-task rerun is pending; no timeout or assertion was relaxed.
+
+The request-parity phase is frozen: all 114 Bybit native cases and strict
+all-target Clippy pass. The thirteen public tests cover every profile,
+PreLaunch pagination/nonempty results, optional error/nonzero responses,
+Hyro symbol deduplication, slow/retried Trading, timeout with partial optional
+pages, stale timers and late callbacks while fee metadata is still pending.
+The two new account request regressions were proved red/green, including the
+second Hyro position page. Independent public and account reviews pass with
+no remaining findings. The optional grace starts only after the final required
+Trading page, cancels its exact timer on completion, and ignores late optional
+results. No request audit, performance threshold or timeout assertion changed.

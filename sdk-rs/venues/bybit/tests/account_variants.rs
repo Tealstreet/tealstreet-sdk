@@ -457,3 +457,38 @@ fn hyro_periodic_absent_order_keeps_partial_fill_cursor() {
     h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
     assert_eq!(emitted_fills(&mut h), vec![(110.0, 0.6)]);
 }
+
+#[test]
+fn request_parity_spot_reads_account_metadata_before_private_snapshots() {
+    let mut h = Harness::started(options(Variant::Spot));
+    let metadata = h.take("/v5/account/info");
+    assert!(!metadata.url.contains("category="));
+    assert!(!h.has_request("/v5/position/list"));
+    assert!(!h.has_request("/v5/order/realtime"));
+    h.reply(metadata.id, 200, support::ACCOUNT_INFO);
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    assert!(h.has_request("/v5/order/realtime?category=spot"));
+    assert!(h.has_request("/v5/account/wallet-balance?accountType=UNIFIED"));
+    assert!(!h.has_request("/v5/position/list"));
+}
+
+#[test]
+fn request_parity_hyro_position_pages_use_its_fifty_row_limit() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let first = h.take("/v5/position/list");
+    assert!(
+        first
+            .url
+            .contains("category=linear&settleCoin=USDT&limit=50&cursor=")
+    );
+    h.reply(
+        first.id,
+        200,
+        &POSITIONS.replace("\"nextPageCursor\":\"\"", "\"nextPageCursor\":\"next\""),
+    );
+    let next = h.take("/v5/position/list");
+    assert!(next.url.contains("limit=50&cursor=next"));
+    assert!(!h.has_request("/v5/account/info"));
+}

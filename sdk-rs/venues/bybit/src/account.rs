@@ -1031,7 +1031,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn request_account_info(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.variant.is_hyro() || self.variant.is_spot() {
+        if self.variant.is_hyro() {
             self.account.margin_type = Some(MarginType::Cross);
             self.startup.account_info = true;
             return;
@@ -1099,7 +1099,12 @@ impl BybitLinear {
         coin: &'static str,
         cursor: String,
     ) {
-        let query = self.page_query(coin, POSITIONS_PAGE_LIMIT, &cursor);
+        let limit = if self.variant.is_hyro() {
+            ORDERS_PAGE_LIMIT
+        } else {
+            POSITIONS_PAGE_LIMIT
+        };
+        let query = self.page_query(coin, limit, &cursor);
         let request = Request::Positions {
             generation,
             coin,
