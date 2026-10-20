@@ -165,13 +165,61 @@ check and regression. The 87 pure tests, 15 CLI tests and six saved-output
 checks pass, with independent passing rereview. Broad checks and the remaining
 replays are being repeated after the shared parser change.
 
+## Final landing integration and verification
+
+`622982dc35` merges landing `702a62050c` (broker attribution/cancellation).
+The only manual conflict was independent Bitget regression tests; both were
+retained. Independent merge review passed, including KuCoin role/token/pong
+state, private auth guards and the signing-clock reset before startup.
+
+The preceding v2 verification passed all 27 build stages, ten integration
+stages and root checks; its replay matrix was intentionally stopped after six
+completed passes to integrate the new landing. Those six results and the
+in-flight cancellation are not a full-matrix pass. The new binary is different,
+so no earlier performance result is reused in v3.
+
+On source `622982dc354fdfb138a4c9eaf579142ee4cc0d91`, all 27 build stages pass:
+2,877 workspace tests, 164 explicit KuCoin Spot tests, 109 all-feature engine
+tests and 103 no-default engine tests (overlapping suites), formatting, bans,
+strict native/WASM Clippy, workspace WASM build and 17 standalone size budgets.
+The largest standalone is Paradex at 1,223,634 bytes against the unchanged
+1,258,291 budget. The final combined artifact is 12,231,306 bytes, SHA-256
+`1197834f0dcfbd499b1870538486b86213b5699990d0255a0d317699088a5476`.
+
+All ten integration stages pass, including 683 harness tests and 444 compiled
+SDK WASM tests. Root typecheck/lint/test pass (44/28/27 tasks); licenses cover 31 workspaces.
+Final replay verification passes all 72 cases: 21 frozen public controls,
+22 fresh public profiles and 29 private cases. Public cases use three runs and
+pass main/steady CPU and retained memory thresholds; private metrics are
+informational. Final fresh Paradex is TS 232.4 / Rust 229.8 ms main CPU,
+63.9 / 41.3 ms steady CPU and 18.7 / 2.5 MB retained memory: a narrow main-CPU
+margin, not a robust-headroom claim. Every final case is measured on the merged
+artifact; prior source timings are not reused.
+
+[Machine-readable gate evidence](venue-ports/SOCKET_SUPERVISOR_GATES.json)
+records every source/artifact/input/output/log hash, three-run medians, exact
+17 size selectors and parsed check counts. It separately retains the original
+68-pass/four-failure matrix, interrupted six-pass v2 run, and the final stale
+KuCoin input failure. Final artifact: 72 passing cases across 73 attempts;
+71 inputs retain their original hashes and one uses the current generator.
+No successful performance case was repeated to seek a larger margin.
+
+The final-artifact replay attempt completed 52 cases before legacy KuCoin
+private input failed in TS with one unconsumed taped write, producing no metrics.
+Landing had already removed precisely that obsolete DELETE `stopOrders` record
+from its generator. The current generator produces 76 records instead of 77,
+with no other difference; its regenerated private gate passes. The old input,
+failure log and interrupted collector exit are preserved, and the final matrix
+uses the current generated KuCoin input. The 52 passes are retained verbatim;
+remaining cases resumed and passed without rerunning successful performance measurements.
+
 ## Public alias discovery and coverage limitation
 
 On 2026-10-20, Bitget USDC's live contracts/tickers returned 49 native symbols,
 including `BTCPERP` and `ETHPERP`. Rust and TS both retain those native IDs.
 The initial `BTCUSDC,ETHUSDC` book selection was rejected by the venue; the
-recording matrix now uses `BTCPERP,ETHPERP`. Corrected capture and replay must
-pass before claiming USDC public-book or performance coverage.
+recording matrix now uses `BTCPERP,ETHPERP`. The corrected capture passed its initial three-run public gate; the final
+integrated matrix repeats it on the merged artifact.
 
 Classic inverse contracts returned HTTP 200/code `00000` with an empty catalog
 for both `coin-futures` and `COIN-FUTURES`; USDC also returned identical data
