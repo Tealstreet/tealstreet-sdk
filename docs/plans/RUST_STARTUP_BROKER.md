@@ -21,6 +21,24 @@ Scope follows the OKX, BloFin and cross-venue port reviews in `RUST_AUDITS.md`.
    PR into `feat/rust-rewrite`; repair findings and merge only on green CI.
    Strike only repaired audit findings, retaining unrelated subfindings.
 
+## Landing split (Sam's addenda)
+
+Land this work in three sequential PRs so reviews remain scoped:
+
+1. Broker attribution and cancel semantics, including KuCoin symbol-stop safety
+   and independent handling of unknown IDs.
+2. Public startup resilience and KuCoin authenticated REST independence from
+   private socket welcome.
+3. Private-row tolerance (retain existing entries for skipped identities),
+   `SetTickerSymbols` across every venue, and actual app stop payload request
+   tests (all venues; Orderly implementation owned by the order-races lane).
+   Read the app's stop form/chart/hotkey/bracket/trailing constructors from
+   `~/cs/tealstreet-next/apps/web/src/order/` as the payload source.
+
+Sam's judging rule: lifecycle differences are allowed. Fix only incorrect or
+missing/stale production state, money/attribution loss, invisible failure or
+broken downstream callers. Pure lifecycle parity changes are out of scope.
+
 ## Boundaries and verification
 
 `feat/rust-audit-binance-bybit` owns other Binance/Bybit findings;

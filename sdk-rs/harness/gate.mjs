@@ -487,7 +487,6 @@ const KNOWN_TS_FIXES = {
     'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
     'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
     'Bybit-only BBO and tick-slippage controls are rejected on KuCoin before batch I/O',
-    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
     'open orders walk every numbered page; TS reads only its default first page',
     'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
     'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
