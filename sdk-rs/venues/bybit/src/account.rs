@@ -44,6 +44,7 @@ pub enum Request {
     },
     Wallet {
         session: u32,
+        epoch: u32,
     },
 }
 
@@ -122,6 +123,9 @@ pub struct AccountState {
     unsupported_logged: HashSet<String>,
     /// A Hyro reconciliation read failed in transport or at the venue, not on content.
     hyro_transient: bool,
+    hyro_transient_streak: u8,
+    /// Bumped to orphan an in-flight wallet read without ending the session.
+    wallet_epoch: u32,
     /// Per-coin holdings; `None` until a wallet read or push is accepted.
     coins: Option<Vec<CoinBalance>>,
     pub authed: bool,
@@ -168,9 +172,19 @@ impl AccountState {
     }
 }
 
-/// The engine reports a valid envelope missing its list through the failure path.
+/// The engine reports a valid envelope missing its list through the failure path;
+/// a Bybit error envelope there is a venue refusal, not bad content.
 fn malformed_stream(message: &str) -> bool {
-    message.starts_with("response did not contain the expected list")
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Refusal {
+        ret_code: i64,
+    }
+    message
+        .strip_prefix("response did not contain the expected list: ")
+        .is_some_and(|body| {
+            serde_json::from_str::<Refusal>(body).map_or(true, |refusal| refusal.ret_code == 0)
+        })
 }
 
 fn finite(value: f64) -> Option<f64> {
@@ -1025,9 +1039,21 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        if std::mem::take(&mut self.account.hyro_transient) && self.account.ready {
+        if std::mem::take(&mut self.account.hyro_transient)
+            && self.account.ready
+            && self.account.hyro_transient_streak < 3
+        {
+            self.account.hyro_transient_streak += 1;
             cx.log(LogLevel::Warning, format!("HyroTrader {message}; retrying"));
+            // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
+            self.account.snapshot_attempts = 0;
+            self.account.orders = None;
+            self.account.positions = None;
+            self.account.orders_generation += 1;
+            self.account.positions_generation += 1;
+            self.account.wallet_in_flight = false;
+            self.account.wallet_epoch = self.account.wallet_epoch.wrapping_add(1);
             return;
         }
         self.fail_hyro(cx, message);
@@ -1035,6 +1061,7 @@ impl BybitLinear {
 
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
         self.account.hyro_transient = false;
+        self.account.hyro_transient_streak = 0;
         cx.log(LogLevel::Error, format!("HyroTrader {message}"));
         if let Some(socket) = self.private.socket {
             cx.close(socket);
@@ -1169,6 +1196,7 @@ impl BybitLinear {
         cx.store.set_hedged(false);
         self.account.wallet = snapshot.wallet;
         self.account.coins = Some(snapshot.coins);
+        self.account.hyro_transient_streak = 0;
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
@@ -1345,6 +1373,7 @@ impl BybitLinear {
             Rest::get("/v5/account/wallet-balance", query).signed(),
             Then::Account(Request::Wallet {
                 session: self.account.session_version,
+                epoch: self.account.wallet_epoch,
             }),
         );
     }
@@ -1967,8 +1996,8 @@ impl BybitLinear {
                 }
                 self.finish_positions(cx);
             }
-            Request::Wallet { session } => {
-                if session != self.account.session_version {
+            Request::Wallet { session, epoch } => {
+                if session != self.account.session_version || epoch != self.account.wallet_epoch {
                     return;
                 }
                 self.account.wallet_in_flight = false;
@@ -1991,6 +2020,11 @@ impl BybitLinear {
                     self.fetch_wallet(cx);
                 }
                 if retired {
+                    // USDC-settled rows were never read under the classic settle coins.
+                    self.account.orders_follow_up |= self.account.orders.is_some();
+                    self.account.positions_follow_up |= self.account.positions.is_some();
+                    self.fetch_orders(cx);
+                    self.fetch_positions(cx);
                     return;
                 }
                 self.account.hyro_transient |= outcome.is_err();
