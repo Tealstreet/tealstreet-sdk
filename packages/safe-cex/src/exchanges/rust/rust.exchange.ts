@@ -15,11 +15,11 @@ import type {
   Order,
   OrderBook,
   OrderHistoryOptions,
-  PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
+import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 
 import bs58 from 'bs58';
@@ -33,6 +33,15 @@ import { assertEngineAccountRouting, createEngineTransport } from '../../transpo
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
+import {
+  ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
+  hasAsterDEXV3AuthContext,
+  isAsterDEXAddress,
+  isAsterDEXStpMode,
+  isAsterDEXV3PrivateKey,
+  resolveAsterDEXApiVersion,
+  resolveAsterDEXV3AuthContext,
+} from '../asterdex/asterdex.types';
 import { BaseExchange } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
@@ -47,6 +56,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
+  asterdex: 'asterdex',
   binance: 'binance',
   backpack: 'backpack',
   'tealstreet-dex': 'tealstreet-dex',
@@ -187,7 +197,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
-  private readonly bookListeners = new Map<string, Set<(book: OrderBook) => void>>();
+  private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
+  private nextBookListenerId = 0;
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
 
   /**
@@ -220,7 +231,8 @@ export class RustEngineExchange extends BaseExchange {
         const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
         const orders = await this.fetchHistoricalOrders({ from, to });
         return wooOrdersToPositionRecords(orders, {
-          account: opts.account, from,
+          account: opts.account,
+          from,
           resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
         });
       };
@@ -237,6 +249,15 @@ export class RustEngineExchange extends BaseExchange {
       !Boolean(this.options.vault || this.options.applicationId || this.options.key)
     );
   }
+
+  protected override get canSign(): boolean {
+    if (this.name !== 'asterdex') return super.canSign;
+    if (!this.options.key) return false;
+    if (this.options.remoteSigner) return true;
+    return resolveAsterDEXApiVersion(this.options) === 'v3'
+      ? hasAsterDEXV3AuthContext(this.options)
+      : Boolean(this.options.secret);
+  }
   private updateTickerSymbols = () => {
     if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
@@ -248,14 +269,26 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private startEngine = async () => {
-    assertEngineAccountRouting(this.options);
+    assertEngineAccountRouting(this.options, this.name);
+    if (this.name === 'asterdex' && !this.options.publicDataOnly) {
+      const auth = resolveAsterDEXV3AuthContext(this.options);
+      if (
+        resolveAsterDEXApiVersion(this.options) === 'v1' &&
+        isAsterDEXAddress(this.options.key) &&
+        isAsterDEXV3PrivateKey(this.options.secret) &&
+        !auth.userAddress
+      ) {
+        throw new Error(ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE);
+      }
+    }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
       !['hyperliquid', 'lighter'].includes(this.name) &&
       !this.isPublicDataOnly &&
-      (!this.options.key || !this.options.secret)
+      (!this.options.key ||
+        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
@@ -317,6 +350,21 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(this.name === 'asterdex'
+          ? {
+              asterdex: {
+                apiVersion: resolveAsterDEXApiVersion(this.options),
+                userAddress: this.options.auth?.userAddress,
+                signerAddress: this.options.auth?.signerAddress,
+                privateKey: this.options.auth?.privateKey,
+                builderAddress: this.options.extra?.asterBuilderAddress,
+                builderFeeRateMaker: this.options.extra?.asterBuilderFeeRateMaker,
+                builderFeeRateTaker: this.options.extra?.asterBuilderFeeRateTaker,
+                readKey: this.options.secondary_key,
+                readSecret: this.options.secondary_secret,
+              },
+            }
+          : {}),
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
@@ -379,7 +427,20 @@ export class RustEngineExchange extends BaseExchange {
     for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
     if (!this.onFrame) {
       for (const { symbol, orderbook } of this.applier.books(frame)) {
-        this.bookListeners.get(symbol)?.forEach((listener) => listener(orderbook));
+        const listeners = this.bookListeners.get(symbol);
+        if (this.name !== 'asterdex') listeners?.forEach((listener) => listener(orderbook));
+        else if (listeners)
+          for (const [id, listener] of [...listeners]) {
+            if (listeners.has(id))
+              listener(
+                this.name === 'asterdex'
+                  ? {
+                      bids: orderbook.bids.map((level) => ({ ...level })),
+                      asks: orderbook.asks.map((level) => ({ ...level })),
+                    }
+                  : orderbook,
+              );
+          }
       }
       for (const { symbol, interval, candle } of this.applier.candles(frame)) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => listener(candle));
@@ -444,7 +505,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = async (orders: PlaceOrderOpts[]) => {
+  placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
     const isBybit = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name);
     if (!isBybit && orders.some((order) => 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
       this.rejectPreflight(`${this.name} does not support Bybit BBO or TickSize controls`);
@@ -483,10 +544,11 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
     }
+    if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
-  placeOrder = async (opts: PlaceOrderOpts) => {
+  placeOrder = async (opts: AsterDEXPlaceOrderOpts) => {
     this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
@@ -508,7 +570,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
-    await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
+    if (this.name === 'asterdex') {
+      await this.command({ op: 'cancelOrdersWithSymbols', orders: orders.map(({ id, symbol }) => ({ id, symbol })) });
+    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
@@ -516,6 +580,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   getAccount = async (): Promise<ExchangeAccount> => {
+    if (this.name === 'asterdex') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
     if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
     if (!this.host) await this.start();
     await this.untilLoaded();
@@ -546,16 +611,61 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'setPositionMode', hedged });
   };
 
-  // The engine reconciles orders and positions itself; reads serve its state.
-  fetchOrders = async () => this.store.orders;
+  private validateAsterStp = (mode?: AsterDEXStpMode): void => {
+    if (mode === undefined) return;
+    if (resolveAsterDEXApiVersion(this.options) !== 'v3')
+      throw new Error('AsterDEX self-trade prevention requires API v3');
+    if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
+  };
 
-  fetchPositions = async () => this.store.positions;
+  fetchStpMode = async (): Promise<AsterDEXStpMode> => {
+    if (this.name !== 'asterdex') throw new Error('Self-trade prevention is unavailable for this venue');
+    this.validateAsterStp('EXPIRE_TAKER');
+    return this.command<AsterDEXStpMode>({ op: 'fetchStpMode' });
+  };
+
+  changeStpMode = async (mode: AsterDEXStpMode): Promise<void> => {
+    if (this.name !== 'asterdex') throw new Error('Self-trade prevention is unavailable for this venue');
+    this.validateAsterStp('EXPIRE_TAKER');
+    if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
+    await this.command({ op: 'setStpMode', mode });
+  };
+
+  // The engine reconciles orders and positions itself; reads serve its state.
+  fetchMarkets = async () => this.store.markets;
+
+  fetchTickers = async () => this.store.tickers;
+
+  fetchOrders = async (symbols?: string[]) =>
+    symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;
+
+  fetchPositions = async (symbols?: string[]) =>
+    symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+
+  fetchPositionMode = async () => Boolean(this.store.options.isHedged);
+
+  fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
+    return market.limits.leverage.max;
+  };
+
+  fetchOrderBook = async (symbol: string, limit = 100): Promise<OrderBook> => {
+    if (this.name !== 'asterdex') throw new Error('Orderbook snapshot queries are unavailable for this venue');
+    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
+  };
+
+  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
+    this.name === 'asterdex' &&
+    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
+      ? '1h'
+      : interval;
 
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: opts.interval,
+      interval: this.candleInterval(opts.interval),
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -579,7 +689,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
@@ -626,13 +736,16 @@ export class RustEngineExchange extends BaseExchange {
   listenOrderBook = (symbol: string, callback: (book: OrderBook) => void) => {
     let listeners = this.bookListeners.get(symbol);
     if (!listeners) {
-      listeners = new Set();
+      listeners = new Map();
       this.bookListeners.set(symbol, listeners);
       void this.command({ op: 'subscribeOrderBook', symbol });
     }
-    listeners.add(callback);
+    const listenerId =
+      (this.name !== 'asterdex' ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
+      ++this.nextBookListenerId;
+    listeners.set(listenerId, callback);
     return () => {
-      listeners!.delete(callback);
+      if (!listeners!.delete(listenerId)) return;
       if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
         this.bookListeners.delete(symbol);
         void this.command({ op: 'unsubscribeOrderBook', symbol });
@@ -641,19 +754,20 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const key = `${opts.symbol}:${opts.interval}`;
+    const interval = this.candleInterval(opts.interval);
+    const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     if (!listeners) {
       listeners = new Set();
       this.candleListeners.set(key, listeners);
-      void this.command({ op: 'subscribeCandles', symbol: opts.symbol, interval: opts.interval });
+      void this.command({ op: 'subscribeCandles', symbol: opts.symbol, interval });
     }
     listeners.add(callback);
     return () => {
       listeners!.delete(callback);
       if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
         this.candleListeners.delete(key);
-        void this.command({ op: 'unsubscribeCandles', symbol: opts.symbol, interval: opts.interval });
+        void this.command({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
       }
     };
   };

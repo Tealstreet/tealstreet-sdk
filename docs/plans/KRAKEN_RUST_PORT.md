@@ -303,3 +303,26 @@ Binance public CPU 288.1/142.0 ms (2.03x), retained 19.0/3.0 MB (6.25x), private
 correctness PASS. No Kraken implementation changes in this landing merge.
 All phase, PR and integration code-correctness reviews accepted and posted.
 Only hosted CI acceptance/merge/fresh-branch actions remain.
+
+### AsterDEX landing integration
+
+Final KuCoin-integrated head a244a10542 passed all 27 hosted CI checks, including
+Kraken public/private and the unchanged WOO strict timing gate. Hosted Kraken
+public medians: CPU 760.8/110.0 ms (6.92x), steady 560.6/51.1 ms (10.98x),
+retained 17.6/2.1 MB (8.58x); node Wasm 858,577 bytes. Before merge, base advanced
+to d9aa597fd3 (AsterDEX), creating registration conflicts. Integrate incoming
+layout, host HTTP deadlines/routes, typed currency/STP/cancel references and lazy
+Aster crypto initialization. Union both venue entries, constructors, build and
+feature sets, TS corrections, exact fixture fingerprints and roster changes.
+
+Independent integration code-correctness review found Kraken collateral coins
+would be stripped by the new balance projection. Dedicated compareBalanceCoins
+opt-in restores both TS/Rust comparisons without enabling inverse sizing extras.
+Kraken rejects the new unsupported per-order STP control across the whole batch
+before writes and initializes the shared field in protective replacements.
+93 Kraken tests and 268 harness tests pass; independent review reran harness
+268/268 and accepted all integration fixes with no remaining findings.
+
+Push this reviewed merge promptly while full affected local checks run in
+parallel with hosted CI. Post final gate results on #1323; avoid another docs-only
+CI restart. Merge only when the final head's hosted checks and local gates pass.

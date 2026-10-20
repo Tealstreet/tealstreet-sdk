@@ -5,7 +5,7 @@ mod history;
 mod paths;
 mod sign;
 mod trading;
-mod wire;
+pub mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;

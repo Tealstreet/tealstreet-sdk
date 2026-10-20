@@ -6,3 +6,18 @@
 # with "replay-key" and independently checked by kraken-protocol.mjs. No account.
 # Exact historical fingerprint; future source and credential changes stay scanned.
 6e7a3e90853214fd9c9377e5bbf96be74b972303:sdk-rs/harness/venues.mjs:generic-api-key:161
+
+# Aster published V3 demonstration private key, copied only into signing fixtures
+# and their independent oracle/generator (never a funded account credential):
+# https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md
+# Exact historical occurrences only; production source and future changes stay scanned.
+076496fbb11bf2810d7209ba5bc98a536cf13ffb:sdk-rs/harness/asterdex-requests.mjs:generic-api-key:15
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/generate-signing.mjs:generic-api-key:8
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:6
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:31
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:56
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:80
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:104
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:125
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:146
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:164

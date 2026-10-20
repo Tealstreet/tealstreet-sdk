@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
+import { AWS_PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
 
 const tunnels = vi.hoisted(
   () =>
@@ -143,5 +144,37 @@ describe('engine through the real HOW package', () => {
       data: {},
       headers: { 'x-site-id': 'BRA_BTL' },
     });
+  });
+  it('Aster secondary reads keep AWS CORS inside the real HOW RPC while writes keep the primary path', async () => {
+    const raw = rawTransport();
+    const route = createEngineTransport(
+      'asterdex',
+      {
+        key: 'primary-wallet',
+        secret: 'primary-key',
+        secondary_key: 'read-wallet',
+        secondary_secret: 'read-key',
+        tealstreetTunnel: true,
+        transport: tealstreetTransport,
+      },
+      raw,
+    );
+    const state = tunnels.get(TOKYO_HOW_EGRESS)!;
+    state.reply = { status: 200, data_raw: '{"balance":"1.2300"}', headers: {} };
+    const url = 'https://fapi.asterdex.com/fapi/v3/account?user=owner&nonce=1001&signature=exact%2Bbytes';
+    await route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } });
+    expect(state.sent.at(-1)?.arg).toMatchObject({
+      method: 'GET',
+      url: `${AWS_PUBLIC_CORS_PROXY}/${url}`,
+      headers: { 'X-MBX-APIKEY': 'read-wallet' },
+    });
+    await route.request({ method: 'POST', url, headers: { 'X-MBX-APIKEY': 'primary-wallet' } });
+    expect(state.sent.at(-1)?.arg).toMatchObject({
+      method: 'POST',
+      url,
+      headers: { 'X-MBX-APIKEY': 'primary-wallet' },
+    });
+    expect(raw.request).not.toHaveBeenCalled();
+    route.dispose!();
   });
 });

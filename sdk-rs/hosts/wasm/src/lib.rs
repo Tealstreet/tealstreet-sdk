@@ -7,6 +7,7 @@
 #[cfg(not(any(
     feature = "bitrue",
     feature = "binance",
+    feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
@@ -24,13 +25,15 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "asterdex")]
+use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "binance")]
@@ -114,6 +117,7 @@ struct KucoinExtra {
 
 #[cfg(any(
     feature = "binance",
+    feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
     feature = "bybit",
@@ -146,6 +150,7 @@ struct EngineOptions {
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "binance",
+        feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
@@ -180,6 +185,7 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
+        feature = "asterdex",
         feature = "orderly",
         feature = "lighter",
         feature = "woo"
@@ -195,6 +201,10 @@ struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
+    #[cfg(feature = "asterdex")]
+    #[serde(default)]
+    asterdex: AsterConfig,
+
     #[cfg(feature = "kucoin")]
     #[serde(default)]
     extra: Option<KucoinExtra>,
@@ -207,6 +217,20 @@ struct EngineOptions {
     #[cfg(feature = "orderly")]
     #[serde(default)]
     tick_interval: Option<f64>,
+}
+#[cfg(feature = "asterdex")]
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AsterConfig {
+    api_version: Option<safe_cex_venue_asterdex::sign::Version>,
+    user_address: Option<String>,
+    signer_address: Option<String>,
+    private_key: Option<String>,
+    builder_address: Option<String>,
+    builder_fee_rate_maker: Option<String>,
+    builder_fee_rate_taker: Option<String>,
+    read_key: Option<String>,
+    read_secret: Option<String>,
 }
 
 #[cfg(feature = "bybit")]
@@ -265,6 +289,10 @@ enum ActionOut<'a> {
     Http {
         request: u32,
         method: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        route: Option<&'static str>,
+        #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u32>,
         url: &'a str,
         headers: Vec<(&'static str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -338,6 +366,8 @@ fn encode(actions: &[Action]) -> String {
             Action::Http(request) => ActionOut::Http {
                 request: request.id.0,
                 method: request.method.as_str(),
+                route: request.route.map(safe_cex_engine::RequestRoute::as_str),
+                timeout_ms: request.timeout_ms,
                 url: &request.url,
                 headers: request
                     .headers
@@ -399,6 +429,10 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    CancelOrdersWithSymbols {
+        command: u32,
+        orders: Vec<CancelOrderRef>,
+    },
     AmendOrder {
         command: u32,
         id: String,
@@ -425,6 +459,22 @@ enum CommandIn {
     SetPositionMode {
         command: u32,
         hedged: bool,
+    },
+    FetchStpMode {
+        command: u32,
+    },
+    FetchAccount {
+        command: u32,
+    },
+    FetchOrderBook {
+        command: u32,
+        symbol: String,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    SetStpMode {
+        command: u32,
+        mode: StpMode,
     },
     FetchLeverage {
         command: u32,
@@ -520,6 +570,9 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            CommandIn::CancelOrdersWithSymbols { command, orders } => {
+                Self::CancelOrdersWithSymbols { command, orders }
+            }
             CommandIn::AmendOrder {
                 command,
                 id,
@@ -543,6 +596,18 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            CommandIn::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            } => Self::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            },
+            CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
@@ -654,6 +719,7 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[cfg(any(
         feature = "binance",
+        feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
@@ -697,6 +763,23 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+            }))),
+            #[cfg(feature = "asterdex")]
+            "asterdex" => Box::new(Engine::new(AsterDex::new(AsterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                auth_user_address: options.asterdex.user_address,
+                auth_signer_address: options.asterdex.signer_address,
+                auth_private_key: options.asterdex.private_key,
+                api_version: options.asterdex.api_version,
+                builder_address: options.asterdex.builder_address,
+                builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker,
+                builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
+                read_key: options.asterdex.read_key,
+                read_secret: options.asterdex.read_secret,
             }))),
             #[cfg(feature = "orderly")]
             "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
@@ -995,7 +1078,52 @@ impl WasmEngine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn http_route_metadata_is_optional_and_has_stable_host_names() {
+        let actions = [
+            None,
+            Some(safe_cex_engine::RequestRoute::Direct),
+            Some(safe_cex_engine::RequestRoute::PublicCors),
+        ]
+        .into_iter()
+        .map(|route| {
+            Action::Http(safe_cex_engine::HttpRequest {
+                id: safe_cex_engine::RequestId(1),
+                method: safe_cex_engine::Method::Get,
+                route,
+                timeout_ms: route.map(|_| 5_000),
+                url: "https://venue.test/time".into(),
+                headers: vec![],
+                body: None,
+            })
+        })
+        .collect::<Vec<_>>();
+        let encoded = encode(&actions);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&encoded).unwrap();
+        assert!(rows[0].get("route").is_none());
+        assert_eq!(rows[1]["route"], "direct");
+        assert_eq!(rows[2]["route"], "publicCors");
+        assert!(rows[0].get("timeoutMs").is_none());
+        assert_eq!(rows[1]["timeoutMs"], 5_000);
+        assert_eq!(rows[2]["timeoutMs"], 5_000);
+        assert!(
+            rows.iter()
+                .all(|row| row["headers"] == serde_json::json!([]))
+        );
+    }
+
     use super::*;
+
+    #[test]
+    fn cancellation_with_symbols_preserves_caller_identity() {
+        let wire: CommandIn = serde_json::from_str(
+            r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"22542179","symbol":"BTCUSDT"}]}"#,
+        ).unwrap();
+        assert!(
+            matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
+            if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
+        );
+    }
 
     #[test]
     fn forwards_leverage_metadata_command() {

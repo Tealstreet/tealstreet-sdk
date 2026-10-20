@@ -218,6 +218,9 @@ impl Kraken {
         {
             return Err("Bybit execution controls are supported only on Bybit".into());
         }
+        if orders.iter().any(|o| o.stp_mode.is_some()) {
+            return Err("Kraken per-order self-trade prevention is unsupported".into());
+        }
         let mut steps = VecDeque::new();
         for opts in orders {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
@@ -454,6 +457,7 @@ impl Kraken {
                 price: Some(replacement.price),
                 trigger_price: None,
                 max_slippage_pct: None,
+                stp_mode: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
                 stop_loss: None,

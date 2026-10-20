@@ -873,3 +873,17 @@ fn batch_rejects_bybit_controls_before_any_write() {
         )));
     }
 }
+
+#[test]
+fn batch_rejects_foreign_stp_controls_before_writes() {
+    let (mut e, _) = ready();
+    let mut bad = limit();
+    bad.stp_mode = Some(StpMode::ExpireTaker);
+    place(&mut e, vec![limit(), bad]);
+    let all = e.drain_actions().collect::<Vec<_>>();
+    assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(all.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { result: Err(error), .. })
+            if error.contains("self-trade prevention")
+    )));
+}
