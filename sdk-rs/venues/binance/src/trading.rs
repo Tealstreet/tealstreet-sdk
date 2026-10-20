@@ -6,8 +6,8 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::model::{
-    Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, StopTriggerType,
-    TimeInForce,
+    Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use std::collections::{HashMap, VecDeque};
@@ -57,6 +57,7 @@ enum Call {
 }
 
 struct Planned {
+    receipts: Vec<OrderIdentityReceipt>,
     method: Method,
     path: &'static str,
     query: Query,
@@ -273,6 +274,7 @@ impl BinanceFutures {
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
                 let mut step = vec![
                     Planned {
+                        receipts: Vec::new(),
                         method: Method::Delete,
                         path: self.paths.cancel_all,
                         query: Query::new().str("symbol", &symbol),
@@ -288,6 +290,7 @@ impl BinanceFutures {
                         },
                     },
                     Planned {
+                        receipts: Vec::new(),
                         method: Method::Delete,
                         path: self.paths.cancel_all_conditional,
                         query: Query::new().str("symbol", &symbol),
@@ -391,7 +394,7 @@ impl BinanceFutures {
                 self.advance(cx, id);
             }
             Err(message) => {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(id, message.clone());
                 cx.done(id, Err(message));
             }
         }
@@ -464,6 +467,7 @@ impl BinanceFutures {
         };
         job.outstanding = step.len();
         for planned in step {
+            cx.command_progress(command, planned.receipts);
             self.signed(
                 cx,
                 planned.method,
@@ -563,7 +567,7 @@ impl BinanceFutures {
                                 }
                                 if code != POST_ONLY_REJECTED {
                                     let msg = item.msg.as_deref().unwrap_or("batch order rejected");
-                                    cx.log(LogLevel::Error, msg.to_owned());
+                                    cx.command_error(command, msg.to_owned());
                                 }
                             }
                         }
@@ -651,7 +655,7 @@ impl BinanceFutures {
         };
         if let Some((code, message)) = error {
             if !SILENT_CODES.contains(&code) {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(command, message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 job.error.get_or_insert(message);
@@ -751,6 +755,7 @@ impl BinanceFutures {
         for lot in regular.chunks(lot_size) {
             let step = match (lot, self.paths.batch_orders) {
                 ([only], _) => Planned {
+                    receipts: identities(only),
                     method: Method::Post,
                     path: self.paths.order,
                     query: only.query(),
@@ -763,6 +768,7 @@ impl BinanceFutures {
                 (_, Some(path)) => {
                     let batch: Vec<String> = lot.iter().map(Params::json).collect();
                     Planned {
+                        receipts: lot.iter().flat_map(identities).collect(),
                         method: Method::Post,
                         path,
                         query: Query::new().str("batchOrders", &format!("[{}]", batch.join(","))),
@@ -778,6 +784,7 @@ impl BinanceFutures {
         }
         for params in algo {
             job.steps.push_back(vec![Planned {
+                receipts: identities(&params),
                 method: Method::Post,
                 path: self.paths.conditional_order,
                 query: params.query(),
@@ -835,6 +842,7 @@ impl BinanceFutures {
                     (self.paths.order, "origClientOrderId")
                 };
                 job.steps.push_back(vec![Planned {
+                    receipts: Vec::new(),
                     method: Method::Delete,
                     path,
                     query: Query::new()
@@ -870,6 +878,7 @@ impl BinanceFutures {
             if let [id] = ids.as_slice() {
                 let query = Query::new().str("symbol", &symbol).str("orderId", id);
                 job.steps.push_back(vec![Planned {
+                    receipts: Vec::new(),
                     method: Method::Delete,
                     path: self.paths.order,
                     query,
@@ -892,6 +901,7 @@ impl BinanceFutures {
                     .str("symbol", &symbol)
                     .str("orderIdList", &format!("[{}]", lot.join(",")));
                 job.steps.push_back(vec![Planned {
+                    receipts: Vec::new(),
                     method: Method::Delete,
                     path: batch,
                     query,
@@ -917,6 +927,7 @@ impl BinanceFutures {
             .filter(|o| !self.is_inverse() && is_algo(o.kind))
         {
             job.steps.push_back(vec![Planned {
+                receipts: Vec::new(),
                 method: Method::Delete,
                 path: self.paths.conditional_order,
                 query: Query::new().str("algoId", &order.id),
@@ -1501,6 +1512,7 @@ impl BinanceFutures {
 fn single(method: Method, path: &'static str, query: Query, call: Call) -> Job {
     Job {
         steps: VecDeque::from([vec![Planned {
+            receipts: Vec::new(),
             method,
             path,
             query,
@@ -2081,6 +2093,22 @@ impl BinanceFutures {
         }
         None
     }
+}
+
+fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
+    let Some(symbol) = params.get("symbol") else {
+        return Vec::new();
+    };
+    ["newClientOrderId", "clientAlgoId", "newClientStrategyId"]
+        .into_iter()
+        .filter_map(|key| {
+            params.get(key).map(|identity| OrderIdentityReceipt {
+                symbol: symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
