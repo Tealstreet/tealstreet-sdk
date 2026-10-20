@@ -1557,3 +1557,30 @@ unchanged, so preserve its already green three-run gate and rerun private only.
 Independent oracle audit PASS,23/23 tests independently rechecked. No Rust
 input, balance overwrite or comparison waiver; exact TS portfolio-mode
 behavior confirmed from frozen source. Commit and resume private gates now.
+
+INTX ES256+EdDSA private gates PASS after reviewed fix14d2da5f73; CFM and
+remaining profiles continue sequentially. Current source remains frozen for
+the batch. Read-only landing check found pinned e391337054d5591ff2a253ed75162d7fefa20d4d:
+Binance variants PR1326 plus GRVT profiling docs-only PR1331. Finish current
+gates before mutating source, then merge this exact SHA (not a moving ref).
+
+Next additive integration plan: Binance native auto-merge (no ours-only native
+diff since74b), preserve entire engine/crypto/Cargo and all JSON/scratch/BCM1/
+prediction reservation guards. Default USD-M and PM behavior retained; Spot
+and COIN-M branches add70 tests,29→99, retaining oldnames. Host adds explicit
+BinanceVariant field and Spot/inverse factories under existing Binance feature,
+still26 crate features. SDK adds aliases/Spot CID rules; keep stricter Coinbase
+Unicode rule and all Bitunix secret/transport lifecycle guards. New inverse
+contract-size conversion must reach both worker and main FrameApplier paths,
+with other inverse venues keeping factor1 and Bitunix unaffected. Preserve
+old currency bytes: Binance explicit coin/currency Some tables emit no BCM1.
+
+Harness merges Binance protocol/private tapes/live fixtures into the existing
+611 strict backbone, preserving actual socket identity, typed auth/body checks,
+constructor-inclusive signed memory and every book timestamp/hash. Review
+production delegation/generator typing/duplicate auth before source checkpoint.
+Expected CI remains26rows/36checks but now33public/58private profiles: three
+new public+private Binance modes (Spot, COIN-M, PM). Rebuild Binance once for
+allfour mode gates plus newBitunix control after merge, run scoped/native/root
+quality checks and independent phase/adversarial reviews, post findings and
+push only when local gates pass. No speculative GRVT perf code to adopt.
