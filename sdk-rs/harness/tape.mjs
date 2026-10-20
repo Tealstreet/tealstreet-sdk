@@ -182,25 +182,98 @@ export class ReplayClock {
     } else this.timers.delete(timer);
     timer.fn(...timer.args);
   }
+  beginStartup() {
+    this.start(0);
+    this.startup = true;
+  }
   start(elapsed = 0) {
-    const wall = this.original.now();
+    // Public records are anchored before construction. Readiness does not
+    // establish a new epoch: genuine startup timers have already spent time.
+    if (this.startup) { this.startup = false; return; }
+    const previous = this.active ? this.time : this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
-      timer.at = this.epoch + elapsed + Math.max(0, timer.at - wall);
+      timer.at = this.epoch + elapsed + Math.max(0, timer.at - previous);
     }
     this.active = true;
+    this.startup = false;
     this.time = this.epoch + elapsed;
+  }
+  work = new Set();
+  holds = new Set();
+  hold() {
+    const token = {};
+    this.holds.add(token);
+    return () => this.holds.delete(token);
+  }
+  beginWork() {
+    const token = {};
+    this.work.add(token);
+    return () => this.work.delete(token);
+  }
+  async drainStartup(cancelled = () => false) {
+    if (!this.startup) return;
+    // Every externally pending operation is owned explicitly. Event turns only
+    // drain its continuations; they are not a substitute for the I/O guard.
+    while (this.startup && !cancelled()) {
+      await new Promise(setImmediate);
+      if (!this.startup || cancelled()) return;
+      if (this.holds.size || this.startupBlocked?.()) continue;
+      await new Promise(setImmediate);
+      if (!this.startup || cancelled()) return;
+      if (!this.holds.size && !this.startupBlocked?.()) {
+        // The observer reports newly started setup work. Drain that work at
+        // this time before observing readiness or selecting a future timer.
+        if (this.observeStartup?.()) continue;
+        return;
+      }
+    }
+  }
+  nextTimer(ceiling = Infinity) {
+    let next;
+    for (const timer of this.timers.values())
+      if (timer.at <= ceiling && (!next || timer.at < next.at)) next = timer;
+    return next;
+  }
+  async until(predicate, label, timeoutMs = 30000, ceiling = Infinity) {
+    if (this.startupOwner) throw new Error('Concurrent logical startup scheduler');
+    this.startupOwner = true;
+    let stopped = false;
+    const run = async () => {
+      while (!stopped) {
+        await this.drainStartup(() => stopped);
+        if (stopped) return;
+        if (predicate()) return;
+        const next = this.nextTimer(this.epoch + ceiling);
+        if (next) {
+          this.time = Math.max(this.time, next.at);
+          this.fire(next);
+        } else await new Promise(setImmediate);
+      }
+    };
+    const remaining = this.startupDeadline === undefined ? timeoutMs
+      : Math.max(1, Math.min(timeoutMs, this.startupDeadline - performance.now()));
+    try { return await withTimeout(run(), label, remaining); }
+    finally { stopped = true; this.startupOwner = false; }
   }
   async advance(t) {
     if (!this.active) return;
     const target = Math.max(this.time, this.epoch + t);
+    if (this.startup) {
+      await this.until(() => {
+        if (this.nextTimer(target)) return false;
+        this.time = target;
+        return true;
+      }, 'Logical startup timeline', this.startupTimeoutMs ?? 30000, t);
+      return;
+    }
     for (;;) {
-      let next;
-      for (const timer of this.timers.values()) if (timer.at <= target && (!next || timer.at < next.at)) next = timer;
+      const next = this.nextTimer(target);
       if (!next) break;
       this.time = next.at;
       this.fire(next);
-      await new Promise(setImmediate);
+      if (this.startup) await this.drainStartup();
+      else await new Promise(setImmediate);
     }
     this.time = target;
   }
@@ -229,6 +302,8 @@ export class ReplayClock {
     }
   }
   restore() {
+    this.startup = false;
+    this.active = false;
     for (const timer of this.timers.values()) this.original.clearTimeout(timer.handle);
     this.timers.clear();
     Date.now = this.original.now;
@@ -930,7 +1005,7 @@ export class Tape {
         waiter();
       });
       const label = `socket did not open: ${frame.url} ${stream ?? 'open'}`;
-      return await (this.replayClock?.active ? this.replayClock.wait(pending, label, this.timeoutMs) : withTimeout(pending, label, this.timeoutMs));
+      return await (this.replayClock?.active && !this.replayClock.startup ? this.replayClock.wait(pending, label, this.timeoutMs) : withTimeout(pending, label, this.timeoutMs));
     } finally { this.waiters.delete(waiter); }
   }
 
@@ -1002,9 +1077,50 @@ export class Tape {
    * waits until its time after the account is ready.
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
+    this.replayClock = clock;
+    if (clock) clock.startupTimeoutMs = this.timeoutMs;
+    const logicalStartup = Boolean(clock?.startup);
+    if (logicalStartup) clock.startupDeadline = performance.now() + this.timeoutMs;
     let initialized;
     let startupReady = false;
+    let fallbackReady, fallbackDone = false, fallbackError;
+    let startupCeiling = Infinity;
+    let expectedStartupTopics, expectedBitunixTopics;
+    const complete = () => {
+      if (this.readiness) {
+        if (!this.readiness(!this.venue.bootstrapPrivateFromTape)) return false;
+      } else {
+        if (fallbackError) throw fallbackError;
+        if (!fallbackDone) return false;
+      }
+      if ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions) return false;
+      if (this.venue.startupTopics) {
+        expectedStartupTopics ??= this.venue.startupTopics(this.records, this.books).map((arg) => JSON.stringify(stable(arg)));
+        if (!expectedStartupTopics.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)))) return false;
+      }
+      if (this.venue.rust === 'bitunix') {
+        expectedBitunixTopics ??= 2 * JSON.parse(this.records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
+          .filter((m) => apiSupported(m.isApiSupported) && m.symbolStatus === 'OPEN' && m.quote === 'USDT').length;
+        const active = this.sockets.filter((s) => s.opened && !s.closed).reduce((sum, s) => sum + s.publicTopics.size, 0);
+        if (active < expectedBitunixTopics) return false;
+      }
+      return true;
+    };
+    if (logicalStartup) clock.observeStartup = () => {
+      if (this.prepareReadiness?.()) return true;
+      if (!this.readiness && !fallbackReady) {
+        fallbackReady = Promise.resolve().then(() => ready(!this.venue.bootstrapPrivateFromTape))
+          .then(() => { fallbackDone = true; }, (error) => { fallbackError = error; });
+        return true;
+      }
+      return false;
+    };
     const ensureReady = () => initialized ??= withTimeout((async () => {
+      if (logicalStartup) {
+        await clock.until(complete, 'Logical replay startup', this.timeoutMs,
+          startupCeiling);
+        return;
+      }
       if (this.venue.bootstrapFrame) for (const frame of this.frames.filter((record) => this.venue.bootstrapFrame(record))) {
         if (frame.type !== 'ws') throw new Error('Invalid bootstrap record');
         await this.deliver(frame, true);
@@ -1030,9 +1146,9 @@ export class Tape {
       }
     })(), 'Replay startup', this.timeoutMs).then(() => { startupReady = true; });
     const recordedLifecycle = this.records.some((r) => r.type === 'connect');
-    const inlineStartup = this.venue.rust === 'bitunix' || recordedLifecycle;
+    const inlineStartup = logicalStartup || this.venue.rust === 'bitunix' || recordedLifecycle;
     if (!inlineStartup) await ensureReady();
-    else {
+    else if (!logicalStartup) {
       // Explicit opens can be prerequisites of readiness. Keep startup timers
       // live while consuming that prelude, then move both venues to tape time.
       ensureReady().catch(() => {}); // The same promise is awaited below.
@@ -1046,6 +1162,7 @@ export class Tape {
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
+      startupCeiling = frame.t;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (this.isPrivate) {
         const wait = frame.t - (performance.now() - start);
@@ -1058,6 +1175,7 @@ export class Tape {
         this.venue.validateWait?.(frame, this);
       } else if (frame.type === 'command') {
         await ensureReady();
+        if (logicalStartup && clock.startup) clock.start();
         if (this.venue.bootstrapPrivateFromTape) {
           const account = ready(true);
           await (clock?.active ? clock.wait(account, 'account readiness', this.timeoutMs) : withTimeout(account, 'account readiness', this.timeoutMs));
@@ -1067,14 +1185,29 @@ export class Tape {
           return { error: String(error?.message ?? error) };
         }));
       } else if (!this.startupDelivered.has(frame)) {
-        await this.deliver(frame, true);
+        if (logicalStartup && clock.startup) {
+          let delivered = false, error;
+          this.deliver(frame, true).then(() => { delivered = true; }, (failure) => { error = failure; delivered = true; });
+          await clock.until(() => delivered, 'Startup frame delivery', this.timeoutMs, frame.t);
+          if (error) throw error;
+        } else await this.deliver(frame, true);
+      }
+      if (logicalStartup && clock.startup) {
+        await clock.drainStartup();
+        if (complete()) {
+          startupReady = true;
+          initialized = Promise.resolve();
+          clock.start(frame.t);
+        }
       }
       delivered++;
       if (delivered % 64 === 0) this.peakBytes = Math.max(this.peakBytes, this.sampleMemory?.() ?? 0);
       onTick?.(frame.t);
       await new Promise(setImmediate);
     }
+    startupCeiling = Infinity;
     await ensureReady();
+    if (logicalStartup && clock.startup) clock.start();
     if (clock && !clock.active) clock.start(this.time);
     await this.finishResponses();
     return delivered;

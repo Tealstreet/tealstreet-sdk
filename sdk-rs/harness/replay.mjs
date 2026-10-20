@@ -389,6 +389,7 @@ async function runRust() {
   const tape = new Tape('rust');
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
+  tape.replayClock = clock;
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -431,6 +432,7 @@ async function runRust() {
   tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage(), wasmMemoryBytes());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  clock?.beginStartup();
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -455,6 +457,14 @@ async function runRust() {
       }
     },
   });
+  if (clock) {
+    clock.startupBlocked = () => host.requests.size > tape.pendingResponses.size;
+    tape.readiness = (accountReady = true) => {
+      const booksReady = !venue.initialBookSnapshots || replayBooksReady(bookSymbols, Array.from(books.keys(), (market) => markets?.symbol(market)));
+      return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && booksReady
+        && (!tape.audit || tape.audit.ready()) && tape.sockets.some((socket) => socket.opened && !socket.closed);
+    };
+  }
   const sampling = realInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
@@ -571,6 +581,7 @@ async function runTs() {
   const tape = new Tape('ts');
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
+  tape.replayClock = clock;
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -613,8 +624,19 @@ async function runTs() {
     const request = input instanceof Request ? input : undefined;
     const method = (init.method ?? request?.method ?? 'GET').toUpperCase();
     const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method) ? await request.clone().text() : undefined);
-    const { status, body } = await tape.waitForResponse(tape.respond(method, request?.url ?? String(input), requestBody, Object.fromEntries(new Headers(init.headers ?? request?.headers).entries())));
-    return new Response([204, 205, 304].includes(status) ? null : body, { status });
+    const finish = clock?.startup ? clock.beginWork() : () => {};
+    try {
+      const { status, body } = await tape.waitForResponse(tape.respond(method, request?.url ?? String(input), requestBody, Object.fromEntries(new Headers(init.headers ?? request?.headers).entries())));
+      const response = new Response([204, 205, 304].includes(status) ? null : body, { status });
+      if (clock?.startup) for (const name of ['json', 'text', 'arrayBuffer', 'blob', 'formData']) {
+        const consume = response[name].bind(response);
+        response[name] = async (...args) => {
+          const consumed = clock?.startup ? clock.beginWork() : () => {};
+          try { return await consume(...args); } finally { consumed(); }
+        };
+      }
+      return response;
+    } finally { finish(); }
   };
   const { createRequire } = await import('node:module');
   const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
@@ -623,21 +645,33 @@ async function runTs() {
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
-    const base = config.baseURL ?? '';
-    const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
-    for (const [key, value] of Object.entries(config.params ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
-    }
-    const { status, body, headers: responseHeaders } = await tape.waitForResponse(tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers));
-    // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
-    if (status >= 400) {
-      const error = new Error(`Request failed with status code ${status}`);
-      error.response = response;
-      error.config = config;
-      throw error;
-    }
-    return response;
+    const finish = clock?.startup ? clock.beginWork() : undefined;
+    const transforms = config.transformResponse;
+    // Axios parses raw bytes before its venue response/retry interceptors. Own
+    // that stage only: those interceptors may legitimately await clock timers.
+    if (finish) config.transformResponse = [function (data, headers, status) {
+      try {
+        for (const transform of [].concat(transforms ?? [])) data = transform.call(this, data, headers, status);
+        return data;
+      } finally { config.transformResponse = transforms; finish(); }
+    }];
+    try {
+      const base = config.baseURL ?? '';
+      const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
+      for (const [key, value] of Object.entries(config.params ?? {})) {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+      }
+      const { status, body, headers: responseHeaders } = await tape.waitForResponse(tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers));
+      // The raw body: the client's own transformResponse parses it, big ids included.
+      const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
+      if (status >= 400) {
+        const error = new Error(`Request failed with status code ${status}`);
+        error.response = response;
+        error.config = config;
+        throw error;
+      }
+      return response;
+    } catch (error) { if (finish) config.transformResponse = transforms; finish?.(); throw error; }
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   await venue.loadTs?.({ isPrivate });
@@ -651,6 +685,7 @@ async function runTs() {
   tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  clock?.beginStartup();
   const store = new DefaultStore();
   const mainStore = new DefaultStore();
   // Exercise the production browser-worker packer, including its ticker
@@ -676,17 +711,25 @@ async function runTs() {
       }
     });
   });
+  if (clock) clock.startupBlocked = () => clock.work.size > tape.pendingResponses.size;
   venue.configureTs?.(exchange);
-  await venue.prepareTs?.(exchange, TapeWebSocket);
+  const preparedTransport = clock?.hold();
+  try {
+    await venue.prepareTs?.(exchange, TapeWebSocket);
+    for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
+    await venue.prepareTsTransport?.(exchange, adapter);
+  } finally { preparedTransport?.(); }
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
-  for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
-  await venue.prepareTsTransport?.(exchange, adapter);
   const sampling = realInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   const started = exchange.start();
+  let preparedDone = false, preparedError;
   const prepared = started.then(() => venue.prepareTsReady?.(exchange, { isPrivate }));
-  const subscribed = (async () => {
-    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange, store))) await new Promise((r) => realTimeout(r, 1));
+  prepared.then(() => { preparedDone = true; }, (error) => { preparedError = error; });
+  let subscribedDone = false, subscribedResolve;
+  const subscribed = new Promise((resolve) => { subscribedResolve = resolve; });
+  const subscribeBooks = () => {
+    if (subscribedDone || !store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange, store))) return;
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => {
       // KNOWN_TS_FIXES: BingX's feed supplies descending asks. Apply the
       // independent price-order contract before consumers and flush hashes.
@@ -696,6 +739,23 @@ async function runTs() {
       }
       finalBooks[symbol] = book;
     });
+    subscribedDone = true;
+    subscribedResolve();
+    return true;
+  };
+  if (clock) tape.prepareReadiness = subscribeBooks;
+  if (clock) tape.readiness = (accountReady = true) => {
+    if (preparedError) throw preparedError;
+    if ((accountReady && !preparedDone) || !subscribedDone || !venue.tsBooksSubscribed(exchange, bookSymbols.length)) return false;
+    if (venue.initialBookSnapshots && !replayBooksReady(bookSymbols, Object.keys(finalBooks))) return false;
+    return accountReady && !isPrivate ? true : store.loaded.markets && store.loaded.tickers
+      && (!isPrivate || Object.values(store.loaded).every(Boolean));
+  };
+  else (async () => {
+    while (!subscribedDone) {
+      subscribeBooks();
+      if (!subscribedDone) await new Promise((resolve) => realTimeout(resolve, 1));
+    }
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;

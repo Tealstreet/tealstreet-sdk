@@ -1331,3 +1331,40 @@ stream/asyncprepare beforewatchdog, preserveBitunixopens/reconnects/bootstrap
 andprivateclock+metrics. NoN-idleturn/quiettimeoutguess, snapshotwarmup,
 hashdrop, pervenueoffset, orperformancepolicychanges. Independentreview
 andallhelpers+actualprobes requiredbeforeunchangedpublicgates.
+
+Clockphase initial441+6focusedPASS butindependentproductionreview finds
+three blockers: Axios transformed-error/laterretryinterceptor couldleak or
+deadlockworktoken; socketForlegacyclock.wait createsunboundednestedpump
+pastopenprefixceiling; timeoutsdidnotcanceldrainloop (932observercalls after
+rejectionrepro). SourceWIP, fixes/regressionsrequired, no perfgatererun.
+Primaryrecord.mjs27/29/31 plus109/113 provesepoch createdBEFOREconstructors.
+Reviseplanaccordingly: readiness endsstartupmode withabsolute logicaltime/
+deadlinesUNCHANGED, notper-implementationtranslateelapsedbackto0. Genuine
+setup100ms leaves900toabsolutequota1000; nextrecord228 advances100→228.
+Allpublicfixturesmustconsumeinitialrecordprefixchronologically whilewaiting
+readiness, notlegacyunboundedawaitready pastfirstrecord. Privateoldpath
+unchanged. Two-agentplan audit agrees; owner implementing withrecordceilings
+andexplicitIOcancellation, no timings/hash/thresholdnormalization.
+
+Clockcorrectedfunctional PhemexpairPASS:534frames/126bookevents each, entire
+timestamp/hash arraysidentical/errors0 (/tmp/phemex-logical-{ts,rust}.json).
+No normalization; absolute recorderorigin+chronologicalprefixexplainfix.
+Nine focusedregressions PASS; independentintegration reviewer independently
+9/9PASS1.616s andoriginalrealAxioslostconfig401 repro nowwork0/no watchdog
+atlogical0. Nativefullbody/TSadapterparseownership, selectedfutureeligibility,
+privateundefinedclock/continuoussigning andcostbaselines auditedunchanged.
+Full450helperrun+Bitunixexplicitlifecyclefunctional smoke andsecondreview
+remainbeforepublicperformancegates; source stillunstaged.
+
+Publiclogicalstartup phase COMPLETE/reviewed:451helpersPASS7.16s,10new
+regressions includingall4adversarialcounterexamples (responseinterceptor
+retry/errorownership, nestedpump/prefixceiling, canceleddrain, observer-created
+asyncrace). Bothindependentreviewers PASS. Synchronousreadinesspure: native
+host.flush removedfrompredicate; declared250msonTickegress unchanged.
+Singleoriginal15sTOTALstartupdeadline preserved acrossper-frame waits.
+FinalfunctionalPhemexTS/Rust exact534frames/126events, fulltimestamps/hash
+arrays/errors0; latestBitunixTSexplicitlifecycle28,694frames/150events/
+697markets/errors0 completes~2.5s. Privatepaced/signingpath untouched,
+beforeconstructorCPU/memory baselines andgateformula/thresholds/peak unchanged.
+Three-runPhemexpublicgate nowrunning afteralllocalchecksquiet. Checkpoint
+reviewedclockcorrection separatelybeforegateoutcome.
