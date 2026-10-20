@@ -209,39 +209,21 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   woo: () => import(/* webpackChunkName: "exchange-woo" */ './woo/woo.exchange').then((m) => m.WOOXExchange),
 
   // Orderly Network exchanges
-  kodiakfi: () =>
-    import(/* webpackChunkName: "exchange-kodiakfi" */ './orderly/exchanges/kodiakfi/kodiakfi.exchange').then(
-      (m) => m.KodiakFIExchange,
-    ),
+  kodiakfi: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  mode: () =>
-    import(/* webpackChunkName: "exchange-mode" */ './orderly/exchanges/mode/mode.exchange').then(
-      (m) => m.MODEExchange,
-    ),
+  mode: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  salsadex: () =>
-    import(/* webpackChunkName: "exchange-salsadex" */ './orderly/exchanges/salsadex/salsadex.exchange').then(
-      (m) => m.SalsaDEXExchange,
-    ),
+  salsadex: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  'tealstreet-dex': () =>
-    import(
-      /* webpackChunkName: "exchange-tealstreet-dex" */ './orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange'
-    ).then((m) => m.TealstreetDEXExchange),
+  'tealstreet-dex': () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   // TxFlow (Phase 0 scaffold only)
   txflow: () =>
     import(/* webpackChunkName: "exchange-txflow" */ './txflow/txflow.exchange').then((m) => m.TxFlowExchange),
 
-  what: () =>
-    import(/* webpackChunkName: "exchange-what" */ './orderly/exchanges/what/what.exchange').then(
-      (m) => m.WhatExchange,
-    ),
+  what: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  woofi: () =>
-    import(/* webpackChunkName: "exchange-woofi" */ './orderly/exchanges/woofi/woofi.exchange').then(
-      (m) => m.WoofiExchange,
-    ),
+  woofi: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 };
 
 /**

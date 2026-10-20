@@ -81,6 +81,9 @@ impl Harness {
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::Deactivate) => {
+                    panic!("unexpected Bitget account deactivation")
+                }
             }
         }
     }
