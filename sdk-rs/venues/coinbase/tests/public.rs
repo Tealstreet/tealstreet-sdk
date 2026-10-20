@@ -95,7 +95,7 @@ fn four_hour_stream_forwards_five_minute_candles_and_trade_prices() {
         1000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "4h".into(),
+            interval: safe_cex_engine::model::Interval::H4,
         }),
     );
     assert!(e.drain_actions().any(|action| matches!(action,
@@ -254,7 +254,7 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
         Event::Command(Command::FetchCandles {
             command: 31,
             symbol: SYMBOL.into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: None,
             to_ms: None,
@@ -391,7 +391,7 @@ fn daily_candle_seed_retains_earlier_day_and_counts_bucket_volume_once() {
         90500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     message(
@@ -464,7 +464,7 @@ fn daily_candles_backfill_reconnect_gaps_and_reject_old_seed_generations() {
         86500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     let initial = requests(&mut e).pop().unwrap();
@@ -562,7 +562,7 @@ fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
             86699000.,
             Event::Command(Command::SubscribeCandles {
                 symbol: SYMBOL.into(),
-                interval: "1d".into(),
+                interval: safe_cex_engine::model::Interval::D1,
             }),
         );
         assert!(requests(&mut e).is_empty());
@@ -591,7 +591,7 @@ fn delayed_websocket_bucket_cannot_regress_a_newer_rest_daily_seed() {
         86500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     let seed = requests(&mut e).pop().unwrap();

@@ -137,7 +137,7 @@ fn candle_subscriptions_are_reference_counted() {
             0.0,
             Event::Command(Command::SubscribeCandles {
                 symbol: "BTCUSDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
     }
@@ -147,7 +147,7 @@ fn candle_subscriptions_are_reference_counted() {
         0.0,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(!e.has_actions());
@@ -155,7 +155,7 @@ fn candle_subscriptions_are_reference_counted() {
         0.0,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(
@@ -256,7 +256,7 @@ fn candle_ranges_are_not_truncated_without_an_explicit_limit() {
         Event::Command(Command::FetchCandles {
             command: 17,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: Some(1700000000000.0),
             to_ms: Some(1700060000000.0),

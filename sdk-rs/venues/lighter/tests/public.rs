@@ -171,7 +171,7 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
         1_000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "ETH".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -187,7 +187,7 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "ETH".into(),
-            interval: "3m".into(),
+            interval: safe_cex_engine::model::Interval::M3,
             limit: None,
             from_ms: None,
             to_ms: None,

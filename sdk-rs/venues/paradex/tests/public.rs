@@ -194,7 +194,7 @@ fn documented_klines_and_fallback_preserve_time_units() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(120000.),
         to_ms: Some(240000.),
@@ -220,7 +220,7 @@ fn wide_intervals_use_legacy_route_and_malformed_parallel_arrays_fail() {
     h.command(Command::FetchCandles {
         command: 2,
         symbol: BTC.into(),
-        interval: "4h".into(),
+        interval: safe_cex_engine::model::Interval::H4,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -240,7 +240,7 @@ fn missing_kline_list_uses_legacy_fallback() {
     h.command(Command::FetchCandles {
         command: 3,
         symbol: BTC.into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -253,11 +253,11 @@ fn polling_is_reference_counted_and_old_generation_cannot_restart_it() {
     let mut h = Harness::new();
     let subscribe = || Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     };
     let unsubscribe = || Command::UnsubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     };
     h.command(subscribe());
     h.command(subscribe());
@@ -476,7 +476,7 @@ fn late_poll_cannot_overwrite_newer_trade_or_restart_removed_subscription() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     let r = h.take("klines");
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"111","size":"2","created_at":1700000000000}}}"#);
@@ -700,15 +700,15 @@ fn preseed_subscriptions_keep_reference_counts_and_cancelled_interest_stays_canc
     });
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.command(Command::SubscribeCandles {
         symbol: "ETH-USD-PERP".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     h.command(Command::UnsubscribeCandles {
         symbol: "ETH-USD-PERP".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     assert_eq!(h.pending.len(), 1);
     h.reply("/markets", MARKETS);
@@ -952,7 +952,7 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
     let bucket = (h.now / 60_000.).floor() * 60_000.;
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.reply("klines", r#"{"results":[]}"#);
     assert!(h.e.take_market_frame(h.now).is_none());

@@ -138,7 +138,7 @@ fn klines_stream_into_candle_frames() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     h.flush_subscriptions();
     assert!(
@@ -166,7 +166,7 @@ fn fetched_candles_come_back_oldest_first() {
     h.command(Command::FetchCandles {
         command: 3,
         symbol: "BTCUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         limit: None,
         from_ms: Some(1670601600000.0),
         to_ms: Some(1670608800000.0),

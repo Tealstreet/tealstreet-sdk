@@ -40,7 +40,7 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
         NOW,
         Event::Command(Command::SubscribeCandles {
             symbol: "ETH".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -120,7 +120,7 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
                 now,
                 Event::Command(Command::SubscribeCandles {
                     symbol: "ETH".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }),
             )
         };
@@ -146,7 +146,7 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
             NOW + 120_001.0,
             Event::Command(Command::UnsubscribeCandles {
                 symbol: "ETH".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
         subscribe(&mut e, NOW + 120_002.0);

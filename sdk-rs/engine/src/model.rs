@@ -18,6 +18,171 @@ impl OrderSide {
     }
 }
 
+/// A candle interval: the TS `AnyTimeframe` spellings, parsed once where a
+/// command enters the engine. Venues map it to their own codes and reject
+/// what they cannot serve instead of substituting another interval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Interval {
+    S1,
+    S5,
+    S15,
+    S30,
+    M1,
+    M3,
+    M5,
+    M15,
+    M30,
+    H1,
+    H2,
+    H3,
+    H4,
+    H5,
+    H6,
+    H7,
+    H8,
+    H9,
+    H10,
+    H11,
+    H12,
+    H24,
+    D1,
+    D2,
+    D3,
+    W1,
+    Mo1,
+}
+
+impl Interval {
+    pub const ALL: [Self; 27] = [
+        Self::S1,
+        Self::S5,
+        Self::S15,
+        Self::S30,
+        Self::M1,
+        Self::M3,
+        Self::M5,
+        Self::M15,
+        Self::M30,
+        Self::H1,
+        Self::H2,
+        Self::H3,
+        Self::H4,
+        Self::H5,
+        Self::H6,
+        Self::H7,
+        Self::H8,
+        Self::H9,
+        Self::H10,
+        Self::H11,
+        Self::H12,
+        Self::H24,
+        Self::D1,
+        Self::D2,
+        Self::D3,
+        Self::W1,
+        Self::Mo1,
+    ];
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|i| i.as_str() == text)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::S1 => "1s",
+            Self::S5 => "5s",
+            Self::S15 => "15s",
+            Self::S30 => "30s",
+            Self::M1 => "1m",
+            Self::M3 => "3m",
+            Self::M5 => "5m",
+            Self::M15 => "15m",
+            Self::M30 => "30m",
+            Self::H1 => "1h",
+            Self::H2 => "2h",
+            Self::H3 => "3h",
+            Self::H4 => "4h",
+            Self::H5 => "5h",
+            Self::H6 => "6h",
+            Self::H7 => "7h",
+            Self::H8 => "8h",
+            Self::H9 => "9h",
+            Self::H10 => "10h",
+            Self::H11 => "11h",
+            Self::H12 => "12h",
+            Self::H24 => "24h",
+            Self::D1 => "1d",
+            Self::D2 => "2d",
+            Self::D3 => "3d",
+            Self::W1 => "1w",
+            Self::Mo1 => "1M",
+        }
+    }
+
+    /// Nominal length; a month counts as 30 days, as the TS SDK's
+    /// `timeframeToSeconds` does. Calendar-exact windows use `time::sub_months`.
+    pub fn ms(self) -> f64 {
+        const S: f64 = 1000.0;
+        const M: f64 = 60.0 * S;
+        const H: f64 = 60.0 * M;
+        const D: f64 = 24.0 * H;
+        match self {
+            Self::S1 => S,
+            Self::S5 => 5.0 * S,
+            Self::S15 => 15.0 * S,
+            Self::S30 => 30.0 * S,
+            Self::M1 => M,
+            Self::M3 => 3.0 * M,
+            Self::M5 => 5.0 * M,
+            Self::M15 => 15.0 * M,
+            Self::M30 => 30.0 * M,
+            Self::H1 => H,
+            Self::H2 => 2.0 * H,
+            Self::H3 => 3.0 * H,
+            Self::H4 => 4.0 * H,
+            Self::H5 => 5.0 * H,
+            Self::H6 => 6.0 * H,
+            Self::H7 => 7.0 * H,
+            Self::H8 => 8.0 * H,
+            Self::H9 => 9.0 * H,
+            Self::H10 => 10.0 * H,
+            Self::H11 => 11.0 * H,
+            Self::H12 => 12.0 * H,
+            Self::H24 | Self::D1 => D,
+            Self::D2 => 2.0 * D,
+            Self::D3 => 3.0 * D,
+            Self::W1 => 7.0 * D,
+            Self::Mo1 => 30.0 * D,
+        }
+    }
+
+    /// The error a venue returns for an interval it cannot serve.
+    pub fn unsupported(self, venue: &str) -> String {
+        format!("{venue} does not support {} candles", self.as_str())
+    }
+}
+
+impl std::fmt::Display for Interval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Interval {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = std::borrow::Cow::<str>::deserialize(d)?;
+        Self::parse(&text).ok_or_else(|| {
+            serde::de::Error::custom(format!("Unsupported candle interval {text:?}"))
+        })
+    }
+}
+
+impl Serialize for Interval {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OrderStatus {

@@ -125,7 +125,7 @@ fn candle_rows_sort_by_time_and_use_seconds() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: None,
             to_ms: Some(120000.),
@@ -156,7 +156,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
         Event::Command(Command::FetchCandles {
             command: 77,
             symbol: "BTCUSDT".into(),
-            interval: "💥".into(),
+            interval: safe_cex_engine::model::Interval::S1,
             limit: None,
             from_ms: None,
             to_ms: None,

@@ -2,7 +2,9 @@
 use crate::{ApexOmni, Pending, public_wire as wire};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, PositionSide, Precision, Ticker};
+use safe_cex_engine::model::{
+    Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId,
 };
@@ -53,7 +55,7 @@ struct CandleState {
 #[derive(Default)]
 pub struct Public {
     pub books: HashMap<String, Depth>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     socket: Option<SocketId>,
     open: bool,
     received: f64,
@@ -71,22 +73,25 @@ impl Public {
         Box::new(self.books.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
 }
-pub(crate) fn interval(interval: &str) -> Option<(&'static str, f64)> {
-    Some(match interval {
-        "1m" => ("1", 60.0),
-        "3m" => ("3", 180.0),
-        "5m" => ("5", 300.0),
-        "15m" => ("15", 900.0),
-        "30m" => ("30", 1800.0),
-        "1h" => ("60", 3600.0),
-        "2h" => ("120", 7200.0),
-        "4h" => ("240", 14400.0),
-        "6h" => ("360", 21600.0),
-        "12h" => ("720", 43200.0),
-        "1d" => ("D", 86400.0),
-        "1w" => ("W", 604800.0),
+/// ApeX's native code and the interval in seconds.
+pub(crate) fn interval(interval: Interval) -> Option<(&'static str, f64)> {
+    use Interval::*;
+    let native = match interval {
+        M1 => "1",
+        M3 => "3",
+        M5 => "5",
+        M15 => "15",
+        M30 => "30",
+        H1 => "60",
+        H2 => "120",
+        H4 => "240",
+        H6 => "360",
+        H12 => "720",
+        D1 => "D",
+        W1 => "W",
         _ => return None,
-    })
+    };
+    Some((native, interval.ms() / 1000.0))
 }
 fn valid_candle(c: &Candle) -> bool {
     c.timestamp >= 0.0
@@ -363,7 +368,7 @@ impl ApexOmni {
         );
         let mut trades = HashSet::new();
         for (s, i) in self.public.candles.keys() {
-            if let Some((i, _)) = interval(i) {
+            if let Some((i, _)) = interval(*i) {
                 topics.push(format!("candle.{i}.{s}"));
             }
             if !self.options.public_data_only {
@@ -598,14 +603,14 @@ impl ApexOmni {
             }
             for ((s, i), state) in &mut self.public.candles {
                 if s == symbol
-                    && interval(i).is_some_and(|(n, _)| n == native)
+                    && interval(*i).is_some_and(|(n, _)| n == native)
                     && state
                         .last
                         .as_ref()
                         .is_none_or(|c| c.timestamp <= candle.timestamp)
                 {
                     state.last = Some(candle);
-                    cx.candle(s, i, candle);
+                    cx.candle(s, *i, candle);
                 }
             }
         } else if let Some(symbol) = message.topic.strip_prefix("recentlyTrade.H.") {
@@ -632,7 +637,7 @@ impl ApexOmni {
                 if s != symbol {
                     continue;
                 }
-                let Some((_, seconds)) = interval(i) else {
+                let Some((_, seconds)) = interval(*i) else {
                     continue;
                 };
                 let Some(last) = state.last.as_mut() else {
@@ -706,7 +711,8 @@ impl ApexOmni {
                 symbol,
                 interval: i,
             } => {
-                let Some((native, _)) = interval(&i) else {
+                let Some((native, _)) = interval(i) else {
+                    cx.log(LogLevel::Error, i.unsupported("ApeX"));
                     return Ok(());
                 };
                 let was_trades = self.public.candles.keys().any(|(s, _)| s == &symbol);
@@ -727,11 +733,11 @@ impl ApexOmni {
                 symbol,
                 interval: i,
             } => {
-                if let Some(state) = self.public.candles.get_mut(&(symbol.clone(), i.clone())) {
+                if let Some(state) = self.public.candles.get_mut(&(symbol.clone(), i)) {
                     state.count = state.count.saturating_sub(1);
                     if state.count == 0 {
-                        self.public.candles.remove(&(symbol.clone(), i.clone()));
-                        if let Some((native, _)) = interval(&i) {
+                        self.public.candles.remove(&(symbol.clone(), i));
+                        if let Some((native, _)) = interval(i) {
                             self.public_subscribe(
                                 cx,
                                 "unsubscribe",
@@ -758,8 +764,8 @@ impl ApexOmni {
                 from_ms,
                 to_ms,
             } => {
-                let Some((native, seconds)) = interval(&i) else {
-                    cx.done(command, Err("unsupported ApeX interval".into()));
+                let Some((native, seconds)) = interval(i) else {
+                    cx.done(command, Err(i.unsupported("ApeX")));
                     return Ok(());
                 };
                 let limit = limit.filter(|n| *n > 0);

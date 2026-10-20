@@ -3,7 +3,7 @@
 use crate::model::CancelOrderRef;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
-use crate::model::{PlaceOrderOpts, PositionSide};
+use crate::model::{Interval, PlaceOrderOpts, PositionSide};
 use crate::{Command, Query};
 use serde::Deserialize;
 
@@ -40,11 +40,11 @@ enum CommandIn {
     },
     SubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     UnsubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     PlaceOrders {
         command: u32,
@@ -183,7 +183,7 @@ enum CommandIn {
     FetchCandles {
         command: u32,
         symbol: String,
-        interval: String,
+        interval: Interval,
         #[serde(default)]
         limit: Option<u32>,
         #[serde(default)]
@@ -428,8 +428,8 @@ pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Er
         enum Subscription {
             SubscribeOrderBook { symbol: String },
             UnsubscribeOrderBook { symbol: String },
-            SubscribeCandles { symbol: String, interval: String },
-            UnsubscribeCandles { symbol: String, interval: String },
+            SubscribeCandles { symbol: String, interval: Interval },
+            UnsubscribeCandles { symbol: String, interval: Interval },
         }
         let command = match serde_json::from_str::<Subscription>(json)? {
             Subscription::SubscribeOrderBook { symbol } => Command::SubscribeOrderBook { symbol },
@@ -800,5 +800,33 @@ mod tests {
             decode_command(r#"{"op":"setPositionMode","command":9,"hedged":true,"symbol":17}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn candle_intervals_parse_once_and_unknown_spellings_are_rejected() {
+        for interval in Interval::ALL {
+            assert_eq!(Interval::parse(interval.as_str()), Some(interval));
+            let json = format!(
+                r#"{{"op":"fetchCandles","command":3,"symbol":"BTC","interval":"{interval}"}}"#
+            );
+            assert!(matches!(
+                decode_command(&json).unwrap(),
+                Command::FetchCandles { interval: parsed, .. } if parsed == interval
+            ));
+        }
+        assert_eq!(Interval::Mo1.ms(), 2_592_000_000.0);
+        assert_eq!(Interval::H24.ms(), Interval::D1.ms());
+        for bad in ["7m", "1H", "", "60", "1mo"] {
+            let fetch =
+                format!(r#"{{"op":"fetchCandles","command":3,"symbol":"BTC","interval":"{bad}"}}"#);
+            let error = decode_command(&fetch).unwrap_err().to_string();
+            assert!(
+                error.contains("Unsupported candle interval"),
+                "{bad}: {error}"
+            );
+            let subscribe =
+                format!(r#"{{"op":"subscribeCandles","symbol":"BTC","interval":"{bad}"}}"#);
+            assert!(decode_subscription(&subscribe).is_err(), "{bad}");
+        }
     }
 }

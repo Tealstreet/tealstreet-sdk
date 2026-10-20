@@ -75,7 +75,7 @@ fn candle_limit_selects_a_bounded_recent_window_even_with_an_old_from() {
             Event::Command(Command::FetchCandles {
                 command: 7,
                 symbol: "BTCUSDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 from_ms: Some(week_ago),
                 to_ms: Some(now),
                 limit: Some(limit),
@@ -112,7 +112,7 @@ fn candle_from_only_and_default_500_bar_windows_keep_their_existing_semantics() 
             Event::Command(Command::FetchCandles {
                 command: 7,
                 symbol: "BTCUSDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 from_ms,
                 to_ms: Some(now),
                 limit,
@@ -137,7 +137,7 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         Event::Command(Command::FetchCandles {
             command,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(500),

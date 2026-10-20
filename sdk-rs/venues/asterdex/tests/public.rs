@@ -385,7 +385,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 12,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(1499040000000.0),
         to_ms: None,
@@ -421,7 +421,7 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
     h.command(Command::FetchCandles {
         command: 13,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,

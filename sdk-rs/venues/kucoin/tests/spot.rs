@@ -349,7 +349,7 @@ fn candles_use_spot_order_and_second_timestamps() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: "BTC-USDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(1),
         from_ms: None,
         to_ms: Some(1700000060000.0),
@@ -1219,7 +1219,7 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
         h.command(Command::FetchCandles {
             command: 3,
             symbol: "BTC-USDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(10),
@@ -1394,7 +1394,7 @@ fn spot_supervisors_repost_role_tokens_with_increasing_backoff_and_restore_inter
             });
             h.command(Command::SubscribeCandles {
                 symbol: "BTC-USDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             });
         }
         let old = if private { h.private } else { h.public };

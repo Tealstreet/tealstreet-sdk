@@ -6,7 +6,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -70,7 +70,7 @@ pub struct Blofin {
     trading: trading::Trading,
     public: Connection,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
 }
 #[derive(Serialize)]
 struct Topic<'a> {
@@ -83,26 +83,23 @@ struct Subscription<'a> {
     op: &'a str,
     args: &'a [Topic<'a>],
 }
-fn interval_ms(value: &str) -> Option<f64> {
-    let seconds = match value {
-        "1m" => 60,
-        "3m" => 180,
-        "5m" => 300,
-        "15m" => 900,
-        "30m" => 1800,
-        "1h" => 3600,
-        "2h" => 7200,
-        "4h" => 14400,
-        "6h" => 21600,
-        "12h" => 43200,
-        "1d" => 86400,
-        "1w" => 604800,
+fn interval(value: Interval) -> Option<&'static str> {
+    use Interval::*;
+    Some(match value {
+        M1 => "1m",
+        M3 => "3m",
+        M5 => "5m",
+        M15 => "15m",
+        M30 => "30m",
+        H1 => "1H",
+        H2 => "2H",
+        H4 => "4H",
+        H6 => "6H",
+        H12 => "12H",
+        D1 => "1D",
+        W1 => "1W",
         _ => return None,
-    };
-    Some(f64::from(seconds) * 1000.0)
-}
-fn interval(value: &str) -> String {
-    value.replace('h', "H").replace('d', "D").replace('w', "W")
+    })
 }
 fn candle(row: &[Number]) -> Option<Candle> {
     if row.len() < 6 {
@@ -232,12 +229,9 @@ impl Blofin {
             self.subscription(cx, "subscribe", symbol, &["books", "books5"]);
         }
         for (symbol, i) in self.candles.keys() {
-            self.subscription(
-                cx,
-                "subscribe",
-                symbol,
-                &[&format!("candle{}", interval(i)), "books5"],
-            );
+            if let Some(bar) = interval(*i) {
+                self.subscription(cx, "subscribe", symbol, &[&format!("candle{bar}"), "books5"]);
+            }
         }
     }
     fn ticker(&self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
@@ -285,14 +279,7 @@ impl Blofin {
                     if bid.is_empty() || ask.is_empty() {
                         continue;
                     }
-                    let step = match i.as_str() {
-                        "1w" => 604800.0,
-                        "1d" => 86400.0,
-                        _ => {
-                            let n = i[..i.len() - 1].parse::<f64>().unwrap_or(1.0);
-                            n * if i.ends_with('h') { 3600.0 } else { 60.0 }
-                        }
-                    };
+                    let step = i.ms() / 1000.0;
                     let time = (d.ts.0 / 1000.0 / step).floor() * step;
                     if last.timestamp == time {
                         let mut prices = [bid[0].0, last.close, ask[0].0];
@@ -303,7 +290,7 @@ impl Blofin {
                         last.close = prices[1];
                         last.high = last.high.max(last.close);
                         last.low = last.low.min(last.close);
-                        cx.candle(s, i, *last);
+                        cx.candle(s, *i, *last);
                     }
                 }
             }
@@ -482,11 +469,11 @@ impl Venue for Blofin {
                     let symbol = market.symbol.clone();
                     for ((s, i), state) in &mut self.candles {
                         if *s == symbol
-                            && format!("candle{}", interval(i)) == channel
+                            && interval(*i).is_some_and(|bar| format!("candle{bar}") == channel)
                             && state.last != Some(c)
                         {
                             state.last = Some(c);
-                            cx.candle(s, i, c);
+                            cx.candle(s, *i, c);
                         }
                     }
                 }
@@ -729,18 +716,18 @@ impl Venue for Blofin {
                 symbol,
                 interval: i,
             } => {
-                if interval_ms(&i).is_none() {
-                    cx.log(LogLevel::Error, "Unsupported candle interval");
+                let Some(bar) = interval(i) else {
+                    cx.log(LogLevel::Error, i.unsupported("BloFin"));
                     return;
-                }
-                let state = self.candles.entry((symbol.clone(), i.clone())).or_default();
+                };
+                let state = self.candles.entry((symbol.clone(), i)).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
                     self.subscription(
                         cx,
                         "subscribe",
                         &symbol,
-                        &[&format!("candle{}", interval(&i)), "books5"],
+                        &[&format!("candle{bar}"), "books5"],
                     );
                 }
             }
@@ -748,15 +735,17 @@ impl Venue for Blofin {
                 symbol,
                 interval: i,
             } => {
-                if let Some(state) = self.candles.get_mut(&(symbol.clone(), i.clone())) {
+                if let Some(state) = self.candles.get_mut(&(symbol.clone(), i))
+                    && let Some(bar) = interval(i)
+                {
                     state.subscribers = state.subscribers.saturating_sub(1);
                     if state.subscribers == 0 {
-                        self.candles.remove(&(symbol.clone(), i.clone()));
+                        self.candles.remove(&(symbol.clone(), i));
                         self.subscription(
                             cx,
                             "unsubscribe",
                             &symbol,
-                            &[&format!("candle{}", interval(&i))],
+                            &[&format!("candle{bar}")],
                         );
                         if !self.books.contains_key(&symbol)
                             && !self.candles.keys().any(|(s, _)| *s == symbol)
@@ -775,10 +764,11 @@ impl Venue for Blofin {
                 to_ms,
             } => {
                 if let Some(m) = cx.store.market(&symbol) {
-                    let Some(step) = interval_ms(&i) else {
-                        cx.done(command, Err("Unsupported candle interval".into()));
+                    let Some(bar) = interval(i) else {
+                        cx.done(command, Err(i.unsupported("BloFin")));
                         return;
                     };
+                    let step = i.ms();
                     let end = to_ms.unwrap_or(cx.now);
                     let count = limit.filter(|n| *n > 0).unwrap_or(1440).min(1440);
                     let start = if limit.is_none() {
@@ -789,7 +779,7 @@ impl Venue for Blofin {
                     let path = format!(
                         "/api/v1/market/candles?instId={}&bar={}&before={}&after={}",
                         m.id,
-                        interval(&i),
+                        bar,
                         num::format(start),
                         num::format(end)
                     );

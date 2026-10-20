@@ -383,7 +383,7 @@ fn streamed_candles_keep_open_and_monotonic_time() {
         40.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -595,7 +595,7 @@ fn candle_ranges_use_history_shape_and_millisecond_to_seconds() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1600000000000.0),
             to_ms: Some(1600000120000.0),

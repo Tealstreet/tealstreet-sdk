@@ -155,7 +155,7 @@ fn non_direct_policies_keep_rest_metadata_private_account_and_only_private_node_
             },
             Command::SubscribeCandles {
                 symbol: "BTC-USDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             rig.engine.handle(NOW + 2000., Event::Command(command));

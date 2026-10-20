@@ -179,7 +179,7 @@ fn candle_seconds_and_empty_stream_candles() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: Some(1732182900123.0),
             to_ms: None,
@@ -200,7 +200,7 @@ fn candle_seconds_and_empty_stream_candles() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.take_frame(0.0);
@@ -293,7 +293,7 @@ fn malformed_candle_never_enters_frame() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.take_frame(0.0);

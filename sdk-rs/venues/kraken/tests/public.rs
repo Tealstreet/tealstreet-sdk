@@ -116,7 +116,7 @@ fn charts_are_public_and_convert_ms_to_seconds() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "PF_XBTUSD".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: None,
             to_ms: None,
@@ -160,7 +160,7 @@ fn old_candle_reply_cannot_seed_a_recreated_subscription() {
     let (mut e, _) = public();
     let c = || Command::SubscribeCandles {
         symbol: "PF_XBTUSD".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     };
     e.handle(NOW, Event::Command(c()));
     let old = requests(&mut e).pop().unwrap();
@@ -169,7 +169,7 @@ fn old_candle_reply_cannot_seed_a_recreated_subscription() {
         NOW,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "PF_XBTUSD".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.handle(NOW, Event::Command(c()));
@@ -222,7 +222,7 @@ fn failed_or_incomplete_candles_are_explicit_errors() {
             Event::Command(Command::FetchCandles {
                 command: 9,
                 symbol: "PF_XBTUSD".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: Some(2),
                 from_ms: None,
                 to_ms: None,

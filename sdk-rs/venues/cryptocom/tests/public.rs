@@ -195,7 +195,7 @@ fn failed_candle_reads_complete_with_error() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSD-PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: None,
             to_ms: None,

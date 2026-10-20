@@ -233,7 +233,7 @@ fn fetch_candles_uses_seconds_bounds_daily_omission_and_sorted_results() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
             limit: Some(2),
             from_ms: Some(0.0),
             to_ms: Some(1_700_000_000_000.0),
@@ -269,7 +269,7 @@ fn candle_stream_rejects_backward_snapshots() {
         30.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     ws(
@@ -399,7 +399,7 @@ fn secondary_trade_uses_decimal_quote_conversion_and_rollover_without_backflow()
         21.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     ws(

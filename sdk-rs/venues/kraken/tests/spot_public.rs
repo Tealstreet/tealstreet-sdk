@@ -79,7 +79,7 @@ fn candle_fallback_request_and_alias_stream_fanout() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "XBT/USD".into(),
-            interval: "12h".into(),
+            interval: safe_cex_engine::model::Interval::H12,
             from_ms: Some(NOW),
             to_ms: None,
             limit: None,
@@ -139,7 +139,7 @@ fn public_candle_network_read_retries_three_times_and_settles() {
         Event::Command(Command::FetchCandles {
             command: 30,
             symbol: "XBT/USD".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: None,

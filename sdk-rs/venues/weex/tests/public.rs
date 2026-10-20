@@ -160,7 +160,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "2h".into(),
+            interval: safe_cex_engine::model::Interval::H2,
         }),
     );
     assert!(
@@ -175,7 +175,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "BTCUSDT".into(),
-            interval: "2h".into(),
+            interval: safe_cex_engine::model::Interval::H2,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -325,7 +325,7 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
         Event::Command(Command::FetchCandles {
             command: 8,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(200),
             from_ms: Some(1_700_000_000_000.0),
             to_ms: Some(1_700_000_120_000.0),
@@ -411,7 +411,7 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: None,
             to_ms: None,

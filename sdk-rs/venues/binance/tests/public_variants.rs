@@ -178,7 +178,7 @@ fn variant_public_testnet_urls_and_candles_use_their_family() {
         h.event(Event::Command(Command::FetchCandles {
             command: 99,
             symbol: "BTCUSD_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(100),
             from_ms: Some(1000.0),
             to_ms: Some(2000.0),
@@ -319,7 +319,7 @@ fn spot_book_and_candle_stream_limit_rejects_before_subscribing() {
     }
     h.event(Event::Command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     let sent = h.sent.len();
     h.event(Event::Command(Command::SubscribeOrderBook {
@@ -327,7 +327,7 @@ fn spot_book_and_candle_stream_limit_rejects_before_subscribing() {
     }));
     h.event(Event::Command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     }));
     assert_eq!(h.sent.len(), sent);
     assert_eq!(
@@ -339,7 +339,7 @@ fn spot_book_and_candle_stream_limit_rejects_before_subscribing() {
     );
     h.event(Event::Command(Command::UnsubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     h.event(Event::Command(Command::SubscribeOrderBook {
         symbol: "now-fits".into(),

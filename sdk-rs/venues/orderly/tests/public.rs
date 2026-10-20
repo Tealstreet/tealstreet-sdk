@@ -264,7 +264,7 @@ fn malformed_seed_and_candles_do_not_commit_partial_results() {
         1000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     actions(&mut e);
@@ -303,7 +303,7 @@ fn startup_subscriptions_are_retained_and_can_be_removed_before_seed() {
                 1000.0,
                 Event::Command(Command::SubscribeCandles {
                     symbol: symbol.into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }),
             );
         }
@@ -317,7 +317,7 @@ fn startup_subscriptions_are_retained_and_can_be_removed_before_seed() {
             1000.0,
             Event::Command(Command::UnsubscribeCandles {
                 symbol: "ETHUSDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
     });
@@ -458,7 +458,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
             Event::Command(Command::FetchCandles {
                 command: 42,
                 symbol: "BTCUSDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: Some(5),
                 from_ms: None,
                 to_ms: None,
@@ -558,7 +558,7 @@ fn broker_listed_markets_keep_usdc_quote_unique_identity_and_native_requests() {
         Event::Command(Command::FetchCandles {
             command: 90,
             symbol: "XLMUSDC_mythos".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(10),
             from_ms: None,
             to_ms: None,
@@ -914,7 +914,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
         2000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "ASSET099USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(subscription_topics(&actions(&mut e), sockets[0]).is_empty());
@@ -929,7 +929,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
         2000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "ASSET099USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert_eq!(

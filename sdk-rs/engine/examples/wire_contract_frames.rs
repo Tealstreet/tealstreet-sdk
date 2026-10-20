@@ -182,7 +182,7 @@ impl Venue for FixtureVenue {
                 cx.book_changed("A");
                 cx.candle(
                     "A",
-                    "1m",
+                    safe_cex_engine::model::Interval::M1,
                     Candle {
                         timestamp: 1000.,
                         open: 100.,

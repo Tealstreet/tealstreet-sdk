@@ -75,7 +75,7 @@ fn multiple_market_requests_share_one_login_and_one_discovery() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -249,7 +249,7 @@ fn first_401_refreshes_and_resends_once_while_second_fails() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -282,7 +282,7 @@ fn late_old_session_401_reuses_new_session_without_second_login() {
         rig.command(Command::FetchCandles {
             command,
             symbol: "ETHUSD".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -321,7 +321,7 @@ fn simultaneous_401s_share_one_reauthentication() {
         rig.command(Command::FetchCandles {
             command,
             symbol: "ETHUSD".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -370,7 +370,7 @@ fn login_401_does_not_loop_and_does_not_leak_password_or_response_body() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -394,7 +394,7 @@ fn network_retries_have_three_attempt_limit() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -437,7 +437,7 @@ fn ambiguous_account_discovery_fails_before_market_requests() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -478,7 +478,7 @@ fn historical_candles_parse_rfc3339_to_seconds_and_send_account() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: Some(1_733_907_600_000.0),
         to_ms: None,
         limit: None,
@@ -509,7 +509,7 @@ fn unsupported_interval_fails_before_any_new_http_request() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "3m".into(),
+        interval: safe_cex_engine::model::Interval::M3,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -525,7 +525,7 @@ fn partial_stream_failure_discards_accumulated_rows_before_retry() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -666,7 +666,7 @@ fn a_delayed_read_retry_cannot_hold_ready_work_past_the_rate_limit() {
     rig.command(Command::FetchCandles {
         command: 8,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -678,7 +678,7 @@ fn a_delayed_read_retry_cannot_hold_ready_work_past_the_rate_limit() {
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         from_ms: None,
         to_ms: None,
         limit: None,
@@ -701,7 +701,7 @@ fn burst_budget_never_exceeds_five_requests_in_a_rolling_second() {
         rig.command(Command::FetchCandles {
             command,
             symbol: "ETHUSD".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -748,7 +748,7 @@ fn rejected_login_deactivates_clears_timers_and_fails_future_reads() {
         rig.command(Command::FetchCandles {
             command: 8,
             symbol: "ETHUSD".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -762,7 +762,7 @@ fn rejected_login_deactivates_clears_timers_and_fails_future_reads() {
         rig.command(Command::FetchCandles {
             command: 9,
             symbol: "ETHUSD".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -861,7 +861,7 @@ fn configured_infinite_interval_pauses_polls_but_preserves_rate_limited_queries(
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         from_ms: None,
         to_ms: None,
         limit: None,

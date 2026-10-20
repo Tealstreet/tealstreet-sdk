@@ -221,7 +221,7 @@ fn every_perpetual_has_independent_tickers_books_and_candles() {
         h.command(Command::FetchCandles {
             command: 50 + n as u32,
             symbol: id.to_ascii_uppercase(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(1),
             from_ms: None,
             to_ms: None,

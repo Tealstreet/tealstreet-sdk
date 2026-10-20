@@ -173,7 +173,7 @@ fn candles_use_documented_volume_and_request_window() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -194,7 +194,7 @@ fn candles_use_documented_volume_and_request_window() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1.0),
             to_ms: None,
@@ -238,7 +238,7 @@ fn reconnect_restores_active_subscriptions_and_traffic_satisfies_watchdog() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);

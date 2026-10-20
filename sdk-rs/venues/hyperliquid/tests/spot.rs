@@ -470,7 +470,7 @@ fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "HFUN/USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(5),
             from_ms: None,
             to_ms: Some(10_000.0),
@@ -854,7 +854,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
             2000.0,
             Event::Command(Command::SubscribeCandles {
                 symbol: symbol.clone(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
         assert!(e.drain_actions().any(|a|matches!(a,Action::WsSend{text,..}if serde_json::from_str::<serde_json::Value>(&text).unwrap()["subscription"]["coin"]==coin)));
@@ -863,7 +863,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
             Event::Command(Command::FetchCandles {
                 command: 1,
                 symbol: symbol.clone(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: Some(1),
                 from_ms: None,
                 to_ms: None,
@@ -1174,7 +1174,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             },
             Command::SubscribeCandles {
                 symbol: "PURR/USDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             e.handle(2000., Event::Command(command));

@@ -358,7 +358,7 @@ fn candle_subscription_uses_api_socket_and_numeric_asset() {
         2000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC-USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let (socket, text) = e
@@ -384,7 +384,7 @@ fn candle_query_validates_and_streams_documented_envelope() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTC-USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(0.0),
             to_ms: Some(120000.0),
@@ -597,7 +597,7 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
         1000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC-USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let r = e
@@ -673,7 +673,7 @@ fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
         3000.0,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "BTC-USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     for (index, (method, interval)) in [
@@ -733,12 +733,12 @@ fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
             let command = if add {
                 Command::SubscribeCandles {
                     symbol: "BTC-USDC".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }
             } else {
                 Command::UnsubscribeCandles {
                     symbol: "BTC-USDC".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }
             };
             e.handle(3000.0, Event::Command(command));
@@ -752,12 +752,12 @@ fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
             let command = if add {
                 Command::SubscribeCandles {
                     symbol: "BTC-USDC".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }
             } else {
                 Command::UnsubscribeCandles {
                     symbol: "BTC-USDC".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }
             };
             e.handle(13000.0, Event::Command(command));

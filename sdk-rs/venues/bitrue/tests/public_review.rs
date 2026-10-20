@@ -79,7 +79,7 @@ fn candles(e: &mut Engine<Bitrue>, command: u32, to: Option<f64>) {
         Event::Command(Command::FetchCandles {
             command,
             symbol: SYMBOL.into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(1),
             from_ms: None,
             to_ms: to,
@@ -127,7 +127,7 @@ fn subscribed_candles_keep_routing_after_reconnect() {
         2.0,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -327,7 +327,7 @@ fn candle_stream_requires_close_and_ticker_null_never_overwrites_last_good_price
         2.0,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);

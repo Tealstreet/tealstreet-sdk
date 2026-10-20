@@ -77,13 +77,13 @@ fn candle_volume_is_quote_volume_and_rest_errors_fail_command() {
     let mut h = Harness::public();
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "6h".into(),
+        interval: safe_cex_engine::model::Interval::H6,
     });
     assert!(h.sent.last().unwrap().1.contains("candle6Hutc"));
     h.command(Command::FetchCandles {
         command: 1,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(1000.0),
         to_ms: Some(1_000_000.0),
@@ -99,7 +99,7 @@ fn candle_volume_is_quote_volume_and_rest_errors_fail_command() {
     h.command(Command::FetchCandles {
         command: 2,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -174,7 +174,7 @@ fn malformed_required_candle_number_fails_instead_of_emitting_zero() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: None,
         from_ms: None,
         to_ms: None,

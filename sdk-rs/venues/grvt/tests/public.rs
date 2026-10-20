@@ -222,7 +222,7 @@ fn candle_requires_complete_valid_ohlc_and_nanosecond_time() {
         Event::Command(Command::FetchCandles {
             command: 8,
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1700000000000.),
             to_ms: None,
@@ -408,7 +408,7 @@ fn unsupported_unicode_candle_interval_fails_without_trapping() {
         Event::Command(Command::FetchCandles {
             command: 33,
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1分钟".into(),
+            interval: safe_cex_engine::model::Interval::S1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -570,7 +570,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let socket = e
@@ -588,7 +588,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     let socket = e
@@ -610,7 +610,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::SubscribeCandles {
             symbol: "ETH_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(
@@ -622,7 +622,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "ETH_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.drain_actions().for_each(drop);
@@ -630,7 +630,7 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         now,
         Event::Command(Command::UnsubscribeCandles {
             symbol: "BTC_USDT_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(

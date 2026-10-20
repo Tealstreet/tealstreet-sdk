@@ -490,11 +490,11 @@ fn non_direct_subscriptions_bypass_venue_public_requests_but_keep_private_comman
             Command::UnsubscribeOrderBook { symbol: "A".into() },
             Command::SubscribeCandles {
                 symbol: "A".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
             Command::UnsubscribeCandles {
                 symbol: "A".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             engine.handle(0., Event::Command(command));

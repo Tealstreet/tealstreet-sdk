@@ -180,7 +180,7 @@ fn non_direct_spot_suppresses_public_socket_but_preserves_private_token_refresh_
             },
             Command::SubscribeCandles {
                 symbol: "XBT/USD".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             rig.engine.handle(NOW + 100., Event::Command(command));
