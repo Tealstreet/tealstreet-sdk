@@ -93,6 +93,7 @@ export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
 };
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
+  if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
@@ -113,7 +114,14 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
+  if (options.bitrueProtocol) {
+    if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
+    if (message?.params?.cb_id !== undefined) {
+      message = { ...message, params: { ...message.params } };
+      delete message.params.cb_id;
+    }
+  }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
@@ -160,7 +168,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (typeof message.topic === 'string') {
       const colon = message.topic.indexOf(':');

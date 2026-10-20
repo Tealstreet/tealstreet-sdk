@@ -68,7 +68,7 @@ impl Harness {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
                 Action::Http(request) => self.requests.push(request),
-                Action::WsConnect { socket, url } => self.sockets.push((socket, url)),
+                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsConnectWithHeaders { .. } => {
                     panic!("Binance authenticates sockets with listen keys")
                 }

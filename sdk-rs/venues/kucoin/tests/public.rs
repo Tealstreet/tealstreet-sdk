@@ -1,5 +1,7 @@
 //! Official Classic Futures public examples: docs-new/3470082w0 and /3470086w0.
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_kucoin::{Kucoin, Options};
 
 const MARKET: &str = r#"{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}"#;
@@ -136,17 +138,35 @@ fn snapshot_pool_stays_under_session_and_frame_limits() {
             ),
         );
     }
+    let mut feeds = std::collections::BTreeSet::new();
     let sockets = e
         .drain_actions()
         .filter_map(|a| {
-            if let Action::WsConnect { socket, url } = a {
+            if let Action::WsConnect {
+                socket,
+                url,
+                channel,
+                context,
+            } = a
+            {
                 assert!(url.contains("?token="));
+                assert_eq!(channel, Some(SocketChannel::Public));
+                let context = context.expect("routing feed context");
+                assert!(feeds.insert(context.feed));
+                assert!(!context.recover);
                 Some(socket)
             } else {
                 None
             }
         })
         .collect::<Vec<_>>();
+    assert_eq!(
+        feeds,
+        ["detail", "snapshot-0", "snapshot-1", "snapshot-2"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
     let mut total = 0;
     for socket in sockets {
         e.handle(0.0, Event::WsOpened { socket });
@@ -596,7 +616,16 @@ fn disconnect_cancels_pending_book_retry() {
     let socket = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::WsConnect { socket, .. } => Some(socket),
+            Action::WsConnect {
+                socket,
+                channel,
+                context,
+                ..
+            } => {
+                assert_eq!(channel, Some(SocketChannel::Public));
+                assert_eq!(context.expect("routing feed context").feed, "detail");
+                Some(socket)
+            }
             _ => None,
         })
         .unwrap();

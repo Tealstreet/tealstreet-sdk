@@ -457,3 +457,60 @@ Independent final profile review passes with no P1/P2 findings. Fresh final-head
 CI is required before merging. Previous native, KuCoin, Binance and Hyperliquid
 validations remain applicable because this override affects only the BingX
 release artifact.
+
+### Transport and Bitrue landing integration plan
+
+Landing fc18c55874 adds account transport routing (#1313) and Bitrue (#1314)
+while final CI runs. Merge it without dropping either venue, the landing
+structure, per-venue budgets, strict KuCoin read contracts or signature checks.
+Independent workers resolve disjoint host/SDK, gate/request, and build/roster
+conflicts; a separate cross-review audits their merged result.
+
+The new brief requires explicit socket roles and independent stable feed IDs.
+KuCoin bullet sockets can share their endpoint while tokens rotate, and hosts
+strip query parameters when tracking fallback. Emit Public detail/snapshot roles
+and Private account role, with stable detail/snapshot-{index}/private IDs.
+Generalize the engine's static feed name to an owned String to support runtime
+shard counts without leaks or arbitrary caps. Preserve the recovery policy.
+Extend existing shard, reconnect and private tests to verify role separation,
+unique shard names and identity stability across fresh bullet tokens. Review
+this compatibility adaptation independently.
+
+Verify fmt/bans/native+Wasm workspace clippy and tests, harness/wire/host, full
+Wasm SDK integration and root typecheck/lint. Repeat selective KuCoin and
+Binance brief gates, plus incoming Bitrue public/private gates. Keep all exact
+comparisons, CPU/memory thresholds and the fixed per-venue budget unchanged.
+Commit the integration and reviews, push, require green final-head CI across
+all 13 venues before merge, then cut the follow-up branch.
+
+### Thirteen-venue integration checkpoint
+
+All six selective gates pass: KuCoin, Binance and incoming Bitrue public/private.
+Three-run public medians TS/Rust, with exact output/request/write/signature and
+socket audits unchanged:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 1177.0 / 828.1 | 795.4 / 511.2 | 7.0 / 3.2 | 744,387 |
+| Binance | 289.0 / 118.7 | 167.2 / 50.2 | 4.2 / 2.2 | 751,369 |
+| Bitrue | 279.9 / 270.2 | 187.0 / 171.6 | 3.8 / 2.4 | 711,181 |
+
+All bundles remain below 1,258,291 bytes. KuCoin public retains 16,157 frames,
+692 markets/tickers and two books; private retains 32 frames/17 commands.
+Bitrue's first public attempt timed out settling memory before comparison; an
+unchanged retry reached comparison, revealing that the local command used
+BTCUSDT/ETHUSDT instead of Bitrue's E-BTC-USDT/E-ETH-USDT. Correcting only those
+CLI inputs to match the incoming CI configuration passes the complete gate.
+No assertion, deadline or source behavior was changed for these attempts.
+
+Workspace 917 tests (97 KuCoin), fmt/bans/native+Wasm clippy, harness 175,
+actual Wasm SDK integration 29, host/wire 34 (including four wire tests), and
+root typecheck44/lint28 pass. Incoming Bitrue's account test closed socket
+pattern needed `..` for new channel/context fields; that compatibility fix
+is included. Independent cross-reviews of merged host/SDK/features, shared
+harness/request contracts and transport/feed identity all pass with no P1/P2.
+The engine accepts owned feed names without changing their serialized shape.
+
+The isolated BingX optimization already passed all 12 replay CI jobs at
+55df2945fc. Publish this integrated head and require green native/Wasm/root CI
+and all 29 public/private gates across 13 venues before merging PR #1312.

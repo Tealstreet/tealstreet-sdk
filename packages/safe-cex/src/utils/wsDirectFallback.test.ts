@@ -59,3 +59,45 @@ describe('WsDirectFallback', () => {
     for (let i = 0; i < 5; i++) expect(f.resolveUrl(DIRECT, undefined)).toBe(DIRECT);
   });
 });
+
+describe('host fallback recovery policy', () => {
+  it('matches the frozen Bitget inline counters for all 512 nine-message patterns over ten connects', () => {
+    for (let pattern = 0; pattern < 512; pattern++) {
+      let lastMessageCount = 0;
+      let messageCount = 0;
+      let connectionAttempts = 0;
+      let useFallbackUrl = false;
+      const fallback = new WsDirectFallback(2, 1);
+      for (let attempt = 0; attempt < 10; attempt++) {
+        // Frozen oracle from the TS Bitget socket classes, independently of the
+        // generic helper: the first connect itself counts as a silent attempt.
+        if (lastMessageCount === 0 && messageCount === 0) {
+          connectionAttempts++;
+          if (connectionAttempts >= 2) useFallbackUrl = true;
+        }
+        lastMessageCount = messageCount;
+        messageCount = 0;
+        expect(fallback.resolveUrl(DIRECT, ATHENA), `pattern=${pattern} attempt=${attempt}`).toBe(
+          useFallbackUrl ? ATHENA : DIRECT,
+        );
+        if (pattern & (1 << attempt)) {
+          messageCount++;
+          fallback.onMessage();
+        }
+      }
+    }
+  });
+
+  it('an explicit recovery signal sticks to the final declared candidate', () => {
+    const fallback = new WsDirectFallback();
+    expect(fallback.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(DIRECT);
+    fallback.onMessage();
+    fallback.preferFallback();
+    expect(fallback.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(ATHENA);
+    fallback.onMessage();
+    expect(fallback.resolveUrl(DIRECT, RELAY, ATHENA)).toBe(ATHENA);
+    const direct = new WsDirectFallback();
+    direct.preferFallback();
+    expect(direct.resolveUrl(DIRECT)).toBe(DIRECT);
+  });
+});

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
-import { createEngineObject, workersTransport } from './workers.mjs';
+import { createEngineObject, workersTransport, WorkersWebSocket } from './workers.mjs';
 import { Frame } from './wire.mjs';
 
 const require = createRequire(import.meta.url);
@@ -78,7 +78,7 @@ globalThis.Response = class {
 globalThis.fetch = async (url, init = {}) => {
   if (init.headers?.Upgrade === 'websocket') {
     const socket = new FakeSocket();
-    upgrades.push({ url, socket });
+    upgrades.push({ url, init, socket });
     return { webSocket: socket };
   }
   const name = new URL(url).pathname.split('/').pop();
@@ -154,4 +154,107 @@ test('Workers derives private upgrade capability from its transport', async () =
     assert.equal(options.privateWsHeaders, true);
     assert.equal(options.key, 'replay-key');
   } finally { object.leave(client); }
+});
+
+test('Workers runs engine effects through its configured account transport', async () => {
+  const destinations = [];
+  const EngineObject = createEngineObject({
+    loadEngine: async () => ({ WasmEngine: class {
+      start() { return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'private' }]); }
+    } }),
+    createTransport: (venue, options, raw) => {
+      assert.equal(venue, 'okx');
+      assert.equal(options.tealstreetProxy, true);
+      return { ...raw, connect: (url, handlers) => {
+        destinations.push([url, handlers.channel]);
+        return { send() {}, close() {} };
+      } };
+    },
+  });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send() {} };
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'okx', options: { tealstreetProxy: true } }));
+    assert.deepEqual(destinations, [['wss://venue.test/shared', 'private']]);
+  } finally { object.leave(client); }
+});
+
+test('Workers refuses requested routing without an account transport factory', async () => {
+  const messages = [];
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    constructor() { throw new Error('must not construct an unrouted engine'); }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  for (const options of [{ tealstreetProxy: true }, { tealstreetTunnel: true }, { tealstreetWsRoute: true },
+    { overrideProxyUrl: 'https://proxy.test' }, { bybitSiteId: 'BRA_BTL' }]) {
+    await object.receive({ send: (text) => messages.push(JSON.parse(text)) }, JSON.stringify({
+      op: 'start', venue: 'bingx', options,
+    }));
+  }
+  assert.equal(object.host, undefined);
+  assert.equal(messages[0].level, 'error');
+  assert.match(messages[0].message, /configured createTransport/);
+  assert.equal(messages.length, 5);
+});
+
+
+test('the Workers raw constructor preserves upgrade headers, protocol and binary payloads', async () => {
+  const before = upgrades.length;
+  const socket = new WorkersWebSocket('wss://tunnel.tealstreet.io/tunnel?region=one&region=two', ['first', 'second'], {
+    headers: { Origin: 'https://preview.tealstreet.io', 'User-Agent': 'worker-agent' },
+  });
+  const messages = [];
+  socket.onmessage = (event) => messages.push(event.data);
+  await until(() => socket.readyState === socket.OPEN);
+  const upgrade = upgrades[before];
+  assert.equal(upgrade.url, 'https://tunnel.tealstreet.io/tunnel?region=one&region=two');
+  assert.deepEqual(upgrade.init.headers, {
+    Origin: 'https://preview.tealstreet.io', 'User-Agent': 'worker-agent', Upgrade: 'websocket',
+    'Sec-WebSocket-Protocol': 'first, second',
+  });
+  const binary = new Uint8Array([0x54, 0x53, 0x42, 0x31]).buffer;
+  upgrade.socket.dispatch('message', { data: binary });
+  assert.equal(messages[0], binary);
+  socket.close();
+});
+
+test('closing a pending Workers upgrade aborts it and suppresses a late open', async () => {
+  const original = globalThis.fetch;
+  let finish;
+  let signal;
+  globalThis.fetch = (_url, init) => {
+    signal = init.signal;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  try {
+    const events = [];
+    const socket = new WorkersWebSocket('wss://tunnel.tealstreet.io/tunnel');
+    socket.onopen = () => events.push('open');
+    socket.onmessage = () => events.push('message');
+    socket.onerror = () => events.push('error');
+    socket.onclose = () => events.push('close');
+    socket.close();
+    assert.equal(signal.aborted, true);
+    const raw = new FakeSocket();
+    let closed = false;
+    raw.addEventListener('close', () => { closed = true; });
+    finish({ webSocket: raw });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(closed, true);
+    assert.deepEqual(events, ['close']);
+    assert.equal(socket.readyState, socket.CLOSED);
+  } finally { globalThis.fetch = original; }
+});
+
+test('a Workers raw socket failure reports one abnormal close despite a following close event', async () => {
+  const before = upgrades.length;
+  const events = [];
+  const socket = new WorkersWebSocket('wss://tunnel.tealstreet.io/tunnel');
+  socket.onerror = () => events.push('error');
+  socket.onclose = (event) => events.push(event.code);
+  await until(() => socket.readyState === socket.OPEN);
+  const raw = upgrades[before].socket;
+  raw.dispatch('error', {});
+  raw.close(1000);
+  assert.deepEqual(events, ['error', 1006]);
 });

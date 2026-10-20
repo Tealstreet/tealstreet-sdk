@@ -137,6 +137,9 @@ jobs:
           - venue: kucoin
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-kucoin
+          - venue: bitrue
+            books: E-BTC-USDT,E-ETH-USDT
+            private_script: rust:private-tape-bitrue
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid

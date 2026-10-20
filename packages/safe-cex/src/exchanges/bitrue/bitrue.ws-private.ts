@@ -2,13 +2,19 @@ import type { BitrueExchange } from './bitrue.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
 import { reverseWsSymbol } from './bitrue.utils';
-import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 
 export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
   private readonly incrementalFills = createIncrementalFills();
+  private readonly orderWatermarks = new Map<
+    string,
+    { filled: number; amount: number; terminal?: OrderStatus; time: number }
+  >();
+  private readonly cumulativeValues = new Map<string, number>();
+  getWatchdogStaleThresholdMs = () => 20_000;
 
   private listenKeyRefreshTimeoutId: NodeJS.Timeout | undefined;
   private static readonly LISTEN_KEY_RETRY_DELAYS_MS = [250, 500, 1_000];
@@ -131,59 +137,118 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
     const symbol = rawSymbol.includes('_') ? reverseWsSymbol(rawSymbol) : rawSymbol;
 
     const market = this.parent.store.markets.find((m) => m.symbol === symbol);
-    const multiplier = Number(market?.info?.multiplier || 1);
+    if (!market) return;
+    const multiplier = Number(market.contractSize || market.info?.multiplier || market.precision.amount || 1);
 
-    const side = this.parseOrderSide(update.S);
-    const type = this.parseOrderType(update.o);
+    let side = this.parseOrderSide(update.S);
+    let type =
+      update.conditionOrder && Number(update.triggerType) === 1
+        ? OrderType.StopLoss
+        : update.conditionOrder && Number(update.triggerType) === 2
+          ? OrderType.TakeProfit
+          : this.parseOrderType(update.o);
     const status = this.parseOrderStatus(update.x, update.X);
 
     const rawQty = Number(update.q ?? update.origQty ?? 0);
     const rawVolume = Number(update.volume ?? 0);
     const rawFilled = Number(update.z ?? update.executedQty ?? 0);
-    const rawRemaining = Number(update.l ?? 0);
-
-    const amountFromVolume = rawVolume > 0 ? rawVolume * multiplier : 0;
-    const amount = rawQty > 0 ? rawQty : amountFromVolume;
-    const scaledFilled = rawFilled * multiplier;
-    const filled = amount > 0 && rawFilled <= amount ? rawFilled : scaledFilled;
-    const remaining = rawRemaining > 0 ? rawRemaining * multiplier : Math.max(amount - filled, 0);
-    const price = Number(update.p ?? update.ap ?? update.L ?? 0);
-
+    if (![rawQty, rawVolume, rawFilled].every(Number.isFinite) || rawQty < 0 || rawVolume < 0 || rawFilled < 0) return;
+    // q already includes the face value; z and l remain native contracts.
+    const amount = rawQty > 0 ? rawQty : cleanFloat(rawVolume * multiplier);
+    const filled = cleanFloat(rawFilled * multiplier);
     const orderId = update.i ?? update.orderId ?? update.c ?? update.clientOrderId;
     if (orderId === undefined || orderId === null) {
       console.error('Order update without id', update);
       return;
     }
 
+    const id = String(orderId);
+    const existing = this.store.orders.find((order) => order.id === id);
+    if (existing && [OrderType.StopLoss, OrderType.TakeProfit].includes(existing.type)) {
+      type = existing.type;
+      if (existing.parentId) side = existing.side;
+    }
+    const watermark = this.orderWatermarks.get(id);
+    const previous = Math.max(watermark?.filled || 0, existing?.filled || 0);
+    if (existing && existing.filled > (watermark?.filled || 0)) {
+      if (Number(existing.info?.avgPrice) > 0)
+        this.cumulativeValues.set(id, (existing.filled / multiplier) * Number(existing.info.avgPrice));
+      else this.cumulativeValues.delete(id);
+    }
+    const previousTerminal =
+      watermark?.terminal ||
+      (existing && [OrderStatus.Closed, OrderStatus.Canceled].includes(existing.status) ? existing.status : undefined);
+    const terminal = [OrderStatus.Closed, OrderStatus.Canceled].includes(status);
+    const time = Number((json as any).E ?? update.E ?? Date.now());
+    const total = Math.max(amount, existing?.amount || 0, watermark?.amount || 0, filled);
+    const cumulativeValue =
+      Number(update.ap) > 0
+        ? rawFilled * Number(update.ap)
+        : Number(update.L) > 0 && filled > previous && (previous === 0 || this.cumulativeValues.has(id))
+          ? (this.cumulativeValues.get(id) || 0) + (rawFilled - previous / multiplier) * Number(update.L)
+          : undefined;
     if (`${update.x || ''}`.toUpperCase() === 'TRADE') {
-      // `z` is filled SO FAR; take this execution's share of the RAW value, then convert,
-      // since the raw-vs-scaled choice below can flip mid-order.
-      const fillAmountRaw = Number(update.z ?? 0);
-      const executedRaw = this.incrementalFills(String(orderId), fillAmountRaw).qty;
-      const fillAmount = amount > 0 && fillAmountRaw <= amount ? executedRaw : cleanFloat(executedRaw * multiplier);
-      if (fillAmount > 0) {
+      // A REST snapshot may already include fills that a delayed stream repeats.
+      this.incrementalFills(id, previous / multiplier, this.cumulativeValues.get(id));
+      const execution = this.incrementalFills(id, rawFilled, cumulativeValue);
+      const price =
+        Number(update.L) > 0
+          ? Number(update.L)
+          : (previous === 0 || this.cumulativeValues.has(id)) && cumulativeValue !== undefined && execution.qty > 0
+            ? (cumulativeValue - (this.cumulativeValues.get(id) || 0)) / execution.qty
+            : 0;
+      if (execution.qty > 0 && price > 0)
         this.emitter.emit('fill', {
-          id: String(orderId),
+          id,
           side,
           symbol,
-          price,
-          amount: fillAmount,
+          price: cleanFloat(price),
+          amount: cleanFloat(execution.qty * multiplier),
         });
-      }
     }
-
+    if (filled >= previous && cumulativeValue !== undefined) this.cumulativeValues.set(id, cumulativeValue);
+    this.orderWatermarks.delete(id);
+    this.orderWatermarks.set(id, {
+      filled: Math.max(previous, filled),
+      amount: total,
+      terminal: previousTerminal === OrderStatus.Closed ? previousTerminal : terminal ? status : previousTerminal,
+      time: Math.max(time, watermark?.time || 0),
+    });
+    while (this.orderWatermarks.size > 500) {
+      const oldest = this.orderWatermarks.keys().next().value!;
+      this.orderWatermarks.delete(oldest);
+      this.cumulativeValues.delete(oldest);
+    }
+    if (
+      !terminal &&
+      (previousTerminal || filled < previous || time < Math.max(existing?.lastUpdate || 0, watermark?.time || 0))
+    )
+      return;
+    if (previousTerminal === OrderStatus.Closed && status === OrderStatus.Canceled) return;
+    const conditional = type === OrderType.StopLoss || type === OrderType.TakeProfit;
+    const price = conditional
+      ? Number(update.triggerPrice) || existing?.price || Number(update.p) || 0
+      : Number(update.p) || Number(update.ap) || 0;
     const order: Order = {
-      id: String(orderId),
+      id,
       status,
       symbol,
       type,
       side,
       price,
-      amount,
-      filled,
-      remaining,
-      reduceOnly: Boolean(update.R ?? update.open === 'CLOSE'),
-      lastUpdate: Number((json as any).E ?? update.E ?? Date.now()),
+      amount: total,
+      filled: Math.max(previous, filled),
+      remaining: Math.max(total - Math.max(previous, filled), 0),
+      reduceOnly:
+        Boolean(existing?.parentId) ||
+        Boolean(update.R ?? (update.open === undefined ? existing?.reduceOnly : update.open === 'CLOSE')),
+      ...(existing?.parentId && { parentId: existing.parentId }),
+      ...(existing?.clientOrderId && { clientOrderId: existing.clientOrderId }),
+      ...(existing?.tpTriggerType && { tpTriggerType: existing.tpTriggerType }),
+      ...(existing?.slTriggerType && { slTriggerType: existing.slTriggerType }),
+      ...(existing?.takeProfit !== undefined && { takeProfit: existing.takeProfit }),
+      ...(existing?.stopLoss !== undefined && { stopLoss: existing.stopLoss }),
+      lastUpdate: time,
       info: update,
     };
 
@@ -216,7 +281,7 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
     if (ping !== undefined) {
       this.send(JSON.stringify({ pong: ping }));
     } else {
-      this.send(JSON.stringify({ event: 'pong' }));
+      this.send(JSON.stringify({ event: 'pong', ...(json?.ts === undefined ? {} : { ts: json.ts }) }));
     }
     this.handlePongEvent(20_000);
   };

@@ -141,7 +141,7 @@ impl Blofin {
         } else {
             "wss://openapi.blofin.com/ws/public"
         };
-        self.public.socket = Some(cx.connect(url));
+        self.public.socket = Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Public));
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5_000.0));
     }

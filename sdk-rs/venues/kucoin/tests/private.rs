@@ -2,7 +2,9 @@
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_kucoin::{Kucoin, Options};
 const MARKET: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100}]}"#;
 const TICKERS: &str = r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100","bestBidPrice":"99","bestAskPrice":"101"}]}"#;
@@ -38,7 +40,19 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url } if url.contains("/private?") => Some(*socket),
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                    context,
+                } if url.contains("/private?") => {
+                    assert_eq!(*channel, Some(SocketChannel::Private));
+                    assert_eq!(
+                        context.as_ref().expect("routing feed context").feed,
+                        "private"
+                    );
+                    Some(*socket)
+                }
                 _ => None,
             })
             .unwrap();

@@ -10,7 +10,8 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, Store, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
+    Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -872,13 +873,25 @@ impl Venue for Kucoin {
                             '?'
                         };
                         self.message_id += 1;
-                        c.socket = Some(cx.connect(format!(
-                            "{}{separator}token={}&connectId={}-{}",
-                            server.endpoint,
-                            encode(bullet.token),
-                            cx.now as u64,
-                            self.message_id
-                        )));
+                        let (role, feed) = match c.role {
+                            Role::Detail => (SocketChannel::Public, "detail".into()),
+                            Role::Snapshot { index, .. } => {
+                                (SocketChannel::Public, format!("snapshot-{index}"))
+                            }
+                            Role::Private => (SocketChannel::Private, "private".into()),
+                        };
+                        c.socket = Some(cx.connect_feed(
+                            format!(
+                                "{}{separator}token={}&connectId={}-{}",
+                                server.endpoint,
+                                encode(bullet.token),
+                                cx.now as u64,
+                                self.message_id
+                            ),
+                            role,
+                            feed,
+                            false,
+                        ));
                         c.pong = Some(cx.set_timer(c.ping_timeout));
                     }
                     Err(error) => {
