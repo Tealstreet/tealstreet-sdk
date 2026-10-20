@@ -544,3 +544,49 @@ fn a_page_cap_with_a_pending_cursor_is_incomplete_not_partial_success() {
     assert!(h.result(1).unwrap_err().contains("INCOMPLETE"));
     assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
 }
+
+#[test]
+fn a_limited_order_history_stops_at_its_limit_instead_of_paging_to_the_cap() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    );
+    let rows: Vec<String> = (0..3)
+        .map(|i| ORDER.replace(r#""id":"123""#, &format!(r#""id":"o{i}""#)))
+        .collect();
+    h.reply(
+        "/orders-history?",
+        &format!(r#"{{"next":"c1","results":[{}]}}"#, rows.join(",")),
+    );
+    let result: Vec<serde_json::Value> = serde_json::from_str(h.result(1).unwrap()).unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
+}
+
+#[test]
+fn a_lookup_found_in_history_finishes_without_walking_more_pages() {
+    let mut h = private();
+    read(
+        &mut h,
+        10,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    h.reply("/orders?", r#"{"results":[]}"#);
+    h.reply(
+        "/orders-history?",
+        &format!(r#"{{"next":"h2","results":[{ORDER}]}}"#),
+    );
+    let result: serde_json::Value = serde_json::from_str(h.result(10).unwrap()).unwrap();
+    assert_eq!(result["found"], true);
+    assert!(!h.pending.iter().any(|r| r.url.contains("cursor=h2")));
+}
