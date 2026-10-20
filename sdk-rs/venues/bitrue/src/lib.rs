@@ -8,7 +8,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -345,8 +345,7 @@ impl Bitrue {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket =
-            Some(cx.connect_channel(PUBLIC, safe_cex_engine::SocketChannel::Public));
+        self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5000.0));
     }

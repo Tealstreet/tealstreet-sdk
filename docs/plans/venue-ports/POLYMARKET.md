@@ -344,3 +344,20 @@ A public rerun failed TS backing-buffer settling before comparison (22 samples,
 other checks finished. Initial CI had 30 successful checks and one false-positive
 secret finding: the documented fake `safe-fake-secret` fixture. Its exact
 historical fingerprint is recorded; local full-range secret scan passes.
+
+Repair gates pass at a15c51c4c2: public three-run TS/Rust worker CPU47.6/34.2ms,
+steady23.7/14.2ms, retained21.3/0.9MB. Private correctness passes (33records,
+12WSframes, eightcommands). All87native venue tests and16actualWasm boundary
+tests pass. The independent trading and integration re-reviews pass.
+
+### Phemex landing integration
+
+PR became conflicted after landing advanced to45d7a3fb98. Resolved four shared
+registration/harness/lock conflicts, retaining the landing structure and all
+Phemex text-auth, parser and host message APIs. Independent host/manifest/lock
+and SDK audits pass; all340harness tests and47SDK/oracle tests pass. Prediction
+sections13/14 and repaired venue state are unchanged. Incoming Phemex increases
+the backing-buffer settling deadline from1s to5s and adds GC diagnostics; CPU,
+retained-memory comparison criteria and1,258,291byte size budget are unchanged.
+Polymarket had passed the stricter1s deadline before this merge. Combined build
+and affected native/SDK/replay checks are running; merge still requires greenCI.

@@ -22,6 +22,7 @@ blofin = ["dep:safe-cex-venue-blofin"]
 mexc = ["dep:safe-cex-venue-mexc"]
 bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
+phemex = ["dep:safe-cex-venue-phemex"]
 default = [
     "polymarket",
     "paradex",
@@ -44,6 +45,7 @@ default = [
     "backpack",
     "bitget",
     "orderly",
+    "phemex",
 ]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
 binance = ["dep:safe-cex-venue-binance"]
@@ -68,6 +70,7 @@ safe-cex-venue-blofin = { workspace = true, optional = true }
 safe-cex-venue-mexc = { workspace = true, optional = true }
 safe-cex-venue-bingx = { workspace = true, optional = true }
 safe-cex-venue-weex = { workspace = true, optional = true }
+safe-cex-venue-phemex = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
 safe-cex-venue-orderly = { path = "../../venues/orderly", optional = true }
 safe-cex-venue-cryptocom = { workspace = true, optional = true }

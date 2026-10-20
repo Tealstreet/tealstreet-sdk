@@ -8,16 +8,19 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { add, divide1, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
-import { OrderStatus, Position } from '../../types';
+import { OrderStatus, Position, PositionMode, PositionSide } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_STATUS } from './phemex.types';
 
+type PositionSyncSide = PositionSide | 'merged' | 'unknown';
+type PositionSyncTarget = { symbol: string; side: PositionSyncSide };
+
 export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
   requestId: number = 1200;
   private positionsAndBalanceSyncTimeout?: NodeJS.Timeout;
-  private readonly positionsAndBalanceSyncSymbols = new Set<string>();
+  private readonly positionsAndBalanceSyncSymbols = new Map<string, Set<PositionSyncSide>>();
   private readonly positionsAndBalanceSyncDebounceMs = 1_000;
 
   dispose() {
@@ -39,9 +42,31 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
       const { balance, positions } = await this.parent.fetchPositionsAndBalance();
       if (this.isDisposed) return;
 
+      // Recover missing affected legs, while retaining nonzero full-snapshot rows
+      // if a scoped response lags behind them.
+      const nonzeroPositions = positions.filter(
+        (position) => Number.isFinite(position.contracts) && position.contracts !== 0,
+      );
+      const authoritativeIds = new Set(nonzeroPositions.map((position) => position.id));
+      const recoverySymbols = symbols
+        .filter(
+          ([symbol, sides]) =>
+            ![...sides].every(
+              (side) =>
+                side !== 'unknown' &&
+                nonzeroPositions.some(
+                  (position) =>
+                    position.symbol === symbol &&
+                    (side === 'merged' ? position.positionMode === PositionMode.OneWay : position.side === side),
+                ),
+            ),
+        )
+        .map(([symbol]) => symbol);
       const symbolPositions = (
-        await Promise.allSettled(symbols.map((symbol) => this.parent.fetchPositions([symbol])))
-      ).flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+        await Promise.allSettled(recoverySymbols.map((symbol) => this.parent.fetchPositions([symbol])))
+      )
+        .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+        .filter((position) => !authoritativeIds.has(position.id));
       const symbolPositionIds = new Set(symbolPositions.map((position) => position.id));
       const mergedPositions = uniqBy(
         [...positions.filter((position) => !symbolPositionIds.has(position.id)), ...symbolPositions],
@@ -62,8 +87,12 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
     }
   };
 
-  private schedulePositionsAndBalanceSync = (symbols: string[] = []) => {
-    symbols.forEach((symbol) => this.positionsAndBalanceSyncSymbols.add(symbol));
+  private schedulePositionsAndBalanceSync = (targets: PositionSyncTarget[] = []) => {
+    targets.forEach(({ symbol, side }) => {
+      const sides = this.positionsAndBalanceSyncSymbols.get(symbol) ?? new Set<PositionSyncSide>();
+      sides.add(side);
+      this.positionsAndBalanceSyncSymbols.set(symbol, sides);
+    });
 
     if (this.positionsAndBalanceSyncTimeout) {
       clearTimeout(this.positionsAndBalanceSyncTimeout);
@@ -243,21 +272,27 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           // "userID":932867
 
           const orders = json?.orders_p;
-          const terminalOrderSymbols: string[] =
+          const terminalOrderTargets: PositionSyncTarget[] =
             json?.type !== 'snapshot'
-              ? Array.from(
-                  new Set<string>(
-                    orders
-                      .filter((order: any) => {
-                        const rawOrderStatus = `${order?.ordStatus || ''}`.toLowerCase();
-                        return ['filled', 'triggered', 'canceled', 'rejected'].includes(rawOrderStatus);
-                      })
-                      .map((order: any) => this.parent.formatSymbolIn(order.symbol) as string)
-                      .filter(Boolean),
-                  ),
-                )
+              ? orders
+                  .filter((order: any) => {
+                    const rawOrderStatus = `${order?.ordStatus || ''}`.toLowerCase();
+                    return ['filled', 'triggered', 'canceled', 'rejected'].includes(rawOrderStatus);
+                  })
+                  .map((order: any) => ({
+                    symbol: this.parent.formatSymbolIn(order.symbol) as string,
+                    side:
+                      order.posSide === 'Long'
+                        ? PositionSide.Long
+                        : order.posSide === 'Short'
+                          ? PositionSide.Short
+                          : order.posSide === 'Merged'
+                            ? 'merged'
+                            : 'unknown',
+                  }))
+                  .filter((target: PositionSyncTarget) => Boolean(target.symbol))
               : [];
-          const shouldSyncPositionsAfterOrderEvent = json?.type !== 'snapshot' && terminalOrderSymbols.length > 0;
+          const shouldSyncPositionsAfterOrderEvent = json?.type !== 'snapshot' && terminalOrderTargets.length > 0;
           this.recordMessageHandlerStats('order');
 
           // mapOrder = (o: Record<string, any>) => {
@@ -508,7 +543,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             // Terminal order events (filled/canceled/etc.) often imply position changes.
             // Debounce REST sync to avoid waiting for slow tick intervals.
             if (shouldSyncPositionsAfterOrderEvent) {
-              this.schedulePositionsAndBalanceSync(terminalOrderSymbols);
+              this.schedulePositionsAndBalanceSync(terminalOrderTargets);
             }
           }
         }
