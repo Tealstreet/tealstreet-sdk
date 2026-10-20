@@ -763,3 +763,216 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
     );
     assert_session(&h.take("aggregated_account_summary"), "recovered");
 }
+
+fn pong_followup(h: &Harness) -> (safe_cex_engine::TimerId, f64) {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5_000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("pong schedules the next ping in five seconds")
+}
+fn private_pings(h: &Harness) -> Vec<SocketId> {
+    h.actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::WsSend { socket, text } if text == "ping" => Some(*socket),
+            _ => None,
+        })
+        .collect()
+}
+fn use_latest_private_socket(h: &mut Harness) {
+    h.socket = h.actions.iter().rev().find_map(|action| match action {
+        Action::WsConnect {
+            socket,
+            channel: Some(SocketChannel::Private),
+            ..
+        }
+        | Action::WsConnectWithHeaders {
+            socket,
+            channel: Some(SocketChannel::Private),
+            ..
+        } => Some(*socket),
+        _ => None,
+    });
+}
+
+#[test]
+fn pong_followup_is_one_shot_and_position_traffic_does_not_cancel_it() {
+    for proxy in [true, false] {
+        let mut h = Harness::new(proxy);
+        h.authenticate();
+        h.open();
+        h.actions.clear();
+        h.ws("pong");
+        let (timer, deadline) = pong_followup(&h);
+        assert!(private_pings(&h).is_empty());
+        h.ws(r#"{"s":"v1.position","f":{"i":"BTC_USDT_Perp","s":"1","ep":"100","n":"100","l":"20","el":"50","up":"0","mt":"CROSS","et":"1700000000000000000"}}"#);
+        assert_eq!(h.engine.store().positions().len(), 1);
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::ClearTimer { timer: cleared } if *cleared == timer)
+        ));
+        h.timer(timer, deadline);
+        assert_eq!(private_pings(&h), [h.socket.unwrap()]);
+        h.timer(timer, deadline + 5_000.);
+        assert_eq!(
+            private_pings(&h),
+            [h.socket.unwrap()],
+            "follow-up must not become a periodic timer"
+        );
+    }
+}
+
+#[test]
+fn repeated_pong_replaces_pending_ping_instead_of_adding_another() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.actions.clear();
+    h.ws("pong");
+    let (old, old_deadline) = pong_followup(&h);
+    h.now += 1_000.;
+    h.ws("pong");
+    let (current, deadline) = pong_followup(&h);
+    assert_ne!(old, current);
+    assert!(
+        h.actions
+            .iter()
+            .any(|action| matches!(action, Action::ClearTimer { timer } if *timer == old))
+    );
+    h.timer(old, old_deadline);
+    assert!(private_pings(&h).is_empty());
+    h.timer(current, deadline);
+    assert_eq!(private_pings(&h), [h.socket.unwrap()]);
+}
+
+#[test]
+fn close_reauth_and_cookie_rotation_cancel_ping_and_fence_old_generation() {
+    for reason in ["close", "reauth", "cookie rotation"] {
+        let mut h = Harness::new(true);
+        h.authenticate();
+        h.open();
+        h.actions.clear();
+        h.ws("pong");
+        let (old_timer, _) = pong_followup(&h);
+        let old_socket = h.socket.unwrap();
+        match reason {
+            "close" => {
+                h.engine.handle(
+                    h.now,
+                    Event::WsClosed {
+                        socket: old_socket,
+                        code: 1006,
+                    },
+                );
+                h.collect();
+                let reconnect = h
+                    .actions
+                    .iter()
+                    .rev()
+                    .find_map(|action| match action {
+                        Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1_000. => {
+                            Some(*timer)
+                        }
+                        _ => None,
+                    })
+                    .expect("reconnect timer");
+                h.timer(reconnect, h.now + 1_000.);
+            }
+            "reauth" => {
+                h.ws(r#"{"type":"error","code":1000}"#);
+                h.reply(
+                    "login",
+                    r#"{"status":"success"}"#,
+                    "x-ts-grvt-session: replacement\nx-grvt-account-id: 0xaccount",
+                );
+            }
+            _ => {
+                fetch_leverage(&mut h, 704);
+                let request = h.take("get_all_initial_leverage");
+                h.respond(
+                    request,
+                    r#"{"r":[{"i":"BTC_USDT_Perp","l":"20"}]}"#,
+                    "x-ts-grvt-session: rotated\nx-grvt-account-id: 0xaccount",
+                );
+            }
+        }
+        assert!(
+            h.actions.iter().any(
+                |action| matches!(action, Action::ClearTimer { timer } if *timer == old_timer)
+            ),
+            "{reason} must clear the old ping"
+        );
+        use_latest_private_socket(&mut h);
+        assert_ne!(h.socket.unwrap(), old_socket, "{reason}");
+        h.open();
+        h.ws("pong");
+        let (new_timer, deadline) = pong_followup(&h);
+        h.engine.handle(
+            h.now,
+            Event::WsMessage {
+                socket: old_socket,
+                text: "pong",
+            },
+        );
+        h.collect();
+        assert!(
+            !h.actions.iter().any(
+                |action| matches!(action, Action::ClearTimer { timer } if *timer == new_timer)
+            ),
+            "stale socket pong cannot replace a new generation timer"
+        );
+        h.timer(old_timer, h.now + 1.);
+        assert!(
+            private_pings(&h).is_empty(),
+            "{reason}: stale timer sent ping"
+        );
+        h.timer(new_timer, deadline);
+        assert_eq!(private_pings(&h), [h.socket.unwrap()], "{reason}");
+    }
+}
+
+#[test]
+fn unauthenticated_or_rejected_private_stream_cannot_schedule_ping() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.engine.handle(
+        h.now,
+        Event::WsOpened {
+            socket: h.socket.unwrap(),
+        },
+    );
+    h.collect();
+    h.actions.clear();
+    h.ws("pong");
+    assert!(
+        !h.actions
+            .iter()
+            .any(|action| matches!(action, Action::SetTimer { .. }))
+    );
+    h.ws(r#"{"type":"error","code":1000}"#);
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: replacement\nx-grvt-account-id: 0xaccount",
+    );
+    use_latest_private_socket(&mut h);
+    h.open();
+    h.ws("pong");
+    let (timer, deadline) = pong_followup(&h);
+    h.ws(r#"{"type":"error","code":1000}"#);
+    assert!(h.actions.iter().any(
+        |action| matches!(action, Action::ClearTimer { timer: cleared } if *cleared == timer)
+    ));
+    h.ws("pong");
+    h.timer(timer, deadline);
+    assert!(private_pings(&h).is_empty());
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.ends_with("login")),
+        "second auth rejection must stay closed"
+    );
+}

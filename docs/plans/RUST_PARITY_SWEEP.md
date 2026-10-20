@@ -363,3 +363,25 @@ than treating the original port boundary as a waiver.
   controls alongside57 planned replays,11 venue controls and25 feature budgets.
   Scripted smoke is not funded live execution evidence. The fixed1,258,291-byte
   ceiling and strict output/performance comparisons are unchanged.
+
+### Final-source checks and extended GRVT lifecycle replay
+
+- Root typecheck44/44, lint28/28 and test27/27 tasks PASS. Both SDK test targets
+  pass7491/7491 across508files; final bounded SDK typecheck covers the last
+  incoming fixture edit. Compiled SDK379/379 across11files and host68/68 PASS.
+- Real native cutover initially failed only EEA aliases: the old incoming
+  helper supplied SWAP-only input. It now selects the actual captured EEA
+  SWAP/FUTURES tape and maps the demo host without changing payloads/assertions.
+  Focused EEA controls and independent fixture review PASS; the complete379
+  rerun above includes both corrected profiles. Original377/379 is preserved.
+- Explicit workspace native2460+3doctests, bans and strict native Clippy PASS
+  before the following GRVT timer change. The lone fmt failure was a routing
+  test's line wrapping, now corrected without semantic change.
+- Expanded mixed-product GRVT replay matched account/output/commands/signatures
+  but exposed a missing native keepalive: TS schedules a client ping five
+  seconds after pong. Native now retains one replaceable timer fenced by
+  socket/auth generation; data does not cancel it, retirement does. Existing
+  idle thresholds are unchanged. GRVT108/108, strict Clippy and independent
+  timer review PASS. Rebuilt mixed-product replay and final WASM Clippy follow.
+- All four OKX private profiles PASS on the combined artifact, covering native
+  inverse counts and EEA X-Perp lifecycles without output normalization.

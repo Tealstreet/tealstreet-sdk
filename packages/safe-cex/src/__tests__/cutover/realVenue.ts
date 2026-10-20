@@ -55,13 +55,15 @@ const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex'
 export const realVenue = (name: ExchangeName) => {
   const fixture = orderlyAliases.has(name)
     ? 'orderly'
-    : name.startsWith('okx')
-      ? 'okx'
-      : name === 'binancepm'
-        ? 'binance'
-        : name === 'coinbasespot'
-          ? 'coinbase'
-          : name;
+    : name.startsWith('okxeu')
+      ? 'okxeu-xperp'
+      : name.startsWith('okx')
+        ? 'okx'
+        : name === 'binancepm'
+          ? 'binance'
+          : name === 'coinbasespot'
+            ? 'coinbase'
+            : name;
   let records: RecordRow[];
   let source: string;
   if (name === 'bitgetinverse' || name === 'bitgetusdc') {
@@ -130,13 +132,16 @@ export const realVenue = (name: ExchangeName) => {
       restore.push(() => Object.assign(object, previous));
     }
   }
-  // EU OKX has identical documented public paths/data, at its regional host.
+  // EEA inputs include the captured FUTURES catalog/tickers as well as SWAP.
+  // Demo aliases retain those products while selecting their public WS host.
   if (name.startsWith('okx'))
     records = records.map((record) => ({
       ...record,
       ...(record.url
         ? {
             url: record.url
+              .replace('wseea.okx.com', 'ws.okx.com')
+              .replace('eea.okx.com', 'www.okx.com')
               .replace(
                 'www.okx.com',
                 name === 'okxeu' || name === 'okxeudemo'
