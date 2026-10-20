@@ -4,12 +4,14 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
 use safe_cex_engine::model::{
-    Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
-    PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
+    Balance, CoinBalance, CurrencyBalance, MarginType, Order, OrderExtra, OrderSide, OrderStatus,
+    OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
-use std::collections::HashMap;
+use serde::Deserialize;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
@@ -41,7 +43,9 @@ pub enum Request {
         generation: u32,
         configs: Vec<(String, MarketSetting)>,
     },
-    Account,
+    Account {
+        version: u32,
+    },
     OpenOrders {
         generation: u32,
     },
@@ -62,6 +66,8 @@ struct PositionsJoin {
 
 struct OrdersJoin {
     generation: u32,
+    version: u32,
+    native_orders: Vec<(String, String, u64, f64)>,
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
     failed: bool,
@@ -79,6 +85,17 @@ pub struct AccountState {
     tick_timer: Option<TimerId>,
     last_account_at: f64,
     account_in_flight: bool,
+    account_version: u32,
+    spot_balances: HashMap<String, (f64, f64)>,
+    native_executed: HashMap<(String, u64), (f64, bool)>,
+    unquantified_cancels: HashSet<(String, u64)>,
+    spot_client_native: HashMap<(String, String), u64>,
+    spot_subscribe_id: Option<String>,
+    spot_subscribe_at: Option<f64>,
+    spot_subscription: Option<u64>,
+    spot_heartbeat_id: Option<String>,
+    spot_heartbeat_at: Option<f64>,
+    order_version: u32,
     last_risk_at: f64,
     position_version: u32,
     pending_position_events: bool,
@@ -96,10 +113,10 @@ pub struct AccountState {
 
 pub fn order_type(text: &str) -> Option<OrderType> {
     Some(match text {
-        "LIMIT" => OrderType::Limit,
+        "LIMIT" | "LIMIT_MAKER" => OrderType::Limit,
         "MARKET" => OrderType::Market,
-        "STOP_MARKET" | "STOP" => OrderType::StopLoss,
-        "TAKE_PROFIT_MARKET" | "TAKE_PROFIT" => OrderType::TakeProfit,
+        "STOP_MARKET" | "STOP" | "STOP_LOSS" | "STOP_LOSS_LIMIT" => OrderType::StopLoss,
+        "TAKE_PROFIT_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT" => OrderType::TakeProfit,
         "TRAILING_STOP_MARKET" => OrderType::TrailingStopLoss,
         _ => return None,
     })
@@ -165,18 +182,25 @@ fn opt(value: &Option<std::borrow::Cow<'_, str>>) -> f64 {
 /// The body's Binance error, if the request failed.
 pub fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     let body = response.body;
-    let looks_like_error = body.trim_start().starts_with('{') && body.contains("\"code\":-");
-    if (200..300).contains(&response.status) && !looks_like_error {
+    let error = body
+        .trim_start()
+        .starts_with('{')
+        .then(|| serde_json::from_str::<ErrorBody>(body).ok())
+        .flatten();
+    if (200..300).contains(&response.status) && error.as_ref().is_none_or(|e| e.code >= 0) {
         return None;
     }
-    match serde_json::from_str::<ErrorBody>(body) {
-        Ok(error) => Some((error.code, error.msg.into_owned())),
-        Err(_) => Some((0, format!("HTTP {}: {}", response.status, body))),
+    match error {
+        Some(error) => Some((error.code, error.msg.into_owned())),
+        None => Some((0, format!("HTTP {}: {}", response.status, body))),
     }
 }
 
 impl BinanceFutures {
     pub(crate) fn request_leverage_brackets(&self, cx: &mut Cx<'_, Pending>) {
+        if self.is_spot() {
+            return;
+        }
         self.signed_streamed(
             cx,
             self.paths.leverage_bracket,
@@ -192,13 +216,15 @@ impl BinanceFutures {
         }
         self.account.listen_key_retry_ms = LISTEN_KEY_RETRY_MIN_MS;
         self.request_listen_key(cx);
-        self.signed(
-            cx,
-            Method::Get,
-            self.paths.position_mode,
-            Query::new(),
-            Pending::Account(Request::PositionMode),
-        );
+        if !self.is_spot() {
+            self.signed(
+                cx,
+                Method::Get,
+                self.paths.position_mode,
+                Query::new(),
+                Pending::Account(Request::PositionMode),
+            );
+        }
         self.fetch_positions(cx);
         self.fetch_account(cx);
         self.fetch_orders(cx);
@@ -208,6 +234,11 @@ impl BinanceFutures {
     }
 
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_spot() {
+            self.reset_spot_subscription(cx);
+            self.connect_url(cx, Channel::Private, self.urls.private_ws);
+            return;
+        }
         self.listen_key_request(cx, Method::Post, Request::ListenKey);
     }
 
@@ -236,6 +267,10 @@ impl BinanceFutures {
     }
 
     fn fetch_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_spot() {
+            cx.store.set_positions(Vec::new());
+            return;
+        }
         if self.account.positions.is_some() {
             return;
         }
@@ -282,7 +317,9 @@ impl BinanceFutures {
             Method::Get,
             self.paths.balance,
             Query::new(),
-            Pending::Account(Request::Account),
+            Pending::Account(Request::Account {
+                version: self.account.account_version,
+            }),
         );
     }
 
@@ -294,8 +331,10 @@ impl BinanceFutures {
         let generation = self.account.orders_generation;
         self.account.orders = Some(OrdersJoin {
             generation,
+            version: self.account.order_version,
+            native_orders: Vec::new(),
             regular: None,
-            algo: None,
+            algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
             failed: false,
         });
         self.signed(
@@ -305,6 +344,9 @@ impl BinanceFutures {
             Query::new(),
             Pending::Account(Request::OpenOrders { generation }),
         );
+        if self.is_spot() || self.is_inverse() {
+            return;
+        }
         let conditional = if self.options.portfolio_margin {
             Query::new()
         } else {
@@ -348,6 +390,14 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_spot() {
+            self.subscribe_spot_account(cx);
+            return;
+        }
+        self.private_ready(cx);
+    }
+
+    fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         // Order events while no stream was open were never delivered.
         if self.account.resync_orders_on_open || self.account.has_opened {
             self.account.resync_orders_on_open = false;
@@ -462,7 +512,7 @@ impl BinanceFutures {
                 }
                 self.finish_positions(cx);
             }
-            Request::Account => {
+            Request::Account { .. } => {
                 self.account.account_in_flight = false;
                 cx.log(LogLevel::Error, format!("Binance account: {message}"));
             }
@@ -501,7 +551,13 @@ impl BinanceFutures {
                 }
             }
             Request::PositionRisk { rows, generation } => {
-                let Ok(p) = serde_json::from_str::<PositionRisk>(item) else {
+                let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
+                    if let Some(join) = &mut self.account.positions
+                        && join.generation == *generation
+                    {
+                        join.failed = true;
+                    }
+                    _cx.log(LogLevel::Error, "Binance positionRisk row malformed");
                     return;
                 };
                 if let (Some(leverage), Some(join)) = (p.leverage, &mut self.account.positions)
@@ -511,13 +567,17 @@ impl BinanceFutures {
                 {
                     let setting = MarketSetting {
                         leverage,
-                        margin_type: Some(MarginType::Cross),
+                        margin_type: Some(if p.margin_type.eq_ignore_ascii_case("isolated") {
+                            MarginType::Isolated
+                        } else {
+                            MarginType::Cross
+                        }),
                         ..MarketSetting::default()
                     };
                     configs.push((p.symbol.to_string(), setting));
                 }
                 let signed = num::parse(&p.position_amt);
-                if signed == 0.0 {
+                if signed == 0.0 && !self.is_inverse() {
                     return;
                 }
                 let side = position_side(&p.position_side, signed);
@@ -526,20 +586,56 @@ impl BinanceFutures {
                 } else {
                     PositionMode::Hedged
                 };
+                let entry_price = num::parse(&p.entry_price);
+                let reference = self.inverse_reference_price(
+                    _cx.store,
+                    &p.symbol,
+                    if opt(&p.mark_price) > 0.0 {
+                        opt(&p.mark_price)
+                    } else {
+                        entry_price
+                    },
+                );
+                let contract_size = _cx
+                    .store
+                    .market(&p.symbol)
+                    .map_or(1.0, |m| m.contract_size.unwrap_or(1.0));
+                let notional = if self.is_inverse() {
+                    signed.abs() * contract_size
+                } else {
+                    opt(&p.notional).abs()
+                };
+                let contracts = if self.is_inverse() {
+                    if reference > 0.0 {
+                        notional / reference
+                    } else {
+                        0.0
+                    }
+                } else {
+                    signed.abs()
+                };
+                let isolated = opt(&p.isolated_margin);
+                let margin_size = if isolated > 0.0 {
+                    isolated
+                } else if self.is_inverse() {
+                    contracts / p.leverage.unwrap_or(1.0).max(1.0)
+                } else {
+                    0.0
+                };
                 rows.push(Position {
                     id: position_id(&p.symbol, side, mode),
                     symbol: p.symbol.into_owned(),
                     side,
-                    entry_price: num::parse(&p.entry_price),
-                    notional: num::parse(&p.notional).abs(),
+                    entry_price,
+                    notional,
                     leverage: 0.0,
                     margin_type: None,
                     position_mode: Some(mode),
                     unrealized_pnl: num::parse(&p.un_realized_profit),
                     realized_pnl: None,
-                    contracts: signed.abs(),
+                    contracts,
                     liquidation_price: num::parse(&p.liquidation_price),
-                    margin_size: Some(opt(&p.isolated_margin)),
+                    margin_size: Some(margin_size),
                     last_update: (p.update_time > 0.0).then_some(p.update_time),
                 });
             }
@@ -631,7 +727,11 @@ impl BinanceFutures {
                 }
                 self.finish_positions(cx);
             }
-            Request::Account if self.options.portfolio_margin => {
+            Request::Account { version } if self.options.portfolio_margin => {
+                if version != self.account.account_version {
+                    self.account.account_in_flight = false;
+                    return;
+                }
                 self.account.account_in_flight = false;
                 let mut balance = Balance::default();
                 let parsed = json::each::<PmBalance>(body, |row| {
@@ -650,8 +750,18 @@ impl BinanceFutures {
                     Err(error) => cx.log(LogLevel::Error, format!("Binance balance: {error}")),
                 }
             }
-            Request::Account => {
+            Request::Account { version } => {
                 self.account.account_in_flight = false;
+                if version != self.account.account_version {
+                    if self.is_spot() && self.account.spot_subscription.is_some() {
+                        self.fetch_account(cx);
+                    }
+                    return;
+                }
+                if self.is_spot() {
+                    self.on_spot_account_snapshot(cx, body);
+                    return;
+                }
                 match serde_json::from_str::<Account>(body) {
                     Ok(account) => {
                         let balance = self.aggregate_balance(cx, &account);
@@ -663,6 +773,7 @@ impl BinanceFutures {
             Request::OpenOrders { generation } => {
                 let now = cx.now;
                 let mut orders = Vec::new();
+                let mut native_orders = Vec::new();
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
                         return;
@@ -670,10 +781,16 @@ impl BinanceFutures {
                     let price = num::parse(&o.price);
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
-                    let id = match (&o.client_order_id, self.options.portfolio_margin) {
+                    let id = match (
+                        &o.client_order_id,
+                        self.options.portfolio_margin || self.is_spot(),
+                    ) {
                         (Some(client), true) => client.to_string(),
                         _ => o.order_id.to_string(),
                     };
+                    if self.is_spot() || self.is_inverse() {
+                        native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
+                    }
                     orders.push(Order {
                         id,
                         parent_id: None,
@@ -692,7 +809,11 @@ impl BinanceFutures {
                         reduce_only: o.reduce_only,
                         close: Some(o.close_position),
                         client_order_id: o.client_order_id.map(|c| c.into_owned()),
-                        time_in_force: o.time_in_force.as_deref().and_then(time_in_force),
+                        time_in_force: if self.is_spot() && o.kind == "LIMIT_MAKER" {
+                            Some(TimeInForce::PostOnly)
+                        } else {
+                            o.time_in_force.as_deref().and_then(time_in_force)
+                        },
                         last_update: now,
                         trigger_type: trigger_type(kind, o.working_type.as_deref()),
                         take_profit: None,
@@ -700,11 +821,22 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
+                if self.is_inverse() {
+                    for order in &mut orders {
+                        order.extra = Some(OrderExtra {
+                            remaining_native: Some(order.remaining),
+                            ..OrderExtra::default()
+                        });
+                    }
+                }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => join.regular = Some(orders),
+                        Ok(()) => {
+                            join.regular = Some(orders);
+                            join.native_orders = native_orders;
+                        }
                         Err(_) => join.failed = true,
                     }
                 }
@@ -827,7 +959,11 @@ impl BinanceFutures {
                         p.margin_size = if isolated > 0.0 {
                             Some(isolated)
                         } else if p.leverage > 0.0 {
-                            Some(p.notional / p.leverage)
+                            Some(if self.is_inverse() {
+                                p.contracts / p.leverage
+                            } else {
+                                p.notional / p.leverage
+                            })
                         } else {
                             None
                         };
@@ -864,9 +1000,48 @@ impl BinanceFutures {
             self.account.orders_stale = true;
             return;
         }
+        if join.version != self.account.order_version {
+            self.account.orders_stale = true;
+            self.schedule_orders_refresh(cx);
+            return;
+        }
+        if (self.is_spot() || self.is_inverse())
+            && join
+                .native_orders
+                .iter()
+                .any(|(symbol, client, native, filled)| {
+                    self.account
+                        .native_executed
+                        .get(&(symbol.clone(), *native))
+                        .is_some_and(|(seen, terminal)| *terminal || *seen > *filled)
+                        || (self.is_spot()
+                            && self
+                                .account
+                                .spot_client_native
+                                .get(&(symbol.clone(), client.clone()))
+                                .is_some_and(|current| *current > *native))
+                })
+        {
+            self.account.orders_stale = true;
+            self.schedule_orders_refresh(cx);
+            return;
+        }
         self.account.orders_stale = false;
         let mut orders = join.regular.unwrap_or_default();
         orders.extend(join.algo.unwrap_or_default());
+        for (symbol, client, native, filled) in join.native_orders {
+            let entry = self
+                .account
+                .native_executed
+                .entry((symbol.clone(), native))
+                .or_default();
+            entry.0 = entry.0.max(filled);
+            if self.is_spot() {
+                self.account
+                    .spot_client_native
+                    .insert((symbol, client), native);
+            }
+        }
         cx.store.set_orders(orders);
     }
 
@@ -875,6 +1050,7 @@ impl BinanceFutures {
     fn aggregate_balance(&mut self, cx: &mut Cx<'_, Pending>, account: &Account<'_>) -> Balance {
         let mut balance = Balance::default();
         let mut details = Vec::new();
+        let mut coins = Vec::new();
         for asset in &account.assets {
             let wallet = opt(&asset.wallet_balance);
             let available = opt(&asset.available_balance);
@@ -886,7 +1062,7 @@ impl BinanceFutures {
             let price = if STABLECOINS.contains(&asset.asset.as_ref()) {
                 1.0
             } else {
-                usd_price(cx.store, &asset.asset)
+                self.asset_usd_price(cx.store, &asset.asset)
             };
             if price > 0.0 {
                 balance.total += wallet * price;
@@ -894,9 +1070,19 @@ impl BinanceFutures {
                 balance.used += initial * price;
                 balance.upnl += unrealized * price;
             }
+            if self.is_inverse() {
+                coins.push(CoinBalance {
+                    base: asset.asset.to_string(),
+                    amount: wallet,
+                    notional: wallet * price,
+                });
+            }
             if wallet > 0.0 {
                 details.push(format!("{}({wallet} @ {price})", asset.asset));
             }
+        }
+        if self.is_inverse() {
+            cx.store.set_coin_balances(coins);
         }
         if !self.account.logged_balance && !details.is_empty() {
             self.account.logged_balance = true;
@@ -916,6 +1102,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_user_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        if self.is_spot() {
+            self.on_spot_user_event(cx, text);
+            return;
+        }
         match event_type(text) {
             Some("ORDER_TRADE_UPDATE") => {
                 if let Ok(event) = serde_json::from_str::<OrderUpdateEvent>(text) {
@@ -966,6 +1156,7 @@ impl BinanceFutures {
     }
 
     fn on_order_update(&mut self, cx: &mut Cx<'_, Pending>, o: OrderUpdate<'_>) {
+        self.account.order_version += 1;
         // Portfolio margin identifies orders by client order id.
         let id = match (&o.c, self.options.portfolio_margin) {
             (Some(client), true) => client.to_string(),
@@ -974,7 +1165,41 @@ impl BinanceFutures {
         let status = o.status.as_ref();
         let amount = num::parse(&o.q);
         let filled = num::parse(&o.z);
-        if matches!(status, "PARTIALLY_FILLED" | "FILLED") {
+        let inverse = self.is_inverse();
+        let fresh_execution = if inverse {
+            let key = (o.s.to_string(), o.i);
+            let (previous, terminal) = self
+                .account
+                .native_executed
+                .get(&key)
+                .copied()
+                .unwrap_or_default();
+            let unquantified = self.account.unquantified_cancels.contains(&key);
+            if (terminal
+                && !(unquantified
+                    && filled > previous
+                    && opt(&o.l) > 0.0
+                    && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
+                || filled < previous
+            {
+                return;
+            }
+            let terminal = terminal
+                || matches!(
+                    status,
+                    "FILLED"
+                        | "CANCELED"
+                        | "CANCELLED"
+                        | "EXPIRED"
+                        | "EXPIRED_IN_MATCH"
+                        | "REJECTED"
+                );
+            self.account.native_executed.insert(key, (filled, terminal));
+            filled > previous && opt(&o.l) > 0.0
+        } else {
+            true
+        };
+        if matches!(status, "PARTIALLY_FILLED" | "FILLED") && fresh_execution {
             // One execution: its own quantity at its own price.
             let price = o
                 .last_price
@@ -993,10 +1218,19 @@ impl BinanceFutures {
             cx.store.update_order(&id, |order| {
                 order.filled = filled;
                 order.remaining = amount - filled;
+                if inverse {
+                    order
+                        .extra
+                        .get_or_insert_with(OrderExtra::default)
+                        .remaining_native = Some((amount - filled).max(0.0));
+                }
                 order.last_update = now;
             });
         }
-        if status == "NEW"
+        if (status == "NEW"
+            || (inverse
+                && cx.store.order(&id).is_none()
+                && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
             && let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type)
         {
             let price = num::parse(&o.p);
@@ -1019,10 +1253,15 @@ impl BinanceFutures {
                 trigger_type: trigger_type(kind, o.wt.as_deref()),
                 take_profit: None,
                 stop_loss: None,
-                extra: None,
+                extra: inverse.then(|| OrderExtra {
+                    remaining_native: Some((amount - filled).max(0.0)),
+                    ..OrderExtra::default()
+                }),
             });
         }
-        if matches!(status, "CANCELED" | "CANCELLED" | "EXPIRED") {
+        if matches!(status, "CANCELED" | "CANCELLED" | "EXPIRED")
+            || (inverse && matches!(status, "EXPIRED_IN_MATCH" | "REJECTED"))
+        {
             let code = o.r.as_deref().unwrap_or_default().to_ascii_uppercase();
             let post_only =
                 code.contains("POST_ONLY") || code.contains("GTX") || code.contains("MAKER");
@@ -1036,8 +1275,22 @@ impl BinanceFutures {
                 }
             });
         }
+        if inverse
+            && self
+                .account
+                .unquantified_cancels
+                .contains(&(o.s.to_string(), o.i))
+            && status != "FILLED"
+        {
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
         if status == "FILLED" {
             cx.store.set_order_status(&id, OrderStatus::Closed);
+            if inverse {
+                self.account
+                    .unquantified_cancels
+                    .remove(&(o.s.to_string(), o.i));
+            }
         }
     }
 
@@ -1151,7 +1404,24 @@ impl BinanceFutures {
                 (Some(existing), true) => existing.side,
                 _ => event_side,
             };
-            let notional = (signed * entry_price + upnl).abs();
+            let notional = if self.is_inverse() {
+                signed.abs()
+                    * cx.store
+                        .market(&p.s)
+                        .map_or(1.0, |m| m.contract_size.unwrap_or(1.0))
+            } else {
+                (signed * entry_price + upnl).abs()
+            };
+            let reference = self.inverse_reference_price(cx.store, &p.s, entry_price);
+            let contracts = if self.is_inverse() {
+                if reference > 0.0 {
+                    notional / reference
+                } else {
+                    0.0
+                }
+            } else {
+                signed.abs()
+            };
             let leverage = existing
                 .as_ref()
                 .map(|e| e.leverage)
@@ -1161,7 +1431,11 @@ impl BinanceFutures {
             let margin_size = if isolated_wallet > 0.0 {
                 Some(isolated_wallet)
             } else if leverage > 0.0 {
-                Some(notional / leverage)
+                Some(if self.is_inverse() {
+                    contracts / leverage
+                } else {
+                    notional / leverage
+                })
             } else {
                 existing.as_ref().and_then(|e| e.margin_size)
             };
@@ -1180,7 +1454,7 @@ impl BinanceFutures {
                 position_mode: Some(mode),
                 unrealized_pnl: upnl,
                 realized_pnl: existing.as_ref().and_then(|e| e.realized_pnl),
-                contracts: signed.abs(),
+                contracts,
                 liquidation_price: existing.as_ref().map_or(0.0, |e| e.liquidation_price),
                 margin_size,
                 last_update: Some(cx.now),
@@ -1214,5 +1488,631 @@ fn usd_price(store: &safe_cex_engine::Store, asset: &str) -> f64 {
         in_btc * btc
     } else {
         0.0
+    }
+}
+
+/// COIN-M omits USD-M's `notional`; its quantity is a count of USD contracts.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PositionSnapshot<'a> {
+    #[serde(borrow)]
+    symbol: Cow<'a, str>,
+    #[serde(borrow)]
+    position_side: Cow<'a, str>,
+    #[serde(borrow)]
+    position_amt: Cow<'a, str>,
+    #[serde(borrow)]
+    entry_price: Cow<'a, str>,
+    #[serde(borrow)]
+    un_realized_profit: Cow<'a, str>,
+    #[serde(borrow)]
+    liquidation_price: Cow<'a, str>,
+    #[serde(borrow, default)]
+    notional: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    mark_price: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    isolated_margin: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    margin_type: Cow<'a, str>,
+    #[serde(default, deserialize_with = "optional_leverage")]
+    leverage: Option<f64>,
+    #[serde(default)]
+    update_time: f64,
+}
+
+fn optional_leverage<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Scalar<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Cow<'a, str>),
+    }
+    Ok(Option::<Scalar<'_>>::deserialize(d)?.map(|s| match s {
+        Scalar::Bare(n) => n,
+        Scalar::Text(s) => num::parse(&s),
+    }))
+}
+
+#[derive(Deserialize)]
+struct SpotAccount<'a> {
+    #[serde(borrow)]
+    balances: Vec<SpotBalance<'a>>,
+}
+#[derive(Deserialize)]
+struct SpotBalance<'a> {
+    #[serde(borrow)]
+    asset: Cow<'a, str>,
+    #[serde(borrow)]
+    free: Cow<'a, str>,
+    #[serde(borrow)]
+    locked: Cow<'a, str>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpotSubscription {
+    subscription_id: u64,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SpotReply {
+    Subscription(SpotSubscription),
+    Subscriptions(Vec<SpotSubscription>),
+    Other(serde::de::IgnoredAny),
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpotEnvelope<'a> {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    status: Option<u16>,
+    #[serde(default)]
+    result: Option<SpotReply>,
+    #[serde(default)]
+    subscription_id: Option<u64>,
+    #[serde(borrow, default)]
+    event: Option<SpotEvent<'a>>,
+}
+/// Both Spot execution and account records share the same envelope.
+#[derive(Deserialize)]
+struct SpotEvent<'a> {
+    #[serde(borrow)]
+    e: Cow<'a, str>,
+    #[serde(rename = "B", borrow, default)]
+    balances: Vec<SpotEventBalance<'a>>,
+    #[serde(default)]
+    i: Option<u64>,
+    #[serde(borrow, default)]
+    c: Cow<'a, str>,
+    #[serde(rename = "C", borrow, default)]
+    original_client: Cow<'a, str>,
+    #[serde(borrow, default)]
+    s: Cow<'a, str>,
+    #[serde(rename = "S", borrow, default)]
+    side: Cow<'a, str>,
+    #[serde(borrow, default)]
+    o: Cow<'a, str>,
+    #[serde(rename = "X", borrow, default)]
+    status: Cow<'a, str>,
+    #[serde(borrow, default)]
+    x: Cow<'a, str>,
+    #[serde(borrow, default)]
+    p: Cow<'a, str>,
+    #[serde(borrow, default)]
+    q: Cow<'a, str>,
+    #[serde(borrow, default)]
+    z: Cow<'a, str>,
+    #[serde(borrow, default)]
+    l: Cow<'a, str>,
+    #[serde(rename = "L", borrow, default)]
+    last_price: Cow<'a, str>,
+    #[serde(rename = "P", borrow, default)]
+    stop_price: Cow<'a, str>,
+    #[serde(borrow, default)]
+    f: Cow<'a, str>,
+}
+#[derive(Deserialize)]
+struct SpotEventBalance<'a> {
+    #[serde(borrow)]
+    a: Cow<'a, str>,
+    #[serde(borrow)]
+    f: Cow<'a, str>,
+    #[serde(borrow)]
+    l: Cow<'a, str>,
+}
+
+impl BinanceFutures {
+    fn inverse_reference_price(
+        &self,
+        store: &safe_cex_engine::Store,
+        symbol: &str,
+        fallback: f64,
+    ) -> f64 {
+        store
+            .ticker(symbol)
+            .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
+            .filter(|p| *p > 0.0)
+            .unwrap_or(fallback)
+    }
+    fn asset_usd_price(&self, store: &safe_cex_engine::Store, asset: &str) -> f64 {
+        if self.is_spot() {
+            if matches!(asset, "USD" | "USDT" | "USDC") {
+                return 1.0;
+            }
+            for suffix in ["USDT", "USDC", "USD"] {
+                if let Some(ticker) = store.ticker(&format!("{asset}{suffix}"))
+                    && ticker.last > 0.0
+                {
+                    return ticker.last;
+                }
+            }
+            return 0.0;
+        }
+        if asset == "USD" || STABLECOINS.contains(&asset) {
+            return 1.0;
+        }
+        if self.is_inverse() {
+            for suffix in ["USD_PERP", "USD", "USDT"] {
+                if let Some(ticker) = store.ticker(&format!("{asset}{suffix}")) {
+                    let price = if ticker.mark > 0.0 {
+                        ticker.mark
+                    } else {
+                        ticker.last
+                    };
+                    if price > 0.0 {
+                        return price;
+                    }
+                }
+            }
+            return 0.0;
+        }
+        usd_price(store, asset)
+    }
+    pub(crate) fn reset_spot_subscription(&mut self, _cx: &mut Cx<'_, Pending>) {
+        if !self.is_spot() {
+            return;
+        }
+        self.account.spot_subscribe_id = None;
+        self.account.spot_subscribe_at = None;
+        self.account.spot_heartbeat_at = None;
+        self.account.spot_subscription = None;
+        self.account.spot_heartbeat_id = None;
+        self.account.account_version += 1;
+        self.account.order_version += 1;
+    }
+    fn next_spot_request_id(&mut self, prefix: &str) -> String {
+        let id = self.private.next_request_id;
+        self.private.next_request_id += 1;
+        format!("{prefix}-{id}")
+    }
+    fn subscribe_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(socket) = self.private.socket else {
+            return;
+        };
+        let id = self.next_spot_request_id("tealstreet-user-data");
+        let Some(credentials) = &self.credentials else {
+            return;
+        };
+        let timestamp = cx.now.floor();
+        let payload = format!(
+            "apiKey={}&recvWindow=5000&timestamp={}",
+            credentials.key,
+            num::format(timestamp)
+        );
+        let signature = safe_cex_crypto::hmac_sha256(
+            credentials.secret.as_bytes(),
+            payload.as_bytes(),
+            safe_cex_crypto::Encoding::Hex,
+        );
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Params<'a> {
+            api_key: &'a str,
+            recv_window: u32,
+            timestamp: f64,
+            signature: &'a str,
+        }
+        #[derive(serde::Serialize)]
+        struct Subscription<'a> {
+            id: &'a str,
+            method: &'a str,
+            params: Params<'a>,
+        }
+        let message = serde_json::to_string(&Subscription {
+            id: &id,
+            method: "userDataStream.subscribe.signature",
+            params: Params {
+                api_key: &credentials.key,
+                recv_window: 5000,
+                timestamp,
+                signature: &signature,
+            },
+        })
+        .expect("finite timestamp");
+        self.account.spot_subscription = None;
+        self.account.spot_heartbeat_id = None;
+        self.account.spot_subscribe_id = Some(id);
+        self.account.spot_subscribe_at = Some(cx.now);
+        cx.send(socket, message);
+    }
+    pub(crate) fn ping_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self
+            .account
+            .spot_subscribe_at
+            .is_some_and(|at| cx.now - at >= crate::SILENCE_LIMIT_MS)
+            || self
+                .account
+                .spot_heartbeat_at
+                .is_some_and(|at| cx.now - at >= crate::SILENCE_LIMIT_MS)
+        {
+            self.fail_spot_stream(cx, "acknowledgement timed out");
+            return;
+        }
+        let (Some(socket), Some(_)) = (self.private.socket, self.account.spot_subscription) else {
+            return;
+        };
+        if self.account.spot_heartbeat_id.is_some() {
+            return;
+        }
+        let id = self.next_spot_request_id("tealstreet-user-data-heartbeat");
+        cx.send(
+            socket,
+            format!(r#"{{"id":"{id}","method":"session.subscriptions"}}"#),
+        );
+        self.account.spot_heartbeat_id = Some(id);
+        self.account.spot_heartbeat_at = Some(cx.now);
+    }
+    fn fail_spot_stream(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
+        cx.log(
+            LogLevel::Error,
+            format!("Binance Spot user-data subscription {reason}"),
+        );
+        if let Some(socket) = self.private.socket {
+            cx.close(socket);
+            self.on_socket_closed(cx, Channel::Private, 4001);
+        }
+    }
+    fn on_spot_user_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        let Ok(envelope) = serde_json::from_str::<SpotEnvelope<'_>>(text) else {
+            return;
+        };
+        if let Some(id) = envelope.id {
+            if self.account.spot_subscribe_id.as_deref() == Some(id.as_str()) {
+                self.account.spot_subscribe_id = None;
+                self.account.spot_subscribe_at = None;
+                let Some(SpotReply::Subscription(subscription)) = envelope.result else {
+                    self.fail_spot_stream(cx, "rejected");
+                    return;
+                };
+                if envelope.status != Some(200) {
+                    self.fail_spot_stream(cx, "rejected");
+                    return;
+                }
+                self.account.spot_subscription = Some(subscription.subscription_id);
+                self.private_ready(cx);
+                self.account.account_version += 1;
+                self.account.order_version += 1;
+                self.account.orders_stale = true;
+                if !self.account.account_in_flight {
+                    self.fetch_account(cx);
+                }
+                if self.account.orders.is_none() {
+                    self.fetch_orders(cx);
+                }
+                self.ping_spot_account(cx);
+            } else if self.account.spot_heartbeat_id.as_deref() == Some(id.as_str()) {
+                self.account.spot_heartbeat_id = None;
+                self.account.spot_heartbeat_at = None;
+                let valid = envelope.status == Some(200)
+                    && matches!(envelope.result, Some(SpotReply::Subscriptions(ref subscriptions)) if subscriptions.iter().any(|s| Some(s.subscription_id) == self.account.spot_subscription));
+                if !valid {
+                    self.fail_spot_stream(cx, "is no longer active");
+                }
+            }
+            return;
+        }
+        if self.account.spot_subscription.is_none()
+            || envelope.subscription_id != self.account.spot_subscription
+        {
+            return;
+        }
+        let Some(event) = envelope.event else {
+            return;
+        };
+        match event.e.as_ref() {
+            "outboundAccountPosition" => {
+                self.account.account_version += 1;
+                for balance in event.balances {
+                    self.account.spot_balances.insert(
+                        balance.a.into_owned(),
+                        (num::parse(&balance.f), num::parse(&balance.l)),
+                    );
+                }
+                self.commit_spot_balance(cx);
+            }
+            "executionReport" => {
+                self.on_spot_order(cx, event);
+                self.schedule_orders_refresh(cx);
+            }
+            "eventStreamTerminated" => self.fail_spot_stream(cx, "terminated"),
+            _ => {}
+        }
+    }
+    fn on_spot_account_snapshot(&mut self, cx: &mut Cx<'_, Pending>, body: &str) {
+        match serde_json::from_str::<SpotAccount<'_>>(body) {
+            Ok(snapshot) => {
+                self.account.spot_balances = snapshot
+                    .balances
+                    .into_iter()
+                    .map(|b| {
+                        (
+                            b.asset.into_owned(),
+                            (num::parse(&b.free), num::parse(&b.locked)),
+                        )
+                    })
+                    .collect();
+                self.commit_spot_balance(cx);
+            }
+            Err(error) => cx.log(LogLevel::Error, format!("Binance Spot account: {error}")),
+        }
+    }
+    fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        let mut balance = Balance::default();
+        let mut coins = Vec::with_capacity(self.account.spot_balances.len());
+        let mut currencies = Vec::with_capacity(self.account.spot_balances.len());
+        for (asset, &(free, used)) in &self.account.spot_balances {
+            let price = self.asset_usd_price(cx.store, asset);
+            let total = free + used;
+            balance.free += free * price;
+            balance.used += used * price;
+            balance.total += total * price;
+            coins.push(CoinBalance {
+                base: asset.clone(),
+                amount: total,
+                notional: total * price,
+            });
+            currencies.push(CurrencyBalance {
+                currency: asset.clone(),
+                balance: Balance {
+                    free,
+                    used,
+                    total,
+                    upnl: 0.0,
+                },
+            });
+        }
+        coins.sort_by(|a, b| a.base.cmp(&b.base));
+        currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
+        cx.store.set_coin_balances(coins);
+        cx.store.set_currency_balances(currencies);
+        cx.store.set_balance(balance);
+    }
+    fn on_spot_order(&mut self, cx: &mut Cx<'_, Pending>, event: SpotEvent<'_>) {
+        if event.c.is_empty() || event.s.is_empty() {
+            return;
+        }
+        self.account.order_version += 1;
+        let Some(native) = event.i else {
+            return;
+        };
+        let id = if !event.original_client.is_empty()
+            && matches!(
+                event.status.as_ref(),
+                "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+            ) {
+            event.original_client.to_string()
+        } else {
+            event.c.to_string()
+        };
+        let key = (event.s.to_string(), native);
+        let client_key = (event.s.to_string(), id.clone());
+        if self
+            .account
+            .spot_client_native
+            .get(&client_key)
+            .is_some_and(|current| *current > native)
+        {
+            // An unquantified cancel-all can precede the old order's final fill,
+            // even after its caller ID has been reused for another native order.
+            let previous = self
+                .account
+                .native_executed
+                .get(&key)
+                .map_or(0.0, |(filled, _)| *filled);
+            let filled = num::parse(&event.z);
+            if self.account.unquantified_cancels.contains(&key)
+                && event.x == "TRADE"
+                && filled > previous
+                && num::parse(&event.l) > 0.0
+            {
+                cx.fill(Fill {
+                    order_id: id,
+                    symbol: event.s.to_string(),
+                    side: order_side(&event.side),
+                    price: num::parse(&event.last_price),
+                    amount: num::parse(&event.l),
+                });
+                self.account
+                    .native_executed
+                    .insert(key.clone(), (filled, true));
+                if event.status == "FILLED" {
+                    self.account.unquantified_cancels.remove(&key);
+                }
+            }
+            return;
+        }
+        let amount = num::parse(&event.q);
+        let filled = num::parse(&event.z);
+        let (previous, terminal) = self
+            .account
+            .native_executed
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let unquantified = self.account.unquantified_cancels.contains(&key);
+        if (terminal
+            && !(unquantified
+                && event.x == "TRADE"
+                && filled > previous
+                && num::parse(&event.l) > 0.0))
+            || filled < previous
+        {
+            return;
+        }
+        let terminal = terminal
+            || matches!(
+                event.status.as_ref(),
+                "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+            );
+        self.account.native_executed.insert(key, (filled, terminal));
+        let new_incarnation =
+            self.account.spot_client_native.insert(client_key, native) != Some(native);
+        if event.status == "NEW"
+            || ((new_incarnation || cx.store.order(&id).is_none())
+                && matches!(event.status.as_ref(), "PARTIALLY_FILLED" | "FILLED"))
+        {
+            let Some(kind) = order_type(&event.o) else {
+                return;
+            };
+            let price = num::parse(&event.p);
+            cx.store.upsert_order(Order {
+                id: id.clone(),
+                parent_id: None,
+                status: OrderStatus::Open,
+                symbol: event.s.to_string(),
+                kind,
+                side: order_side(&event.side),
+                price: if price > 0.0 {
+                    price
+                } else {
+                    num::parse(&event.stop_price)
+                },
+                amount,
+                filled,
+                remaining: (amount - filled).max(0.0),
+                reduce_only: false,
+                close: Some(false),
+                client_order_id: Some(id.clone()),
+                time_in_force: if event.o == "LIMIT_MAKER" {
+                    Some(TimeInForce::PostOnly)
+                } else {
+                    time_in_force(&event.f)
+                },
+                last_update: cx.now,
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: None,
+            });
+        }
+        if event.x == "TRADE" && filled > previous && num::parse(&event.l) > 0.0 {
+            // `p` is the limit price, which is zero on market orders; `L` is execution price.
+            cx.fill(Fill {
+                order_id: id.clone(),
+                symbol: event.s.to_string(),
+                side: order_side(&event.side),
+                price: num::parse(&event.last_price),
+                amount: num::parse(&event.l),
+            });
+        }
+        let now = cx.now;
+        cx.store.update_order(&id, |order| {
+            order.filled = filled;
+            order.remaining = (amount - filled).max(0.0);
+            order.last_update = now;
+        });
+        if unquantified && event.status != "FILLED" {
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
+        if event.status == "FILLED" {
+            cx.store.set_order_status(&id, OrderStatus::Closed);
+            self.account
+                .unquantified_cancels
+                .remove(&(event.s.to_string(), native));
+        }
+        if matches!(
+            event.status.as_ref(),
+            "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+        ) {
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
+    }
+}
+
+impl BinanceFutures {
+    pub(crate) fn spot_native_order_id(&self, symbol: &str, client: &str) -> Option<u64> {
+        self.account
+            .spot_client_native
+            .get(&(symbol.to_owned(), client.to_owned()))
+            .copied()
+    }
+
+    pub(crate) fn observe_unquantified_cancel(&mut self, symbol: &str, native: u64, filled: f64) {
+        self.observe_native_terminal(symbol, native, filled);
+        self.account
+            .unquantified_cancels
+            .insert((symbol.to_owned(), native));
+    }
+
+    pub(crate) fn fence_order_snapshots(&mut self) {
+        self.account.order_version += 1;
+    }
+
+    pub(crate) fn known_native_filled(&self, symbol: &str, native: u64) -> f64 {
+        self.account
+            .native_executed
+            .get(&(symbol.to_owned(), native))
+            .map_or(0.0, |(filled, _)| *filled)
+    }
+
+    pub(crate) fn observe_native_terminal(&mut self, symbol: &str, native: u64, filled: f64) {
+        let execution = self
+            .account
+            .native_executed
+            .entry((symbol.to_owned(), native))
+            .or_default();
+        execution.0 = execution.0.max(filled);
+        execution.1 = true;
+        self.account.order_version += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::venue_error;
+    use safe_cex_engine::Response;
+
+    #[test]
+    fn successful_http_status_does_not_hide_whitespace_formatted_binance_errors() {
+        for body in [
+            r#"{"code":-2010,"msg":"rejected"}"#,
+            "{ \"code\" : -2010, \"msg\": \"rejected\" }",
+        ] {
+            assert_eq!(
+                venue_error(&Response {
+                    status: 200,
+                    headers: "",
+                    body
+                }),
+                Some((-2010, "rejected".to_owned()))
+            );
+        }
+        assert_eq!(
+            venue_error(&Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":200,"msg":"success"}"#
+            }),
+            None
+        );
+        assert_eq!(
+            venue_error(&Response {
+                status: 200,
+                headers: "",
+                body: r#"{"assets":[]}"#
+            }),
+            None
+        );
     }
 }

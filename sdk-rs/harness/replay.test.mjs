@@ -747,3 +747,65 @@ test('production polling private startup prepares subscriptions before playback 
   logical.tape.prepareReadiness();
   assert.equal(logical.subscribed(),true);
 });
+
+test('production Binance modes retain raw auth and route-scoped generated identities before one-shot writes', () => {
+  const paths={binance:['https://fapi.binance.com','/fapi/v1/order'],binancepm:['https://papi.binance.com','/papi/v1/um/order'],binanceinverse:['https://dapi.binance.com','/dapi/v1/order'],binancespot:['https://api.binance.com','/api/v3/order']};
+  for(const [name,[origin,path]] of Object.entries(paths)) {
+    const url=origin+path,base={symbol:name==='binanceinverse'?'BTCUSD_PERP':'BTCUSDT',quantity:'7'};
+    const record={type:'http',method:'POST',url:url+'?'+new URLSearchParams(base),status:200,body:'{"clientOrderId":"$newClientOrderId"}'};
+    const tape=productionTapeFor(name,[record]);
+    assert(tape.responseStore,name+' must use shared typed Responses');
+    const signed=(fields,headers={'X-MBX-APIKEY':'replay-key'},target=url,method='POST')=>{
+      const params=new URLSearchParams({...base,...fields,timestamp:String(Date.now()),recvWindow:'5000'});
+      const query=params.toString();
+      return tape.respond(method,target+'?'+query+'&signature='+createHmac('sha256','replay-secret').update(query).digest('hex'),undefined,headers);
+    };
+    const valid='x-s3vFFRQpGenerated';
+    assert.throws(()=>signed({newClientOrderId:valid},[['X-MBX-APIKEY','wrong'],['x-mbx-apikey','replay-key']]),/Duplicate request header/);
+    assert.equal(tape.missingWrites,1);
+    for(const newClientOrderId of ['arbitrary','',valid+'\n',valid+'\r',valid+'\u2028','x-s3vFFRQp'+'x'.repeat(40)]) {
+      assert.equal(signed({newClientOrderId}).status,599,name+JSON.stringify(newClientOrderId));
+      assert.equal(tape.missingWrites,1);
+    }
+    assert.equal(signed({newClientOrderId:valid,quantity:'8'}).status,599);
+    const response=signed({newClientOrderId:valid});
+    assert.equal(response.status,200,name);
+    assert.deepEqual(JSON.parse(response.body),{clientOrderId:valid});
+    assert.equal(tape.missingWrites,0);
+    assert.equal(signed({newClientOrderId:valid}).status,599);
+    const caller='x-s3vFFRQpCaller';
+    const callerTape=productionTapeFor(name,[{type:'command',op:'placeOrders',orders:[{clientOrderId:caller}]},{...record,url:record.url+'&newClientOrderId='+caller}]);
+    const sendCaller=(id)=>{
+      const query=new URLSearchParams({...base,newClientOrderId:id,timestamp:String(Date.now()),recvWindow:'5000'}).toString();
+      return callerTape.respond('POST',url+'?'+query+'&signature='+createHmac('sha256','replay-secret').update(query).digest('hex'),undefined,{'X-MBX-APIKEY':'replay-key'});
+    };
+    assert.equal(sendCaller(valid).status,599,name+' caller must remain exact');
+    assert.equal(callerTape.missingWrites,1);
+    assert.equal(sendCaller(caller).status,200);
+  }
+});
+
+test('production Binance cancellation targets, duplicate queries and batch JSON value types stay exact', () => {
+  const name='binanceinverse',url='https://dapi.binance.com/dapi/v1/order';
+  const base={symbol:'BTCUSD_PERP',orderId:'123'};
+  const tape=productionTapeFor(name,[{type:'http',method:'DELETE',url:url+'?'+new URLSearchParams(base),status:200,body:'{}'}]);
+  const send=(extra='')=>{
+    const query=new URLSearchParams({...base,timestamp:String(Date.now()),recvWindow:'5000'}).toString()+extra;
+    return tape.respond('DELETE',url+'?'+query+'&signature='+createHmac('sha256','replay-secret').update(query).digest('hex'),undefined,{'X-MBX-APIKEY':'replay-key'});
+  };
+  assert.equal(send('&newClientOrderId=x-s3vFFRQpExtra').status,599);
+  assert.throws(()=>send('&orderId=123'),/Duplicate Binance query/);
+  assert.equal(tape.missingWrites,1);
+  assert.equal(send().status,200);
+  const batchUrl='https://dapi.binance.com/dapi/v1/batchOrders';
+  const order={symbol:'BTCUSD_PERP',quantity:'7'};
+  const batch=productionTapeFor(name,[{type:'http',method:'POST',url:batchUrl+'?batchOrders='+encodeURIComponent(JSON.stringify([order])),status:200,body:'[]'}]);
+  const post=(value)=>{
+    const query=new URLSearchParams({batchOrders:JSON.stringify([{...order,newClientOrderId:value}]),timestamp:String(Date.now()),recvWindow:'5000'}).toString();
+    return batch.respond('POST',batchUrl+'?'+query+'&signature='+createHmac('sha256','replay-secret').update(query).digest('hex'),undefined,{'X-MBX-APIKEY':'replay-key'});
+  };
+  for(const value of [123,null,true,[],['x-s3vFFRQpGenerated'],{},'x-s3vFFRQpBad\n']) {
+    assert.equal(post(value).status,599);assert.equal(batch.missingWrites,1);
+  }
+  assert.equal(post('x-s3vFFRQpGenerated').status,200);
+});

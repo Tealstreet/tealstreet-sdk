@@ -159,6 +159,23 @@ fn nonzero(text: &str) -> Option<f64> {
 
 impl BinanceFutures {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+        if self.is_spot()
+            || (self.is_inverse()
+                && !matches!(
+                    read,
+                    Read::PublicTrades { .. } | Read::OrderByClientId { .. }
+                ))
+        {
+            if matches!(
+                read,
+                Read::OrderByClientId { .. } | Read::PublicTrades { .. }
+            ) {
+                cx.done(command, Err("Binance Spot query is not supported".into()));
+            } else {
+                cx.done(command, Ok("[]".into()));
+            }
+            return;
+        }
         if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
             cx.done(command, Ok("[]".into()));
             return;
@@ -251,7 +268,7 @@ impl BinanceFutures {
             }
             Read::PublicTrades { symbol, limit } => {
                 let limit = limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT);
-                let path = format!("/fapi/v1/trades?symbol={symbol}&limit={limit}");
+                let path = format!("{}?symbol={symbol}&limit={limit}", self.paths.trades);
                 self.history
                     .reads
                     .insert(command, InFlight::Trades { symbol });

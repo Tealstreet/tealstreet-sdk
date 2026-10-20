@@ -1605,3 +1605,53 @@ Investigating awaited async fullGC at the SAME existing collection point,
 with unchanged quiet/deadline/formula/thresholds. Fresh-process controls must
 prove improvement before source changes or any gate retry. Sequential probes
 whose sync baseline was already clean do not establish causality.
+
+Quota-reset resume: checked cleanstatus, current a2a7498287 and PR1309 OPEN
+against feat/rust-rewrite (remotehead6b2d; old WOO failure alreadyfixedlocally).
+Fetched and began merge of pinned0063068241646a542ca0b936f75cb5ec6de2907c,
+which supersedes planned e391 with nativeframe-server, consumer cutover and
+live-smoke ports as well as Binancevariants. ActualMERGE_HEAD verified; no
+stash/rebase/master. Native owner handles engine/venues/crypto/nativehost,
+hostowner WASM+SDK, harnessowner scripts/workflow+collector. Preserve all
+prior guards and landing structure; incoming native transport cancellation
+must retain our16MiB raw/decompression bounds. LocalWASM fullbooks remain
+default; bookdelta producer is native opt-in. New shared command decoder
+replaces duplicate host parsing while retaining all venue command contracts.
+
+Fresh async-FIRST collection control completed: same import-only script with
+awaited asyncmajor GC baseline22,696,824→22,751,536 at30s (+54,712), backing
+buffers constant; prior sync control -2,873,024. Independent review approves
+bounded helper fix in principle; implement awaitcollection at SAME point,
+same100ms quiet/1s totaldeadline (including rejected/hungcollectors), no
+formula, negative-total guard, peak, baseline location or threshold changes.
+Revalidate metrics after merged source stabilizes rather than continuing the
+old failed batch across changing source. Root combined artifact and repository
+quality checks now running; all final gate claims await rebuilt source.
+
+Pinned006 integration source released after owner reviews: 2,473 workspace
+native tests /198groups PASS, default engine92 separately PASS; bans/global
+format/strict native-all-target and WASM clippy PASS. Combined26-venue build
+PASS; host89/89 and harness737/737 PASS. Root44typecheck/28lint tasks PASS;
+root tests remain running. Actual Binance USD-M/Spot/COIN-M/PM private TS
+fixtures all match writes/auth/socket contracts (14/8/6/6 frames,3commands
+each). Incoming consumer test encoder corrected to the frozen legacy currency
+format; production BCM1 bytes unchanged. Independent native/SDK review PASS;
+remaining shared harness review is in progress.
+
+Fresh combined WASM suite384/385 PASS: Paradex realVenue consumer helper
+chooses books inconsistent with recorded subscription acknowledgements; fix
+the helper rather than weakening protocol validation. Original CoinbaseSpot
+ES256 TS-only producer still has negative total AFTER async collector fix:
+heap28,336,864→26,012,576 (-2,324,288), buffers+32, net-2,324,256. Raw proof
+/tmp/bitunix-006-coinbasespot-ES256-private-ts.json. Thus helper correctness
+and import-only control do not prove the actual producer fixed. Retain this
+failure and investigate real loader lifetimes; no actual gate retries,
+negative-total waiver, quiet/deadline changes or warmup added.
+
+Merge checkpoint: all conflicts resolved and reviewed. Paradex cutover's
+fresh failing case now PASS after actual captured-book subscriptions and
+ordered validated waits; scoped typecheck/lint PASS, full44case replay pending.
+Independent shared harness review67+2PASS, no new source findings. Root SDK
+test-ci7349/507files PASS; duplicate test-unit/remaining repository tasks still
+running. Native frame-wire1/1 and mock live-smoke9/9 PASS. Memory diagnosis
+continues separately; this checkpoint does not claim final replay gates PASS.

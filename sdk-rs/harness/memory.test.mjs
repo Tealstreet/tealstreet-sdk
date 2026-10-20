@@ -114,3 +114,90 @@ test('settled samples use real time when replay replaces global timers', async (
   }
 });
 }
+
+test('pending collection completes before any pause, sample or published result', async () => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const events = [];
+  let time = 0, collections = 0, published = false;
+  const result = settledMemory({
+    collect() { events.push('collect'); return ++collections === 1 ? pending : undefined; },
+    pause: async () => { events.push('pause'); time += 10; },
+    sample() { events.push('sample'); return { arrayBuffers: 42, heapUsed: 1000 }; },
+    now: () => time, quietMs: 0,
+  }).then((memory) => { published = true; return memory; });
+  await new Promise(setImmediate);
+  assert.deepEqual(events, ['collect']);
+  assert.equal(published, false);
+  release();
+  assert.deepEqual(await result, { arrayBuffers: 42, heapUsed: 1000 });
+  assert.deepEqual(events, ['collect', 'pause', 'sample', 'collect', 'pause', 'sample', 'collect', 'pause', 'sample']);
+});
+
+test('default major collector is awaited across its asynchronous task boundary', async () => {
+  const original = globalThis.gc;
+  let pending = false, completed = 0;
+  let time = 0;
+  globalThis.gc = async (options) => {
+    assert.deepEqual(options, { type: 'major', execution: 'async' });
+    pending = true;
+    await new Promise(setImmediate);
+    completed++;
+    pending = false;
+  };
+  try {
+    await settledMemory({
+      pause: async () => { assert.equal(pending, false); assert(completed > 0); time += 10; },
+      sample: () => { assert.equal(pending, false); return { arrayBuffers: 42, heapUsed: 1000 }; },
+      now: () => time, quietMs: 0,
+    });
+    assert.equal(completed, 3);
+  } finally { if (original === undefined) delete globalThis.gc; else globalThis.gc = original; }
+});
+
+test('collector rejection propagates unchanged and clears the real deadline timer', async () => {
+  const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
+  const before = timers();
+  const failure = new Error('collection failed');
+  let sampled = false;
+  await assert.rejects(settledMemory({
+    collect: async () => { await new Promise(setImmediate); throw failure; },
+    sample: () => { sampled = true; return { arrayBuffers: 0 }; },
+    timeoutMs: 10_000,
+  }), (error) => error === failure);
+  assert.equal(sampled, false);
+  assert.equal(timers(), before);
+});
+
+test('a hung collector shares the total real deadline and cannot sample after late completion', async () => {
+  const original = globalThis.setTimeout;
+  let release, sampled = 0, calls = 0;
+  const pending = new Promise((resolve) => { release = resolve; });
+  globalThis.setTimeout = () => { throw new Error('virtual timer cannot own collection deadline'); };
+  try {
+    const started = performance.now();
+    await assert.rejects(settledMemory({
+      collect: () => { calls++; return pending; },
+      sample: () => { sampled++; return { arrayBuffers: 0 }; },
+      timeoutMs: 30,
+    }), /Backing-buffer memory did not settle/);
+    assert(performance.now() - started < 500, 'hung collection exceeded its bounded deadline');
+    release();
+    await new Promise(setImmediate);
+    assert.equal(sampled, 0);
+    assert.equal(calls, 1);
+  } finally { globalThis.setTimeout = original; }
+});
+
+test('collection duration consumes the existing budget instead of restarting it', async () => {
+  let time = 0, sampled = 0, pauses = 0;
+  await assert.rejects(settledMemory({
+    collect: async () => { time += 40; },
+    pause: async () => { pauses++; time += 10; },
+    sample: () => { sampled++; return { arrayBuffers: 42 }; },
+    now: () => time, timeoutMs: 100,
+  }), /Backing-buffer memory did not settle/);
+  assert.equal(time, 140);
+  assert.equal(pauses, 2);
+  assert.equal(sampled, 2);
+});

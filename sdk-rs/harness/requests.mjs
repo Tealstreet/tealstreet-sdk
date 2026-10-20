@@ -259,7 +259,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (options.phemexProtocol && ['server.ping','server.pong'].includes(method)) return undefined;
-  if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
+  if (['ping', 'pong', 'heartbeat'].includes(method) || (method === 'list_subscriptions' && /\/private\/ws$/.test(new URL(url).pathname) && Object.keys(message).every((key) => ['id','method'].includes(key)))) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;

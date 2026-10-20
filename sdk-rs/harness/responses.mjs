@@ -4,9 +4,9 @@ import { isRead } from './requests.mjs';
 export const implementationRecords = (records, impl) => {
   if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
   return records.filter((record) => {
-    if (record.type !== 'http' || record.impl === undefined) return true;
-    if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown HTTP record implementation');
-    if (impl === undefined) throw new Error('Tagged HTTP records require a replay implementation');
+    if (record.impl === undefined) return true;
+    if (!['ts', 'rust'].includes(record.impl)) throw new Error(`Unknown ${record.type === 'http' ? 'HTTP' : 'tape'} record implementation`);
+    if (impl === undefined) throw new Error(`Tagged ${record.type === 'http' ? 'HTTP' : 'tape'} records require a replay implementation`);
     return record.impl === impl;
   });
 };
@@ -64,7 +64,7 @@ export class Responses {
       const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
       const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw ?? {};
       responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g,
-        (_, field) => JSON.stringify(sent[field] ?? null, (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
+        (_, field) => JSON.stringify(sent[field] ?? new URL(url).searchParams.get(field), (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
     }
     if (responseBody.includes('"$request:')) {
       const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;

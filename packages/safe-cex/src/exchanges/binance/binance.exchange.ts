@@ -1475,12 +1475,12 @@ export class BinanceExchange extends BaseExchange {
           leverage,
         });
 
-        this.store.updatePositions([
-          [{ id: createPositionId(symbol, PositionSide.Long) }, { leverage }],
-          [{ id: createPositionId(symbol, PositionSide.Short) }, { leverage }],
-        ]);
+        this.store.updatePositions(
+          this.store.positions.filter((p) => p.symbol === symbol).map((p) => [{ id: p.id }, { leverage }]),
+        );
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
       }
     }
   };

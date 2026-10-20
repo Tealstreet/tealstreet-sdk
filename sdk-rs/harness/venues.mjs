@@ -1,3 +1,4 @@
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols, binanceRequestOptions } from './binance-protocol.mjs';
 import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
 import { polymarket } from './polymarket.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
@@ -1564,17 +1565,43 @@ export const VENUES = {
       }
     },
   },
-  binance: {
-    rust: 'binance',
-      ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
-    /** Depth topics are registered once each book subscription reaches the socket. */
+  ...Object.fromEntries([
+    ['binance', 'BinanceExchange'], ['binancepm', 'BinancePMExchange'],
+    ['binanceinverse', 'BinanceInverseExchange'], ['binancespot', 'BinanceSpotExchange'],
+  ].map(([name, className]) => [name, {
+    rust: name,
+    family: 'binance',
+    generatedId: () => false,
+    preserveQueryFields: ['requestId'],
+    requestOptions: binanceRequestOptions,
+    compareWriteOrder: true,
+    requestKey: typedRequest,
+    validateRequest: validateBinanceRequest,
+    subscriptionMessage: binanceSubscriptionMessage,
+    recordTickerSymbols: binanceTickerSymbols,
+    ts: { module: `${root}/binance/${name}.exchange.ts`, className, name },
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
-      count,
-    privateSocket: '/private/ws',
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+    privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
+    ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancespot' ? {
+      compareFillPrices: true,
+      compareCoins: true,
+      compareBalanceCurrencies: true,
+      // Wire currencies carry native numeric balances, without TS's opaque info.
+      tsBalanceCurrencies: (currencies) => Object.fromEntries(Object.entries(currencies).map(([asset, row]) =>
+        [asset, { free: row.free, used: row.used, total: row.total, upnl: row.upnl }])),
+    } : {}),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
-  },
+    ...(name === 'binancespot' ? {
+      bootstrapPrivateFromTape: true,
+      socketRequest: spotSocketRequest,
+      socketResponse: spotSocketResponse,
+      createSocketAudit: createBinanceSpotSocketAudit,
+      prepareTs: prepareBinanceSpot,
+    } : {}),
+  }])),
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
   bybitspot: bybit('bybitspot', 'BybitSpotExchange'),

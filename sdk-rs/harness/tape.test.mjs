@@ -3475,3 +3475,38 @@ test('Coinbase same-URL sockets retain exact channel and product scope across ba
   await assert.rejects(tape.socketFor(url, frame('l2_data', 'BTC-USD').text), /replay timeout/);
   tape.close(b);
 });
+
+test('implementation tags independently scope websocket requests and replies', () => {
+  const records = ['ts', 'rust'].flatMap((impl) => [
+    { impl, type: 'ws-send', url: 'wss://example.test/ws', text: JSON.stringify({id: impl, method: impl}) },
+    { impl, type: 'ws', t: 1, url: 'wss://example.test/ws', text: JSON.stringify({id: impl, status: 200}) },
+  ]);
+  const venue = { socketRequest: (message) => ({id: message.id, key: message.method}) };
+  for (const impl of ['ts', 'rust']) {
+    const tape = new Tape(records, venue, true, 100, impl);
+    assert.equal(tape.frames.length, 1);
+    assert.equal(JSON.parse(tape.frames[0].text).id, impl);
+    assert.deepEqual([...tape.recordedSocketRequests.values()], [impl]);
+  }
+  assert.throws(() => new Tape(records, venue), /require a replay implementation/);
+  assert.throws(() => new Tape([{...records[0], impl:'typo'}], venue, true, 100, 'rust'), /Unknown tape record/);
+});
+
+test('live-smoke bootstrap records preserve chronology, count and ticks while enabling readiness', async () => {
+  const url='wss://example.test/ws',seen=[];
+  let ready;
+  const acknowledged=new Promise(resolve=>{ready=resolve;});
+  const tape=new Tape([
+    {type:'meta',liveSmoke:true},
+    {type:'open',t:0,url,socket:0,bootstrap:true},
+    {type:'ws',t:10,url,socket:0,text:'ack',bootstrap:true},
+    {type:'command',t:20,op:'noop'},
+  ],{},true,200);
+  tape.connect(url,()=>seen.push('opened'),()=>{seen.push('ack:'+tape.time);ready();});
+  const frames=await tape.play(t=>seen.push('tick:'+t),()=>acknowledged,()=>{seen.push('command');return[];});
+  assert.equal(frames,3);
+  assert.equal(seen.filter(x=>x==='opened').length,1);
+  assert.equal(seen.filter(x=>x==='ack:10').length,1);
+  assert(seen.indexOf('tick:0')<seen.indexOf('ack:10'));
+  assert.deepEqual(seen.filter(x=>x.startsWith('tick:')),['tick:0','tick:10','tick:20']);
+});

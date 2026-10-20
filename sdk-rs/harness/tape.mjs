@@ -442,6 +442,8 @@ export class Tape {
     this.explicitOpens = venue.explicitOpens ?? false;
     this.legacyLatest = venue.legacyLatest ?? true;
     this.venue = venue;
+    this.liveSmoke = records.some((record) => record.type === 'meta' && record.liveSmoke === true);
+    this.bootstrapFrame = (frame) => venue.bootstrapFrame?.(frame) || (this.liveSmoke && ['open', 'close', 'ws'].includes(frame.type) && frame.bootstrap === true);
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.books = books;
@@ -454,7 +456,9 @@ export class Tape {
     this.recordedSocketRequests = new Map();
     this.recordedSocketQueues = new Map();
     for (const record of records.filter((r) => r.type === 'ws-send')) {
-      const request = venue.socketRequest?.(JSON.parse(record.text));
+      let message;
+      try { message = JSON.parse(record.text); } catch { continue; /* Literal heartbeat. */ }
+      const request = venue.socketRequest?.(message);
       if (!request) continue;
       const scope = `${this.canonicalize(record.url)} ${record.connection ?? record.socket ?? 0}`;
       const key = `${scope} ${request.id}`;
@@ -1186,7 +1190,7 @@ export class Tape {
         if (fallbackError) throw fallbackError;
         if (!fallbackDone) return false;
       }
-      if ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions) return false;
+      if ((this.audit && !this.audit.ready(!this.venue.bootstrapPrivateFromTape)) || this.pendingStartupSubscriptions) return false;
       if (this.venue.startupTopics) {
         expectedStartupTopics ??= this.venue.startupTopics(this.records, this.books).map((arg) => JSON.stringify(stable(arg)));
         if (!expectedStartupTopics.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)))) return false;
@@ -1214,14 +1218,14 @@ export class Tape {
           startupCeiling);
         return;
       }
-      if (this.venue.bootstrapFrame) for (const frame of this.frames.filter((record) => this.venue.bootstrapFrame(record))) {
-        if (frame.type !== 'ws') throw new Error('Invalid bootstrap record');
+      if (this.venue.bootstrapFrame && !this.liveSmoke) for (const frame of this.frames.filter((record) => this.bootstrapFrame(record))) {
+        if (!['open', 'close', 'ws'].includes(frame.type)) throw new Error('Invalid bootstrap record');
         await this.deliver(frame, true);
         this.startupDelivered.add(frame);
         await new Promise(setImmediate);
       }
       await ready(!this.venue.bootstrapPrivateFromTape);
-      while (this.audit && !this.audit.ready()) await new Promise((r) => realTimeout(r, 5));
+      while (this.audit && !this.audit.ready(!this.venue.bootstrapPrivateFromTape)) await new Promise((r) => realTimeout(r, 5));
       while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));
       if (this.venue.startupTopics) {
         const expected = this.venue.startupTopics(this.records, this.books).map((arg) => JSON.stringify(stable(arg)));
@@ -1239,7 +1243,7 @@ export class Tape {
       }
     })(), 'Replay startup', this.timeoutMs).then(() => { startupReady = true; });
     const recordedLifecycle = this.records.some((r) => r.type === 'connect');
-    const inlineStartup = logicalStartup || this.venue.rust === 'bitunix' || recordedLifecycle;
+    const inlineStartup = logicalStartup || this.venue.rust === 'bitunix' || recordedLifecycle || this.liveSmoke;
     if (!inlineStartup) await ensureReady();
     else if (!logicalStartup) {
       // Explicit opens can be prerequisites of readiness. Keep startup timers

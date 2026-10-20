@@ -1,4 +1,4 @@
-import { setTimeout as realTimeout } from 'node:timers';
+import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 
 // Node accounts WebAssembly linear memory separately from arrayBuffers.
 // Received frame buffers still belong to JS and must count alongside its heap.
@@ -29,9 +29,11 @@ export const memoryMetricErrors = (metrics) => {
   return errors;
 };
 
-// Immediate-only samples can agree before delayed backing-store cleanup runs.
+// Async major GC runs at a clean task boundary; synchronous GC can retain dead
+// loader objects through conservative stack roots. Backing stores still need
+// the same quiet window after collection completes.
 export const settledMemory = async ({
-  collect = () => globalThis.gc?.(),
+  collect = () => globalThis.gc?.({ type: 'major', execution: 'async' }),
   sample = () => process.memoryUsage(),
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
@@ -42,19 +44,31 @@ export const settledMemory = async ({
   let previous;
   let stableSince = now();
   let stable = 0;
-  while (now() <= deadline) {
-    collect();
-    await pause();
-    const memory = sample();
-    const time = now();
-    if (time > deadline) break;
-    if (memory.arrayBuffers === previous) stable++;
-    else {
-      stable = 0;
-      stableSince = time;
+  let stopped = false;
+  let timer;
+  const failure = () => new Error('Backing-buffer memory did not settle');
+  const expired = new Promise((_, reject) => {
+    timer = realTimeout(() => { stopped = true; reject(failure()); }, timeoutMs);
+  });
+  const run = async () => {
+    while (!stopped && now() <= deadline) {
+      await collect();
+      if (stopped || now() > deadline) break;
+      await pause();
+      if (stopped || now() > deadline) break;
+      const memory = sample();
+      const time = now();
+      if (time > deadline) break;
+      if (memory.arrayBuffers === previous) stable++;
+      else {
+        stable = 0;
+        stableSince = time;
+      }
+      if (stable >= 2 && time - stableSince >= quietMs) return memory;
+      previous = memory.arrayBuffers;
     }
-    if (stable >= 2 && time - stableSince >= quietMs) return memory;
-    previous = memory.arrayBuffers;
-  }
-  throw new Error('Backing-buffer memory did not settle');
+    throw failure();
+  };
+  try { return await Promise.race([run(), expired]); }
+  finally { stopped = true; realClearTimeout(timer); }
 };

@@ -1,3 +1,5 @@
+import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
+import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 // The rewrite's merge gate for one venue: replay a tape through TS and Rust,
 // require identical Store output and order books, and require Rust to use
 // less CPU and less retained memory. Exits non-zero on any failure.
@@ -29,6 +31,10 @@ const { values } = parseArgs({
 const outDir = `sdk-rs/harness/out/${values.venue}-${values.tape.split('/').at(-1).replaceAll('.', '-')}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
+const rawTape = readFileSync(values.tape);
+const smokeResult = assertLiveSmokeComplete((values.tape.endsWith('.gz') ? gunzipSync(rawTape) : rawTape).toString('utf8').split('\n').filter(Boolean).map(JSON.parse));
+if (smokeResult) values.books = smokeResult.symbol;
+
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
@@ -36,7 +42,9 @@ const replay = (impl, run) => {
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000, env: { ...process.env, ESBUILD_WORKER_THREADS: '0' } });
   if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
-  return JSON.parse(readFileSync(out, 'utf8'));
+  const output = JSON.parse(readFileSync(out, 'utf8'));
+  if (smokeResult && (!Array.isArray(output.commands) || output.commands.length !== smokeResult.commands.length || output.commands.some((result) => !result || !Object.hasOwn(result, 'ok') || Object.hasOwn(result, 'error')))) throw new Error(`${impl} live-smoke replay did not successfully complete every lifecycle command`);
+  return output;
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
@@ -207,6 +215,39 @@ const fixBackpack = (ts) => {
     ts.account.fills = fills;
 
 };
+// Spot aggregate !ticker@arr/!bookTicker streams were retired; the TS replay
+// adapter sends documented per-symbol ticker shards and uses TS's own handlers.
+// Signature-only subscriptions use session.subscriptions, not session.status.
+// COIN-M's documented fixes also have native regression proofs: exact split
+// totals, plain-trigger/caller-ID whole-batch rejection, post-only amendment,
+// cumulative-fill/terminal replay fences and malformed openOrders retention.
+// TS cancel-all marks already FILLED rows canceled; use explicit tape events.
+// Other documented Binance variant fixes have native regression proofs:
+// - TS split lots divide the whole request and can round away quantity;
+//   Rust sends max-size lots plus the exact native-unit remainder.
+// - Spot attached stops inherit entry timeInForce and may exceed max quantity;
+//   Rust removes incompatible fields and splits every protective leg.
+// - Spot drops reduceOnly/close and plain-order triggerPrice; COIN-M also
+//   drops plain-order triggerPrice. Rust rejects before any batch write.
+// - COIN-M overrides silently drop caller IDs despite the base unsupported
+//   contract; Rust rejects the whole batch before placing an earlier order.
+// - TS cancel/replace loses post-only TIF; Rust retains the native semantics.
+// - Spot cancel executionReport.C identifies the original client order; TS
+//   instead targets c, which can be the cancellation request's client ID.
+// - Spot/COIN-M duplicate cumulative executions can emit fills again and
+//   stale NEW events reopen terminal orders; Rust fences by native order ID.
+// - COIN-M malformed openOrders responses become authoritative empty in TS;
+//   Rust preserves the previous order state and retries reconciliation.
+// - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its
+//   native amount with USD0 until a real mark/last price is available.
+// - Tiny/negative inverse quantities can round to zero and become full
+//   position stops in TS; Rust requires zero input or explicit close intent.
+// - Spot/COIN-M cancel-replace reuses original total quantity after fills,
+//   accepts unproven cancel bodies and can overwrite Filled with Canceled.
+//   Rust verifies native acknowledgements, then recomputes remaining size;
+//   rejected/ambiguous cancels and filled orders never place a replacement.
+// TS reports resting executionReport.p instead of this trade's L.
+
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'blofin') {
     // TS can retain the zero-size placeholder's margin. Derive the repair
@@ -535,6 +576,8 @@ const fixCryptocomAccount = (account) => {
 for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
+  if (values.venue === 'binancespot') fixBinanceSpotFills(ts.account, tape);
+  if (['binancespot','binanceinverse'].includes(values.venue)) fixBinanceFilledStatus(ts.account, tape, values.venue === 'binancespot');
   if (values.venue === 'kraken') fixKrakenOutput(ts, tape);
   if (venue.family === 'coinbase') fixCoinbase(ts, tape);
   if (values.venue === 'phemex') {

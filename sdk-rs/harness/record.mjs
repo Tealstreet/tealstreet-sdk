@@ -43,6 +43,7 @@ if (policy.replayOptions || options.endpoints) write({ type: 'config', options: 
 
 const live = nativeTransport();
 const connections = new Map();
+const tickerSymbols = new Set();
 const closedUrls = new Set();
 const recording = {
   ...live,
@@ -69,6 +70,7 @@ const recording = {
       },
       onMessage: (text) => {
         frames++;
+        for (const symbol of venue.recordTickerSymbols?.(text) ?? []) tickerSymbols.add(symbol);
         write({ type: 'ws', url, connection, socket: connection, text });
         handlers.onMessage(text);
       },
@@ -148,7 +150,7 @@ const stop = () => {
   host.dispose();
   tape.end(() => {
     console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
-    process.exit(recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
+    process.exit((!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
   });
 };
 const duration = Number(values.seconds) * 1000;
