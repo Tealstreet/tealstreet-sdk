@@ -329,10 +329,10 @@ fn a_quiet_socket_is_pinged_and_a_silent_one_reconnected() {
         "/v5/public/linear",
         r#"{"success":true,"ret_msg":"pong","conn_id":"465772b1-7630-4fdc-a492-e003e6f0f260","req_id":"","op":"ping"}"#,
     );
-    h.advance(20_000.0);
+    h.advance(19_999.0);
     assert!(!h.closed.contains(&socket), "the pong kept it alive");
-    h.advance(5_000.0);
+    h.advance(1.0);
     assert!(h.closed.contains(&socket));
-    h.advance(1_000.0);
+    h.advance(500.0);
     assert_ne!(h.socket("/v5/public/linear"), Some(socket));
 }

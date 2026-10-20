@@ -693,3 +693,40 @@ fn inverse_position_uses_native_mark_before_last_when_the_ticker_mark_is_cold() 
     assert_eq!(inverse.notional, 1000.0);
     assert_eq!(inverse.contracts, 0.01);
 }
+
+#[test]
+fn each_category_socket_is_supervised_on_its_own() {
+    let mut h = ready(false);
+    let socket = |h: &Harness, category: &str| h.socket(&format!("public/{category}")).unwrap();
+    let [linear, inverse, option] = ["linear", "inverse", "option"].map(|c| socket(&h, c));
+    let opened = h.now;
+    for _ in 0..19 {
+        h.advance(1_000.0);
+        h.message(
+            "public/inverse",
+            r#"{"topic":"tickers.BTCUSD","type":"delta","data":{"symbol":"BTCUSD","lastPrice":"70001"}}"#,
+        );
+    }
+    h.advance(opened + 20_000.0 - h.now);
+    assert!(h.closed.contains(&linear) && h.closed.contains(&option));
+    assert!(
+        !h.closed.contains(&inverse),
+        "inverse traffic kept it alive"
+    );
+    h.advance(500.0);
+    let fresh = socket(&h, "linear");
+    assert_ne!(fresh, linear);
+    assert_ne!(socket(&h, "option"), option);
+    assert_eq!(socket(&h, "inverse"), inverse);
+    h.event(Event::WsOpened { socket: fresh });
+    h.advance(100.0);
+    let sent: Vec<_> = h.sent.iter().filter(|(s, _)| *s == fresh).collect();
+    assert!(
+        sent.iter()
+            .any(|(_, text)| text.contains("tickers.BTCUSDT"))
+    );
+    assert!(
+        sent.iter()
+            .all(|(_, text)| !text.contains("tickers.BTCUSD\""))
+    );
+}

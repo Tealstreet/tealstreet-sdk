@@ -1,7 +1,8 @@
 //! Drives a Binance engine through scripted responses and frames.
 #![allow(dead_code)]
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, RequestId, Response,
+    SocketId, TimerId,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options};
 
@@ -37,8 +38,14 @@ impl Harness {
     }
 
     pub fn started(options: Options) -> Self {
+        Self::started_with_policy(options, PublicFeedPolicy::Direct)
+    }
+
+    pub fn started_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
+        let mut engine = Engine::new(BinanceFutures::new(options));
+        engine.set_public_feed_policy(policy).unwrap();
         let mut harness = Self {
-            engine: Engine::new(BinanceFutures::new(options)),
+            engine,
             now: 1_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),

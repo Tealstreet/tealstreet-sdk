@@ -449,7 +449,7 @@ impl BinanceFutures {
         let account = &mut self.account;
         if account.listen_key_timer == Some(timer) {
             account.listen_key_timer = None;
-            if self.private.socket.is_none() && self.private.reconnect.is_none() {
+            if self.private.socket.is_none() && !self.private.supervisor.is_waiting() {
                 self.request_listen_key(cx);
             }
         } else if account.keepalive_timer == Some(timer) {

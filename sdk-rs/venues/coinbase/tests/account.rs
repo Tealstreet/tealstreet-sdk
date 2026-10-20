@@ -21,6 +21,10 @@ struct Session {
     kind: &'static str,
     positions: Option<String>,
     logs: Vec<String>,
+    sends: Vec<(SocketId, String)>,
+    // Private sockets only; the unopened public feed has its own supervisor.
+    closes: Vec<SocketId>,
+    privates: Vec<SocketId>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -43,6 +47,9 @@ impl Session {
             kind,
             positions: None,
             logs: vec![],
+            sends: vec![],
+            closes: vec![],
+            privates: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -69,10 +76,15 @@ impl Session {
                 Action::SetTimer { timer, at_ms } => self.timers.push((at_ms, timer)),
                 Action::ClearTimer { timer } => self.timers.retain(|(_, t)| *t != timer),
                 Action::WsConnect { socket, url, .. } if url.contains("ws-user") => {
-                    self.private = Some(socket)
+                    self.private = Some(socket);
+                    self.privates.push(socket)
                 }
                 Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
                     self.logs.push(message.to_string())
+                }
+                Action::WsSend { socket, text } => self.sends.push((socket, text)),
+                Action::WsClose { socket } if self.privates.contains(&socket) => {
+                    self.closes.push(socket)
                 }
                 _ => {}
             }
@@ -1030,4 +1042,246 @@ fn skipped_position_row_beside_a_mapped_row_does_not_duplicate_the_position() {
             .filter(|p| p.symbol == "BTC-PERP-INTX")
             .count();
     assert_eq!(held, 1);
+}
+
+impl Session {
+    fn event(&mut self, event: Event<'_>) -> Vec<(f64, TimerId)> {
+        let before: Vec<_> = self.timers.iter().map(|(_, t)| *t).collect();
+        self.e.handle(self.now, event);
+        self.collect();
+        self.timers
+            .iter()
+            .filter(|(_, t)| !before.contains(t))
+            .copied()
+            .collect()
+    }
+    fn advance(&mut self, until: f64) {
+        self.collect();
+        loop {
+            self.timers.sort_by(|a, b| a.0.total_cmp(&b.0));
+            match self.timers.first() {
+                Some(&(at, timer)) if at <= until => {
+                    self.timers.remove(0);
+                    self.now = self.now.max(at);
+                    self.e.handle(self.now, Event::TimerFired { timer });
+                    self.collect();
+                }
+                _ => break,
+            }
+        }
+        self.now = until;
+    }
+    fn frame(&mut self, text: &str) {
+        let socket = self.private.unwrap();
+        self.event(Event::WsMessage { socket, text });
+    }
+    fn heartbeat(&mut self, seq: u64) {
+        self.frame(&format!(
+            r#"{{"channel":"heartbeats","sequence_num":{seq},"events":[]}}"#
+        ));
+    }
+    fn snapshot(&mut self) {
+        self.frame(
+            r#"{"channel":"user","sequence_num":0,"events":[{"type":"snapshot","orders":[]}]}"#,
+        );
+    }
+    /// Closes the current private socket; returns the scheduled reconnect timer.
+    fn drop_private(&mut self) -> (TimerId, f64) {
+        let socket = self.private.unwrap();
+        let timers = self.event(Event::WsClosed { socket, code: 1006 });
+        self.reconnect_timer(timers)
+    }
+    fn reconnect_timer(&self, timers: Vec<(f64, TimerId)>) -> (TimerId, f64) {
+        let retries: Vec<_> = timers
+            .into_iter()
+            .filter(|(at, _)| *at - self.now >= 1000.0)
+            .collect();
+        assert_eq!(retries.len(), 1, "one reconnect timer");
+        (retries[0].1, retries[0].0 - self.now)
+    }
+    fn reconnect(&mut self, timer: TimerId, delay: f64) -> SocketId {
+        let old = self.private.unwrap();
+        self.now += delay;
+        self.timers.retain(|(_, t)| *t != timer);
+        self.event(Event::TimerFired { timer });
+        let socket = self.private.unwrap();
+        assert_ne!(socket, old);
+        self.closes.clear();
+        socket
+    }
+}
+
+#[test]
+fn private_flaps_back_off_exponentially_even_after_valid_snapshots() {
+    let mut s = Session::new("INTX", false).ready();
+    for attempt in 0..7 {
+        s.snapshot();
+        let (timer, delay) = s.drop_private();
+        let nominal = (2000.0 * 2f64.powi(attempt)).min(30_000.0);
+        assert!(
+            (nominal * 0.75..=nominal).contains(&delay),
+            "attempt {attempt}: {delay}"
+        );
+        let socket = s.reconnect(timer, delay);
+        s.event(Event::WsOpened { socket });
+    }
+}
+
+#[test]
+fn private_reconnect_resubscribes_and_ignores_the_retired_socket() {
+    let mut s = Session::new("INTX", false).ready();
+    s.collect();
+    let old = s.private.unwrap();
+    let (timer, delay) = s.drop_private();
+    let fresh = s.reconnect(timer, delay);
+    s.sends.clear();
+    s.event(Event::WsOpened { socket: fresh });
+    let channels: Vec<_> = s
+        .sends
+        .iter()
+        .map(|(socket, text)| {
+            assert_eq!(*socket, fresh);
+            assert!(text.contains(r#""type":"subscribe""#) && text.contains(r#""jwt":""#));
+            text.split(r#""channel":""#)
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(channels, ["user", "heartbeats"]);
+    let row = user_order("retired", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let text = format!(
+        r#"{{"channel":"user","sequence_num":0,"events":[{{"type":"snapshot","orders":[{row}]}}]}}"#
+    );
+    s.event(Event::WsMessage {
+        socket: old,
+        text: &text,
+    });
+    s.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    assert!(s.e.store().order("retired").is_none());
+    assert!(s.closes.is_empty());
+    s.frame(&text);
+    assert!(s.e.store().order("retired").is_some());
+}
+
+#[test]
+fn private_connect_timeout_closes_a_socket_that_never_opens() {
+    let mut s = Session::new("INTX", false).ready();
+    let (timer, delay) = s.drop_private();
+    let fresh = s.reconnect(timer, delay);
+    let connected = s.now;
+    s.advance(connected + 9_999.0);
+    assert!(s.closes.is_empty());
+    s.advance(connected + 10_000.0);
+    assert_eq!(s.closes, [fresh]);
+    assert!(s.logs.iter().any(|l| l.contains("watchdog expired")));
+}
+
+#[test]
+fn private_snapshot_deadline_ignores_heartbeats() {
+    let mut s = Session::new("INTX", false).ready();
+    let (timer, delay) = s.drop_private();
+    let fresh = s.reconnect(timer, delay);
+    s.event(Event::WsOpened { socket: fresh });
+    let opened = s.now;
+    for seq in 0..6 {
+        s.advance(opened + 5_000.0 * seq as f64 + 4_000.0);
+        s.heartbeat(seq);
+    }
+    s.advance(opened + 29_999.0);
+    assert!(s.closes.is_empty());
+    s.advance(opened + 30_000.0);
+    assert_eq!(s.closes, [fresh]);
+}
+
+#[test]
+fn private_idle_timeout_counts_only_sequence_valid_frames_and_sends_no_pings() {
+    let mut s = Session::new("INTX", false).ready();
+    let socket = s.private.unwrap();
+    s.collect();
+    s.sends.clear();
+    s.snapshot();
+    let mut seq = 1;
+    for _ in 0..12 {
+        s.advance(s.now + 9_000.0);
+        s.heartbeat(seq);
+        seq += 1;
+    }
+    let last = s.now;
+    s.advance(last + 20_000.0);
+    s.heartbeat(seq - 1);
+    s.advance(last + 29_999.0);
+    assert!(s.closes.is_empty());
+    assert!(
+        s.sends.is_empty(),
+        "Coinbase relies on its heartbeats channel"
+    );
+    s.advance(last + 30_000.0);
+    assert_eq!(s.closes, [socket]);
+}
+
+#[test]
+fn private_stable_traffic_resets_backoff() {
+    let mut s = Session::new("INTX", false).ready();
+    for _ in 0..3 {
+        s.snapshot();
+        let (timer, delay) = s.drop_private();
+        let socket = s.reconnect(timer, delay);
+        s.event(Event::WsOpened { socket });
+    }
+    s.snapshot();
+    for seq in 1..5 {
+        s.advance(s.now + 9_000.0);
+        s.heartbeat(seq);
+    }
+    let (_, delay) = s.drop_private();
+    assert!((1500.0..=2000.0).contains(&delay), "{delay}");
+}
+
+#[test]
+fn private_pending_snapshot_survives_while_user_frames_arrive() {
+    let mut s = Session::new("INTX", false).ready();
+    let (timer, delay) = s.drop_private();
+    let fresh = s.reconnect(timer, delay);
+    s.event(Event::WsOpened { socket: fresh });
+    let opened = s.now;
+    for seq in 0..7 {
+        s.advance(opened + 10_000.0 * (seq + 1) as f64);
+        s.message(seq, "update", "[]");
+    }
+    let last = s.now;
+    assert!(s.closes.is_empty());
+    for seq in 7..13 {
+        s.advance(last + 5_000.0 * (seq - 6) as f64 - 1_000.0);
+        s.heartbeat(seq);
+    }
+    s.advance(last + 29_999.0);
+    assert!(s.closes.is_empty());
+    s.advance(last + 35_000.0);
+    assert_eq!(s.closes, [fresh]);
+}
+
+#[test]
+fn private_resent_snapshot_on_the_same_connection_expires_without_user_frames() {
+    let mut s = Session::new("INTX", false).ready();
+    let socket = s.private.unwrap();
+    s.snapshot();
+    let rows: Vec<_> = (0..50)
+        .map(|i| user_order(&format!("page-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .collect();
+    s.message(1, "snapshot", &format!("[{}]", rows.join(",")));
+    let resent = s.now + 1.0;
+    for seq in 2..8 {
+        s.advance(resent + 5_000.0 * (seq - 1) as f64 - 1_000.0);
+        s.heartbeat(seq);
+    }
+    s.advance(resent + 29_000.0);
+    assert!(s.closes.is_empty());
+    s.advance(resent + 35_000.0);
+    assert_eq!(s.closes, [socket]);
 }
