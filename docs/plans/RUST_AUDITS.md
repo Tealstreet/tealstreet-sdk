@@ -515,3 +515,21 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
   Binance COIN-M, Bitrue cancels).
 - Integers serialized as floats (`20.0`): Paradex leverage, KuCoin leverage;
   check every venue's integer fields.
+
+### GRVT
+Signing and integer scaling exact; no highs.
+- Medium: builder check fails once → every order rejected for the session, and
+  a matching row without `mfr` treated as unknown (`grvt/src/account.rs:1531,1011`,
+  `trading.rs:777`); one unknown-instrument row hides all positions or orders
+  (`account.rs:516,422,970`); GRVT's rejection message dropped and misleading
+  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).
+- Low: order history fails on one bad row; signer mismatch blocks trading;
+  1008 loses the proxy-whitelist message; amend may cancel without replacing if
+  cancels are asynchronous (verify live).
+
+### Polymarket (development-only)
+CLOB V2 signing and amounts match the official client.
+- Medium: one `null` in a Gamma market row breaks the venue with no retry
+  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).
+- Low: cancel-all reports failure after a successful cancel; one bad position
+  row freezes positions; auth failures invisible.
