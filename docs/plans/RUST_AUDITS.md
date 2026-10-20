@@ -79,6 +79,9 @@ Medium:
 - Binance Spot quantified cancel acknowledgement can advance the execution
   cursor before its matching TRADE, losing the execution notification. Reverified
   on `bd94abb524`; tracked for the Binance follow-up after the derivative fixes.
+- Binance PM strategy/regular client-ID reuse on one symbol can let an old
+  strategy terminal replay cancel the newer regular row. Reproduced in PR #1348;
+  inherited from the base, tracked for native-owner fencing in the follow-up.
 - BloFin replays pre-session fills (`blofin/src/account.rs:1231`).
 - Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`,
   kraken spot ignores checksum, asterdex/lighter keep books while waiting.

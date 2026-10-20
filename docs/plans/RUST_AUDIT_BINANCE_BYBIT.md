@@ -94,8 +94,8 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   replies use their separate native acknowledgement contracts.
 - M5 USD-M/PM confirmed and fixed: acknowledged cancels and private terminal
   events fence in-flight and replica-stale snapshots. PM regular and strategy
-  generations have separate native identity maps; old replies/events cannot
-  mutate a newer order reusing a caller client ID. Old native generations are
+  generations have separate native identity maps; captured replies and older
+  same-family events cannot mutate a newer binding of a caller client ID. Old native generations are
   retired when a new one binds in a stream event or accepted REST snapshot.
 - UUID fallback confirmed and fixed: entropy failure propagates through every
   native order formatter. Actual Engine command tests inject failures in plain,
@@ -187,6 +187,9 @@ against the freshly merged base before implementing on a fresh follow-up branch:
 - Sign with `recvWindow` from options.
 - Separate Spot delivery progress from quantified cancel acknowledgements, which
   can otherwise suppress the matching later TRADE (reverified inherited gap).
+- Track the PM canonical row's observed native owner across regular/strategy
+  families. A replay from a canceled strategy can still retire a newer regular
+  order reusing its caller ID on the same symbol (inherited, PR review finding).
 
 Leave every `Confirm`/owner-decision item untouched. Repeat phased independent
 reviews, regression tests, all touched-family gates, PR reviews posted to the
@@ -339,3 +342,39 @@ captures were also trimmed and gated separately without replacing that coverage.
   count against the logs. It verifies 23 passing replay checks plus the final
   nine Binance reruns, explicit evidence limits and deferred follow-up scope;
   no correction or false-green claim found. Proceed to PR correctness reviews.
+
+### PR #1348 correctness review round one
+
+- Opened https://github.com/Tealstreet/tealstreet-sdk/pull/1348 into
+  `feat/rust-rewrite` at `1a16e2196e`. Three fresh independent reviews cover
+  account/executions, trading, and TS/harness/AsterDEX/SDK boundaries. Findings
+  and evidence are posted as code-correctness PR comments.
+- Boundary review passes: 22 focused TS tests, 62 compiled WASM boundary tests
+  and one frame-wire integration. The 22-test total covers 19 new tests plus
+  three existing symbol-cancel tests; no evidence-count correction is needed.
+- Account review reproduces an inherited PM cross-family reuse gap: strategy42
+  canceled, regular78 reuses its client ID/symbol, then old strategy42 CANCELED
+  retires the regular row. Native type/source ownership is needed; order type
+  alone cannot identify triggered STOP_MARKET wire ownership. Record this as an
+  explicit follow-up limitation and preserve the owner's Confirm decisions.
+  Original snapshot and captured-ACK fixes do not claim complete cross-family
+  stream isolation. All 95 focused native review tests pass.
+- Trading review finds an introduced Bybit Demo cancel-all regression: a valid
+  ACK can return only 500 affected native IDs while the captured set also
+  contains live conditional orders. Fencing every captured ID permanently hides
+  omitted live exposure from later snapshots. Fix before merge by honoring
+  returned IDs and preserving/reconciling omitted targets, with a real 500-plus-
+  conditional regression. The reviewer ran 77 focused tests successfully.
+- Bybit correction passes 156 native tests, strict Clippy, formatting and bans.
+  It parses the documented affected list strictly, fences all returned native
+  IDs including uncaptured arrivals, retires their projected children, and
+  preserves omitted live targets with a visible partial-cancellation error.
+  Missing/malformed lists and bulk unknown-order errors cannot fence all targets.
+  Six new regressions include the actual 500-plus-one case (failed before fix),
+  omitted/unrelated snapshot rows, uncaptured arrivals, terminal races and bad
+  ACKs. Independent re-review reruns all 49 trading variants and closes P1.
+- The first CI head passes its other completed checks but Hyro's small scripted
+  public fixture misses steady CPU by 0.1 ms (Rust 5.8 / TS 5.7 ms). Thresholds
+  remain unchanged. Rerun CI on the corrected head; never merge while red.
+  Earlier Bybit replay/size evidence must be replaced after this correction;
+  Binance and AsterDEX protocol behavior is unchanged.

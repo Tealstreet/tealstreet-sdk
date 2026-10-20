@@ -38,8 +38,9 @@ trade IDs are deduplicated in a bounded 16,384-execution window retained across
 private reconnects; missing IDs use cumulative progress, so complete identity
 coverage requires the venue's documented `t`. Execution delivery is independent
 of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
-while an old native generation cannot close a new PM order reusing its client
-ID. Accepted cancellations invalidate in-flight order snapshots. Generated-ID
+while an old generation cannot close a new PM order within the same native
+family. Cross-family client-ID stream ownership remains a tracked follow-up.
+Accepted cancellations invalidate in-flight order snapshots. Generated-ID
 entropy failures return an error instead of sharing a broker-only ID.
 
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
