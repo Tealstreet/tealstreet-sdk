@@ -25,6 +25,7 @@ export class EngineHost {
     this.commands = new Map();
     this.requests = new Map();
     this.signings = new Map();
+    this.socketFailures = new Map();
     this.nextCommand = 1;
     this.disposed = false;
     this.started = false;
@@ -87,6 +88,7 @@ export class EngineHost {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    for (const id of this.socketFailures.keys()) this.clearSocketFailure(id);
     for (const controller of this.requests.values()) controller.abort();
     this.requests.clear();
     for (const pending of this.signings.values()) {
@@ -124,9 +126,9 @@ export class EngineHost {
           }
         }
       }
-    } catch (error) {
+    } catch {
       if (this.disposed) return;
-      this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+      this.run(engine.httpFailed(id, 'HTTP response body failed', transport.now()));
       return;
     }
     if (this.disposed) return;
@@ -148,8 +150,8 @@ export class EngineHost {
         signal: controller.signal,
       });
       if (!this.disposed) await this.receive(id, response);
-    } catch (error) {
-      if (!this.disposed) this.run(this.engine.httpFailed(id, String(error?.message ?? error), this.transport.now()));
+    } catch {
+      if (!this.disposed) this.run(this.engine.httpFailed(id, 'HTTP transport request failed', this.transport.now()));
     } finally {
       this.requests.delete(id);
     }
@@ -195,6 +197,39 @@ export class EngineHost {
     }).catch(() => finish(new Error('Payload signing failed')));
   }
 
+  clearSocketFailure(id) {
+    const pending = this.socketFailures.get(id);
+    if (!pending) return;
+    this.socketFailures.delete(id);
+    this.timers.delete(pending.key);
+    try { this.transport.clearTimeout(pending.handle); } catch { /* Its callback is revoked even if cancellation fails. */ }
+  }
+
+  socketFailed(id, message) {
+    const socket = this.sockets.get(id);
+    this.sockets.delete(id);
+    try { socket?.close(); } catch { /* The failed transport is already detached. */ }
+    if (this.disposed) return;
+    this.handlers.onLog?.('error', message);
+    if (this.disposed || this.sockets.has(id)) return;
+    this.clearSocketFailure(id);
+    const pending = { key: Symbol('socketFailure'), handle: undefined };
+    this.socketFailures.set(id, pending);
+    try {
+      // A broken provider cannot recursively reconnect venues without their own backoff.
+      pending.handle = this.transport.setTimeout(() => {
+        if (this.socketFailures.get(id) !== pending) return;
+        this.socketFailures.delete(id);
+        this.timers.delete(pending.key);
+        if (!this.disposed && !this.sockets.has(id)) this.run(this.engine.wsClose(id, 1006, this.transport.now()));
+      }, 1_000);
+      this.timers.set(pending.key, pending.handle);
+    } catch {
+      this.socketFailures.delete(id);
+      throw new Error('WebSocket failure reporting failed');
+    }
+  }
+
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
     for (const action of JSON.parse(actionsJson)) this.execute(action);
@@ -209,6 +244,7 @@ export class EngineHost {
         break;
       case 'wsConnect': {
         const id = action.socket;
+        this.clearSocketFailure(id);
         const wsMessageBytes = typeof engine.wsMessageBytes === 'function' ? engine.wsMessageBytes : undefined;
         const wsMessage = typeof engine.wsMessageActions === 'function' ? engine.wsMessageActions : engine.wsMessage;
         if (action.headers?.length && !transport.webSocketHeaders) {
@@ -218,62 +254,77 @@ export class EngineHost {
           }, 0);
           break;
         }
-        const socket = transport.connect(action.url, {
-          binary: action.binary === true,
-          channel: action.channel,
-          context: action.context,
-          headers: action.headers && Object.fromEntries(action.headers),
-          onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
-          onMessage: (text) => {
-            if (this.disposed) return;
-            if (!wsMessageBytes) {
-              this.run(wsMessage.call(engine, id, text, transport.now()));
-              return;
-            }
-            // UTF-8 needs at most three bytes per UTF-16 unit, including lone
-            // surrogates. Keep one small buffer; large or reentrant messages own theirs.
-            const scratch = text.length <= 1365 && !this.wsScratchBusy;
-            if (scratch) this.wsScratchBusy = true;
-            let actions;
-            try {
-              const encoder = this.wsEncoder ??= new TextEncoder();
-              let bytes;
-              if (scratch && typeof encoder.encodeInto === 'function') {
-                const buffer = this.wsScratch ??= new Uint8Array(4096);
-                const { read, written } = encoder.encodeInto(text, buffer);
-                bytes = read === text.length ? buffer.subarray(0, written) : encoder.encode(text);
-              } else {
-                bytes = encoder.encode(text);
+        let socket;
+        let connecting = true;
+        try {
+          socket = transport.connect(action.url, {
+            binary: action.binary === true,
+            channel: action.channel,
+            context: action.context,
+            headers: action.headers && Object.fromEntries(action.headers),
+            onOpen: () => { if (!this.disposed && (connecting || (socket && this.sockets.get(id) === socket))) this.run(engine.wsOpen(id, transport.now())); },
+            onMessage: (text) => {
+              if (this.disposed || (!connecting && (!socket || this.sockets.get(id) !== socket))) return;
+              if (!wsMessageBytes) {
+                this.run(wsMessage.call(engine, id, text, transport.now()));
+                return;
               }
-              actions = wsMessageBytes.call(engine, id, bytes, transport.now());
-            } finally {
-              if (scratch) this.wsScratchBusy = false;
-            }
-            this.run(actions);
-          },
-          onBinary: (data) => {
-            if (this.disposed || !this.sockets.has(id)) return;
-            if (engine.wsBinary) this.run(engine.wsBinary(id, data, transport.now()));
-            else {
-              const active = this.sockets.get(id);
+              // UTF-8 needs at most three bytes per UTF-16 unit, including lone
+              // surrogates. Keep one small buffer; large or reentrant messages own theirs.
+              const scratch = text.length <= 1365 && !this.wsScratchBusy;
+              if (scratch) this.wsScratchBusy = true;
+              let actions;
+              try {
+                const encoder = this.wsEncoder ??= new TextEncoder();
+                let bytes;
+                if (scratch && typeof encoder.encodeInto === 'function') {
+                  const buffer = this.wsScratch ??= new Uint8Array(4096);
+                  const { read, written } = encoder.encodeInto(text, buffer);
+                  bytes = read === text.length ? buffer.subarray(0, written) : encoder.encode(text);
+                } else {
+                  bytes = encoder.encode(text);
+                }
+                actions = wsMessageBytes.call(engine, id, bytes, transport.now());
+              } finally {
+                if (scratch) this.wsScratchBusy = false;
+              }
+              this.run(actions);
+            },
+            onBinary: (data) => {
+              if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
+              if (engine.wsBinary) this.run(engine.wsBinary(id, data, transport.now()));
+              else {
+                const active = this.sockets.get(id);
+                this.sockets.delete(id);
+                active.close();
+                this.run(engine.wsClose(id, 1003, transport.now()));
+              }
+            },
+            onClose: (code) => {
+              if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
               this.sockets.delete(id);
-              active.close();
-              this.run(engine.wsClose(id, 1003, transport.now()));
-            }
-          },
-          onClose: (code) => {
-            if (this.disposed || !this.sockets.has(id)) return;
-            this.sockets.delete(id);
-            this.run(engine.wsClose(id, code ?? 1006, transport.now()));
-          },
-        });
+              this.run(engine.wsClose(id, code ?? 1006, transport.now()));
+            },
+          });
+        } catch {
+          connecting = false;
+          this.socketFailed(id, 'WebSocket transport connection failed');
+          break;
+        }
+        connecting = false;
+        if (this.disposed) {
+          try { socket.close(); } catch { /* No callbacks may enter a disposed engine. */ }
+          break;
+        }
         this.sockets.set(id, socket);
         break;
       }
       case 'wsSend':
-        this.sockets.get(action.socket)?.send(action.text);
+        try { this.sockets.get(action.socket)?.send(action.text); }
+        catch { this.socketFailed(action.socket, 'WebSocket transport send failed'); }
         break;
       case 'wsClose':
+        this.clearSocketFailure(action.socket);
         this.sockets.get(action.socket)?.close();
         this.sockets.delete(action.socket);
         break;

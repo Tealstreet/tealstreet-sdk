@@ -219,3 +219,37 @@ live trading, weakened parity oracle, or performance threshold changes.
   An earlier unfiltered JS run used temporary Backpack-only bindings: the new
   assertion passed, while four unavailable Binance/Phemex binding cases failed.
   The final complete suite must use rebuilt combined bindings.
+
+### Final transport boundary review
+
+- A further correctness review traced raw custom HTTP request/body-reader
+  exceptions through `httpFailed` into venue logs and command errors. Sanitize
+  those unstructured exceptions at their origin, preserving structured venue
+  responses and actionable errors such as insufficient balance.
+- Custom WebSocket connect/send exceptions receive fixed diagnostics too.
+  Detach failed physical sockets before cleanup, then notify the engine through
+  a bounded one-second timer so immediate venue reconnects cannot recurse.
+  Symbol timer keys cannot collide with engine IDs; pending-token/physical
+  socket checks and disposal prevent late failures closing replacements.
+- All 50 mock host tests pass. Both the three HTTP exception regressions and
+  the two WebSocket exception regressions intentionally fail against the
+  original host and pass after restoration. Logs:
+  `/tmp/security-host-http-negative.log`, `/tmp/security-host-origin-restored.log`,
+  `/tmp/security-host-ws-negative.log`, `/tmp/security-host-ws-restored.log`.
+  Independent read-only re-review accepted the added logic without findings.
+- Merged native workspace: strict Clippy passes; 2852 tests in 244 suites pass,
+  zero failed/ignored. Wasm workspace Clippy, standalone engine without default
+  features, root typecheck (44 tasks) and lint (28 tasks) pass.
+- Root JS tests first ended with exit 137 before completion; preserve
+  `/tmp/security-v2-tests-sigkill.log`. The cause is not asserted from that exit
+  code alone. The controlled rerun serializes package tasks and retains two
+  Vitest workers. Turbo's strict environment filters `VITEST_MAX_WORKERS`, so
+  the external runner uses `--env-mode=loose` to pass that operational limit.
+  No repository code, test assertions, tape content or gate criteria changed
+  to obtain a result. The replay matrix waits for these checks and low host
+  contention; it did not start after the incomplete JS run.
+- Scanner proof at `f479ec6b7d` against landing `fc809a9d85`: 151 changed
+  files exported, zero findings. All 39 fixtures / 304201 records match except
+  removal of 145 Set-Cookie headers across 120 HTTP records in 12 captures.
+  Proof files: `/tmp/security-gitleaks-final-receipt.json` and
+  `/tmp/security-fixture-final-proof.json`.

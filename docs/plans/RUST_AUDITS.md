@@ -118,6 +118,8 @@ against current code before fixing. Lifecycle differences alone are not defects.
 - ~~Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).~~
   **M3:** strip URLs on request/body errors. New delegated signer callback errors
   are generic instead of echoing arbitrary credential-bearing exception text.
+  Unstructured custom JS HTTP/body/socket exceptions are sanitized at origin;
+  structured venue responses retain actionable errors.
 - ~~Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).~~
   **M4:** redirects disabled in native HTTP, host fetch and Workers HTTP/upgrade.
 - ~~live-smoke: no notional cap, no post-only, testnet reads mainnet env names.~~
