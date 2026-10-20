@@ -363,7 +363,7 @@ impl Lighter {
     fn builder(&self) -> Option<sign::Builder> {
         self.options
             .integrator_account_index
-            .or(if self.options.testnet {
+            .or(if self.options.testnet || self.options.robinhood {
                 None
             } else {
                 Some(158_385)

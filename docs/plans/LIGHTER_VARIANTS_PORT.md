@@ -29,6 +29,43 @@ its stable commit. No load tests, TS deletion, credentials or gate relaxation.
 
 - Plan: TS profiles have distinct Robinhood main/test URLs, USDG quote and main
   signing chain 466324 (testnet 300). Standard chain IDs remain 304/300.
-- Signing investigation in progress: TS startup recognizes remoteSigner, while
-  its only current signer adapter requires a local secret; resolve with source
-  and regression evidence before implementation.
+- Signing audit complete: TS startup recognizes remoteSigner, while its only
+  current signer adapter requires a local secret. Source and regression tests
+  establish unsigned account polling without delegated transaction signing.
+
+## Credential contract
+
+TS `LighterExchange.start()` classifies startup separately from its inherited
+`canSign`/`isPublicDataOnly` getter. The Rust wrapper follows the startup formula,
+including keyless local signer accounts, rather than using that inconsistent
+inherited getter as permission to skip private startup.
+
+- Explicit public mode, missing API key index, or neither secret nor remoteSigner:
+  public startup. A payloadSigner callback alone does not enable private startup.
+- RemoteSigner without a secret: unsigned account identity/snapshot reads and
+  polling, loaded orders with no authenticated order request; no private socket,
+  authentication token or transactions. Callbacks are never invoked.
+- A valid local secret with either callback: local transaction/auth signing.
+  No callback or credential-bearing closure is serialized into WASM.
+- Invalid local signing key/index or legacy provider: account snapshots continue;
+  no signing/private socket/write. Current TS supports only `tealstreet-sdk` provider.
+
+This resolves the existing modes; it does not introduce remote transaction
+signing, which current TS's adapter cannot perform. Standard host routing remains
+in force, and venue code emits only the deployment's real REST/socket URLs.
+
+## Phase reviews and verification
+
+- Public/deployment independent review PASS: exact four profile URLs, quote,
+  chain isolation, distinct alias registration, explicit builder override.
+- Private/signing review found invalid API signing-key index blocked unsigned
+  snapshots; corrected before gates. Follow-up review also found validation
+  accepted that index; added the existing TS parser and pre-start validation.
+  Independent final private phase re-review PASS.
+- Trading/query review PASS: shared typed command state machine, caller-ID
+  rejection, nonce retries, independent TS/Go-WASM verification, unsigned private
+  histories empty and public trades remain available.
+- Native verification: 95 tests PASS including final history/index edge
+  coverage; bans, crate fmt/Clippy PASS. Wrapper + TS mode regressions: 56 PASS;
+  package typecheck/lint PASS.
+- Combined release WASM build and replay gates in progress.
