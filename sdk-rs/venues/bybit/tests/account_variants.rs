@@ -732,3 +732,49 @@ fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
         "the unfenced wallet still refreshed"
     );
 }
+
+#[test]
+fn hyro_steady_frames_during_initial_recovery_still_become_ready_without_reconnecting() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    // Three reads in a row are overtaken; the third is admitted.
+    for _ in 0..3 {
+        h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+        hyro_snapshot(&mut h);
+    }
+    assert!(
+        h.closed.is_empty(),
+        "steady frames during recovery forced a reconnect"
+    );
+    assert!(h.engine.store().loaded().positions && h.engine.store().loaded().orders);
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("kept moving during reconciliation"))
+    );
+}
+
+#[test]
+fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let refusal =
+        r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
+    for _ in 0..5 {
+        h.advance(5000.0);
+        h.respond("/v5/order/realtime", 200, refusal);
+        h.requests.clear();
+        // Successful reads overtaken by frames are admitted and clear the streak.
+        h.advance(5000.0);
+        for _ in 0..3 {
+            h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+            hyro_snapshot(&mut h);
+        }
+        h.requests.clear();
+    }
+    assert!(
+        h.closed.is_empty(),
+        "spaced-out transient blips accumulated into a reconnect"
+    );
+}

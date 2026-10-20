@@ -795,9 +795,10 @@ Mostly matches TS.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
   - ~~Bybit Hyro: a ready session's periodic snapshot is discarded on every order/position
-    frame and three discards reconnect, so steady frames loop forever.~~ Fixed: a ready
-    session commits the unfenced wallet (Hyro streams none), re-reads, and stops after
-    three tries without tearing down the live stream that already owns orders/positions.
+    frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
+    reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
+    admitted with a warning instead of reconnecting, in initial recovery too, and the
+    next tick reconciles again.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
