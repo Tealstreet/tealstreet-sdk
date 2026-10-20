@@ -575,6 +575,8 @@ fn fill_stamped_ahead_of_the_host_clock_is_still_emitted() {
     assert_eq!(fill_count(e.take_frame(NOW + 5000.0).unwrap()), 1);
 }
 
+const BASELINE: &str =
+    r#"{"type":"subscribed/account_all","channel":"account_all:718895","account":{}}"#;
 fn trade_row(id: &str, at: f64) -> String {
     format!(
         r#"{{"trade_id":"{id}","market_id":1,"ask_id":"50","bid_id":"42","ask_account_id":"9","bid_account_id":"718895","price":"90","size":"0.25","timestamp":{}}}"#,
@@ -616,12 +618,7 @@ fn reconnect(
 #[test]
 fn fills_made_while_the_private_socket_was_down_are_backfilled_once() {
     let (mut e, s) = ready();
-    message(
-        &mut e,
-        s,
-        NOW + 500.0,
-        r#"{"type":"update/account_all","channel":"account_all:718895","account":{}}"#,
-    );
+    message(&mut e, s, NOW + 500.0, BASELINE);
     e.take_frame(NOW + 500.0);
     let (socket, reads) = reconnect(&mut e, s);
     let backfill = reads
@@ -631,10 +628,12 @@ fn fills_made_while_the_private_socket_was_down_are_backfilled_once() {
     assert!(backfill.url.contains("account_index=718895"));
     assert!(backfill.headers.iter().any(|(k, _)| *k == "authorization"));
     let body = format!(
-        r#"{{"code":200,"trades":[{},{},{}]}}"#,
+        r#"{{"code":200,"trades":[{},{},{},{}]}}"#,
         trade_row("gap-2", NOW + 1600.0),
         trade_row("gap-1", NOW + 1500.0),
         trade_row("before-session", NOW - 60_000.0),
+        // Microsecond stamps are normalized, not read as far-future milliseconds.
+        trade_row("before-session-us", (NOW - 60_000.0) * 1000.0),
     );
     reply_at(&mut e, NOW + 3100.0, backfill, 200, &body);
     assert_eq!(fill_count(e.take_frame(NOW + 3100.0).unwrap()), 2);
@@ -653,6 +652,7 @@ fn fills_made_while_the_private_socket_was_down_are_backfilled_once() {
 #[test]
 fn a_full_backfill_page_inside_the_outage_reads_the_next_page() {
     let (mut e, s) = ready();
+    message(&mut e, s, NOW + 500.0, BASELINE);
     let (_, reads) = reconnect(&mut e, s);
     let backfill = reads
         .iter()
@@ -670,4 +670,155 @@ fn a_full_backfill_page_inside_the_outage_reads_the_next_page() {
         next.iter()
             .any(|r| r.url.contains("/api/v1/trades?") && r.url.contains("cursor=page-2"))
     );
+}
+#[test]
+fn a_drop_before_the_baseline_snapshot_replays_no_history() {
+    let (mut e, s) = ready();
+    let (socket, reads) = reconnect(&mut e, s);
+    assert!(!reads.iter().any(|r| r.url.contains("/api/v1/trades?")));
+    let snapshot = format!(
+        r#"{{"type":"subscribed/account_all","channel":"account_all:718895","trades":{{"1":[{}]}}}}"#,
+        trade_row("pre-session", NOW - 5000.0),
+    );
+    message(&mut e, socket, NOW + 3200.0, &snapshot);
+    assert_eq!(e.take_frame(NOW + 3200.0).map_or(0, fill_count), 0);
+}
+#[test]
+fn fills_during_a_quiet_but_pinging_stretch_are_backfilled_once() {
+    let (mut e, socket) = ready();
+    e.handle(NOW, Event::WsOpened { socket });
+    let mut watchdog = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 10_000.0 => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    message(&mut e, socket, NOW + 500.0, BASELINE);
+    e.take_frame(NOW + 500.0);
+    let mut reconnect_at = None;
+    for step in 1..=20 {
+        let now = NOW + f64::from(step) * 10_000.0;
+        message(&mut e, socket, now, r#"{"type":"pong"}"#);
+        e.handle(now, Event::TimerFired { timer: watchdog });
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, at_ms } if at_ms == now + 10_000.0 => watchdog = timer,
+                Action::SetTimer { timer, at_ms } if at_ms == now + 1000.0 => {
+                    reconnect_at = Some((timer, at_ms))
+                }
+                _ => {}
+            }
+        }
+        if reconnect_at.is_some() {
+            break;
+        }
+    }
+    let (timer, at) = reconnect_at.expect("stale stream reconnects");
+    e.handle(at, Event::TimerFired { timer });
+    let next = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at + 100.0, Event::WsOpened { socket: next });
+    let reads = requests(&mut e);
+    let backfill = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .expect("fill backfill read");
+    let quiet = [
+        trade_row("quiet-1", NOW + 30_000.0),
+        trade_row("quiet-2", NOW + 60_000.0),
+    ];
+    let body = format!(r#"{{"code":200,"trades":[{},{}]}}"#, quiet[1], quiet[0]);
+    reply_at(&mut e, at + 200.0, backfill, 200, &body);
+    assert_eq!(fill_count(e.take_frame(at + 200.0).unwrap()), 2);
+    let snapshot = format!(
+        r#"{{"type":"subscribed/account_all","channel":"account_all:718895","trades":{{"1":[{},{}]}}}}"#,
+        quiet[0], quiet[1]
+    );
+    message(&mut e, next, at + 300.0, &snapshot);
+    assert_eq!(e.take_frame(at + 300.0).map_or(0, fill_count), 0);
+}
+#[test]
+fn a_rejected_backfill_retries_once_and_then_emits() {
+    let (mut e, s) = ready();
+    message(&mut e, s, NOW + 500.0, BASELINE);
+    e.take_frame(NOW + 500.0);
+    let (_, reads) = reconnect(&mut e, s);
+    let first = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .unwrap();
+    reply_at(
+        &mut e,
+        NOW + 3100.0,
+        first,
+        200,
+        r#"{"code":429,"message":"too many requests"}"#,
+    );
+    let retry = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 5100.0 => Some(timer),
+            _ => None,
+        })
+        .expect("backfill retry timer");
+    e.take_frame(NOW + 3100.0);
+    e.handle(NOW + 5100.0, Event::TimerFired { timer: retry });
+    let reads = requests(&mut e);
+    let second = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .expect("backfill retried");
+    let body = format!(
+        r#"{{"code":200,"trades":[{}]}}"#,
+        trade_row("gap-1", NOW + 1500.0)
+    );
+    reply_at(&mut e, NOW + 5200.0, second, 200, &body);
+    assert_eq!(fill_count(e.take_frame(NOW + 5200.0).unwrap()), 1);
+}
+#[test]
+fn a_socket_drop_after_pings_without_payloads_backfills_from_the_last_payload() {
+    let (mut e, s) = ready();
+    message(&mut e, s, NOW + 500.0, BASELINE);
+    message(&mut e, s, NOW + 89_000.0, r#"{"type":"pong"}"#);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW + 90_000.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 91_000.0, Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 91_100.0, Event::WsOpened { socket });
+    let reads = requests(&mut e);
+    let backfill = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .unwrap();
+    let body = format!(
+        r#"{{"code":200,"trades":[{}]}}"#,
+        trade_row("quiet-1", NOW + 30_000.0)
+    );
+    reply_at(&mut e, NOW + 91_200.0, backfill, 200, &body);
+    assert_eq!(fill_count(e.take_frame(NOW + 91_200.0).unwrap()), 1);
 }

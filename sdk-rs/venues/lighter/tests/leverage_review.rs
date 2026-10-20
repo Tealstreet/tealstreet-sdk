@@ -66,6 +66,9 @@ fn position_fraction_reads_percent_strings_and_tick_integers_on_rest_and_ws() {
         (json!(2000), 5.0),
         (json!("1.00"), 20.0),
         (json!("0.50"), 20.0),
+        // A percent above 100 is impossible, so it is ticks; a JSON float is a percent.
+        (json!("2000"), 5.0),
+        (json!(20.0), 5.0),
     ] {
         for websocket in [false, true] {
             let (mut e, socket) = ready_unattributed();

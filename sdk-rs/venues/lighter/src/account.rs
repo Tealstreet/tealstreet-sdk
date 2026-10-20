@@ -39,13 +39,19 @@ pub enum Request {
         valid: bool,
     },
     Backfill {
-        since: f64,
-        page: u32,
-        cursor: Option<String>,
+        run: Backfill,
         executions: Vec<Execution>,
         oldest: f64,
         count: usize,
     },
+}
+#[derive(Clone)]
+pub struct Backfill {
+    since: f64,
+    epoch: u64,
+    page: u32,
+    cursor: Option<String>,
+    retried: bool,
 }
 pub struct Execution {
     id: String,
@@ -64,7 +70,6 @@ struct Connection {
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
     attempts: u32,
-    outage_since: Option<f64>,
 }
 struct OrderBatch {
     revision: u64,
@@ -96,6 +101,12 @@ pub struct Account {
     fill_queue: VecDeque<String>,
     newest_fill: f64,
     live_after: Option<f64>,
+    /// Earliest account-payload silence not yet covered by a completed backfill.
+    outage: Option<f64>,
+    outage_epoch: u64,
+    session_start: Option<f64>,
+    baselined: bool,
+    backfill_retry: Option<(TimerId, Backfill)>,
 }
 #[derive(Default)]
 pub struct Snapshot {
@@ -433,6 +444,7 @@ fn ratio(n: f64) -> f64 {
 }
 /// Position `initial_margin_fraction`: the venue sends a percent string
 /// (`"20.00"` = 5x); a bare integer is the 1/10,000 tick form tx payloads use.
+/// A percent above 100 is impossible, so it reads as ticks as in TS.
 enum MarginFraction {
     Percent(f64),
     Ticks(f64),
@@ -458,7 +470,7 @@ impl<'de> Deserialize<'de> for MarginFraction {
                 Ok(MarginFraction::Ticks(n as f64))
             }
             fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<Self::Value, E> {
-                Ok(MarginFraction::Ticks(n))
+                Ok(MarginFraction::Percent(n))
             }
         }
         d.deserialize_any(V)
@@ -467,8 +479,8 @@ impl<'de> Deserialize<'de> for MarginFraction {
 impl MarginFraction {
     fn ratio(&self) -> Option<f64> {
         let ratio = match *self {
-            Self::Percent(n) => n / 100.0,
-            Self::Ticks(n) => n / 10000.0,
+            Self::Percent(n) if n <= 100.0 => n / 100.0,
+            Self::Percent(n) | Self::Ticks(n) => n / 10000.0,
         };
         (ratio.is_finite() && ratio > 0.0 && ratio <= 1.0).then_some(ratio)
     }
@@ -491,16 +503,18 @@ fn millis(time: f64) -> f64 {
 fn normalized(text: &str) -> String {
     text.to_ascii_uppercase().replace(['-', ' '], "_")
 }
+/// Seconds, milliseconds or microseconds to milliseconds.
+fn venue_millis(time: f64) -> f64 {
+    if time >= 100_000_000_000_000.0 {
+        time / 1000.0
+    } else {
+        millis(time)
+    }
+}
 fn event_time(updated: Option<&Num>, transaction: Option<&Num>) -> Option<f64> {
     transaction
         .filter(|n| n.0 > 0.0)
-        .map(|n| {
-            if n.0 >= 100_000_000_000_000.0 {
-                n.0 / 1000.0
-            } else {
-                millis(n.0)
-            }
-        })
+        .map(|n| venue_millis(n.0))
         .or_else(|| updated.filter(|n| n.0 > 0.0).map(|n| millis(n.0)))
 }
 
@@ -793,7 +807,8 @@ impl Lighter {
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
         self.account.connection.recovery_started = None;
-        self.account.live_after = None;
+        self.account.session_start.get_or_insert(cx.now);
+        self.account.live_after = self.account.outage.map(|outage| self.cutoff(outage));
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
@@ -802,9 +817,18 @@ impl Lighter {
         self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
         self.refresh_account(cx);
         self.refresh_orders(cx);
-        if let Some(outage) = self.account.connection.outage_since.take() {
-            let since = self.resume_after(outage);
-            self.request_backfill(cx, since, None, 1);
+        if let Some(since) = self.account.live_after {
+            if let Some((timer, _)) = self.account.backfill_retry.take() {
+                cx.clear_timer(timer);
+            }
+            let run = Backfill {
+                since,
+                epoch: self.account.outage_epoch,
+                page: 1,
+                cursor: None,
+                retried: false,
+            };
+            self.request_backfill(cx, run);
         }
         true
     }
@@ -819,10 +843,8 @@ impl Lighter {
         }
         self.account.connection.open = false;
         self.account.connection.socket = None;
-        if self.account.connection.connected_at > 0.0 {
-            let last = self.account.connection.last_received;
-            self.account.connection.outage_since.get_or_insert(last);
-        }
+        let connection = &self.account.connection;
+        self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
         if let Some(t) = self.account.connection.watchdog.take() {
             cx.clear_timer(t);
         }
@@ -875,7 +897,9 @@ impl Lighter {
                                 connection.last_payload.unwrap_or(connection.connected_at);
                             self.account.connection.last_recovery = Some(cx.now);
                             self.account.connection.recovery_started = Some(cx.now);
-                            self.resume_after(quiet_since);
+                            self.arm_outage(quiet_since);
+                            self.account.live_after =
+                                self.account.outage.map(|outage| self.cutoff(outage));
                             self.subscribe_private(cx, socket);
                         }
                         cx.send(
@@ -893,6 +917,16 @@ impl Lighter {
             self.refresh_account(cx);
             self.refresh_orders(cx);
             self.refresh_limits(cx);
+            return true;
+        }
+        if self
+            .account
+            .backfill_retry
+            .as_ref()
+            .is_some_and(|(t, _)| *t == timer)
+        {
+            let (_, run) = self.account.backfill_retry.take().unwrap();
+            self.request_backfill(cx, run);
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1552,26 +1586,20 @@ impl Lighter {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
             Request::ChangeTier { command } => self.tier_changed(cx, command, response),
             Request::Backfill {
-                since,
-                page,
-                cursor,
+                run,
                 mut executions,
                 oldest,
                 count,
             } => {
                 if !ok {
-                    cx.log(
-                        LogLevel::Warning,
-                        format!(
-                            "Lighter fill backfill failed ({}); fills during the outage may be missing",
-                            response.status
-                        ),
-                    );
+                    let message = status.as_ref().map_or("", |s| s.message.as_ref());
+                    let error = format!("HTTP {} {message}", response.status);
+                    self.backfill_failed(cx, run, error);
                     return;
                 }
                 executions.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 for execution in executions {
-                    self.observe_execution(cx, execution, since);
+                    self.observe_execution(cx, execution, run.since);
                 }
                 #[derive(Deserialize)]
                 struct Page<'a> {
@@ -1581,18 +1609,25 @@ impl Lighter {
                 let next = serde_json::from_str::<Page<'_>>(response.body)
                     .ok()
                     .and_then(|p| p.next_cursor)
-                    .filter(|c| !c.is_empty() && Some(c.as_ref()) != cursor.as_deref())
+                    .filter(|c| !c.is_empty() && Some(c.as_ref()) != run.cursor.as_deref())
                     .map(Cow::into_owned);
-                if count >= 100 && oldest >= since {
-                    match next {
-                        Some(next) if page < 20 => {
-                            self.request_backfill(cx, since, Some(next), page + 1)
-                        }
-                        _ => cx.log(
-                            LogLevel::Warning,
-                            "Lighter fill backfill stopped before the outage start; older fills may be missing",
-                        ),
+                if count >= 100 && oldest >= run.since {
+                    if let Some(next) = next.filter(|_| run.page < 20) {
+                        let run = Backfill {
+                            page: run.page + 1,
+                            cursor: Some(next),
+                            ..run
+                        };
+                        self.request_backfill(cx, run);
+                        return;
                     }
+                    cx.log(
+                        LogLevel::Warning,
+                        "Lighter fill backfill stopped before the outage start; older fills may be missing",
+                    );
+                }
+                if self.account.outage_epoch == run.epoch {
+                    self.account.outage = None;
                 }
             }
             Request::Lookup {
@@ -1750,12 +1785,7 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
-            Request::Backfill { .. } => cx.log(
-                LogLevel::Warning,
-                format!(
-                    "Lighter fill backfill failed; fills during the outage may be missing: {error}"
-                ),
-            ),
+            Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
             Request::ChangeTier { command } => cx.done(
                 command,
                 Err(format!(
@@ -1828,6 +1858,9 @@ impl Lighter {
             || payload.trades.is_some()
             || payload.account.is_some()
             || payload.balances.is_some();
+        if meaningful || frame.kind.starts_with("subscribed") {
+            self.account.baselined = true;
+        }
         if meaningful {
             self.account.connection.last_payload = Some(cx.now);
             self.account.connection.recovery_started = None;
@@ -2005,7 +2038,7 @@ impl Lighter {
             .map(|id| id.0.as_ref())
             .find(|id| !id.is_empty())?;
         // A venue clock ahead of the host is still a real execution; keep its time.
-        let timestamp = millis(trade.timestamp.0);
+        let timestamp = venue_millis(trade.timestamp.0);
         if timestamp <= 0.0 {
             return None;
         }
@@ -2046,21 +2079,45 @@ impl Lighter {
         self.trade_execution_observed(&execution.fill.order_id, execution.timestamp);
         cx.fill(execution.fill);
     }
-    /// Subscription history newer than the returned cutoff was missed while the
-    /// stream was down or stale since `outage`, so it is emitted, once.
-    fn resume_after(&mut self, outage: f64) -> f64 {
-        // Up to 10 s before the outage absorbs clock skew; seen_fills dedupes.
-        let since = self.account.newest_fill.clamp(outage - 10_000.0, outage);
-        self.account.live_after = Some(since);
-        since
+    /// Account payloads stopped at `quiet_since`; executions after it may be
+    /// missing until a backfill completes. Only after a baseline, so pre-session
+    /// history is never replayed as new.
+    fn arm_outage(&mut self, quiet_since: f64) {
+        if !self.account.baselined {
+            return;
+        }
+        let earliest = self
+            .account
+            .outage
+            .map_or(quiet_since, |o| o.min(quiet_since));
+        self.account.outage = Some(earliest);
+        self.account.outage_epoch += 1;
     }
-    fn request_backfill(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        since: f64,
-        cursor: Option<String>,
-        page: u32,
-    ) {
+    /// Executions at or after this time are emitted from history, once.
+    fn cutoff(&self, outage: f64) -> f64 {
+        // Up to 10 s before the outage absorbs clock skew; seen_fills dedupes.
+        let floor = (outage - 10_000.0).max(self.account.session_start.unwrap_or(f64::MIN));
+        self.account.newest_fill.clamp(floor, outage.max(floor))
+    }
+    fn backfill_failed(&mut self, cx: &mut Cx<'_, Pending>, mut run: Backfill, error: String) {
+        if run.retried {
+            cx.log(
+                LogLevel::Warning,
+                format!("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect: {error}"),
+            );
+            return;
+        }
+        cx.log(
+            LogLevel::Info,
+            format!("Lighter fill backfill failed, retrying: {error}"),
+        );
+        run.retried = true;
+        if let Some((timer, _)) = self.account.backfill_retry.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
+    }
+    fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
         let auth = match self.account_auth(cx.now) {
             Ok(auth) => auth,
             Err(e) => {
@@ -2078,7 +2135,7 @@ impl Lighter {
             "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",
             self.host()
         );
-        if let Some(cursor) = &cursor {
+        if let Some(cursor) = &run.cursor {
             url.push_str(&format!("&cursor={}", safe_cex_engine::url::encode(cursor)));
         }
         cx.request_streamed(
@@ -2087,9 +2144,7 @@ impl Lighter {
             vec![("authorization", auth)],
             json::ArrayAt::Field("trades"),
             Pending::Account(Request::Backfill {
-                since,
-                page,
-                cursor,
+                run,
                 executions: Vec::new(),
                 oldest: f64::INFINITY,
                 count: 0,
