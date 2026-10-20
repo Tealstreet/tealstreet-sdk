@@ -10,7 +10,7 @@ use safe_cex_engine::model::{
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, Outcome, Response, SocketId, TimerId, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Outcome, Response, SocketId, TimerId, VenueError, num,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -102,6 +102,12 @@ struct Job {
     error: Option<String>,
     /// A write may have taken effect without a definitive answer.
     unknown: bool,
+    /// The unknown answer was a lost request.
+    network: bool,
+    /// Bybit explicitly refused a write; its retCode when it gave one.
+    refused: Option<Option<i64>>,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
     delay: Option<TimerId>,
 }
 
@@ -414,6 +420,13 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // `send` drops requests while the options are invalid; fail instead of hanging.
+        if let Some(error) = self.config_error.clone()
+            && let Some(id) = trade_command_id(&command)
+        {
+            cx.fail(id, not_sent(error));
+            return;
+        }
         if let Command::PlaceOrders { command, orders } = &command {
             for order in orders {
                 let category = self.category_for(&order.symbol);
@@ -427,7 +440,7 @@ impl BybitLinear {
                     Ok(())
                 };
                 if let Err(error) = valid {
-                    cx.done(*command, Err(error));
+                    cx.fail(*command, not_sent(error));
                     return;
                 }
             }
@@ -437,7 +450,7 @@ impl BybitLinear {
         if let Command::PlaceOrders { command, orders } = &command
             && let Err(error) = validate_stop_triggers(cx, orders)
         {
-            cx.done(*command, Err(error));
+            cx.fail(*command, not_sent(error));
             return;
         }
         if self.variant.is_hyro() {
@@ -452,11 +465,10 @@ impl BybitLinear {
                     | Command::SetPositionMode { command, .. } => *command,
                     _ => return,
                 };
-                cx.done(
+                cx.fail(
                     id,
-                    Err(
-                        "HyroTrader account is reconnecting; wait for private state reconciliation"
-                            .into(),
+                    not_sent(
+                        "HyroTrader account is reconnecting; wait for private state reconciliation",
                     ),
                 );
                 return;
@@ -467,7 +479,10 @@ impl BybitLinear {
             }
         }
         if let Some((id, result)) = self.variant_control(&command) {
-            cx.done(id, result.map(|_| "[]".to_owned()));
+            match result {
+                Ok(()) => cx.done(id, Ok("[]".to_owned())),
+                Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::Unsupported)),
+            }
             return;
         }
         // A settle-coin snapshot omits flat symbols. Resolve their mode before
@@ -491,18 +506,18 @@ impl BybitLinear {
         if let Some((id, symbol)) = unresolved {
             let category = self.category_for(&symbol);
             if !self.category_enabled(category) {
-                cx.done(id, Err("Bybit product is not enabled".into()));
+                cx.fail(id, not_sent("Bybit product is not enabled"));
                 return;
             }
             self.select_category(category);
             if self.credentials.is_none() {
-                cx.done(id, Err("Bybit trading needs an API key".into()));
+                cx.fail(id, not_sent("Bybit trading needs an API key"));
                 return;
             }
             if let Command::PlaceOrders { orders, .. } = &command
                 && let Err(message) = check_client_order_ids(cx, orders)
             {
-                cx.done(id, Err(message));
+                cx.fail(id, not_sent(message));
                 return;
             }
             self.send(
@@ -661,9 +676,9 @@ impl BybitLinear {
                         });
                     }
                     if job.steps.is_empty() {
-                        cx.done(
+                        cx.fail(
                             command,
-                            Err("No inverse markets loaded for position-mode switch".into()),
+                            not_sent("No inverse markets loaded for position-mode switch"),
                         );
                     } else {
                         self.trading.jobs.insert(command, job);
@@ -683,7 +698,7 @@ impl BybitLinear {
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.done(id, Err("Bybit trading needs an API key".into()));
+            cx.fail(id, not_sent("Bybit trading needs an API key"));
             return;
         }
         match plan {
@@ -693,7 +708,7 @@ impl BybitLinear {
             }
             Err(message) => {
                 cx.command_error(id, message.clone());
-                cx.done(id, Err(message));
+                cx.fail(id, not_sent(message));
             }
         }
     }
@@ -771,14 +786,28 @@ impl BybitLinear {
                 let job = self.trading.jobs.remove(&command).expect("present");
                 // A batch reports its failures as logs; it fails only when nothing went through.
                 match job.error {
-                    // Unclassified failures keep the plain path until Bybit migrates to `fail`.
-                    Some(error)
-                        if job.unknown && (job.ids.is_empty() || !job.continue_on_error) =>
-                    {
-                        cx.fail(command, VenueError::new(error).outcome(Outcome::Unknown))
-                    }
                     Some(error) if job.ids.is_empty() || !job.continue_on_error => {
-                        cx.done(command, Err(error))
+                        let error = VenueError::new(error);
+                        let error = if job.unknown {
+                            let error = error.outcome(Outcome::Unknown);
+                            if job.network {
+                                error.kind(ErrorKind::Network)
+                            } else {
+                                error
+                            }
+                        } else if let Some(code) = job.refused
+                            && !job.effective
+                            && job.ids.is_empty()
+                        {
+                            let error = error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected);
+                            match code {
+                                Some(code) => error.venue_code(code.to_string()),
+                                None => error,
+                            }
+                        } else {
+                            error
+                        };
+                        cx.fail(command, error)
                     }
                     _ => cx.done(
                         command,
@@ -868,7 +897,8 @@ impl BybitLinear {
                     }
                     Err(message) => {
                         cx.command_error(command, message.clone());
-                        cx.done(command, Err(message));
+                        // A read before any write: nothing was sent.
+                        cx.fail(command, not_sent(message));
                     }
                 }
                 return;
@@ -896,6 +926,13 @@ impl BybitLinear {
         let mut ids = Vec::new();
         let mut errors = Vec::new();
         let mut unknown = false;
+        let network = response.is_err();
+        // An explicit venue retCode that proves this write was refused.
+        let refused = match &outcome {
+            Err((code, _)) if !outcome_unknown(*code) && !http_unknown => Some(Some(*code)),
+            _ => None,
+        };
+        let succeeded = outcome.is_ok();
         let mut fallback_steps = Vec::new();
         match (call, outcome) {
             (Call::PlaceOne, Ok(body)) => {
@@ -1132,9 +1169,19 @@ impl BybitLinear {
             return;
         };
         if let Some(first) = errors.into_iter().next() {
+            if job.error.is_none() {
+                // Per-order refusals in a 2xx answer carry no single retCode.
+                job.refused = refused.or(succeeded.then_some(None));
+            }
             job.error.get_or_insert(first);
+        } else if succeeded {
+            job.effective = true;
+        }
+        if !ids.is_empty() {
+            job.effective = true;
         }
         job.unknown |= unknown;
+        job.network |= unknown && network;
         job.ids.extend(ids);
         if !fallback_steps.is_empty() {
             let steps = fallback_steps
@@ -2359,5 +2406,24 @@ impl BybitLinear {
                 self.schedule_fill_repair(cx, id, &input.symbol);
             }
         }
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+fn trade_command_id(command: &Command) -> Option<CommandId> {
+    match command {
+        Command::PlaceOrders { command, .. }
+        | Command::CancelOrders { command, .. }
+        | Command::CancelOrdersWithSymbols { command, .. }
+        | Command::AmendOrder { command, .. }
+        | Command::CancelSymbolOrders { command, .. }
+        | Command::SetLeverage { command, .. }
+        | Command::SetMarginType { command, .. }
+        | Command::SetPositionMode { command, .. } => Some(*command),
+        _ => None,
     }
 }
