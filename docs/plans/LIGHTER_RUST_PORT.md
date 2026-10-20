@@ -202,3 +202,17 @@ Full repository verification: 27/27 test tasks pass, with 6,858 safe-cex tests
 in each CI/unit run; typecheck 44/44 and lint 28/28 pass. Source changes from
 PR review are Rust-only. Re-running workspace/Wasm and Lighter replay gates
 on the final patch; merge remains conditional on final green PR CI.
+
+### Final reviewed source verification
+
+At `58e3ed2a36`, every local gate passes again. Native workspace: 904 tests
+(85 Lighter); all-target Clippy, format, bans and Wasm Clippy pass. Actual
+single-venue Wasm boundary: 6/6 tests. Earlier combined-host and unchanged JS
+suite proof above remains applicable.
+
+Lighter public: 8,875 frames, 213 markets/tickers and two books, exact output.
+TS/Rust main CPU 577.0/397.4 ms (1.45x), steady 390.2/244.1 ms (1.60x),
+retained 3.0/1.8 MB (1.67x). Wasm 963,789 bytes against 1,258,291.
+Lighter private: PASS, 14 events/eight commands/11 tx across ten writes;
+CPU and memory informational. Both Binance gates already pass; reviewed
+changes affect only the Lighter crate. Final PR CI must be green before merge.
