@@ -180,6 +180,11 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Query {
+    /// Resolve an uncertain placement using the venue-native client ID.
+    OrderByClientId {
+        symbol: String,
+        client_order_id: String,
+    },
     /// The account's own executions.
     Fills {
         symbol: Option<String>,
@@ -402,6 +407,7 @@ impl<P> Cx<'_, P> {
         self.request_streamed_body(method, url, headers, None, at, pending)
     }
 
+    /// Stream a POSTed read while retaining its typed request body.
     pub fn request_streamed_body(
         &mut self,
         method: Method,

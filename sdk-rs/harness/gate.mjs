@@ -10,8 +10,10 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixWeexConditionals } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals } from './known-ts-fixes.mjs';
 import { venueOf } from './venues.mjs';
+import { memoryMetricErrors } from './memory.mjs';
+import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -82,6 +84,7 @@ const [ts, rust] = [results.ts[0], results.rust[0]];
 
 const venue = venueOf(values.venue);
 const isPrivate =
+  tapeRecords.find((record) => record.type === 'config')?.private ??
   tapeRecords.find((record) => record.type === 'meta')?.private ??
   tapeRecords.some((record) =>
     venue.isPrivateRecord
@@ -146,6 +149,19 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  hyperliquid() {
+    // Native command regressions pin these deliberate TS fixes:
+    // - Validate every cancel acknowledgement before cancel+replace continues.
+    // - Resolve queued leverage/margin settings when the step executes.
+    // - Keep each HIP-3 bracket leg's own metadata in pending/optimistic state;
+    //   TS assigns entry metadata to every returned oid in placeLimitOrder.
+    // - History keeps distinct tid executions and signed rebates, uses vault
+    //   identity and caller ranges, and rejects failed or saturated reads.
+    // - Execution limits sort raw milliseconds before serializing seconds.
+    // - Income honors the requested kind; fills support all-symbol queries.
+    // The tape compares converged state: no account values are rewritten here.
+  },
+
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.
@@ -166,16 +182,8 @@ const KNOWN_TS_FIXES = {
     ],
   },
 
-  blofin: (ts, rust) => {
-    const account = ts.account;
-    if (!account) return;
-    KNOWN_TS_FIXES.binance(ts, rust);
-    // The native empty position snapshot clears both aggregates; TS retains
-    // its last margin and unrealized PnL after the final position closes.
-    if (account.positions.length === 0) {
-      account.balance.used = 0;
-      account.balance.upnl = 0;
-    }
+  blofin: (ts) => {
+    if (ts.account) fixBlofinAccount(ts.account);
   },
   mexc: () => {
     // Full incremental depth, rather than replacing a 20-level snapshot.
@@ -304,12 +312,22 @@ const KNOWN_TS_FIXES = {
     if (!ts.account) return;
     const output = ts;
     KNOWN_TS_FIXES.binance(ts, rust);
-    const required = (
-      values.venue === 'hyrotrader'
-        ? []
-        : output.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
-    ).flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
-    output.subscriptions = [...new Set([...output.subscriptions, ...required])].sort();
+    // Optional TS API/VIP UI metadata has no engine-frame representation.
+    const rest =
+      tapeRecords.find((record) => record.type === 'config')?.options?.endpoints?.rest ??
+      (values.venue === 'bybitdemo' ? 'https://api-demo.bybit.com' : 'https://api.bybit.com');
+    const metadataRequest = requestKey('GET', `${rest}/v5/user/query-api`, undefined, new Set(), venue);
+    output.requests = output.requests.filter((key) => key !== metadataRequest);
+    if (values.venue !== 'hyrotrader') {
+      const feeds = new Set(output.subscriptions);
+      for (const key of output.subscriptions) {
+        const match = /^([1-9]\d*) WS (\S+) \{"args":\["order"\],"op":"subscribe"\}$/.exec(key);
+        if (!match || new URL(match[2]).pathname !== '/v5/private') continue;
+        for (const required of subscriptionKeys(match[2], { op: 'subscribe', args: ['execution', 'wallet'] }))
+          feeds.add(`${match[1]} ${required}`);
+      }
+      output.subscriptions = [...feeds].sort();
+    }
     const latest = new Map();
     for (const record of records) {
       if (record.type !== 'ws') continue;
@@ -350,11 +368,11 @@ const KNOWN_TS_FIXES = {
         new URL(record.url).pathname === '/api/v1/orders' &&
         record.status === 200
       ) {
-        for (const order of JSON.parse(record.body))
+        for (const order of parseRequestJson(record.body))
           orders.set(String(order.id), { c: order.clientId, y: order.postOnly });
       }
       if (record.type !== 'ws') continue;
-      const { stream, data: d } = JSON.parse(record.text);
+      const { stream, data: d } = parseRequestJson(record.text);
       if (!d) continue;
       // TS globally throttles tickers. That
       // drops other markets' last updates. Rust coalesces at the flush boundary.
@@ -516,11 +534,8 @@ for (let run = 0; run < runs; run++) {
     const output = results[impl][run];
     if (Boolean(output.account) !== isPrivate)
       differences.push(impl + ': account presence differs from tape classification');
-    // Invalid baselines fail even when private performance is informational.
-    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
-      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0)
-        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
-    }
+    // Invalid baselines fail on every run, including informational private metrics.
+    for (const error of memoryMetricErrors(output.metrics)) differences.push(`${impl}: ${error}; baseline is invalid`);
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -573,19 +588,23 @@ for (let run = 0; run < runs; run++) {
       privateUrl && `${privateUrl.origin}${privateUrl.pathname}`,
     );
   }
-  // OKX checks native wildcard coverage; Crypto audits auth/topics/heartbeats per socket.
-  if (
-    !values.venue.startsWith('okx') &&
-    values.venue !== 'cryptocom' &&
-    (!Array.isArray(ts.subscriptions) ||
-      !Array.isArray(rust.subscriptions) ||
-      JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions))
-  )
-    differences.push(
-      `subscriptions differ: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`,
-    );
   if (isPrivate && ts.account && rust.account) {
-    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
+    if (values.venue === 'cryptocom') {
+      fixCryptocomAccount(ts.account);
+      const feeds = new Set(ts.subscriptions);
+      const suffix = ' {"method":"subscribe","params":{"channels":["user.order"]}}';
+      for (const key of ts.subscriptions) {
+        if (!key.endsWith(suffix)) continue;
+        for (const required of subscriptionKeys(
+          key.slice(3, -suffix.length),
+          { method: 'subscribe', params: { channels: ['user.trade'] } },
+          new Set(),
+          { cryptoProtocol: true },
+        ))
+          feeds.add(required);
+      }
+      ts.subscriptions = [...feeds].sort();
+    }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);
@@ -602,6 +621,33 @@ for (let run = 0; run < runs; run++) {
         if (ticker[field] === null) ticker[field] = 0;
       }
     }
+  const selectedOnly = (impl) =>
+    new Set(
+      tapeRecords
+        .filter((record) => record.type === 'http' && record.impl === impl)
+        .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tapeRecords), venue)),
+    );
+  const implementationPlans = { ts: selectedOnly('ts'), rust: selectedOnly('rust') };
+  // Tagged fixture writes are independently required by each transport's
+  // consumption audit; compare shared requests and their shared write sequence.
+  for (const field of ['requests', 'subscriptions']) {
+    const left = ts[field]?.filter((key) => field !== 'requests' || !implementationPlans.ts.has(key));
+    const right = rust[field]?.filter((key) => field !== 'requests' || !implementationPlans.rust.has(key));
+    if (!Array.isArray(left) || !Array.isArray(right) || JSON.stringify(left) !== JSON.stringify(right))
+      differences.push(`${field} run ${run + 1}: ts=${JSON.stringify(left)} rust=${JSON.stringify(right)}`);
+  }
+  const tsWrites = ts.writes?.filter((key) => !implementationPlans.ts.has(key));
+  const rustWrites = rust.writes?.filter((key) => !implementationPlans.rust.has(key));
+  if (
+    !Array.isArray(tsWrites) ||
+    !Array.isArray(rustWrites) ||
+    ts.writeCount !== ts.writes.length ||
+    rust.writeCount !== rust.writes.length ||
+    JSON.stringify(tsWrites) !== JSON.stringify(rustWrites)
+  )
+    differences.push(
+      `HTTP write sequence run ${run + 1}: ts=${JSON.stringify(tsWrites)} rust=${JSON.stringify(rustWrites)}`,
+    );
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {

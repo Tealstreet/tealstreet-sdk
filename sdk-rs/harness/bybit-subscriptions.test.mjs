@@ -65,3 +65,31 @@ test('wrong Rust category, socket origin, operation or generation still fails co
     key('order.inverse', 2, url, 'unsubscribe'),
   ]);
 });
+
+test('canonical wire subscription scope changes only TS unqualified private topics', () => {
+  const wire = (topic, generation = 1, origin = url + '?', op = 'subscribe') =>
+    `${generation} WS ${origin} ${JSON.stringify({ args: [topic], op })}`;
+  const result = normalizeTsBybitSubscriptions('bybitinverse', [wire('order'), wire('wallet')], url);
+  assert.deepEqual(result, [wire('order.inverse'), wire('wallet')]);
+  assert.deepEqual(normalizeTsBybitSubscriptions('bybitspot', [wire('execution')], url), [wire('execution.spot')]);
+  const untouched = [
+    wire('order.spot'),
+    wire('order.linear'),
+    wire('orders'),
+    wire('order', 0),
+    wire('order', '01'),
+    wire('order', 1, url + '?extra=1'),
+    wire('order', 1, 'wss://other.example/v5/private?'),
+    wire('order', 1, url + '?', 'other'),
+    wire('order') + ' ',
+    `1 WS ${url}? {"args":["order"],"extra":1,"op":"subscribe"}`,
+  ];
+  assert.deepEqual(normalizeTsBybitSubscriptions('bybitinverse', untouched, url), [...untouched].sort());
+  for (const wrong of [
+    wire('order.spot'),
+    wire('order.inverse', 2),
+    wire('order.inverse', 1, url + '?extra=1'),
+    wire('order.inverse', 1, url + '?', 'unsubscribe'),
+  ])
+    assert.notDeepEqual(normalizeTsBybitSubscriptions('bybitinverse', [wire('order')], url), [wrong]);
+});

@@ -11,7 +11,25 @@ import { VENUES } from './venues.mjs';
 const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
-  writeFileSync(tape, JSON.stringify({ type: 'meta', private: isPrivate }) + '\n');
+  const records = [{ type: 'meta', private: isPrivate }];
+  if (defect?.startsWith('impl-plans')) {
+    for (const [impl, filters] of [
+      ['ts', [undefined]],
+      ['rust', ['Order', 'StopOrder', 'tpslOrder']],
+    ]) {
+      for (const orderFilter of filters)
+        records.push({
+          type: 'http',
+          impl,
+          method: 'POST',
+          url: 'https://api.bybit.com/v5/order/cancel-all',
+          status: 200,
+          body: '{}',
+          requestBody: JSON.stringify({ category: 'spot', ...(orderFilter && { orderFilter }) }),
+        });
+    }
+  }
+  writeFileSync(tape, records.map((record) => JSON.stringify(record)).join('\n') + '\n');
   const script = `
     import assert from 'node:assert/strict';
     import childProcess from 'node:child_process';
@@ -36,9 +54,10 @@ const gate = (venue, isPrivate = false, defect) => {
       const rust = impl === 'rust';
       const output = {
         frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
-        invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [],
+        invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [], requests: [], writes: [], writeCount: 0,
         metrics: {
           cpuMs: rust ? 1 : 2, steadyCpuMs: rust ? 1 : 2, processCpuMs: rust ? 1 : 2,
+          heapBeforeBytes: 100, heapUsedBytes: rust ? 110 : 120, buffersBefore: 100, buffersAfter: 100,
           retainedBytes: rust ? 10 : 20, heapRetainedBytes: rust ? 10 : 20,
           bufferRetainedBytes: 0, wasmBytes: 0,
         },
@@ -62,6 +81,23 @@ const gate = (venue, isPrivate = false, defect) => {
         output.books.BTCUSDT.bids[0][1] = 2;
         output.commands[0].ok.ids.reverse();
       }
+      if (defect?.startsWith('impl-plans')) {
+        output.writes = (rust ? ['Order', 'StopOrder', 'tpslOrder'] : [undefined]).map((orderFilter) =>
+          'POST https://api.bybit.com/v5/order/cancel-all? ' + JSON.stringify({ category: 'spot', ...(orderFilter && { orderFilter }) }));
+        if (rust && defect === 'impl-plans-unexpected') output.writes.push('POST https://api.bybit.com/v5/order/cancel-all? {"category":"linear"}');
+        if (rust && defect === 'impl-plans-missing') {
+          output.writes.pop();
+          output.unusedWrites = 1;
+        }
+        output.requests = [...output.writes].sort();
+        output.writeCount = output.writes.length;
+      }
+      if (rust && defect === 'transport') {
+        output.requests = ['POST https://example.test/orders? {"quantity":1}'];
+        output.writes = [...output.requests];
+        output.writeCount = 1;
+      }
+      if (rust && defect === 'memory-arithmetic') output.metrics.heapBeforeBytes--;
       // A later private run must reject invalid individual memory components
       // even though its aggregate and informational performance otherwise pass.
       if (rust && defect?.startsWith('memory:') && out.endsWith('rust-1.json'))
@@ -110,4 +146,29 @@ test('gate CLI validates every memory component on later private runs', () => {
     assert.equal(result.status, 1, result.stderr);
     assert.ok(result.stdout.includes(`rust: invalid ${field} (-1); baseline is invalid`), result.stdout);
   }
+});
+
+test('gate CLI compares transport requests and ordered writes independently of state', () => {
+  const result = gate('bybitinverse', true, 'transport');
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /requests run 1:/);
+  assert.match(result.stdout, /HTTP write sequence run 1:/);
+});
+
+test('gate CLI requires each tagged Spot write plan and rejects unrelated writes', () => {
+  const valid = gate('bybitspot', true, 'impl-plans');
+  assert.equal(valid.status, 0, valid.stderr + valid.stdout);
+  const unexpected = gate('bybitspot', true, 'impl-plans-unexpected');
+  assert.equal(unexpected.status, 1, unexpected.stderr);
+  assert.match(unexpected.stdout, /requests run 1:/);
+  assert.match(unexpected.stdout, /HTTP write sequence run 1:/);
+  const missing = gate('bybitspot', true, 'impl-plans-missing');
+  assert.equal(missing.status, 1, missing.stderr);
+  assert.match(missing.stdout, /1 taped mutation\(s\) never sent/);
+});
+
+test('gate CLI validates retained deltas against absolute memory samples', () => {
+  const result = gate('bybitinverse', true, 'memory-arithmetic');
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /inconsistent heapRetainedBytes/);
 });

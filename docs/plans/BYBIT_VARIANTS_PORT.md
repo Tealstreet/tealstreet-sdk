@@ -476,3 +476,21 @@ deduplication, publication order, snapshots, market replacement and field masks.
 All 52 engine and 105 Bybit tests, strict Clippy and independent adversarial
 review pass. The artifact is 3,658,442 bytes within the same inherited budget.
 The 31-gate matrix must pass before pushing; all earlier failures are retained.
+
+## Resumed integration after restored quota
+
+All 31 ten-venue replay gates passed on `95ea95c633` (14 public medians of
+three; 17 private), with the 3,658,442-byte artifact. The subsequent combined
+wasm boundary/host run also passed. Quota restoration resumed the final PR
+process; PR #1307 still requires its new head pushed and green CI before merge.
+
+First fetched and merged `c5bc2c4adf`, the Hyperliquid landing. Keep its venue
+feature flags, per-venue builds/CI matrix and fixed 1,258,291-byte single-bundle
+budget. Bybit aliases share the Bybit feature and run only in its matrix job.
+The new build leaves the engine and dispatch at O3; Bybit can return to O3
+within its per-venue budget. All pre-existing allocation and measurement fixes
+remain. Preserve new typed query/identity controls and all exact replay audits.
+Hyperliquid's native Bybit-control guard is proved red/green; all 58 native
+cases pass. Shared Hyperliquid wrapper regressions and client-ID contracts pass.
+Combined functional checks, per-venue size/performance gates and final-head CI
+are pending on this merge. Hyro live connectivity remains unverified.

@@ -245,7 +245,12 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
 
 impl BybitLinear {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
+        if self.credentials.is_none()
+            && !matches!(
+                read,
+                Read::PublicTrades { .. } | Read::OrderByClientId { .. }
+            )
+        {
             cx.done(command, Ok("[]".into()));
             return;
         }
@@ -258,6 +263,13 @@ impl BybitLinear {
             return;
         }
         let walk = match read {
+            Read::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("Bybit client order lookup is not supported by the Rust engine".into()),
+                );
+                return;
+            }
             Read::Fills {
                 symbol,
                 order_id,

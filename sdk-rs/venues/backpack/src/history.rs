@@ -131,6 +131,13 @@ impl Backpack {
         query: Query,
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("Backpack client-order-ID lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,
