@@ -76,9 +76,13 @@ High:
 - ~~Binance USD-M amend re-places the full original size when the order filled
   during the cancel ("unknown order" counted as cancel) (`binance/src/trading.rs:1131,536,1463`).~~
   Fixed: replacement waits for cancellation proof and subtracts racing fills; unknown cancellation cannot replace.
-- Rejected private login leaves a silent socket: bitget `account.rs:1128`,
+- ~~Rejected private login leaves a silent socket: bitget `account.rs:1128`,
   blofin `account.rs:1125`, mexc `account.rs:308`, woo `account.rs:1482`,
-  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.
+  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.~~
+  Fixed in `feat/rust-socket-supervisor`: rejected login retires the socket,
+  preserves account state and schedules jittered retry; an independent auth
+  deadline expires despite pongs. Native regressions cover all six, including
+  ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
 
@@ -105,8 +109,13 @@ Medium:
   A regression verifies authoritative inverse amend updates preserve coin `remaining` and native `remainingNative`.
 - Write timeout discards optimistic state instead of refreshing: orderly, okx.
 
-Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
-coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
+Low: ~~no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
+coinbase public, grvt, paradex, polymarket)~~ — fixed for the requested feeds
+by the shared supervisor, including fresh KuCoin token POSTs. Reverification
+dropped the literal public no-backoff claim for AsterDEX, Bitrue, BingX and
+Paradex: they already had exponential delays, but reset at open; their fixed
+private recovery, missing jitter and repeated-flap reset are now covered.
+KuCoin client-id collisions;
 ~~`uuid().unwrap_or_default()` in Binance~~ (fixed: propagate entropy failure instead of producing a broker-only ID); Backpack empty positions on any 404;
 OKX `partially_effective` final; Lighter late-fill drop; ~~Bybit unused `exec_id`~~ (fixed: bounded native execution-ID dedupe retained across reconnects).
 

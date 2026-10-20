@@ -568,3 +568,30 @@ live trading, weakened parity oracle, or performance threshold changes.
 - No local speedup is claimed. Push this bounded reader repair, collect fresh
   CI and scan the new committed source before merging. Broader logging work
   remains outside this wind-down assignment.
+
+### Overseer timing exception and final landing conflict
+
+- Explicit overseer decision in Aimux thread `thread-dmam1oibxrui`: stop
+  profiling, cite landing runs `39438422053` at `f895a98f26` and `39433770908`
+  at `c44f22bd8e`, and merge this PR once every other job is green. Both
+  downloaded landing Bybit logs independently show the identical Hyro steady
+  failure (TS/Rust 5.3/5.7 and 5.7/6.3 ms). A separate lane owns that inherited
+  timing gate. Preserve its actual FAIL and downstream unexecuted cases;
+  no all-gates-pass claim or threshold change. The profiling build was stopped
+  with exit 130 before any profiling replay ran.
+- Before merge, landing advances to `d17518bc5f` (socket supervisor) and creates
+  three conflicts. Keep incoming Bybit field enums (same bounded optimization)
+  and both sets of semantic tests, removing duplicate enum definitions. Bitrue
+  keeps incoming Supervisor/generation/listen-key recovery and our fixed
+  numeric/private diagnostics; retain both test sets, with privacy retries
+  following the actual bounded jitter timers instead of retired fixed delays.
+- Review automatic credential/nonce/auth merges, run focused engine/Bitrue/
+  Bybit/Hyperliquid tests and Clippy plus harness/formatting/bans, commit/push
+  the resolved merge, scan it and collect fresh CI under that explicit exception.
+  Final handoff records the deferred Hyro gate; start no queued follow-up.
+- Resolved merge passes all 472 focused Rust tests across 30 suite results,
+  strict all-target Clippy, workspace formatting, bans, and 711 harness tests.
+  Independent code-correctness review accepts retained credential erasure,
+  signer nonces, short Paradex auth, host boundaries, Bitrue diagnostics and
+  complete-item JSON validation. Commit/push for final CI under the explicit
+  inherited-Hyro exception; make no profiling or universal PASS claim.

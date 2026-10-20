@@ -97,7 +97,7 @@ impl BitgetFutures {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
             sockets: Default::default(),
@@ -162,6 +162,9 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        if index == 3 && self.account.supervisor.is_waiting() {
+            return;
+        }
         let url = if index == 3 {
             if self.account.uta {
                 paths::UTA_PRIVATE
@@ -195,7 +198,12 @@ impl BitgetFutures {
         ));
         connection.open = false;
         connection.last_received = cx.now;
-        connection.watchdog = Some(cx.set_timer(5_000.0));
+        if index == 3 {
+            self.account.authenticated = false;
+            self.account.supervisor.connecting(cx);
+        } else {
+            connection.watchdog = Some(cx.set_timer(5_000.0));
+        }
     }
 
     fn channel(&self, socket: SocketId) -> Option<usize> {
@@ -253,13 +261,15 @@ impl BitgetFutures {
         if let Some(timer) = connection.watchdog.take() {
             cx.clear_timer(timer);
         }
+        if index == 3 {
+            self.account.authenticated = false;
+            self.account.supervisor.retry(cx);
+            return;
+        }
         if connection.reconnect.is_none() {
             let delay = (1_000.0 * 2f64.powi(connection.attempts.min(5) as i32)).min(30_000.0);
             connection.attempts += 1;
             connection.reconnect = Some(cx.set_timer(delay));
-        }
-        if index == 3 {
-            self.account.authenticated = false;
         }
         if index == 0 {
             for state in self.books.values_mut() {
@@ -494,18 +504,21 @@ impl Venue for BitgetFutures {
         };
         let connection = &mut self.sockets[index];
         connection.open = true;
-        connection.attempts = 0;
+        if index != 3 {
+            connection.attempts = 0;
+        }
         connection.last_received = cx.now;
         connection.ping_at = cx.now;
         if let Some(timer) = connection.watchdog.take() {
             cx.clear_timer(timer);
         }
-        connection.watchdog = Some(cx.set_timer(5_000.0));
         if index == 3 {
+            self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
             cx.send(socket, "ping");
             return;
         }
+        connection.watchdog = Some(cx.set_timer(5_000.0));
         let mut topics: Vec<_> = cx
             .store
             .markets()
@@ -533,6 +546,9 @@ impl Venue for BitgetFutures {
             return;
         };
         self.sockets[index].last_received = cx.now;
+        if index == 3 {
+            self.account.supervisor.received(cx.now);
+        }
         if text == "pong" {
             cx.store
                 .set_latency((cx.now - self.sockets[index].ping_at) / 2.0);
@@ -736,6 +752,22 @@ impl Venue for BitgetFutures {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         self.history_timer(cx, timer);
+        match self.account.supervisor.on_timer(cx, timer) {
+            safe_cex_engine::socket::Tick::Reconnect => self.connect(cx, 3),
+            safe_cex_engine::socket::Tick::Ping => {
+                if let Some(socket) = self.sockets[3].socket {
+                    cx.send(socket, "ping");
+                    self.sockets[3].ping_at = cx.now;
+                }
+            }
+            safe_cex_engine::socket::Tick::TimedOut(_) => {
+                if let Some(socket) = self.sockets[3].socket {
+                    cx.close(socket);
+                    self.disconnected(cx, 3);
+                }
+            }
+            _ => (),
+        }
         for index in 0..self.sockets.len() {
             if self.sockets[index].reconnect == Some(timer) {
                 self.sockets[index].reconnect = None;

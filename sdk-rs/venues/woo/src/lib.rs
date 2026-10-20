@@ -208,7 +208,7 @@ impl Woo {
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
             rest: if options.testnet {

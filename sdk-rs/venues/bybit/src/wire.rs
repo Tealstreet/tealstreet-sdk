@@ -419,18 +419,32 @@ impl BookLevels {
     }
 }
 
-struct BookSeed<'a>(&'a mut BookLevels);
-
+// Field names are identifiers, so neither visitor needs to retain owned keys.
 #[derive(Deserialize)]
-#[serde(field_identifier)]
+#[serde(field_identifier, rename_all = "lowercase")]
 enum BookField {
-    #[serde(rename = "type")]
-    Kind,
-    #[serde(rename = "data")]
+    Type,
     Data,
     #[serde(other)]
     Other,
 }
+
+#[derive(Deserialize)]
+#[serde(field_identifier)]
+enum BookDataField {
+    #[serde(rename = "s")]
+    Symbol,
+    #[serde(rename = "u")]
+    Update,
+    #[serde(rename = "b")]
+    Bids,
+    #[serde(rename = "a")]
+    Asks,
+    #[serde(other)]
+    Other,
+}
+
+struct BookSeed<'a>(&'a mut BookLevels);
 
 impl<'de> serde::de::DeserializeSeed<'de> for BookSeed<'_> {
     type Value = BookMessage<'de>;
@@ -452,7 +466,7 @@ impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
         let (mut kind, mut data) = (None, None);
         while let Some(key) = map.next_key::<BookField>()? {
             match key {
-                BookField::Kind => {
+                BookField::Type => {
                     if kind.is_some() {
                         return Err(M::Error::duplicate_field("type"));
                     }
@@ -479,21 +493,6 @@ impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
 }
 
 struct BookDataSeed<'a>(&'a mut BookLevels);
-
-#[derive(Deserialize)]
-#[serde(field_identifier)]
-enum BookDataField {
-    #[serde(rename = "s")]
-    Symbol,
-    #[serde(rename = "u")]
-    Update,
-    #[serde(rename = "b")]
-    Bids,
-    #[serde(rename = "a")]
-    Asks,
-    #[serde(other)]
-    Other,
-}
 
 impl<'de> serde::de::DeserializeSeed<'de> for BookDataSeed<'_> {
     type Value = (Cow<'de, str>, u64);
@@ -1262,6 +1261,65 @@ mod tests {
                     "accepted invalid type: {text}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn book_field_identifiers_accept_escaped_keys_and_reordered_fields() {
+        let mut levels = BookLevels::default();
+        let message = levels.decode(r#"{"d\u0061ta":{"\u0061":[["2","3"]],"\u0075":4,"\u0073":"BTCUSDT","\u0062":[["1","2"]]},"\u0074ype":"delta"}"#).unwrap();
+        assert_eq!(
+            (
+                message.kind.as_ref(),
+                message.symbol.as_ref(),
+                message.update
+            ),
+            ("delta", "BTCUSDT", 4)
+        );
+        assert_eq!(levels.bids, [(1.0, 2.0)]);
+        assert_eq!(levels.asks, [(2.0, 3.0)]);
+    }
+
+    #[test]
+    fn book_field_identifiers_reject_plain_and_escaped_duplicates_in_either_order() {
+        let mut levels = BookLevels::default();
+        for (field, escaped, value) in [
+            ("type", r"\u0074ype", r#""delta""#),
+            ("data", r"d\u0061ta", r#"{"s":"BTCUSDT"}"#),
+            ("s", r"\u0073", r#""BTCUSDT""#),
+            ("u", r"\u0075", "2"),
+            ("b", r"\u0062", "[]"),
+            ("a", r"\u0061", "[]"),
+        ] {
+            for (first, second) in [(field, escaped), (escaped, field)] {
+                let duplicate = format!(r#""{first}":{value},"{second}":{value}"#);
+                let text = match field {
+                    "type" => format!(r#"{{{duplicate},"data":{{"s":"BTCUSDT"}}}}"#),
+                    "data" => format!(r#"{{"type":"delta",{duplicate}}}"#),
+                    "s" => format!(r#"{{"type":"delta","data":{{{duplicate}}}}}"#),
+                    _ => format!(r#"{{"type":"delta","data":{{"s":"BTCUSDT",{duplicate}}}}}"#),
+                };
+                assert!(levels.decode(&text).is_err(), "accepted duplicate: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn book_field_identifiers_still_validate_ignored_values_and_trailing_json() {
+        let mut levels = BookLevels::default();
+        // Unknown fields, including duplicates after unescaping, stay ignored.
+        let message = levels.decode(r#"{"extra":{"x":[1,true,null]},"ex\u0074ra":false,"type":"delta","data":{"extra":[],"ex\u0074ra":{},"s":"BTCUSDT"}}"#).unwrap();
+        assert_eq!(message.update, 0);
+        assert!(levels.bids.is_empty() && levels.asks.is_empty());
+        for malformed in [
+            r#"{"type":"delta","data":{"s":"BTCUSDT"},"extra":[1,]}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","extra":[1,]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT"}} {}"#,
+        ] {
+            assert!(
+                levels.decode(malformed).is_err(),
+                "accepted malformed: {malformed}"
+            );
         }
     }
 

@@ -9,6 +9,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId,
     json::ArrayAt,
@@ -152,10 +153,7 @@ pub struct Account {
     auth_rpc: Option<u64>,
     subscriptions: HashMap<u64, String>,
     subscriptions_started: f64,
-    received: f64,
-    opened_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     retry: Option<TimerId>,
     poll: Option<TimerId>,
     repair_orders: Option<TimerId>,
@@ -199,10 +197,11 @@ impl Account {
             auth_rpc: None,
             subscriptions: HashMap::new(),
             subscriptions_started: 0.,
-            received: 0.,
-            opened_at: 0.,
-            watchdog: None,
-            reconnect: None,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                idle_timeout_ms: 90_000.,
+                ..Config::default()
+            }),
             retry: None,
             poll: None,
             repair_orders: None,
@@ -325,14 +324,13 @@ impl Account {
     }
     pub fn handles_timer(&self, timer: TimerId) -> bool {
         [
-            self.watchdog,
-            self.reconnect,
             self.retry,
             self.poll,
             self.repair_orders,
             self.repair_positions,
         ]
         .contains(&Some(timer))
+            || self.supervisor.owns_timer(timer)
     }
     pub fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.started {
@@ -514,8 +512,9 @@ impl Account {
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.socket.is_none() {
+        if self.socket.is_none() && !self.supervisor.is_waiting() {
             self.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Private));
+            self.supervisor.connecting(cx);
         }
     }
     fn send_auth(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -590,10 +589,8 @@ impl Account {
         self.authenticated = false;
         self.auth_rpc = None;
         self.subscriptions.clear();
-        self.received = cx.now;
-        self.opened_at = cx.now;
+        self.supervisor.opened(cx);
         // Hosts answer RFC6455 pings; the server's SBE heartbeat proves idle liveness.
-        self.watchdog = Some(cx.set_timer(5_000.));
         self.send_auth(cx);
     }
     fn disconnect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -604,12 +601,7 @@ impl Account {
         self.authenticated = false;
         self.auth_rpc = None;
         self.subscriptions.clear();
-        if let Some(timer) = self.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.reconnect.is_none() {
-            self.reconnect = Some(cx.set_timer(1_000.));
-        }
+        self.supervisor.retry(cx);
     }
     pub fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.handles_socket(socket) {
@@ -624,7 +616,7 @@ impl Account {
             return;
         };
         if message.kind == "ping" || message.kind == "pong" {
-            self.received = cx.now;
+            self.supervisor.received(cx.now);
             return;
         }
         if message.jsonrpc != "2.0" {
@@ -659,7 +651,8 @@ impl Account {
             }
             self.auth_rpc = None;
             self.authenticated = true;
-            self.received = cx.now;
+            self.supervisor.authenticated(cx);
+            self.supervisor.received(cx.now);
             self.subscriptions_started = cx.now;
             for channel in [
                 "orders.ALL",
@@ -693,7 +686,7 @@ impl Account {
                     .map(|ack| ack.channel);
                 if channel == Some(expected.as_str()) {
                     self.subscriptions.remove(&id);
-                    self.received = cx.now;
+                    self.supervisor.received(cx.now);
                 }
             }
             return;
@@ -716,7 +709,7 @@ impl Account {
             false
         };
         if valid {
-            self.received = cx.now;
+            self.supervisor.received(cx.now);
         }
     }
     pub fn on_binary(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, bytes: &[u8]) {
@@ -726,7 +719,7 @@ impl Account {
         let result =
             crate::sbe::Frame::parse(bytes).and_then(|mut frame| self.binary(cx, &mut frame));
         match result {
-            Ok(true) => self.received = cx.now,
+            Ok(true) => self.supervisor.received(cx.now),
             Ok(false) => {}
             Err(error) => cx.log(LogLevel::Warning, error),
         }
@@ -932,21 +925,19 @@ impl Account {
     }
 
     pub fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.watchdog == Some(timer) {
-            self.watchdog = None;
-            if !self.open
-                || (!self.authenticated && cx.now - self.opened_at >= 15_000.)
-                || (!self.subscriptions.is_empty()
-                    && cx.now - self.subscriptions_started >= 15_000.)
-                || cx.now - self.received >= 90_000.
-            {
-                self.disconnect(cx);
-                return;
+        if self.supervisor.owns_timer(timer) {
+            match self.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect(cx),
+                SocketTick::TimedOut(_) => self.disconnect(cx),
+                SocketTick::Handled
+                    if self.authenticated
+                        && !self.subscriptions.is_empty()
+                        && cx.now - self.subscriptions_started >= 15_000. =>
+                {
+                    self.disconnect(cx)
+                }
+                _ => {}
             }
-            self.watchdog = Some(cx.set_timer(5_000.));
-        } else if self.reconnect == Some(timer) {
-            self.reconnect = None;
-            self.connect(cx);
         } else if self.retry == Some(timer) {
             self.retry = None;
             if self.credentials.is_none() {

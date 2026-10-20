@@ -137,7 +137,7 @@ impl Blofin {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),

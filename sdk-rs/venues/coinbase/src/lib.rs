@@ -66,7 +66,7 @@ impl Coinbase {
             .map_or_else(String::new, |c| c.key().to_owned());
         Ok(Self {
             options,
-            public: public::Public::default(),
+            public: public::Public::new(),
             credentials,
             rest: rest::Rest::default(),
             account: account::Account::default(),

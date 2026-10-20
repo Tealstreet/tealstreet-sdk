@@ -10,6 +10,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -65,14 +66,24 @@ enum List {
     Premium,
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
-    last_received: f64,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_base_ms: 1_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -174,9 +185,8 @@ impl Bingx {
             paths::PUBLIC_WS.to_owned(),
             safe_cex_engine::SocketChannel::Public,
         ));
+        self.public.supervisor.connecting(cx);
         self.public.open = false;
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5000.));
     }
 
     fn send_topic(&mut self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
@@ -220,25 +230,18 @@ impl Bingx {
             cx.close(socket)
         }
         self.public.open = false;
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer)
-        }
         for state in self.books.values_mut() {
             state.ready = false;
             state.book.clear()
         }
-        if self.public.reconnect.is_none() {
-            let delay = (1000. * 2f64.powi(self.public.attempts.min(5) as i32)).min(30_000.);
-            self.public.attempts += 1;
-            self.public.reconnect = Some(cx.set_timer(delay));
-        }
+        self.public.supervisor.retry(cx);
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let Some(socket) = self.public.socket else {
             return;
         };
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         if text == "Ping" {
             cx.send(socket, "Pong");
             return;
@@ -452,12 +455,7 @@ impl Venue for Bingx {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer)
-        }
-        self.public.watchdog = Some(cx.set_timer(5000.));
+        self.public.supervisor.opened(cx);
         self.send_topic(cx, "market.contracts", true);
         let topics: Vec<_> = self
             .books
@@ -735,21 +733,17 @@ impl Venue for Bingx {
             self.read(cx, path, pending);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx)
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 20_000. {
-                self.reconnect(cx)
-            } else {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx),
+            Tick::TimedOut(_) => self.reconnect(cx),
+            Tick::Ping => {
                 if self.public.open
                     && let Some(socket) = self.public.socket
                 {
-                    cx.send(socket, "Ping")
+                    cx.send(socket, "Ping");
                 }
-                self.public.watchdog = Some(cx.set_timer(5000.))
             }
+            Tick::Handled | Tick::Unhandled => {}
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
