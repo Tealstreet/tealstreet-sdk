@@ -352,17 +352,18 @@ export class Frame {
   }
 
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
-  *books() {
-    yield* this.bookSections(SECTION.BOOK, 3);
+  books() {
+    return this.bookSections(SECTION.BOOK, 3);
   }
 
   /** Changed `[price, amount]` levels; zero amount deletes a price. */
-  *bookDeltas() {
-    yield* this.bookSections(SECTION.BOOK_DELTA, 2);
+  bookDeltas() {
+    return this.bookSections(SECTION.BOOK_DELTA, 2);
   }
 
   *bookSections(kind, width) {
-    for (const section of this.of(kind)) {
+    for (const section of this.sections) {
+      if (section.kind !== kind) continue;
       if (section.offset % 8 || section.length < 16) throw new Error('invalid book section header');
       const market = this.view.getUint32(section.offset, true);
       const bids = this.view.getUint32(section.offset + 4, true);
@@ -565,12 +566,10 @@ export class TickerState {
       const mask = deltas[i + 1];
       if (row >= this.count) throw new Error('ticker delta has no baseline row');
       i += 2;
-      for (let field = 0; field < TICKER_FIELDS.length; field++) {
-        if (mask & (1 << field)) {
-          const name = TICKER_FIELDS[field];
-          this.columns[name] ??= new Float64Array(this.count).fill(NaN);
-          this.columns[name][row] = deltas[i++];
-        }
+      for (let bits = mask; bits; bits &= bits - 1) {
+        const name = TICKER_FIELDS[31 - Math.clz32(bits & -bits)];
+        this.columns[name] ??= new Float64Array(this.count).fill(NaN);
+        this.columns[name][row] = deltas[i++];
       }
     }
   }

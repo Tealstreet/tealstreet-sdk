@@ -541,3 +541,30 @@ live trading, weakened parity oracle, or performance threshold changes.
   tests. Independent merged-boundary review accepts auth/credential retention,
   native partial-identity/error behavior, SBE validation and listener isolation.
   Final CI and a fresh committed-source scan remain required before merge.
+
+### Sparse frame-reader overhead
+
+- CI `39439169933` retains a second Hyro steady failure (TS/Rust 3.2/3.8 ms;
+  total 23.3/20.8 ms, memory 13.5/0.9 MB and output pass). Primary Bybit and
+  inverse/spot/demo public variants pass. The typed-key repair shrinks its
+  bundle by 250 bytes, but establishes no timing improvement across runners.
+- Independent static review finds no substantial duplicate work in the Rust
+  ticker/store path. The public replay consumes Frame/TickerState directly,
+  so a RustExchange/FrameApplier change would not repair this gate. Plan only
+  two bounded shared-reader changes: remove delegated book generator layers,
+  and visit only set bits in sparse ticker masks. Preserve section ordering,
+  lazy book validation, whole-batch delta validation, exact numeric values,
+  consumer-replaced columns and missing-column NaNs. Add semantic regressions,
+  run the full host JS suite and independent correctness review, then use fresh
+  CI for performance evidence. Keep all gate inputs and thresholds unchanged;
+  no unchanged-code retry and no local public timing.
+- Implemented only those iterator/sparse-loop changes and three guard-focused
+  regressions. Full host JavaScript workspace passes 116/116 using Node 22 and
+  `corepack yarn`; bans and diff checks pass. Independent code-correctness
+  review accepts lazy validation/order, sparse numeric order, NaN/signed zero,
+  consumer-owned columns and validation-before-patching. A first agent test
+  invocation hit the environment's Volta shim and was stopped; its empty log
+  is retained, and the explicit prescribed Corepack invocation passes.
+- No local speedup is claimed. Push this bounded reader repair, collect fresh
+  CI and scan the new committed source before merging. Broader logging work
+  remains outside this wind-down assignment.

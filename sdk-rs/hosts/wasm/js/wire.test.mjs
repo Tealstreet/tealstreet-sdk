@@ -165,6 +165,57 @@ test('ticker deltas respect replaced consumer columns and leave masked fields un
   assert.deepEqual([...state.columns.bid], [100, 101]);
 });
 
+test('ticker bit traversal preserves dense and sparse field order, NaN, signed zero and consumer columns', () => {
+  const state = new TickerState();
+  state.apply(numericFrame([tickerTable(100)]));
+  const bid = Float64Array.of(600, 601);
+  state.columns.bid = bid;
+  const previousLast = state.columns.last;
+  delete state.columns.fundingRate;
+  const dense = TICKER_FIELDS.map((_, index) => index === 0 ? -0 : index === 2 ? NaN : index + 10);
+  const delta = tickerDeltas([
+    0, (1 << TICKER_FIELDS.length) - 1, ...dense,
+    1, (1 << 0) | (1 << 7) | (1 << 11), 0, -0, NaN,
+    0, 0,
+  ]);
+  delta.revision = 1;
+  state.apply(numericFrame([delta]));
+  for (const [index, field] of TICKER_FIELDS.entries()) assert.ok(Object.is(state.columns[field][0], dense[index]), field);
+  assert.equal(state.columns.bid, bid);
+  assert.ok(Object.is(bid[0], -0));
+  assert.ok(Object.is(bid[1], 0));
+  assert.equal(state.columns.last, previousLast);
+  assert.equal(state.columns.last[1], 105);
+  assert.ok(Object.is(state.columns.fundingRate[1], -0));
+  assert.ok(Number.isNaN(state.columns.midPrice[1]));
+
+  // A highest-field-only update initializes absent rows with NaN; a zero mask creates no columns.
+  const sparse = new TickerState();
+  sparse.apply(numericFrame([tickerTable(100)]));
+  const zero = tickerDeltas([1, 0]);
+  zero.revision = 1;
+  sparse.apply(numericFrame([zero]));
+  assert.equal(sparse.columns.midPrice, undefined);
+  const highest = tickerDeltas([1, 1 << 11, -0]);
+  highest.revision = 1;
+  sparse.apply(numericFrame([highest]));
+  assert.ok(Number.isNaN(sparse.columns.midPrice[0]));
+  assert.ok(Object.is(sparse.columns.midPrice[1], -0));
+});
+
+test('ticker decoder validates malformed later rows before any delta mutates columns', () => {
+  for (const tail of [[1, 1], [1, 1 << TICKER_FIELDS.length, 500]]) {
+    const state = new TickerState();
+    state.apply(numericFrame([tickerTable(100)]));
+    const bid = state.columns.bid;
+    const delta = tickerDeltas([0, 1, 700, ...tail]);
+    delta.revision = 1;
+    assert.throws(() => state.apply(numericFrame([delta])), /ticker delta/);
+    assert.equal(state.columns.bid, bid);
+    assert.deepEqual([...bid], [100, 101]);
+  }
+});
+
 test('books preserve section order, empty sides and shared transferred row views', () => {
   const book = (market, bids, asks) => ({
     kind: SECTION.BOOK,
@@ -443,6 +494,44 @@ test('book deltas expose transferred zero-copy pairs independently of full reset
   assert.equal(empty.market, 7);
   assert.equal(empty.bids.length, 0);
   assert.equal(empty.asks.length, 0);
+});
+
+test('book iterators filter interleaved kinds lazily while preserving repeated markets and later validation', () => {
+  for (const kind of [SECTION.BOOK, SECTION.BOOK_DELTA]) {
+    const other = kind === SECTION.BOOK ? SECTION.BOOK_DELTA : SECTION.BOOK;
+    const width = kind === SECTION.BOOK ? 3 : 2;
+    const levels = width === 3 ? [50, 2, 2] : [50, 2];
+    const invalid = (section) => ({
+      ...section,
+      write(view, offset) { section.write(view, offset); view.setUint32(offset + 12, 1, true); },
+    });
+    const frame = numericFrame([
+      bookSection(kind, 7, levels),
+      invalid(bookSection(other, 20)),
+      { kind: SECTION.STATUS, length: 16, write() {} },
+      bookSection(kind, 7),
+      bookSection(other, 21),
+      bookSection(kind, 9, [], levels),
+      invalid(bookSection(kind, 10)),
+    ]);
+    const read = () => kind === SECTION.BOOK ? frame.books() : frame.bookDeltas();
+    const iterator = read();
+    assert.equal(iterator[Symbol.iterator](), iterator);
+    const first = iterator.next();
+    assert.equal(first.value.market, 7);
+    assert.equal(first.value.bids.buffer, frame.buffer);
+    assert.deepEqual([...first.value.bids], levels);
+    const empty = iterator.next().value;
+    assert.equal(empty.market, 7);
+    assert.equal(empty.bids.length, 0);
+    assert.equal(empty.asks.length, 0);
+    assert.equal(iterator.next().value.market, 9);
+    assert.throws(() => iterator.next(), /invalid book section length/);
+    const early = read();
+    assert.equal(early.next().value.market, 7);
+    assert.deepEqual(early.return(), { value: undefined, done: true });
+    assert.deepEqual(early.next(), { value: undefined, done: true });
+  }
 });
 
 test('book readers refuse short, overflowing, trailing and reserved payloads', () => {
