@@ -237,3 +237,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 -316affectednativePASS(86Phemex),346SDK/25filesPASS,278harnessPASS,typecheck44/lint28PASS,bans/fmt/lockedmetadataPASS. Native/WASMclippyandcombined18-featurehost/SDKWASMboundarycheckscontinue;subsequentmandatoryPhemex/Binancepairs+Asterpublic/V1/V3and3nativecontrolsplanned. Finalmatrix62replays(22public40private)+7controls(Bitget4,Aster3);requireexact-headfullCIgreenbeforelanding.
 
 - FinalAstersourcechecksPASS:bans/fmt/lockedmetadata,316affectednative(86Phemex),346SDK,278harness,workspace+WASMclippy,typecheck44/lint28,combined18-featurebuild,57hosttests,76actualSDKWASM. AllboundedreviewsCLEAN. Runtime9fa692238eisfrozenfor7localreplays(Phemex/Binancepairs,Asterpublic/V1/V3)and3Astercontractcontrols;final62replays+7controls/currentfullCIstillrequired.
+
+### Final eighteen-venue publication checkpoint
+
+- All7/7freshlocalreplaysPASS: Phemex/Binancepublic+private,Asterpublic/V1private/V3private;3/3AstercontractcontrolsPASS. PublicmedianCPUms/steadyms/retainedMBTS/Rust: Phemex466.4/128.8,320.8/48.0,20.0/3.0;Binance231.7/145.7,128.6/74.9,18.6/2.4;Aster197.6/107.3,72.2/56.7,23.2/2.0. Bundles760,201/793,847/1,036,120bytesbelow1,258,291. Source/boundarychecksabovePASS;allconcretefindingsindependentlyreviewedclean.
+- PublishthischeckpointandupdatedPRproof,require62replays+7controls/allcurrentfullCIgreen,normalmergePR1310intofeat/rust-rewriteandcutfreshfollowupbranch. Prior9cde01848afull59gateCIproofpreserved. No scorethresholdchangeorunchangedvalidscoreretry.
