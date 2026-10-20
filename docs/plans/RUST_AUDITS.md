@@ -50,34 +50,42 @@ until 1–3 are settled for them.
 ## Trading correctness
 
 High:
-- Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
-  (`binance/src/account.rs:1186`).
-- Binance USD-M amend re-places the full original size when the order filled
-  during the cancel ("unknown order" counted as cancel) (`binance/src/trading.rs:1131,536,1463`).
+- ~~Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
+  (`binance/src/account.rs:1186`).~~ Fixed: late native executions emit independently of lifecycle terminal state.
+- ~~Binance USD-M amend re-places the full original size when the order filled
+  during the cancel ("unknown order" counted as cancel) (`binance/src/trading.rs:1131,536,1463`).~~
+  Fixed: replacement waits for cancellation proof and subtracts racing fills; unknown cancellation cannot replace.
 - Rejected private login leaves a silent socket: bitget `account.rs:1128`,
   blofin `account.rs:1125`, mexc `account.rs:308`, woo `account.rs:1482`,
   cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.
-- Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
-  (`binance/src/account.rs:1169`).
+- ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
+  (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
 
 Medium:
 - Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).
 - Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.
 - Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).
 - No per-order lock between amend and cancel in most venues.
-- Stale snapshot reopens canceled orders: Binance USD-M/PM (`trading.rs:1463`),
-  Bybit Demo/Hyro (`account.rs:1824`).
+- ~~Stale snapshot reopens canceled orders: Binance USD-M/PM (`trading.rs:1463`),
+  Bybit Demo/Hyro (`account.rs:1824`).~~ Fixed: write/event revision fences plus native terminal retention
+  cover in-flight reads and replica-stale reads issued after acknowledgement.
 - REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.
 - BloFin replays pre-session fills (`blofin/src/account.rs:1231`).
 - Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`,
   kraken spot ignores checksum, asterdex/lighter keep books while waiting.
-- Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).
+- ~~Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).~~
+  Dropped after reverification: the cited local-ack branch only runs for Demo/Hyro, which cannot enable inverse.
+  A regression verifies authoritative inverse amend updates preserve coin `remaining` and native `remainingNative`.
 - Write timeout discards optimistic state instead of refreshing: orderly, okx.
 
 Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
 coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
-`uuid().unwrap_or_default()` in Binance; Backpack empty positions on any 404;
-OKX `partially_effective` final; Lighter late-fill drop; Bybit unused `exec_id`.
+~~`uuid().unwrap_or_default()` in Binance~~ (fixed: fail before writes on entropy failure); Backpack empty positions on any 404;
+OKX `partially_effective` final; Lighter late-fill drop; ~~Bybit unused `exec_id`~~ (fixed: bounded native execution-ID dedupe retained across reconnects).
+
+Scenario tests, independent phase reviews and acceptance evidence for these Binance/Bybit
+closures: [`RUST_AUDIT_BINANCE_BYBIT.md`](RUST_AUDIT_BINANCE_BYBIT.md).
+Execution and Bybit terminal retention are bounded; private verification remains scripted.
 
 Engine root causes: `Fill` has no execution id and the store replaces lists with
 no freshness fence, so every venue reinvents dedupe and terminal fencing.

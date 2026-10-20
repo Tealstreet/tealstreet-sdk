@@ -129,3 +129,22 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   43 trading-variant tests successfully, including replica/reconnect/transition
   controls. This follow-up supersedes the earlier selected WASM artifact; all
   Bybit replay variants will be rerun on the final artifact.
+
+### Focused TS reference correction review checkpoint
+
+- Final native USD-M private replay exposed an inherited TS defect: symbol cancel
+  downgraded the already filled ETH order from Closed to Canceled. The paired
+  correction preserves existing Closed/Canceled rows when cancel replies arrive,
+  retires all nonterminal local states, keeps accepted PM cancellations when a
+  later request fails, and captures symbol-cancel targets before dispatch.
+- A terminal-store opt-in was considered during review but rejected: canonical
+  PM client-ID tombstones would newly prevent legitimate immediate client-ID
+  reuse for 60 seconds. The final TS helper deliberately retains the existing
+  status-update semantics. Native reconciliation fixes use native incarnations;
+  TS still has its existing stale-snapshot limitation. No new normalizer.
+- Root review required Creating/Updating/Canceling controls. Independent review
+  additionally required deferred different-ID arrivals and immediate reused PM
+  caller ID/new native incarnation controls. All 22 focused TS regressions pass,
+  with independent rerun, TypeScript typecheck and scoped ESLint passing.
+- Resolved requested audit bullets are struck in `RUST_AUDITS.md`; M10 is marked
+  dropped after reverification, not claimed as a production fix.

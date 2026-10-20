@@ -1,4 +1,7 @@
-import type { HistoricalTrade, HistoricalTradeOptions } from '../../types';
+import type { Store } from '../../store/store.interface';
+import type { HistoricalTrade, HistoricalTradeOptions, Order } from '../../types';
+
+import { OrderStatus } from '../../types';
 
 export const USER_TRADES_MAX_LIMIT = 1000;
 
@@ -59,3 +62,14 @@ export const mapBinanceUserTrade = (entry: Record<string, any>): HistoricalTrade
   commissionAsset: entry.commissionAsset,
   time: +entry.time,
 });
+
+/** A fill arriving before the cancellation acknowledgement keeps its terminal status. */
+export const markBinanceOrdersCanceled = (store: Store, requested: Array<Pick<Order, 'id'>>) => {
+  const ids = new Set(requested.map((order) => order.id));
+  store.updateOrdersStatus(
+    store.orders.filter(
+      (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
+    ),
+    OrderStatus.Canceled,
+  );
+};

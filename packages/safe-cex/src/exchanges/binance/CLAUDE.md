@@ -42,6 +42,14 @@ while an old native generation cannot close a new PM order reusing its client
 ID. Accepted cancellations invalidate in-flight order snapshots. Generated-ID
 entropy failures reject before order writes instead of sharing a broker-only ID.
 
+TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
+`Canceled`, including fills received while cancellation was in flight. Accepted
+nonterminal rows, including local Creating/Updating/Canceling states, become
+Canceled; PM commits each success before attempting the next cancellation.
+These TS paths retain their existing stale-snapshot limitation. Rust tracks
+native order incarnations; TS cancellation does not add canonical client-ID
+tombstones that would block immediate PM client-ID reuse.
+
 The shared engine STP option is currently AsterDEX-only: every Binance profile
 rejects it for the whole batch before any action. Newly shared STP, native
 account/book and symbol-aware cancel commands complete with an explicit
