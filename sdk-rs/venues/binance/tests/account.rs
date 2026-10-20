@@ -759,6 +759,20 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             Outcome::Unknown,
             None,
         ),
+        (
+            503,
+            r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Unknown,
+            Some("-2019"),
+        ),
+        (
+            400,
+            r#"{"code":-1000,"msg":"An unknown error occurred while processing the request."}"#,
+            None,
+            Outcome::Unknown,
+            Some("-1000"),
+        ),
     ];
     for (status, body, kind, outcome, code) in cases {
         let mut h = ready();
@@ -788,4 +802,34 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         error: "connection reset",
     });
     assert_eq!(h.failures[0].1.outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected() {
+    let mut h = ready();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: "8389765519993909000".into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
+    );
+    let replacement = h.take("/fapi/v1/order");
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+    );
+    let [(12, error)] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(error.message, "Margin is insufficient.");
+    assert_eq!(error.outcome, None, "the cancel already took effect");
 }

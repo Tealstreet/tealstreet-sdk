@@ -74,6 +74,8 @@ struct Job {
     ids: Vec<String>,
     error: Option<VenueError>,
     amendment: Option<Amendment>,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 
 struct Amendment {
@@ -446,7 +448,15 @@ impl BinanceFutures {
         }
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
-            match job.error {
+            let error = job.error.map(|mut error| {
+                if (job.effective || !job.ids.is_empty())
+                    && error.outcome == Some(Outcome::Rejected)
+                {
+                    error.outcome = None;
+                }
+                error
+            });
+            match error {
                 // An inverse batch stops at its first failure; earlier legs stand.
                 // Its requests (splits, brackets) do not map back to the caller's orders.
                 Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
@@ -651,6 +661,7 @@ impl BinanceFutures {
             }
             (_, Err(error)) => Some(error),
         };
+        let succeeded = error.is_none();
         if let Some((code, message)) = error {
             if !SILENT_CODES.contains(&code) {
                 cx.log(LogLevel::Error, message.clone());
@@ -670,6 +681,7 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        job.effective |= succeeded;
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
