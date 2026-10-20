@@ -1,8 +1,6 @@
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
-use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
-use std::fmt;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Number(pub f64);
@@ -11,39 +9,10 @@ impl Number {
         self.0
     }
 }
+// KuCoin sends "" or null for values that do not apply; both read as 0.
 impl<'de> Deserialize<'de> for Number {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct Numeric;
-        impl Visitor<'_> for Numeric {
-            type Value = Number;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a decimal number")
-            }
-            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Number, E> {
-                if v.is_finite() {
-                    Ok(Number(v))
-                } else {
-                    Err(E::custom("nonfinite number"))
-                }
-            }
-            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Number, E> {
-                Ok(Number(v as f64))
-            }
-            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Number, E> {
-                Ok(Number(v as f64))
-            }
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<Number, E> {
-                if v.is_empty() {
-                    return Ok(Number(0.0));
-                }
-                let n = v.parse().map_err(E::custom)?;
-                self.visit_f64(n)
-            }
-            fn visit_unit<E: de::Error>(self) -> Result<Number, E> {
-                Ok(Number(0.0))
-            }
-        }
-        d.deserialize_any(Numeric)
+        safe_cex_engine::de::number_or_zero(d).map(Self)
     }
 }
 

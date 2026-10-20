@@ -1710,11 +1710,7 @@ fn scalar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     })
 }
 fn finite(input: &str) -> Result<f64, String> {
-    input
-        .parse::<f64>()
-        .ok()
-        .filter(|n| n.is_finite())
-        .ok_or_else(|| "Invalid Paradex numeric field".into())
+    safe_cex_engine::num::parse_decimal(input).ok_or_else(|| "Invalid Paradex numeric field".into())
 }
 pub fn map_order(row: &NativeOrder) -> Result<Order, String> {
     if row.id.is_empty() || row.market.is_empty() {

@@ -2,25 +2,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-        Null,
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-        N::Null => return Err(serde::de::Error::custom("null number")),
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
+pub use safe_cex_engine::de::{Number as N, number};
 
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
@@ -227,9 +209,6 @@ impl<'de> Deserialize<'de> for Id {
         Ok(Self(s))
     }
 }
-#[derive(Clone, Copy, Deserialize, Default)]
-#[serde(transparent)]
-pub struct N(#[serde(deserialize_with = "number")] pub f64);
 
 #[derive(Deserialize)]
 pub struct Info {

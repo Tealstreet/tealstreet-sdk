@@ -17,41 +17,9 @@ fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
     Option::<BorrowedStr<'de>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
 }
 
-/// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
+/// A decimal string; empty, malformed or non-finite is NaN.
 pub fn float(text: &str) -> f64 {
-    // At most 15 digits keep both the numerator and decimal divisor exact in f64.
-    // One division then rounds the same rational as the full decimal parser.
-    if !text.is_empty() && text.len() <= 16 {
-        let short = || {
-            let (mut integer, mut divisor, mut digits) = (0u64, 0u64, 0);
-            for byte in text.bytes() {
-                if byte == b'.' && divisor == 0 {
-                    divisor = 1;
-                    continue;
-                }
-                let digit = byte.wrapping_sub(b'0');
-                if digit > 9 || digits == 15 {
-                    return None;
-                }
-                integer = integer * 10 + u64::from(digit);
-                digits += 1;
-                if divisor != 0 {
-                    divisor *= 10;
-                }
-            }
-            (digits != 0).then(|| {
-                if divisor <= 1 {
-                    integer as f64
-                } else {
-                    integer as f64 / divisor as f64
-                }
-            })
-        };
-        if let Some(value) = short() {
-            return value;
-        }
-    }
-    text.trim().parse::<f64>().unwrap_or(f64::NAN)
+    safe_cex_engine::num::parse_decimal(text).unwrap_or(f64::NAN)
 }
 
 /// An optional decimal string, NaN when absent or empty.
@@ -1011,7 +979,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }
@@ -1054,7 +1027,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }

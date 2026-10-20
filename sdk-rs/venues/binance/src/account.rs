@@ -1679,23 +1679,13 @@ struct PositionSnapshot<'a> {
     isolated_margin: Option<Cow<'a, str>>,
     #[serde(borrow, default)]
     margin_type: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_leverage")]
+    #[serde(
+        default,
+        deserialize_with = "safe_cex_engine::de::lenient_optional_number"
+    )]
     leverage: Option<f64>,
     #[serde(default)]
     update_time: f64,
-}
-
-fn optional_leverage<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Scalar<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    Ok(Option::<Scalar<'_>>::deserialize(d)?.map(|s| match s {
-        Scalar::Bare(n) => n,
-        Scalar::Text(s) => num::parse(&s),
-    }))
 }
 
 #[derive(Deserialize)]
@@ -2340,5 +2330,30 @@ mod tests {
             }),
             None
         );
+    }
+
+    // A blank or malformed leverage used to decode as Some(0) and overwrite
+    // the market's leverage setting with 0.
+    #[test]
+    fn unreadable_leverage_is_absent_not_zero() {
+        let row = |leverage: &str| {
+            format!(
+                r#"{{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"1","entryPrice":"1",
+                "unRealizedProfit":"0","liquidationPrice":"0","notional":"1","leverage":{leverage}}}"#
+            )
+        };
+        for (leverage, expected) in [
+            ("\"20\"", Some(20.0)),
+            ("20", Some(20.0)),
+            ("\"\"", None),
+            ("\"x\"", None),
+            ("null", None),
+        ] {
+            let text = row(leverage);
+            let snapshot: super::PositionSnapshot<'_> = serde_json::from_str(&text).unwrap();
+            assert_eq!(snapshot.leverage, expected, "{leverage}");
+            let risk: crate::wire::PositionRisk<'_> = serde_json::from_str(&text).unwrap();
+            assert_eq!(risk.leverage, expected, "{leverage}");
+        }
     }
 }

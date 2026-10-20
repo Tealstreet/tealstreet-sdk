@@ -5,19 +5,7 @@ use std::borrow::Cow;
 
 type Str<'a> = Cow<'a, str>;
 
-/// A number Binance sends either bare or as a decimal string.
-fn number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    Ok(match Number::deserialize(deserializer)? {
-        Number::Bare(value) => value,
-        Number::Text(text) => safe_cex_engine::num::parse(&text),
-    })
-}
+use safe_cex_engine::de::{lenient_number, lenient_optional_number};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +20,7 @@ pub struct SymbolInfo<'a> {
     pub quote_asset: Str<'a>,
     #[serde(borrow, default)]
     pub margin_asset: Str<'a>,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "lenient_number")]
     pub contract_size: f64,
     #[serde(default)]
     pub base_asset_precision: i32,
@@ -261,7 +249,7 @@ pub struct LeverageBracket<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bracket {
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "lenient_number")]
     pub initial_leverage: f64,
 }
 
@@ -272,15 +260,8 @@ pub struct SymbolConfig<'a> {
     pub symbol: Str<'a>,
     #[serde(borrow, default)]
     pub margin_type: Str<'a>,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "lenient_number")]
     pub leverage: f64,
-}
-
-/// A number that may be absent, bare or a decimal string.
-fn optional_number<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<f64>, D::Error> {
-    number(deserializer).map(Some)
 }
 
 /// One `positionRisk` row (USD-M `/fapi/v3`, portfolio margin `/papi/v1/um`).
@@ -288,7 +269,7 @@ fn optional_number<'de, D: serde::Deserializer<'de>>(
 #[serde(rename_all = "camelCase")]
 pub struct PositionRisk<'a> {
     /// Portfolio margin rows carry the symbol's leverage.
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "lenient_optional_number")]
     pub leverage: Option<f64>,
     #[serde(borrow)]
     pub symbol: Str<'a>,

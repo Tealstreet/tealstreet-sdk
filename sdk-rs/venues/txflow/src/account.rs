@@ -83,45 +83,9 @@ impl<T> Envelope<T> {
         self.data.ok_or("TxFlow account read omitted data")
     }
 }
-#[derive(Clone, Copy, Debug, Default)]
-struct N(f64);
-impl<'de> Deserialize<'de> for N {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum V {
-            S(String),
-            N(f64),
-        }
-        let n: f64 = match V::deserialize(d)? {
-            V::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-            V::N(n) => n,
-        };
-        if !n.is_finite() {
-            return Err(serde::de::Error::custom("non-finite account number"));
-        }
-        Ok(N(n))
-    }
-}
+use safe_cex_engine::de::Number as N;
 fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<N>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum V {
-        S(String),
-        N(f64),
-    }
-    let n: f64 = match Option::<V>::deserialize(d)? {
-        None => return Ok(None),
-        Some(V::S(s)) if s.is_empty() => return Ok(None),
-        Some(V::S(s)) => s.parse().map_err(serde::de::Error::custom)?,
-        Some(V::N(n)) => n,
-    };
-    if !n.is_finite() {
-        return Err(serde::de::Error::custom(
-            "non-finite optional account number",
-        ));
-    }
-    Ok(Some(N(n)))
+    Ok(safe_cex_engine::de::optional_number_or_blank(d)?.map(N))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

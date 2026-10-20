@@ -3,21 +3,10 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
+// BloFin sends "" for values that do not apply; malformed text reads as 0.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(transparent)]
-pub struct Number(#[serde(deserialize_with = "number")] pub f64);
-fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    Ok(match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => safe_cex_engine::num::parse(&s),
-    })
-}
+pub struct Number(#[serde(deserialize_with = "safe_cex_engine::de::lenient_number")] pub f64);
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -360,14 +349,5 @@ pub fn nullable_text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Err
 }
 
 pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    Ok(Option::<N<'de>>::deserialize(d)?.and_then(|v| match v {
-        N::Bare(n) => n.is_finite().then_some(Number(n)),
-        N::Text(s) => s.parse::<f64>().ok().filter(|n| n.is_finite()).map(Number),
-    }))
+    Ok(safe_cex_engine::de::lenient_optional_number(d)?.map(Number))
 }

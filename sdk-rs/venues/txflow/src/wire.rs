@@ -1,47 +1,9 @@
 //! TxFlow's public envelopes and streamed market records.
+use safe_cex_engine::de::{number_or_zero, optional_number_or_blank};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision};
 use serde::Deserialize;
 use std::borrow::Cow;
 
-pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    struct Number;
-    impl serde::de::Visitor<'_> for Number {
-        type Value = f64;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a number, decimal string or null")
-        }
-        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<f64, E> {
-            Ok(value)
-        }
-        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<f64, E> {
-            Ok(value as f64)
-        }
-        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<f64, E> {
-            Ok(value as f64)
-        }
-        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<f64, E> {
-            if value.is_empty() {
-                Ok(0.0)
-            } else {
-                value.parse().map_err(E::custom)
-            }
-        }
-        fn visit_unit<E: serde::de::Error>(self) -> Result<f64, E> {
-            Ok(0.0)
-        }
-    }
-    let n = d.deserialize_any(Number)?;
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
-fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct Number(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<Number>::deserialize(d)?.map(|n| n.0))
-}
 #[derive(Deserialize)]
 pub struct Header {
     pub success: bool,
@@ -140,11 +102,11 @@ pub struct Instrument {
     pub currency_type: String,
     pub delisted: bool,
     pub halt_trading: bool,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub base_precision: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub price_tick: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub max_leverage: f64,
     #[serde(default)]
     pub only_isolated: bool,
@@ -201,23 +163,23 @@ impl Instrument {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub funding: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub mark_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub oracle_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub open_interest: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub mid_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub last_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub prev_day_px: f64,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub day_ntl_vlm: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub day_base_vlm: Option<f64>,
     #[serde(default)]
     pub next_funding_time: Option<f64>,
@@ -238,28 +200,28 @@ pub struct Contexts<'a> {
 pub struct TickerRow {
     #[serde(default)]
     pub instrument_id: u32,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub last_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub prev_day_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub mark_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub oracle_px: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub open_interest: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub day_ntl_vlm: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub coin_vlm: f64,
     #[serde(default)]
     pub node_ctx: Option<Context>,
 }
 #[derive(Deserialize)]
 pub struct Level {
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub px: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub sz: f64,
 }
 #[derive(Deserialize)]
@@ -276,15 +238,15 @@ pub struct CandleRow<'a> {
     #[serde(borrow)]
     pub i: Cow<'a, str>,
     pub t: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub o: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub h: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub l: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub c: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub v: f64,
 }
 impl CandleRow<'_> {
@@ -307,7 +269,7 @@ mod tests {
     #[test]
     fn public_decimal_forms_keep_finite_and_null_contracts() {
         #[derive(Deserialize)]
-        struct Decimal(#[serde(deserialize_with = "number")] f64);
+        struct Decimal(#[serde(deserialize_with = "number_or_zero")] f64);
         for (json, expected) in [
             ("1", 1.0),
             ("-2", -2.0),

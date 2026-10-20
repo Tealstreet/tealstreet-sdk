@@ -340,10 +340,7 @@ pub struct FillRow<'a> {
     pub created_at: Number,
 }
 
+// Balances must be present: a blank here is not a zero balance.
 fn required_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
-    let raw = <&RawValue>::deserialize(d)?;
-    if matches!(raw.get(), "null" | "\"\"") {
-        return Err(serde::de::Error::custom("missing financial number"));
-    }
-    serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)
+    safe_cex_engine::de::number(d).map(Number)
 }

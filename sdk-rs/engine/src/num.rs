@@ -141,36 +141,59 @@ mod tests {
 
     #[test]
     fn short_decimals_match_the_general_parser() {
+        let general = |text: &str| text.parse::<f64>().ok().filter(|v| v.is_finite());
         for text in [
             "0",
             "-0",
-            "1",
-            "1.",
-            ".5",
+            ".1",
             "-.5",
-            "0.1",
+            "1.",
             "0.3",
-            "27123.456",
-            "-1.000000000001",
+            "000001.001",
+            "0.000009999999999999999",
             "123456789012345",
             "1234567890.12345",
             "999999999999999.",
-            "0.000000000000001",
-            "0.0000000000000001",
-            "1234567890123456",
-            "12345678901234567",
+            "9007199254740991",
+            "9007199254740992",
+            "1792428168600",
+            "81999.7",
+            "-0.00000000000000123456789",
+            "1e-23",
+            "1.234e10",
+            "+1",
+            "NaN",
+            "inf",
+            "1e400",
+            "",
+            "-",
+            ".",
+            "-.",
+            "--1",
+            "1.2.3",
+            "1e",
+            "abc",
         ] {
-            let expected = text.parse::<f64>().unwrap();
-            let got = parse_decimal(text).unwrap();
-            assert_eq!(got.to_bits(), expected.to_bits(), "{text}");
+            assert_eq!(
+                parse_decimal(text).map(f64::to_bits),
+                general(text).map(f64::to_bits),
+                "{text}"
+            );
         }
-        for text in [
-            "", "-", ".", "-.", "1.2.3", "1e", "abc", "NaN", "inf", "1e400",
-        ] {
-            assert_eq!(parse_decimal(text), None, "{text}");
+        for value in [1, 7, 999, 123456789, 9007199254740991u64] {
+            for scale in 0..=22 {
+                let text = if scale == 0 {
+                    value.to_string()
+                } else {
+                    format!("0.{value:0width$}", width = scale)
+                };
+                assert_eq!(
+                    parse_decimal(&text).map(f64::to_bits),
+                    general(&text).map(f64::to_bits),
+                    "{text}"
+                );
+            }
         }
         assert_eq!(parse_decimal(" 2.5 "), Some(2.5));
-        assert_eq!(parse_decimal("1e3"), Some(1000.0));
-        assert_eq!(parse_decimal("+4"), Some(4.0));
     }
 }

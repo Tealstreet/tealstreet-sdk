@@ -1,28 +1,7 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Number(pub f64);
-impl<'de> Deserialize<'de> for Number {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Input<'a> {
-            N(f64),
-            S(#[serde(borrow)] Cow<'a, str>),
-            Null,
-        }
-        let n = match Input::deserialize(d)? {
-            Input::N(v) => v,
-            Input::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-            Input::Null => return Err(serde::de::Error::custom("missing number")),
-        };
-        if !n.is_finite() {
-            return Err(serde::de::Error::custom("nonfinite number"));
-        }
-        Ok(Self(n))
-    }
-}
+pub use safe_cex_engine::de::Number;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gamma<'a> {
