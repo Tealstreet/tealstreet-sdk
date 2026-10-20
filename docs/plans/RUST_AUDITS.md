@@ -682,10 +682,14 @@ No confirmed highs.
 ### Crypto.com
 Mostly matches TS.
 - Medium: per-coin balances (`position_balances`) dropped
-  (`cryptocom/src/account.rs:232`); caller client id refused on stop/TP orders
-  (`trading.rs:76`).
-- Low: one invalid order fails the whole batch; null string fields fail reads;
-  one bad instrument row stops startup.
+  (`cryptocom/src/account.rs:232`) — resilience lane. ~~Caller client id refused
+  on stop/TP orders (`trading.rs:76`).~~ Matches TS and the client-order-id
+  contract (`rust.exchange.ts` rejects it before the engine); a change is a
+  contract decision, not a port bug.
+- Low: ~~one invalid order fails the whole batch; null string fields fail reads;
+  one bad instrument row stops startup.~~ Bad rows in reads and pushed frames
+  are skipped with one summary warning, keeping stored copies; startup stops
+  visibly only when no row maps. Placement still validates the batch before writes.
 
 ### Bitrue
 - High: orders refused on symbols with no account leverage data, and a fresh
