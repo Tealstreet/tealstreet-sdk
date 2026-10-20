@@ -73,7 +73,7 @@ test('synchronous completions, validation errors and no-reply events allocate no
     setTimeout() { timerCalls++; throw new Error('unnecessary timer'); }, clearTimeout() {} });
   assert.equal(await host.command({ op: 'getAccount' }), 42);
   await assert.rejects(host.command({ op: 'bad' }), /native validation/);
-  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setTickInterval', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
+  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
     await host.command({ op });
   }
   assert.equal(timerCalls, 0);
@@ -156,6 +156,14 @@ test('timeouts preserve only caller identity, do not cancel transport I/O or ret
   await io;
   assert.equal(r.host.requests.size, 0);
   assert.equal(r.calls.length, 2);
+});
+
+test('an interrupted Lighter account-tier change is an unknown write outcome', async () => {
+  const r = rig({ commandTimeoutMs: 10 });
+  const tier = r.host.command({ op: 'setAccountTier', tier: 'premium' });
+  r.advance(10);
+  await assert.rejects(tier, (error) => error instanceof CommandTimeoutError
+    && error.command === 'setAccountTier' && error.outcome === 'unknown');
 });
 
 test('known completion wins once, clears its deadline, and ignores malformed duplicate done', async () => {

@@ -1,5 +1,6 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::url;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*,
 };
@@ -187,21 +188,9 @@ fn order(
     }
 }
 pub(super) fn form(params: &[(&str, String)]) -> String {
-    fn encode(s: &str) -> String {
-        let mut out = String::new();
-        for b in s.bytes() {
-            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-                out.push(b as char)
-            } else {
-                use std::fmt::Write;
-                write!(out, "%{b:02X}").unwrap();
-            }
-        }
-        out
-    }
     params
         .iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
+        .map(|(k, v)| format!("{}={}", url::encode(k), url::encode(v)))
         .collect::<Vec<_>>()
         .join("&")
 }
@@ -227,11 +216,6 @@ impl KrakenSpot {
         })();
         match signed {
             Ok((key, body, signature)) => {
-                let scope = match &request.kind {
-                    Kind::Balance { .. } => Some(safe_cex_engine::AccountReadScope::Balance),
-                    Kind::Orders { .. } => Some(safe_cex_engine::AccountReadScope::Orders),
-                    _ => None,
-                };
                 let id = cx.request(
                     Method::Post,
                     format!("https://api.kraken.com{}", request.path),
@@ -244,9 +228,6 @@ impl KrakenSpot {
                     Some(body),
                     Pending::Private(request),
                 );
-                if let Some(scope) = scope {
-                    cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
-                }
                 cx.request_timeout(id, 20_000);
             }
             Err(e) => {
@@ -518,10 +499,14 @@ impl KrakenSpot {
                     self.send_private(cx, r);
                     return;
                 }
-                if e.contains("EAPI:Invalid key")
-                    || e.contains("EAPI:Invalid signature")
-                    || e.contains("EGeneral:Permission denied")
-                    || matches!(response.status, 401 | 403)
+                // A key without trade permission still reads; only fail that write.
+                let permission_on_write = e.contains("EGeneral:Permission denied")
+                    && matches!(request.kind, Kind::Trade(_));
+                if !permission_on_write
+                    && (e.contains("EAPI:Invalid key")
+                        || e.contains("EAPI:Invalid signature")
+                        || e.contains("EGeneral:Permission denied")
+                        || matches!(response.status, 401 | 403))
                 {
                     self.reject_auth(cx, &e);
                 }
@@ -934,43 +919,5 @@ impl KrakenSpot {
             self.account.orders_throttle = Some(cx.set_timer(1_000.));
         }
         true
-    }
-}
-
-impl KrakenSpot {
-    pub(super) fn account_auth_observation(
-        &self,
-        pending: &Pending,
-        response: &Response<'_>,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        let Pending::Private(r) = pending else {
-            return None;
-        };
-        if !matches!(r.kind, Kind::Balance { .. } | Kind::Orders { .. }) {
-            return None;
-        }
-        let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
-        // Preserve legacy signature retry admission, without using message text as evidence.
-        if r.signature_retries < 1 && e.error.iter().any(|e| e.contains("EAPI:Invalid signature")) {
-            return None;
-        }
-        if e.error.iter().any(|e| {
-            matches!(
-                e.as_ref(),
-                "EAPI:Invalid key" | "EAPI:Invalid signature" | "EGeneral:Permission denied"
-            )
-        }) {
-            return Some(Rejected);
-        }
-        let data = result(*response).ok()?;
-        let valid = match &r.kind {
-            Kind::Balance { .. } => serde_json::from_str::<HashMap<String, Amount>>(data).is_ok(),
-            Kind::Orders { .. } => serde_json::from_str::<Open<'_>>(data).is_ok_and(|r| {
-                serde_json::from_str::<HashMap<String, RestOrder<'_>>>(r.open.get()).is_ok()
-            }),
-            _ => false,
-        };
-        valid.then_some(Accepted)
     }
 }

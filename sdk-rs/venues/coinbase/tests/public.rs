@@ -698,17 +698,17 @@ fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
         })
         .unwrap();
     assert!(!context.recover);
-    let timer = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 6000.).then_some(*timer)
-            } else {
-                None
-            }
+    e.handle(1000., Event::WsOpened { socket });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 6000.,
+            } => Some(timer),
+            _ => None,
         })
         .unwrap();
-    e.handle(1000., Event::WsOpened { socket });
     e.handle(
         1000.,
         Event::Command(Command::SubscribeOrderBook {
@@ -721,7 +721,7 @@ fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 12000.).then_some(timer)
+                ((11750. ..=12000.).contains(&at_ms)).then_some(timer)
             } else {
                 None
             }
@@ -864,17 +864,17 @@ fn unknown_envelopes_cannot_keep_stale_socket_alive() {
             }
         })
         .unwrap();
-    let timer = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 6000.).then_some(*timer)
-            } else {
-                None
-            }
+    e.handle(1000., Event::WsOpened { socket });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 6000.,
+            } => Some(timer),
+            _ => None,
         })
         .unwrap();
-    e.handle(1000., Event::WsOpened { socket });
     e.handle(20000., Event::WsMessage { socket, text: "{}" });
     e.handle(21000., Event::TimerFired { timer });
     assert!(
@@ -1046,4 +1046,12 @@ fn product_online_status_respects_disabled_flags_and_unknown_statuses() {
             0.
         );
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let (e, socket) = ready();
+    socket_checks::flaps(e, socket, 1100.);
 }

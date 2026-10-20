@@ -132,7 +132,6 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
         (400, r#"{"code":40008,"msg":"40009"}"#),
         (429, r#"[]"#),
         (200, r#"{}"#),
-        (200, r#"[false]"#),
         (401, r#"<html>unauthorized</html>"#),
     ] {
         let (mut e, a) = started(true);
@@ -142,4 +141,16 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
             "{status} {body}"
         );
     }
+    // Undecodable rows are skipped individually; the signed array still proves
+    // the read key was accepted.
+    let (mut e, a) = started(true);
+    let r = http(&a, "/balance");
+    assert_eq!(
+        auth(&reply(&mut e, &r, 200, r#"[false]"#)),
+        vec![(
+            CredentialSlot::Secondary,
+            AccountReadScope::Balance,
+            AuthOutcome::Accepted
+        )]
+    );
 }

@@ -277,18 +277,30 @@ impl OrderRow<'_> {
     pub fn terminal(&self) -> bool {
         matches!(
             self.status.to_ascii_lowercase().as_str(),
-            "filled" | "canceled" | "cancelled" | "rejected"
+            "filled" | "canceled" | "cancelled" | "rejected" | "deactivated" | "expired"
         )
     }
     pub fn status(&self) -> Option<OrderStatus> {
         match self.status.to_ascii_lowercase().as_str() {
-            "new" | "untriggered" | "partiallyfilled" | "partially_filled" => {
+            "created" | "new" | "untriggered" | "partiallyfilled" | "partially_filled" => {
                 Some(OrderStatus::Open)
             }
             "triggered" | "filled" => Some(OrderStatus::Closed),
-            "canceled" | "cancelled" | "rejected" => Some(OrderStatus::Canceled),
+            "canceled" | "cancelled" | "rejected" | "deactivated" | "expired" => {
+                Some(OrderStatus::Canceled)
+            }
             _ => None,
         }
+    }
+    /// A status or order type this engine does not model (a newer venue type,
+    /// or one placed outside Tealstreet). Such a row is skipped, not fatal; an
+    /// unknown status never removes a stored order, since it may still be live.
+    pub fn unrecognized(&self) -> bool {
+        self.status().is_none()
+            || !matches!(
+                self.kind.as_ref(),
+                "Market" | "Limit" | "Stop" | "StopLimit" | "MarketIfTouched" | "LimitIfTouched"
+            )
     }
     pub fn orders(&self, now: f64) -> Option<Vec<Order>> {
         if self.order_id.is_empty() || self.symbol.is_empty() {

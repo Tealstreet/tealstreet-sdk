@@ -34,6 +34,11 @@ pub struct Request {
     positions: Vec<StagedPosition>,
     balance: Option<Balance>,
     configs: Vec<(String, Config)>,
+    skipped_rows: usize,
+    /// Order or position IDs of malformed rows skipped by this read.
+    skipped: Vec<String>,
+    /// A skipped row had no identity, so the read cannot replace the list.
+    unidentified: bool,
 }
 #[derive(Clone)]
 pub struct Config {
@@ -120,11 +125,15 @@ pub struct State {
     orders_revision: u64,
     settings_revision: u64,
     order_stage: Vec<Order>,
-    position_stage: Option<(u64, Vec<StagedPosition>)>,
+    order_skipped: Vec<String>,
+    /// Revision, staged rows, and IDs of positions whose rows were malformed.
+    position_stage: Option<(u64, Vec<StagedPosition>, Vec<String>)>,
     deferred: Vec<(TimerId, Request)>,
     order_parts: u8,
     orders_failed: bool,
     pub configs: HashMap<String, Config>,
+    settings_failures: u32,
+    settings_retry_at: f64,
     tombstones: HashMap<String, f64>,
     terminal_order: VecDeque<(String, f64)>,
     order_floor: Option<f64>,
@@ -184,12 +193,68 @@ impl State {
         .then_some(order)
     }
 }
+/// The store ID a malformed row would have produced, when it can be known.
+fn row_identity(kind: Kind, item: &str, account: &State, store: &Store) -> Option<String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct OrderIdentity<'a> {
+        #[serde(borrow, deserialize_with = "id", alias = "id", alias = "algoId")]
+        order_id: crate::wire::Str<'a>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PositionIdentity<'a> {
+        #[serde(borrow)]
+        symbol: crate::wire::Str<'a>,
+        #[serde(borrow, default, alias = "positionSide")]
+        side: Option<crate::wire::Str<'a>>,
+        #[serde(borrow, default, alias = "separatedType")]
+        separated_mode: Option<crate::wire::Str<'a>>,
+    }
+    if !matches!(kind, Kind::Positions) {
+        let id = serde_json::from_str::<OrderIdentity<'_>>(item)
+            .ok()?
+            .order_id;
+        return (!id.is_empty()).then(|| id.into_owned());
+    }
+    let row = serde_json::from_str::<PositionIdentity<'_>>(item).ok()?;
+    let side = match row.side.as_deref()? {
+        "LONG" => "long",
+        "SHORT" => "short",
+        _ => return None,
+    };
+    if row.symbol.is_empty() {
+        return None;
+    }
+    // Mirrors StagedPosition::resolve: row mode, else symbol config, else account.
+    let hedged = match row.separated_mode.as_deref().filter(|m| !m.is_empty()) {
+        Some(m) => mode(m) == PositionMode::Hedged,
+        None => account
+            .configs
+            .get(row.symbol.as_ref())
+            .map_or(store.hedged(), |c| c.hedged),
+    };
+    Some(if hedged {
+        format!("{}:{side}", row.symbol)
+    } else {
+        row.symbol.into_owned()
+    })
+}
 impl WeexFutures {
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
             return;
         }
         self.account.started = true;
+        if self.incomplete_credentials {
+            // An empty account would be indistinguishable from a real one.
+            cx.log(
+                LogLevel::Error,
+                "WEEX requires an API key, secret and passphrase; private data is unavailable",
+            );
+            cx.deactivate();
+            return;
+        }
         if self.credentials.is_none() {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
@@ -234,11 +299,14 @@ impl WeexFutures {
         self.account.cycle += 1;
         self.account.deadline =
             Some(cx.set_timer((self.paused_until - cx.now).max(0.0) + RECONCILIATION_DEADLINE_MS));
-        self.account.pending = 6;
+        // Settings reads back off on their own failures; account reads keep polling.
+        let settings_due = cx.now >= self.account.settings_retry_at;
+        self.account.pending = if settings_due { 6 } else { 4 };
         self.account.failed = false;
         self.account.order_parts = 0;
         self.account.orders_failed = false;
         self.account.order_stage.clear();
+        self.account.order_skipped.clear();
         self.account.position_stage = None;
         for kind in [
             Kind::Metadata,
@@ -248,6 +316,9 @@ impl WeexFutures {
             Kind::Normal,
             Kind::Algo,
         ] {
+            if !settings_due && matches!(kind, Kind::Config | Kind::Metadata) {
+                continue;
+            }
             let revision = match kind {
                 Kind::Normal | Kind::Algo => self.account.orders_revision,
                 Kind::Config | Kind::Metadata => self.account.settings_revision,
@@ -263,6 +334,9 @@ impl WeexFutures {
                 positions: vec![],
                 balance: None,
                 configs: vec![],
+                skipped_rows: 0,
+                skipped: vec![],
+                unidentified: false,
             };
             self.send_account(cx, request);
         }
@@ -331,36 +405,29 @@ impl WeexFutures {
             return true;
         }
         request.page_rows += 1;
-        match request.kind {
+        let parsed = match request.kind {
             Kind::Normal | Kind::Algo => serde_json::from_str::<OrderRow<'_>>(item)
                 .ok()
-                .is_some_and(|row| {
-                    let orders = if matches!(request.kind, Kind::Algo) {
+                .map(|row| {
+                    if matches!(request.kind, Kind::Algo) {
                         row.algo()
                     } else {
                         row.normal().into_iter().collect()
-                    };
-                    if orders.is_empty() {
-                        false
-                    } else {
-                        request.orders.extend(orders);
-                        true
                     }
-                }),
+                })
+                .filter(|orders| !orders.is_empty())
+                .map(|orders| request.orders.extend(orders)),
             Kind::Balance => serde_json::from_str::<BalanceRow<'_>>(item)
                 .map(|row| {
                     if row.asset == "USDT" {
                         request.balance = Some(row.balance());
                     }
                 })
-                .is_ok(),
+                .ok(),
             Kind::Positions => serde_json::from_str::<PositionRow<'_>>(item)
                 .ok()
                 .and_then(|row| StagedPosition::new(&row, cx.store))
-                .is_some_and(|p| {
-                    request.positions.push(p);
-                    true
-                }),
+                .map(|p| request.positions.push(p)),
             Kind::Config => serde_json::from_str::<ConfigRow<'_>>(item)
                 .map(|row| {
                     request.configs.push((
@@ -373,9 +440,23 @@ impl WeexFutures {
                         },
                     ));
                 })
-                .is_ok(),
-            Kind::Metadata => false,
+                .ok(),
+            Kind::Metadata => return false,
+        };
+        if parsed.is_none() {
+            // Balance and config rows need no identity: a malformed USDT row
+            // fails the read, and a skipped config keeps its previous entry.
+            match (
+                request.kind,
+                row_identity(request.kind, item, &self.account, cx.store),
+            ) {
+                (Kind::Balance | Kind::Config, _) => {}
+                (_, Some(key)) => request.skipped.push(key),
+                (_, None) => request.unidentified = true,
+            }
+            request.skipped_rows += 1;
         }
+        true
     }
     pub(crate) fn account_response(
         &mut self,
@@ -404,6 +485,28 @@ impl WeexFutures {
             self.send_account(cx, request);
             return;
         }
+        if request.skipped_rows > 0 {
+            let kind = match request.kind {
+                Kind::Normal => "order",
+                Kind::Algo => "algo order",
+                Kind::Positions => "position",
+                Kind::Balance => "balance",
+                _ => "symbol configuration",
+            };
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "WEEX skipped {} malformed {kind} row(s){}{}",
+                    request.skipped_rows,
+                    if request.skipped.is_empty() { "" } else { ": " },
+                    request.skipped.join(", ")
+                ),
+            );
+        }
+        if request.unidentified {
+            self.account_failed(cx, request, "malformed row without an identity");
+            return;
+        }
         match request.kind {
             Kind::Balance if request.revision == self.account.revision => {
                 // Missing USDT on a nonempty response is not a zero balance.
@@ -417,7 +520,8 @@ impl WeexFutures {
                 }
             }
             Kind::Positions if request.revision == self.account.revision => {
-                self.account.position_stage = Some((request.revision, request.positions));
+                self.account.position_stage =
+                    Some((request.revision, request.positions, request.skipped));
             }
             Kind::Config if request.revision == self.account.settings_revision => {
                 for (symbol, config) in request.configs {
@@ -445,13 +549,27 @@ impl WeexFutures {
                     2
                 };
                 self.account.order_stage.extend(request.orders);
+                self.account.order_skipped.extend(request.skipped);
                 if self.account.order_parts == 3 && !self.account.orders_failed {
                     let mut seen = HashSet::new();
-                    let orders = std::mem::take(&mut self.account.order_stage)
+                    let mut orders: Vec<_> = std::mem::take(&mut self.account.order_stage)
                         .into_iter()
                         .filter(|order| seen.insert(order.id.clone()))
                         .filter_map(|order| self.account.snapshot_order(order))
                         .collect();
+                    // A malformed row is not evidence that its order closed.
+                    let skipped = std::mem::take(&mut self.account.order_skipped);
+                    orders.extend(
+                        cx.store
+                            .orders()
+                            .iter()
+                            .filter(|o| {
+                                !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                                    && skipped.iter().any(|id| o.id.split("__").next() == Some(id))
+                                    && seen.insert(o.id.clone())
+                            })
+                            .filter_map(|o| self.account.snapshot_order(o.clone())),
+                    );
                     cx.store.set_orders(orders);
                     self.account.unreconciled_fills = false;
                     // A fresh authoritative read also replaces optimistic
@@ -460,6 +578,9 @@ impl WeexFutures {
                 }
             }
             _ => {}
+        }
+        if matches!(request.kind, Kind::Config | Kind::Metadata) {
+            self.account.settings_failures = 0;
         }
         self.account_finished(cx, false);
     }
@@ -479,6 +600,14 @@ impl WeexFutures {
         if matches!(request.kind, Kind::Normal | Kind::Algo) {
             self.account.orders_failed = true;
             self.account.order_stage.clear();
+            self.account.order_skipped.clear();
+        }
+        if matches!(request.kind, Kind::Config | Kind::Metadata) {
+            self.account.settings_failures += 1;
+            self.account.settings_retry_at = cx.now
+                + (2_000.0 * 2f64.powi(self.account.settings_failures.min(5) as i32)).min(60_000.0);
+            self.account_finished(cx, false);
+            return;
         }
         self.account_finished(cx, true);
     }
@@ -489,10 +618,10 @@ impl WeexFutures {
             if let Some(deadline) = self.account.deadline.take() {
                 cx.clear_timer(deadline);
             }
-            if let Some((revision, rows)) = self.account.position_stage.take()
+            if let Some((revision, rows, skipped)) = self.account.position_stage.take()
                 && revision == self.account.revision
             {
-                let positions = rows
+                let mut positions: Vec<_> = rows
                     .into_iter()
                     .map(|p| p.resolve(&self.account, cx.store))
                     .filter_map(|p| {
@@ -513,6 +642,18 @@ impl WeexFutures {
                         }
                     })
                     .collect();
+                // A malformed row is not evidence that its position closed.
+                positions.extend(
+                    cx.store
+                        .positions()
+                        .iter()
+                        .filter(|old| {
+                            skipped.contains(&old.id)
+                                && !positions.iter().any(|p: &Position| p.id == old.id)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
                 cx.store.set_positions(positions);
             }
             if self.account.failed {
@@ -722,6 +863,7 @@ impl WeexFutures {
             // cannot publish rows, send another page, or finish a newer cycle.
             self.account.cycle += 1;
             self.account.order_stage.clear();
+            self.account.order_skipped.clear();
             self.account.position_stage = None;
             self.account.orders_failed = true;
             for (timer, _) in self.account.deferred.drain(..) {

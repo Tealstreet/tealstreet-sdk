@@ -3,7 +3,7 @@
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
-use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
+use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -227,9 +227,10 @@ enum Control {
         client: u64,
         command: Command,
     },
-    TickIntervalChanged {
+    PollScaleChanged {
         client: u64,
-        interval_ms: f64,
+        scale: f64,
+        ceiling_ms: Option<f64>,
     },
     Leave(u64),
 }
@@ -253,6 +254,8 @@ struct Account<V: Venue, T: Transport> {
     candles: HashMap<(String, String), usize>,
     pending: HashMap<u32, Pending>,
     next_command: u32,
+    /// Replayed to clients that join after startup failed, so none waits on it.
+    startup_failure: Option<Arc<str>>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -266,6 +269,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             candles: HashMap::new(),
             pending: HashMap::new(),
             next_command: 0,
+            startup_failure: None,
         }
     }
 
@@ -283,25 +287,14 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
                     Some(Control::Join { client, outgoing, cancel, ready }) => {
-                        if self.peers.len() >= self.config.max_clients_per_account {
-                            let _ = ready.send(Err("account client limit reached"));
-                            continue;
-                        }
-                        // Snapshot and registration share this actor turn. Existing peers
-                        // establish the same baseline before a new peer takes its snapshot.
-                        self.flush();
-                        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
-                        if snapshot.len() > self.config.max_frame_bytes || outgoing.try_send(Outgoing::Frame(snapshot)).is_err() {
-                            let _ = ready.send(Err("snapshot exceeds connection limits"));
-                            continue;
-                        }
-                        self.peers.insert(client, Peer { outgoing, cancel, books: HashSet::new(), candles: HashSet::new(), tickers: None });
-                        let _ = ready.send(Ok(()));
+                        let _ = ready.send(self.join(client, outgoing, cancel));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
-                    Some(Control::TickIntervalChanged { client, interval_ms }) => {
+                    Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
                         if self.peers.contains_key(&client) {
-                            self.host.engine.handle((self.host.clock)(), Event::TickIntervalChanged { interval_ms });
+                            let now = (self.host.clock)();
+                            self.host.engine.handle(now, Event::PollCeilingChanged { ceiling_ms });
+                            self.host.engine.handle(now, Event::PollScaleChanged { scale });
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
@@ -322,6 +315,40 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.host.stop();
     }
 
+    fn join(
+        &mut self,
+        client: u64,
+        outgoing: mpsc::Sender<Outgoing>,
+        cancel: watch::Sender<bool>,
+    ) -> Result<(), &'static str> {
+        if self.peers.len() >= self.config.max_clients_per_account {
+            return Err("account client limit reached");
+        }
+        // Snapshot and registration share this actor turn. Existing peers
+        // establish the same baseline before a new peer takes its snapshot.
+        self.flush();
+        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
+        if snapshot.len() > self.config.max_frame_bytes
+            || outgoing.try_send(Outgoing::Frame(snapshot)).is_err()
+        {
+            return Err("snapshot exceeds connection limits");
+        }
+        if let Some(failure) = &self.startup_failure {
+            let _ = outgoing.try_send(Outgoing::Text(failure.clone()));
+        }
+        self.peers.insert(
+            client,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+            },
+        );
+        Ok(())
+    }
+
     fn execute(&mut self) {
         let mut notices = Vec::new();
         self.host.execute(&mut |notice| notices.push(notice));
@@ -334,7 +361,21 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let text = encode_notice(ServerNotice::Done {
                             command: pending.original,
                             result: result.as_deref().ok(),
-                            error: result.as_ref().err().map(String::as_str),
+                            error: result.as_ref().err().map(|error| error.as_str().into()),
+                            detail: None,
+                        });
+                        self.send(client, Outgoing::Text(text));
+                    }
+                }
+                Notice::CommandFailed { command, error } => {
+                    if let Some(pending) = self.pending.remove(&command)
+                        && let Some(client) = pending.client
+                    {
+                        let text = encode_notice(ServerNotice::Done {
+                            command: pending.original,
+                            result: None,
+                            error: Some(error.legacy_text().into()),
+                            detail: Some(&error),
                         });
                         self.send(client, Outgoing::Text(text));
                     }
@@ -359,6 +400,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     scope,
                     outcome,
                 }))),
+                Notice::StartupFailed { error } => {
+                    let text = encode_notice(ServerNotice::StartupFailed { detail: &error });
+                    self.startup_failure = Some(text.clone());
+                    self.broadcast(Outgoing::Text(text))
+                }
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
@@ -685,8 +731,10 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::FetchOrderBook { command, .. }
         | Command::SetStpMode { command, .. }
         | Command::FetchLeverage { command, .. }
+        | Command::FetchMaxLeverage { command, .. }
         | Command::Query { command, .. }
-        | Command::FetchCandles { command, .. } => Some(command),
+        | Command::FetchCandles { command, .. }
+        | Command::Venue { command, .. } => Some(command),
         Command::SetTickerSymbols { .. }
         | Command::SubscribeOrderBook { .. }
         | Command::UnsubscribeOrderBook { .. }
@@ -716,7 +764,9 @@ enum ServerNotice<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<std::borrow::Cow<'a, str>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<&'a VenueError>,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -728,10 +778,13 @@ enum ServerNotice<'a> {
         message: &'a str,
     },
     Deactivate,
+    StartupFailed {
+        detail: &'a VenueError,
+    },
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)
-        .expect("notice contains only strings and integers")
+        .expect("notice contains only strings, numbers and enums")
         .into()
 }
 
@@ -843,7 +896,9 @@ async fn connection(
                             let control = match input {
                                 HostInput::PublicFeedUpdate(_) => unreachable!("provider controls are rejected before command dispatch"),
                                 HostInput::Command(command) => Control::Command { client, command },
-                                HostInput::TickIntervalChanged { interval_ms } => Control::TickIntervalChanged { client, interval_ms },
+                                HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                                    Control::PollScaleChanged { client, scale, ceiling_ms }
+                                }
                             };
                             if account.commands.try_send(control).is_err() { break; }
                             continue;
@@ -1268,6 +1323,49 @@ mod tests {
             commands.borrow().last(),
             Some(Command::UnsubscribeOrderBook { .. })
         ));
+    }
+
+    struct FailsStartup;
+    impl Venue for FailsStartup {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.startup_failed(
+                VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_startup_failure_reaches_clients_that_join_later() {
+        let mut actor = Account::new(
+            Host::new(Engine::new(FailsStartup), NoTransport),
+            ServerConfig::default(),
+        );
+        actor.host.engine.start((actor.host.clock)());
+        actor.execute();
+        let (outgoing, mut messages) = mpsc::channel(4);
+        actor.join(7, outgoing, watch::channel(false).0).unwrap();
+        assert!(matches!(messages.recv().await, Some(Outgoing::Frame(_))));
+        let Some(Outgoing::Text(text)) = messages.recv().await else {
+            panic!("startup failure was not replayed");
+        };
+        assert_eq!(
+            text.as_ref(),
+            r#"{"type":"startupFailed","detail":{"message":"key rejected","kind":"authInvalid"}}"#
+        );
     }
 
     #[tokio::test]

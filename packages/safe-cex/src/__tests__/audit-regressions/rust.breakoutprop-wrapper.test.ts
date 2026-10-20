@@ -47,27 +47,27 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('breakoutprop');
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', recvWindow: 9000 });
-    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: 5000 });
+    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 2.5, ceiling: 5000 });
     expect(commands).toContainEqual({ op: 'setTickerSymbols', symbols: [] });
   });
   it('forwards initial and live incident slowdowns and unsubscribes on disposal', async () => {
     setTickIntervalMultipliers({ '*': 4 });
     const { exchange, commands } = fixture({ extra: { tickInterval: 5000 } });
     await exchange.start();
-    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: 20000 });
+    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 10, ceiling: 20_000 });
     setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
-    expect(commands.at(-1)).toEqual({ op: 'setTickInterval', interval: 10000 });
+    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 5, ceiling: 10_000 });
     setTickIntervalMultipliers(undefined);
-    expect(commands.at(-1)).toEqual({ op: 'setTickInterval', interval: 5000 });
+    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 2.5, ceiling: 5000 });
     exchange.dispose();
     const count = commands.length;
     setTickIntervalMultipliers({ '*': 3 });
     expect(commands).toHaveLength(count);
   });
-  it('preserves an explicitly paused polling interval across JSON', async () => {
+  it('preserves an explicitly paused polling scale across JSON', async () => {
     const { exchange, construct, commands } = fixture({ extra: { tickInterval: Number.POSITIVE_INFINITY } });
     await exchange.start();
-    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: null });
+    expect(commands[0]).toEqual({ op: 'setPollScale', scale: null });
     expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
   });
   it('requires session credentials even for market-data-only mode', async () => {
@@ -76,9 +76,23 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     expect(construct).not.toHaveBeenCalled();
   });
   it('settles account selection startup failures without waiting forever', async () => {
-    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    const message = 'DXtrade startup failed: Multiple accounts found';
+    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
     await expect(exchange.start()).rejects.toThrow('Multiple accounts found');
     expect(exchange.isDisposed).toBe(true);
+  });
+  it('treats an error log alone as a toast, not a startup failure', async () => {
+    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    const outcome = await Promise.race([exchange.start().then(() => 'started', () => 'rejected'), new Promise((resolve) => setTimeout(() => resolve('pending'), 20))]);
+    expect(outcome).toBe('pending');
+  });
+  it('keeps the venue reason when a startup failure precedes deactivation', async () => {
+    const message = 'Bybit rejected the API key (10003): API key is invalid.';
+    const { exchange } = fixture({}, [{ op: 'startupFailed', detail: { message, kind: 'authInvalid', venueCode: '10003' } }, { op: 'deactivate' }], false);
+    const deactivated = vi.fn();
+    exchange.emitter.on('deactivate', deactivated);
+    await expect(exchange.start()).rejects.toThrow(message);
+    expect(deactivated).toHaveBeenCalledOnce();
   });
   it('settles definitive login rejection through the shared deactivation contract', async () => {
     const { exchange } = fixture({}, [{ op: 'deactivate' }], false);
@@ -114,6 +128,6 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
       { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1 },
       { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1, clientOrderId: 'caller' },
     ])).rejects.toThrow(/clientOrderId/i);
-    expect(commands.every(({ op }) => op === 'setTickerSymbols' || op === 'setTickInterval')).toBe(true);
+    expect(commands.every(({ op }) => op === 'setTickerSymbols' || op === 'setPollScale')).toBe(true);
   });
 });

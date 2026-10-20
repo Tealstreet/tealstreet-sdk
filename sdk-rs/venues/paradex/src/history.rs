@@ -1,19 +1,39 @@
 //! Rare cursor-paged reads never mutate the account store.
 use crate::{Pending, account::Account};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::num::parse_decimal;
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json::ArrayAt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
+/// Fills pages before the read falls back to order history or stops.
+const FILL_PAGES: u32 = 5;
+
+/// Whether a read with an optional output limit has kept enough rows, and
+/// whether it is bounded at all.
+fn limit_reached(limit: Option<u32>, kept: usize) -> (bool, bool) {
+    match limit.filter(|limit| *limit > 0) {
+        Some(limit) => (kept >= limit as usize, true),
+        None => (false, false),
+    }
+}
+
+/// Pages a read may walk before it stops with a cursor pending.
+fn page_cap(query: &Query) -> u32 {
+    match query {
+        Query::Fills { .. } => FILL_PAGES,
+        Query::Income { .. } => 200,
+        _ => 50,
+    }
+}
 
 #[derive(Default)]
 pub struct History;
 pub struct Request {
     command: CommandId,
     query: Query,
-    cursor: Option<String>,
-    cursors: HashSet<String>,
-    seen: HashSet<String>,
-    page: u32,
+    walk: CursorWalk,
     valid: bool,
     raw_rows: usize,
     fallback: bool,
@@ -129,13 +149,10 @@ struct PublicTrade {
     side: OrderSide,
     timestamp: f64,
 }
-fn finite(s: &str) -> Option<f64> {
-    s.parse::<f64>().ok().filter(|v| v.is_finite())
-}
 fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
     if row.id.is_empty()
         || row.market.is_empty()
-        || !finite(&row.created_at).is_some_and(|v| v > 0.)
+        || !parse_decimal(&row.created_at).is_some_and(|v| v > 0.)
     {
         return false;
     }
@@ -148,7 +165,7 @@ fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
     ];
     if optional
         .into_iter()
-        .any(|s| !s.is_empty() && finite(s).is_none())
+        .any(|s| !s.is_empty() && parse_decimal(s).is_none())
     {
         return false;
     }
@@ -156,17 +173,18 @@ fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
         Query::Income { .. } => true,
         Query::OrderHistory { .. } => {
             side(&row.side).is_some()
-                && finite(&row.size).is_some_and(|n| n > 0.)
-                && finite(&row.remaining_size).is_some_and(|n| n >= 0. && n <= number(&row.size))
-                && (row.price.is_empty() || finite(&row.price).is_some_and(|n| n >= 0.))
+                && parse_decimal(&row.size).is_some_and(|n| n > 0.)
+                && parse_decimal(&row.remaining_size)
+                    .is_some_and(|n| n >= 0. && n <= number(&row.size))
+                && (row.price.is_empty() || parse_decimal(&row.price).is_some_and(|n| n >= 0.))
         }
         Query::Fills { .. } | Query::PublicTrades { .. } => {
             side(&row.side).is_some()
-                && finite(&row.size).is_some_and(|n| n > 0.)
-                && (finite(&row.price).is_some_and(|n| n > 0.)
-                    || (fallback && finite(&row.avg_fill_price).is_some_and(|n| n > 0.)))
+                && parse_decimal(&row.size).is_some_and(|n| n > 0.)
+                && (parse_decimal(&row.price).is_some_and(|n| n > 0.)
+                    || (fallback && parse_decimal(&row.avg_fill_price).is_some_and(|n| n > 0.)))
                 && (!fallback
-                    || finite(&row.remaining_size)
+                    || parse_decimal(&row.remaining_size)
                         .is_some_and(|n| n >= 0. && n <= number(&row.size)))
         }
         Query::OrderByClientId { .. } => true,
@@ -176,19 +194,7 @@ fn number(s: &str) -> f64 {
     safe_cex_engine::num::parse(s)
 }
 fn optional_number(s: &str) -> Option<f64> {
-    s.parse().ok().filter(|n: &f64| n.is_finite() && *n != 0.)
-}
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
+    parse_decimal(s).filter(|n| *n != 0.)
 }
 fn side(s: &str) -> Option<OrderSide> {
     match s {
@@ -292,11 +298,8 @@ impl History {
         };
         let request = Request {
             command,
+            walk: CursorWalk::new(page_cap(&query)),
             query,
-            cursor: None,
-            cursors: HashSet::new(),
-            seen: HashSet::new(),
-            page: 0,
             valid: true,
             raw_rows: 0,
             fallback: false,
@@ -312,6 +315,7 @@ impl History {
         let (path, symbol, from, to, page_size, public) = match &request.query {
             Query::Fills {
                 symbol,
+                from_ms,
                 to_ms,
                 limit,
                 ..
@@ -322,7 +326,7 @@ impl History {
                     "/fills"
                 },
                 symbol.as_deref(),
-                None,
+                *from_ms,
                 *to_ms,
                 limit.unwrap_or(100).clamp(1, 500),
                 false,
@@ -421,7 +425,7 @@ impl History {
         if let Some(to) = to {
             params.push(format!("end_at={}", safe_cex_engine::num::format(to)));
         }
-        if let Some(cursor) = &request.cursor {
+        if let Some(cursor) = request.walk.cursor() {
             params.push(format!("cursor={}", encode(cursor)));
         }
         let path = format!("{path}?{}", params.join("&"));
@@ -460,7 +464,7 @@ impl History {
             };
             if row.market == *symbol
                 && row.client_id == *client_order_id
-                && request.seen.insert(row.id.clone())
+                && request.walk.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
                     rows.push(order);
@@ -492,7 +496,7 @@ impl History {
         if request.fallback && row.order_id.is_empty() {
             row.order_id = row.id.clone();
         }
-        if !row.id.is_empty() && !request.seen.insert(row.id.clone()) {
+        if !row.id.is_empty() && !request.walk.fresh(row.id.clone()) {
             return;
         }
         match &mut request.rows {
@@ -658,75 +662,89 @@ impl History {
             self.on_failed(cx, request, "invalid Paradex history envelope");
             return;
         };
-        request.page += 1;
         let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
             if matches!(&request.rows, Rows::Lookup(rows) if !rows.is_empty()) {
                 self.finish(cx, request);
                 return;
             }
-            if let Some(next) = &next
-                && request.page < 50
-            {
-                if !request.cursors.insert(next.clone()) {
+            let page = CursorPage {
+                next: next.clone(),
+                rows: request.raw_rows,
+                fresh: request.raw_rows,
+                want_more: true,
+            };
+            match request.walk.advance(page) {
+                CursorStep::More(_) => {
+                    self.issue(cx, account, request);
+                    return;
+                }
+                CursorStep::Stalled(Stall::RepeatedCursor) => {
                     self.on_failed(cx, request, "Paradex repeated open-order cursor");
                     return;
                 }
-                request.cursor = Some(next.clone());
-                self.issue(cx, account, request);
-                return;
+                CursorStep::Stalled(_) | CursorStep::Done => {}
             }
             request.open_complete = next.is_none();
             request.lookup_history = true;
-            request.page = 0;
-            request.cursor = None;
-            request.cursors.clear();
+            request.walk.restart();
             self.issue(cx, account, request);
             return;
         }
         if matches!(request.query, Query::Fills { .. })
             && request.raw_rows == 0
             && !request.fallback
-            && (next.is_none() || request.page >= 5)
+            && (next.is_none() || request.walk.pages() + 1 >= FILL_PAGES)
         {
             request.fallback = true;
-            request.cursor = None;
-            request.page = 0;
+            request.walk.restart();
             self.issue(cx, account, request);
             return;
         }
-        let filled_limit = match request.query {
-            Query::Fills { limit, .. } => {
-                request.raw_rows >= limit.unwrap_or(100).clamp(1, 500) as usize
+        // A bounded read stops once it keeps enough rows (filters run after the
+        // page arrives): Paradex pages newest first, so those are the rows a
+        // full walk would keep. Only an unbounded read can exhaust its pages.
+        let (enough, bounded) = match (&request.query, &request.rows) {
+            (Query::Fills { limit, .. }, Rows::Fills(rows)) => (
+                rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize,
+                true,
+            ),
+            (Query::OrderHistory { limit, .. }, Rows::Orders(rows)) => {
+                limit_reached(*limit, rows.len())
             }
-            _ => false,
-        };
-        let cap = match request.query {
-            Query::Fills { .. } => 5,
-            Query::Income { .. } => 200,
-            Query::PublicTrades { .. } => 1,
-            _ => 50,
+            (Query::Income { limit, .. }, Rows::Income(rows)) => limit_reached(*limit, rows.len()),
+            (Query::OrderByClientId { .. }, Rows::Lookup(rows)) => (!rows.is_empty(), true),
+            _ => (false, false),
         };
         request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
-        if !filled_limit
-            && !request.fallback
-            && let Some(next) = next
-        {
-            if !request.cursors.insert(next.clone()) {
-                self.on_failed(cx, request, "Paradex repeated history cursor");
-                return;
-            }
-            if request.page < cap {
-                request.cursor = Some(next);
+        // The orders fallback and public trades are single pages.
+        let single = request.fallback || matches!(request.query, Query::PublicTrades { .. });
+        let page = CursorPage {
+            next: if single { None } else { next },
+            rows: request.raw_rows,
+            fresh: request.raw_rows,
+            want_more: !enough,
+        };
+        match request.walk.advance(page) {
+            CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
             }
-            if cap > 1 {
-                cx.log(
-                    safe_cex_engine::LogLevel::Warning,
-                    "Paradex history reached page cap",
-                );
+            // A bounded read keeps what its pages found, as before: a lookup
+            // reports a non-definitive miss. An unbounded read is incomplete.
+            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.log(
+                safe_cex_engine::LogLevel::Warning,
+                "Paradex history reached page cap",
+            ),
+            CursorStep::Stalled(Stall::PageBudget) => {
+                self.on_failed(cx, request, "INCOMPLETE: Paradex history page cap reached");
+                return;
             }
+            CursorStep::Stalled(_) => {
+                self.on_failed(cx, request, "Paradex repeated history cursor");
+                return;
+            }
+            CursorStep::Done => {}
         }
         self.finish(cx, request);
     }

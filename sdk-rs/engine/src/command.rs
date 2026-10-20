@@ -116,7 +116,18 @@ enum CommandIn {
         command: u32,
         mode: StpMode,
     },
+    FetchAccountTier {
+        command: u32,
+    },
+    SetAccountTier {
+        command: u32,
+        tier: String,
+    },
     FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
+    FetchMaxLeverage {
         command: u32,
         symbol: String,
     },
@@ -287,7 +298,18 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            CommandIn::FetchAccountTier { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchAccountTier,
+            },
+            CommandIn::SetAccountTier { command, tier } => Self::Venue {
+                command,
+                action: crate::VenueAction::SetAccountTier { tier },
+            },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
+            CommandIn::FetchMaxLeverage { command, symbol } => {
+                Self::FetchMaxLeverage { command, symbol }
+            }
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -391,7 +413,12 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 pub enum HostInput {
     Command(Command),
     PublicFeedUpdate(crate::PublicFeedUpdate),
-    TickIntervalChanged { interval_ms: f64 },
+    /// Factor on each venue poll's own cadence; infinity pauses polling. The
+    /// optional ceiling is the host's absolute bound on slowed polls.
+    PollScaleChanged {
+        scale: f64,
+        ceiling_ms: Option<f64>,
+    },
 }
 
 /// Decode startup subscriptions without compiling the trading/query parser.
@@ -465,28 +492,41 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         }));
     }
     #[cfg(feature = "polling-control")]
-    if header.op == "setTickInterval" {
+    if header.op == "setPollScale" {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum Interval {
-            Millis(f64),
+        enum Scale {
+            Factor(f64),
             Paused(()),
         }
         #[derive(Deserialize)]
         struct Control {
-            interval: Interval,
+            scale: Scale,
+            #[serde(default)]
+            ceiling: Option<f64>,
         }
         let control: Control = serde_json::from_str(json)?;
-        let interval_ms = match control.interval {
-            Interval::Millis(ms) => ms,
-            Interval::Paused(()) => f64::INFINITY,
+        let scale = match control.scale {
+            Scale::Factor(factor) => factor,
+            Scale::Paused(()) => f64::INFINITY,
         };
-        if interval_ms.is_nan() || interval_ms <= 0.0 {
+        if scale.is_nan() || scale <= 0.0 {
             return Err(serde::de::Error::custom(
-                "Polling interval must be positive or null to pause",
+                "Polling scale must be positive or null to pause",
             ));
         }
-        return Ok(HostInput::TickIntervalChanged { interval_ms });
+        if control
+            .ceiling
+            .is_some_and(|ms| !ms.is_finite() || ms <= 0.0)
+        {
+            return Err(serde::de::Error::custom(
+                "Polling ceiling must be a positive number of milliseconds",
+            ));
+        }
+        return Ok(HostInput::PollScaleChanged {
+            scale,
+            ceiling_ms: control.ceiling,
+        });
     }
     decode_command(json).map(HostInput::Command)
 }
@@ -495,6 +535,25 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn account_tier_ops_decode_to_venue_actions() {
+        assert_eq!(
+            decode_command(r#"{"op":"setAccountTier","command":5,"tier":"plus"}"#).unwrap(),
+            Command::Venue {
+                command: 5,
+                action: crate::VenueAction::SetAccountTier {
+                    tier: "plus".into()
+                },
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountTier","command":6}"#).unwrap(),
+            Command::Venue {
+                command: 6,
+                action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
     #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
         for op in ["getAccount", "fetchAccount"] {
@@ -603,6 +662,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn maximum_leverage_read_is_distinct_from_current_account_leverage() {
+        let json = r#"{"op":"fetchMaxLeverage","command":82,"symbol":"E-BTC-USDT"}"#;
+        let expected = Command::FetchMaxLeverage {
+            command: 82,
+            symbol: "E-BTC-USDT".into(),
+        };
+        assert_eq!(decode_command(json).unwrap(), expected);
+        assert_eq!(
+            decode_host_input(json).unwrap(),
+            HostInput::Command(expected)
+        );
+        assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
+    }
+
     fn assert_subscription_decoders_match(json: &str) {
         let host = decode_subscription(json).map(|selected| selected.expect("subscription input"));
         assert_eq!(
@@ -662,37 +736,60 @@ mod tests {
     #[test]
     #[cfg(not(feature = "polling-control"))]
     fn polling_controls_are_excluded_from_ordinary_command_parsers() {
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
-        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":4}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setPollScale","scale":null}"#).is_err());
     }
 
     #[test]
     #[cfg(feature = "polling-control")]
-    fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
+    fn host_configuration_accepts_a_positive_scale_and_explicit_pause() {
         assert_eq!(
-            decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
-            HostInput::TickIntervalChanged { interval_ms: 123.5 }
+            decode_host_input(r#"{"op":"setPollScale","scale":1.5}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 1.5,
+                ceiling_ms: None
+            }
         );
         assert_eq!(
-            decode_host_input(r#"{"op":"setTick\u0049nterval","interval":null}"#).unwrap(),
-            HostInput::TickIntervalChanged {
-                interval_ms: f64::INFINITY
+            decode_host_input(r#"{"op":"setPoll\u0053cale","scale":null}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: f64::INFINITY,
+                ceiling_ms: None,
             }
         );
     }
 
     #[test]
-    fn host_configuration_requires_a_typed_positive_interval_or_null() {
+    #[cfg(feature = "polling-control")]
+    fn host_configuration_carries_an_optional_positive_ceiling() {
+        assert_eq!(
+            decode_host_input(r#"{"op":"setPollScale","scale":60,"ceiling":30000}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 60.,
+                ceiling_ms: Some(30_000.)
+            }
+        );
         for json in [
-            r#"{"op":"setTickInterval"}"#,
-            r#"{"op":"setTickInterval","interval":0}"#,
-            r#"{"op":"setTickInterval","interval":-0.0}"#,
-            r#"{"op":"setTickInterval","interval":-1}"#,
-            r#"{"op":"setTickInterval","interval":"1000"}"#,
-            r#"{"op":"setTickInterval","interval":false}"#,
-            r#"{"op":"setTickInterval","interval":{}}"#,
-            r#"{"op":"setTickInterval","interval":NaN}"#,
-            r#"{"op":"setTickInterval","interval":1e309}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":0}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":-5}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":"1000"}"#,
+        ] {
+            assert!(decode_host_input(json).is_err(), "must reject {json}");
+        }
+    }
+
+    #[test]
+    fn host_configuration_requires_a_typed_positive_scale_or_null() {
+        for json in [
+            r#"{"op":"setPollScale"}"#,
+            r#"{"op":"setPollScale","scale":0}"#,
+            r#"{"op":"setPollScale","scale":-0.0}"#,
+            r#"{"op":"setPollScale","scale":-1}"#,
+            r#"{"op":"setPollScale","scale":"4"}"#,
+            r#"{"op":"setPollScale","scale":false}"#,
+            r#"{"op":"setPollScale","scale":{}}"#,
+            r#"{"op":"setPollScale","scale":NaN}"#,
+            r#"{"op":"setPollScale","scale":1e309}"#,
         ] {
             assert!(decode_host_input(json).is_err(), "must reject {json}");
         }
@@ -714,7 +811,7 @@ mod tests {
         );
         assert!(decode_host_input(r#"{"op":"setLeverage","command":"37"}"#).is_err());
         assert!(decode_host_input(r#"{"op":"unknown"}"#).is_err());
-        assert!(decode_command(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
+        assert!(decode_command(r#"{"op":"setPollScale","scale":4}"#).is_err());
     }
 
     #[test]

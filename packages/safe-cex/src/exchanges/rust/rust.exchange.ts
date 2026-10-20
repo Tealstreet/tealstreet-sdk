@@ -1,3 +1,4 @@
+import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { AccountAuthResult, CommandProgress, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -33,7 +34,7 @@ import bs58 from 'bs58';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
-import { exchangeMetadata } from '../../exchangeMetadata';
+import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
@@ -126,6 +127,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
+const LIGHTER_TIER_SYNC_MS = 15_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 // ApeX and KuCoin Spot retain their existing getAccount command aliases below.
 const nativeIdentityNames = new Set<ExchangeName>([
@@ -213,23 +215,17 @@ export type WasmEngineModule = {
 };
 
 /**
- * How this realm loads the wasm engine: the web build in browsers and
- * Workers, the Node build on servers and in tests. Registered once by the
- * host, like the transport.
+ * How this realm loads the wasm engine for a Rust venue: that venue's family
+ * build in browsers and Workers, the combined build on servers and in tests.
+ * Registered once by the host, like the transport. Loaders share pending and
+ * completed initialization: wasm-bindgen init replaces module-wide memory.
  */
-let defaultWasmInitialization: Promise<WasmEngineModule> | undefined;
-const defaultWasmLoader = (): Promise<WasmEngineModule> =>
-  (defaultWasmInitialization ??= (async () => {
-    // wasm-bindgen initialization replaces module-wide memory, including the
-    // pointers held by existing accounts. Share pending and completed startup.
-    const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-    return loadEngine();
-  })().catch((error) => {
-    defaultWasmInitialization = undefined;
-    throw error;
-  }));
-let loadWasmEngine: () => Promise<WasmEngineModule> = defaultWasmLoader;
-export const setWasmEngineLoader = (loader: () => Promise<WasmEngineModule>) => {
+const defaultWasmLoader = async (venue: string): Promise<WasmEngineModule> => {
+  const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
+  return loadEngine(venue);
+};
+let loadWasmEngine: (venue: string) => Promise<WasmEngineModule> = defaultWasmLoader;
+export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngineModule>) => {
   loadWasmEngine = loader;
 };
 
@@ -238,6 +234,11 @@ let engineTransport: () => Transport = nativeTransport;
 export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
+
+const placementScopedCancelAllNames = new Set<ExchangeName>([
+  'phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex',
+  'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
+]);
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -286,6 +287,7 @@ export class RustEngineExchange extends BaseExchange {
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
+  private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -302,11 +304,15 @@ export class RustEngineExchange extends BaseExchange {
    */
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
-  private pollingPolicy?: { interval: number | null; promise?: Promise<void> };
+  private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
   private syncingAccountState = false;
   private warnIgnoredCoinbaseReadOptions = false;
   private readonly accountAuthStreaks = new Uint8Array(10);
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
+  /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
+  changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
+  /** Lighter: the engine's cached account tier, when known. */
+  fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const ignoredCoinbaseReadOptions = ['coinbase', 'coinbasespot'].includes(exchangeName) &&
@@ -333,6 +339,24 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (placementScopedCancelAllNames.has(exchangeName)) {
+      this.cancelAllOrders = async () => {
+        // Frames can lag placement ACKs. Keep attempted scopes for this account's
+        // lifetime, including uncertain/rejected outcomes and races with later places.
+        const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+        const failures: string[] = [];
+        for (const symbol of symbols) {
+          if (this.isDisposed) continue;
+          try {
+            await this.cancelSymbolOrders(symbol);
+          } catch (error) {
+            // A rejected scope must not prevent cancellation of later live orders.
+            failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
+      };
+    }
     if (exchangeName === 'polymarket') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -361,7 +385,10 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchFillsForOrderIds = async (ids) => {
         const quantities = new Map<string, number>();
         for (const id of new Set(ids)) {
-          const fills = await this.command<Execution[]>({ op: 'fetchFills', orderId: id, from: 0, limit: 1000 });
+          const fills = await this.command<Execution[]>(
+            { op: 'fetchFills', orderId: id, from: 0, limit: 1000 },
+            { report: false },
+          );
           for (const fill of fills) {
             if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
           }
@@ -390,16 +417,28 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+    if (this.name === 'binance') {
+      // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
+    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
+    }
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      this.changeAccountTier = async (tier: LighterAccountTier) => {
+        await this.command<null>({ op: 'setAccountTier', tier });
+        this.writeLighterTier(tier);
+      };
+      this.fetchAccountTier = async () =>
+        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
     }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
@@ -474,12 +513,18 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.host || this.isDisposed || this.engineFailure) return;
     const resolved = this.getTickInterval();
     if (resolved === undefined) return;
-    const interval = resolved === Number.POSITIVE_INFINITY ? null : resolved;
-    if (this.pollingPolicy?.interval === interval) return this.pollingPolicy.promise;
+    // Venues keep their own reconcile cadences; the resolved tick (override,
+    // server multiplier, auth backoff) scales them relative to the metadata tick.
+    const reference = getExchangeMetadata(this._exchangeName).tickInterval;
+    const scale = resolved === Number.POSITIVE_INFINITY ? null : reference ? resolved / reference : 1;
+    // The resolved tick still bounds a slowdown (auth backoff and server multiplier
+    // caps), unless a venue's native cadence is already slower.
+    const ceiling = scale === null ? undefined : resolved;
+    if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling) return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
-    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { interval };
+    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale, ceiling };
     this.pollingPolicy = policy;
-    policy.promise = this.command<void>({ op: 'setTickInterval', interval }).catch((error) => {
+    policy.promise = this.command<void>({ op: 'setPollScale', scale, ...(ceiling !== undefined && { ceiling }) }).catch((error) => {
       if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
       throw error;
     });
@@ -597,7 +642,7 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.startupWaiters.add(disposed);
       try {
-        void loadWasmEngine()
+        void loadWasmEngine(RUST_VENUES[this.name]!)
           .then(resolve, reject)
           .finally(() => this.startupWaiters.delete(disposed));
       } catch (error) {
@@ -646,7 +691,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -714,9 +759,13 @@ export class RustEngineExchange extends BaseExchange {
         onCommandProgress: this.receiveCommandProgress,
         onAccountAuth: this.receiveAccountAuth,
         onDeactivate: () => {
-          this.startupFailure = new Error(`${this.name} credentials were rejected`);
+          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
+        },
+        onStartupFailed: (detail) => {
+          this.startupFailure ??= new Error(detail.message);
+          for (const wake of this.startupWaiters) wake();
         },
       },
       { commandTimeoutMs: this.commandTimeoutMs },
@@ -837,6 +886,30 @@ export class RustEngineExchange extends BaseExchange {
       this.dispose();
       throw error;
     }
+    if (this.fetchAccountTier && !this.isPublicDataOnly) {
+      void this.syncLighterTier();
+      this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+  };
+
+  /** The web tier setting reads TS's `balance.info.lighterAccountLimits`; frames keep `info`. */
+  private writeLighterTier = (tier: LighterAccountTier) => {
+    if (this.isDisposed || this.store.balance.info?.lighterAccountLimits?.user_tier_name === tier) return;
+    this.store.update({
+      balance: {
+        ...this.store.balance,
+        info: { ...this.store.balance.info, lighterAccountLimits: { user_tier_name: tier } },
+      },
+    });
+  };
+
+  private syncLighterTier = async () => {
+    try {
+      const tier = await this.fetchAccountTier?.();
+      if (tier) this.writeLighterTier(tier);
+    } catch {
+      // The engine reports tier-read failures itself; the last known tier stays.
+    }
   };
 
   private hyroEndpoints = () => {
@@ -876,8 +949,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
+    if (this.name === 'bitrue') {
+      if (!this.isPublicDataOnly) await this.fetchSymbolMaxLeverage(symbol);
+      return;
+    }
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
-    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
     this.applier.applyLeverage(symbol, rails);
   };
 
@@ -1017,10 +1094,6 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
-    if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
-      this.startupFailure = new Error(message);
-      for (const wake of this.startupWaiters) wake();
-    }
     if (level === 'error') this.emitAndLogError(message);
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };
@@ -1110,7 +1183,11 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  private command = async <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+  /** `report: false` is for background reads whose caller owns the failure's visibility. */
+  private command = async <T>(
+    command: { op: string; [field: string]: unknown },
+    { report = true }: { report?: boolean } = {},
+  ): Promise<T> => {
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
@@ -1124,7 +1201,7 @@ export class RustEngineExchange extends BaseExchange {
       }
       return (await this.host.command(command)) as T;
     } catch (error) {
-      this.reportCommandError(error);
+      if (report) this.reportCommandError(error);
       throw error;
     }
   };
@@ -1188,6 +1265,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
+    if (this.host && placementScopedCancelAllNames.has(this.name)) {
+      for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
@@ -1476,6 +1556,12 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'breakoutprop') throw new Error('Not implemented');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
+    if (this.name === 'bitrue' && !this.isPublicDataOnly) {
+      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
+      this.host?.flush();
+      return leverage;
+    }
     return market.limits.leverage.max;
   };
 
@@ -1558,10 +1644,14 @@ export class RustEngineExchange extends BaseExchange {
           'coinbase',
           'coinbasespot',
           'polymarket',
+          'okx',
+          'okxeu',
+          'okxdemo',
+          'okxeudemo',
         ].includes(this.name) ||
         orderlyNames.has(this.name)
       )
-        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       else {
         const cached = this.store.fetchedLeverage[symbol];
         if (

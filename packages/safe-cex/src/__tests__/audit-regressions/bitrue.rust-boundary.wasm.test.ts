@@ -53,6 +53,7 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
           ]),
         );
       if (path.endsWith('/listenKey')) return ok({ listenKey: 'futures-key' });
+      if (path.endsWith('/leverageBracket')) return ok({ contractName: symbol, brackets: [{ initialLeverage: 125 }] });
       if (path.endsWith('/account'))
         return ok({
           account: [
@@ -135,6 +136,13 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(store.markets[0]).toMatchObject({ symbol, precision: { amount: 10 } });
     expect(store.orders[0]).toMatchObject({ id: orderId, amount: 100, filled: 0, remaining: 100 });
     expect(main.store.orders[0].id).toBe(orderId);
+    expect(await bounded(exchange.fetchSymbolMaxLeverage(symbol), 'native bracket')).toBe(125);
+    expect(store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
+    expect(main.store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
+    expect(store.fetchedLeverage[symbol]?.buyLeverage).toBe(25);
+    const bracketRequest = requests.find((request) => new URL(request.url).pathname.endsWith('/leverageBracket'))!;
+    expect(bracketRequest.method).toBe('GET');
+    expect(bracketRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/leverageBracket?contractName=${symbol}`);
     // Prove this goes through the engine cache, not BaseExchange's JS store.
     const cachedOrders = store.orders;
     store.update({ orders: [] });
@@ -206,17 +214,19 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
       }),
     ).rejects.toThrow();
     expect(placements).toBe(2);
-    const update = (nativeFilled: number, executionPrice: number) => {
+    // l is this event's native fill quantity and cannot exceed cumulative z.
+    // The replay and late event overlap execution ranges already delivered.
+    const update = (nativeFilled: number, lastNativeFilled: number, executionPrice: number) => {
       cumulative = Math.max(cumulative, nativeFilled * 10);
       privateSocket!.onMessage(
-        `{"e":"ORDER_TRADE_UPDATE","E":${++now},"o":{"s":"E_BTCUSDT","i":${orderId},"S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","q":"100","z":"${nativeFilled}","l":"999","p":"100","ap":"102","L":"${executionPrice}"}}`,
+        `{"e":"ORDER_TRADE_UPDATE","E":${++now},"o":{"s":"E_BTCUSDT","i":${orderId},"S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","q":"100","z":"${nativeFilled}","l":"${lastNativeFilled}","p":"100","ap":"102","L":"${executionPrice}"}}`,
       );
     };
     expect(privateSocket).toBeDefined();
-    update(1, 101);
-    update(3, 103);
-    update(3, 103);
-    update(2, 102);
+    update(1, 1, 101);
+    update(3, 2, 103);
+    update(3, 2, 103);
+    update(2, 1, 102);
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(fills.map(({ id, amount, price }) => ({ id, amount, price }))).toEqual([
       { id: orderId, amount: 10, price: 101 },

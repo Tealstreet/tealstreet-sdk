@@ -83,6 +83,8 @@ const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
   return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
 };
 
+const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
+
 export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
@@ -1017,9 +1019,11 @@ export class ExchangeWorker {
           },
         ],
       });
-    } else {
+    } else if (USER_STARTED_ALGORITHMS.has(payload.op)) {
       this.logError(message, new Error(message), { payloadOp: payload.op }, false);
     }
+    // Store sync, UI state and stop/cleanup ops have nothing left to act on; an
+    // error per routine message would toast on every symbol switch.
   }
 
   private _stopOwnedTwaps() {
@@ -1062,9 +1066,11 @@ export class ExchangeWorker {
       name: 'EngineDeadError',
       code: 'ENGINE_DEAD',
     });
+    // Stop TWAPs while their handler context is still current, so the final
+    // completed state reaches the main thread that persists and resumes them.
+    this._stopOwnedTwaps();
     this._generation++;
     this._clearRuntimePipeline();
-    this._stopOwnedTwaps();
     if (this._exchange) {
       chaserOrderManagerInstance.cleanupExchange(this._exchange);
       this._exchange.dispose();

@@ -518,9 +518,10 @@ export class FrameApplier {
       changed = true;
       break;
     }
+    // A current-state read is not another independent venue observation. Its
+    // pending stream frame still owns order/position freshness when it arrives.
     if (changed) {
       try {
-        // A current-state read is not an independent venue observation.
         if (frame.accountRead?.()) this.store.update(update, false, 'account-read');
         else this.store.update(update);
       } catch (error) {
@@ -685,13 +686,13 @@ export class FrameApplier {
     const rows = frame.fills();
     const fills: OrderFillEvent[] = [];
     for (let i = 0; i < (rows?.count ?? 0); i++) {
-      const realizedPnl = rows!.realizedPnl?.[i];
-      const fee = rows!.fee?.[i];
       const fallback = rows!.symbol?.(i);
       const symbol = this.invalidMarketFrames.has(frame)
         ? fallback
         : (this.frameMarkets.get(frame)?.symbols[rows!.market[i]] ?? this.symbol(rows!.market[i], fallback));
       if (symbol === undefined) throw new FrameApplyError('Fill identity requires a market snapshot');
+      const realizedPnl = rows!.realizedPnl?.[i];
+      const fee = rows!.fee?.[i];
       fills.push({
         id: rows!.orderId(i),
         orderId: rows!.orderId(i),

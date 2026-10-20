@@ -1,5 +1,6 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::de::number;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
@@ -30,6 +31,9 @@ impl Lookup {
 pub enum Request {
     Limits {
         started_at: f64,
+    },
+    ChangeTier {
+        command: safe_cex_engine::CommandId,
     },
     Lookup {
         candidates: VecDeque<Lookup>,
@@ -101,23 +105,6 @@ pub struct Snapshot {
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Num(#[serde(deserialize_with = "number")] f64);
-fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Atom<'a>(#[serde(borrow, deserialize_with = "atom")] Cow<'a, str>);
@@ -677,7 +664,7 @@ impl Lighter {
         };
         let id = market.as_deref().unwrap_or("255");
         let account = self.account.account_index.unwrap();
-        let request = cx.request_streamed(
+        cx.request_streamed(
             Method::Get,
             format!(
                 "{}/api/v1/accountActiveOrders?account_index={account}&market_id={id}&auth={auth}",
@@ -698,11 +685,6 @@ impl Lighter {
                 orders: Vec::new(),
                 valid: true,
             }),
-        );
-        cx.tag_account_read(
-            request,
-            safe_cex_engine::CredentialSlot::Primary,
-            safe_cex_engine::AccountReadScope::Orders,
         );
     }
     pub(crate) fn account_order_terminal(&self, id: &str) -> bool {
@@ -1313,7 +1295,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
-            Request::Limits { .. } => {}
+            Request::Limits { .. } | Request::ChangeTier { .. } => {}
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1501,6 +1483,7 @@ impl Lighter {
                 || response.body.trim_start().starts_with('['));
         match request {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
+            Request::ChangeTier { command } => self.tier_changed(cx, command, response),
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1656,6 +1639,12 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
+            Request::ChangeTier { command } => cx.done(
+                command,
+                Err(format!(
+                    "Lighter account tier change outcome is unknown: {error}"
+                )),
+            ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;
@@ -1887,7 +1876,7 @@ impl Lighter {
                 } else {
                     trade.bid_id.0.as_ref()
                 };
-                if order.is_empty() || timestamp <= 0.0 {
+                if order.is_empty() || timestamp <= 0.0 || timestamp > cx.now + 1000.0 {
                     return;
                 }
                 let symbol = symbol.to_owned();
@@ -1902,13 +1891,11 @@ impl Lighter {
                         self.account.seen_fills.remove(&id);
                     }
                 }
+                // Subscription history is baseline; delayed update executions remain live.
                 if frame.kind.starts_with("subscribed") {
                     return;
                 }
                 self.trade_execution_observed(order, timestamp);
-                if cx.now - timestamp > 5000.0 || timestamp > cx.now + 1000.0 {
-                    return;
-                }
                 cx.fill(Fill {
                     order_id: order.into(),
                     symbol,
@@ -1922,28 +1909,5 @@ impl Lighter {
             }
         }
         true
-    }
-}
-
-impl Lighter {
-    pub(crate) fn account_auth_observation(
-        &self,
-        pending: &Pending,
-        response: &Response<'_>,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        let Pending::Account(Request::Orders { valid, .. }) = pending else {
-            return None;
-        };
-        let status: Status<'_> = serde_json::from_str(response.body).ok()?;
-        let code = status.code.as_ref().map(|c| c.0.as_ref());
-        if matches!(code, Some("20013" | "21109")) {
-            return Some(Rejected);
-        }
-        ((200..300).contains(&response.status)
-            && status.valid()
-            && *valid
-            && (code == Some("200") || status.success == Some(true)))
-        .then_some(Accepted)
     }
 }

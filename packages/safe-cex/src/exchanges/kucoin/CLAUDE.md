@@ -908,8 +908,11 @@ endpoints, base-unit sizing, supplied depth50 snapshots, native alteration,
 trade-account holdings, open-only non-definitive client-ID lookup, and fixed
 leverage-one/isolated/one-way settings. Its inherited unsupported history
 capabilities stay branded; see `docs/plans/venue-ports/KUCOIN_SPOT.md`. Both futures and
-Spot honor secondary GET credentials/egress; public GETs remain unsigned.
-Bullet-token POSTs, writes and socket authentication retain the primary identity.
+Spot honor secondary credentials/egress for private GETs. Futures public requests
+use primary signatures when credentials are configured; public-data-only requests
+carry attribution headers without authentication. Spot public requests remain
+unsigned. Bullet-token POSTs, writes and socket authentication retain the primary
+identity.
 Secondary passphrases inherit the primary passphrase only when omitted;
 incomplete configured read identities reject before startup I/O. Malformed
 private quantities/execution prices and incomplete REST trade-account numbers

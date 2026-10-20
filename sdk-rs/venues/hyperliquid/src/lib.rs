@@ -13,7 +13,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Debug, Default)]
@@ -92,6 +92,7 @@ pub struct Hyperliquid {
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, String), usize>,
     assets: HashMap<String, u32>,
+    isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
@@ -109,6 +110,7 @@ impl Hyperliquid {
             books: HashMap::new(),
             candles: HashMap::new(),
             assets: HashMap::new(),
+            isolated_only: HashSet::new(),
             coins: HashMap::new(),
             dex_queue: Default::default(),
             dex_names: Vec::new(),
@@ -693,6 +695,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
@@ -902,6 +908,9 @@ impl Venue for Hyperliquid {
                         };
                         if let Some(m) = markets.iter().find(|m| m.id == id) {
                             self.assets.insert(m.symbol.clone(), offset + index as u32);
+                            if meta.isolated_only() {
+                                self.isolated_only.insert(m.symbol.clone());
+                            }
                             self.coins
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
                         }
@@ -1199,12 +1208,7 @@ impl Venue for Hyperliquid {
             .map(|l| &l.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, l)| l.depth_time.is_some())
-                .map(|(s, l)| (s.as_str(), &l.book)),
-        )
+        Box::new(self.books.iter().map(|(s, l)| (s.as_str(), &l.book)))
     }
 }
 fn interval_ms(interval: &str) -> f64 {

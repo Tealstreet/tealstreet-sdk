@@ -108,8 +108,14 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
 {
     for code in [100001, 100004, 100413, 100419] {
         let (mut e, a) = started(true);
-        let r = http(&a, "/user/balance");
+        let mut r = http(&a, "/user/balance");
         let body = format!(r#"{{"code":{code},"msg":"opaque"}}"#);
+        if code == 100001 {
+            // A signature rejection is re-signed once; only its answer is evidence.
+            let resent = reply(&mut e, &r, 200, &body);
+            assert!(auth(&resent).is_empty());
+            r = http(&resent, "/user/balance");
+        }
         assert_eq!(
             auth(&reply(&mut e, &r, 200, &body)),
             vec![(

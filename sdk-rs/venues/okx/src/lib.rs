@@ -75,12 +75,12 @@ pub enum Pending {
     Markets {
         kind: InstrumentType,
         rows: Vec<Market>,
-        invalid: bool,
+        skipped: u32,
     },
     Tickers {
         kind: InstrumentType,
         rows: Vec<Ticker>,
-        invalid: bool,
+        skipped: u32,
     },
     Candles {
         command: CommandId,
@@ -114,6 +114,9 @@ pub struct Okx {
     products: HashMap<String, Product>,
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
+    startup_retry: Option<TimerId>,
+    startup_failures: u32,
+    skipped_instruments: HashSet<String>,
 }
 
 impl Okx {
@@ -147,6 +150,9 @@ impl Okx {
             products: HashMap::new(),
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
+            startup_retry: None,
+            startup_failures: 0,
+            skipped_instruments: HashSet::new(),
         }
     }
 
@@ -278,27 +284,65 @@ impl Okx {
         headers
     }
 
+    fn load_markets(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        kind: InstrumentType,
+        rows: Vec<Market>,
+        skipped: u32,
+    ) {
+        let private = self.options.eea && self.credentials.is_some();
+        let scope = if private { "account" } else { "public" };
+        self.list(
+            cx,
+            &format!("/api/v5/{scope}/instruments?instType={}", kind.as_str()),
+            private,
+            Pending::Markets {
+                kind,
+                rows,
+                skipped,
+            },
+        );
+    }
+
+    fn load_tickers(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        kind: InstrumentType,
+        rows: Vec<Ticker>,
+        skipped: u32,
+    ) {
+        self.list(
+            cx,
+            &format!("/api/v5/market/tickers?instType={}", kind.as_str()),
+            false,
+            Pending::Tickers {
+                kind,
+                rows,
+                skipped,
+            },
+        );
+    }
+
+    // Startup reads restart their whole product chain; TS halts with an empty catalog.
+    fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(LogLevel::Error, error);
+        if self.startup_retry.is_none() {
+            let delay = (1_000.0 * 2f64.powi(self.startup_failures.min(5) as i32)).min(30_000.0);
+            self.startup_failures = self.startup_failures.saturating_add(1);
+            self.startup_retry = Some(cx.set_timer(delay));
+        }
+    }
+
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
         let headers = self.headers(cx.now, Method::Get, path, "", private);
-        let scope = account::auth_scope(&pending);
-        let id = cx.request_streamed(
+        cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.rest()),
             headers,
             ArrayAt::EnvelopeField("data"),
             pending,
         );
-        if private && let Some(scope) = scope {
-            cx.tag_account_read(
-                id,
-                if self.options.read_credentials.is_some() {
-                    safe_cex_engine::CredentialSlot::Secondary
-                } else {
-                    safe_cex_engine::CredentialSlot::Primary
-                },
-                scope,
-            );
-        }
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
@@ -559,12 +603,19 @@ impl Okx {
                         t.volume = num::parse(p.vol_ccy24h);
                         t.quote_volume = num::parse(p.vol24h);
                     }
-                    "mark-price" => t.mark = num::parse(p.mark_px),
-                    "index-tickers" => t.index = num::parse(p.idx_px),
-                    "open-interest" => t.open_interest = num::parse(p.oi_ccy),
+                    // A blank or null live value keeps the last good one.
+                    "mark-price" if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                    "index-tickers" if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                    "open-interest" if !p.oi_ccy.is_empty() => {
+                        t.open_interest = num::parse(p.oi_ccy)
+                    }
                     "funding-rate" => {
-                        t.funding_rate = num::parse(p.funding_rate);
-                        t.funding_time = num::parse(p.funding_time);
+                        if !p.funding_rate.is_empty() {
+                            t.funding_rate = num::parse(p.funding_rate);
+                        }
+                        if !p.funding_time.is_empty() {
+                            t.funding_time = num::parse(p.funding_time);
+                        }
                     }
                     _ => {}
                 });
@@ -583,14 +634,14 @@ impl Okx {
 }
 
 impl Venue for Okx {
-    fn account_auth_outcome(
-        &self,
-        pending: &Self::Pending,
-        response: &Response<'_>,
-        _now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response)
+    fn guard_pending_placements(&self) -> bool {
+        true
     }
+
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -601,22 +652,7 @@ impl Venue for Okx {
             cx.log(LogLevel::Error, error);
             return;
         }
-        let private = self.options.eea && self.credentials.is_some();
-        let path = if private {
-            "/api/v5/account/instruments?instType=SWAP"
-        } else {
-            "/api/v5/public/instruments?instType=SWAP"
-        };
-        self.list(
-            cx,
-            path,
-            private,
-            Pending::Markets {
-                kind: InstrumentType::Swap,
-                rows: Vec::new(),
-                invalid: false,
-            },
-        );
+        self.load_markets(cx, InstrumentType::Swap, Vec::new(), 0);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -706,17 +742,24 @@ impl Venue for Okx {
             Pending::Markets {
                 kind,
                 rows,
-                invalid,
+                skipped,
             } => match serde_json::from_str::<wire::Instrument<'_>>(item) {
                 Ok(m) => {
-                    if !matches!(m.ct_type, "linear" | "inverse")
+                    if (!m.ct_type.is_empty() && !matches!(m.ct_type, "linear" | "inverse"))
                         || (!m.inst_type.is_empty() && m.inst_type != kind.as_str())
-                        || (*kind == InstrumentType::Futures && m.rule_type != "xperp")
+                        || (*kind == InstrumentType::Futures
+                            && !m.rule_type.is_empty()
+                            && m.rule_type != "xperp")
                     {
                         return;
                     }
-                    if m.inst_type.is_empty() {
-                        *invalid = true;
+                    // A blank or null classifier is malformed, not a different product.
+                    if m.inst_type.is_empty()
+                        || m.ct_type.is_empty()
+                        || (*kind == InstrumentType::Futures && m.rule_type.is_empty())
+                    {
+                        *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -764,7 +807,8 @@ impl Venue for Okx {
                             .iter()
                             .any(|n| n.parse::<f64>().is_err() || num::parse(n) <= 0.0)
                     {
-                        *invalid = true;
+                        *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -783,7 +827,8 @@ impl Venue for Okx {
                                 .ok()
                                 .is_none_or(|value| !value.is_finite() || value <= 0.0)
                     }) {
-                        *invalid = true;
+                        *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -792,7 +837,8 @@ impl Venue for Okx {
                         .map(num::parse)
                         .fold(f64::INFINITY, f64::min);
                     if max <= 0.0 || !max.is_finite() {
-                        *invalid = true;
+                        *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(
@@ -843,27 +889,41 @@ impl Venue for Okx {
                         maker_fee: None,
                     });
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    *skipped += 1;
+                    if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
+                        && !row.inst_id.is_empty()
+                    {
+                        self.skipped_instruments.insert(row.inst_id.into());
+                    }
+                }
             },
             Pending::Tickers {
                 kind,
                 rows,
-                invalid,
+                skipped,
             } => match serde_json::from_str::<wire::Prices<'_>>(item) {
                 Ok(p) => {
                     if let Some(m) = cx.store.market_by_id(p.inst_id) {
                         if self.instrument_type(&m.id) != kind.as_str() {
                             return;
                         }
-                        if [p.last, p.open24h].iter().any(|value| {
+                        // Untraded rows carry blank quotes; seed unusable values as zero
+                        // so the market keeps a row for live updates to patch.
+                        if [
+                            p.last,
+                            p.open24h,
+                            p.bid_px,
+                            p.ask_px,
+                            p.vol_ccy24h,
+                            p.vol24h,
+                        ]
+                        .iter()
+                        .any(|value| {
                             !value.is_empty()
                                 && value.parse::<f64>().ok().is_none_or(|v| !v.is_finite())
-                        }) || [p.bid_px, p.ask_px, p.vol_ccy24h, p.vol24h]
-                            .iter()
-                            .any(|value| value.parse::<f64>().ok().is_none_or(|v| !v.is_finite()))
-                        {
-                            *invalid = true;
-                            return;
+                        }) {
+                            *skipped += 1;
                         }
                         let last = num::parse(p.last);
                         rows.push(Ticker {
@@ -881,7 +941,7 @@ impl Venue for Okx {
                         });
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => *skipped += 1,
             },
             Pending::Candles { rows, invalid, .. } => match serde_json::from_str::<Vec<&str>>(item)
                 .ok()
@@ -921,22 +981,24 @@ impl Venue for Okx {
             Pending::Markets {
                 kind,
                 rows,
-                invalid: false,
+                skipped,
             } => {
                 if let Some(next) = self.next_instrument_type(kind) {
-                    let private = self.options.eea && self.credentials.is_some();
-                    let scope = if private { "account" } else { "public" };
-                    self.list(
+                    self.load_markets(cx, next, rows, skipped);
+                    return;
+                }
+                if rows.is_empty() && skipped > 0 {
+                    self.retry_startup(
                         cx,
-                        &format!("/api/v5/{scope}/instruments?instType={}", next.as_str()),
-                        private,
-                        Pending::Markets {
-                            kind: next,
-                            rows,
-                            invalid: false,
-                        },
+                        &format!("OKX catalog had no usable rows ({skipped} skipped)"),
                     );
                     return;
+                }
+                if skipped > 0 {
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("OKX skipped {skipped} malformed instrument rows"),
+                    );
                 }
                 cx.store.set_markets(rows);
                 self.price_tickers = price_ticker_indexes(cx.store);
@@ -949,35 +1011,31 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                self.list(
-                    cx,
-                    "/api/v5/market/tickers?instType=SWAP",
-                    false,
-                    Pending::Tickers {
-                        kind: InstrumentType::Swap,
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                );
+                self.load_tickers(cx, InstrumentType::Swap, Vec::new(), 0);
             }
             Pending::Tickers {
                 kind,
                 rows,
-                invalid: false,
+                skipped,
             } => {
                 if let Some(next) = self.next_instrument_type(kind) {
-                    self.list(
+                    self.load_tickers(cx, next, rows, skipped);
+                    return;
+                }
+                if rows.is_empty() && skipped > 0 {
+                    self.retry_startup(
                         cx,
-                        &format!("/api/v5/market/tickers?instType={}", next.as_str()),
-                        false,
-                        Pending::Tickers {
-                            kind: next,
-                            rows,
-                            invalid: false,
-                        },
+                        &format!("OKX tickers had no usable rows ({skipped} skipped)"),
                     );
                     return;
                 }
+                if skipped > 0 {
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("OKX had {skipped} malformed ticker rows (seeded zero or skipped)"),
+                    );
+                }
+                self.startup_failures = 0;
                 cx.store.set_tickers(rows);
                 self.price_tickers = price_ticker_indexes(cx.store);
                 self.connect(cx, PUBLIC);
@@ -1020,18 +1078,27 @@ impl Venue for Okx {
         if let Pending::Account(request) = pending {
             self.account_failed(cx, request, error);
         } else if let Pending::Trade(request) = pending {
-            self.trade_failed(cx, request, error);
+            self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
         } else {
-            cx.log(LogLevel::Error, error);
+            self.retry_startup(cx, error);
         }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.startup_retry == Some(timer) {
+            self.startup_retry = None;
+            if cx.store.loaded().markets {
+                self.load_tickers(cx, InstrumentType::Swap, Vec::new(), 0);
+            } else {
+                self.load_markets(cx, InstrumentType::Swap, Vec::new(), 0);
+            }
+            return;
+        }
         if self.history_timer(cx, timer) {
             return;
         }
@@ -1203,12 +1270,7 @@ impl Venue for Okx {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.sequence.is_some())
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 
@@ -1277,10 +1339,9 @@ fn interval_for_bar(value: &str) -> String {
 }
 fn percentage(last: &str, open: &str) -> f64 {
     let open = num::parse(open);
-    if open == 0.0 {
-        0.0
-    } else {
-        usd((num::parse(last) - open) / open * 100.0)
+    match last.parse::<f64>() {
+        Ok(last) if last.is_finite() && open != 0.0 => usd((last - open) / open * 100.0),
+        _ => 0.0,
     }
 }
 fn usd(value: f64) -> f64 {
@@ -1328,31 +1389,7 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
         "12h" => 43_200_000.0,
         "1d" => 86_400_000.0,
         "1w" => 604_800_000.0,
-        "1M" => {
-            let ms = end.floor() as i64;
-            let (year, month, day) = sign::civil_date(ms.div_euclid(86_400_000));
-            let months = year * 12 + month - 1 - i64::from(count);
-            let year = months.div_euclid(12);
-            let month = months.rem_euclid(12) + 1;
-            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-            let days = match month {
-                2 => {
-                    if leap {
-                        29
-                    } else {
-                        28
-                    }
-                }
-                4 | 6 | 9 | 11 => 30,
-                _ => 31,
-            };
-            let year = year - i64::from(month <= 2);
-            let era = year.div_euclid(400);
-            let yoe = year - era * 400;
-            let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day.min(days) - 1;
-            let day = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
-            return Some((day * 86_400_000 + ms.rem_euclid(86_400_000)) as f64);
-        }
+        "1M" => return Some(safe_cex_engine::time::sub_months(end.floor() as i64, count) as f64),
         _ => return None,
     };
     Some(end - duration * f64::from(count))

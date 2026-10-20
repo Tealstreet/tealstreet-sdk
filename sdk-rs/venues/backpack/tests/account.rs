@@ -1,6 +1,9 @@
 mod support;
-use safe_cex_engine::{Action, Event};
+use safe_cex_engine::{Action, Event, Notice};
 use support::*;
+
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
 
 #[test]
 fn startup_signs_reads_and_populates_global_settings() {
@@ -19,6 +22,41 @@ fn startup_signs_reads_and_populates_global_settings() {
             Some(safe_cex_engine::model::MarginType::Cross)
         );
     }
+}
+#[test]
+fn account_rows_on_a_skipped_market_are_reported_once_per_symbol() {
+    let markets = MARKETS.replace(
+        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001""#,
+        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"bogus""#,
+    );
+    let btc_position = POSITIONS.replace("SOL_USDC_PERP", "BTC_USDC_PERP");
+    let btc_order = format!("[{}]", ORDER.replace("SOL_USDC_PERP", "BTC_USDC_PERP"));
+    let (mut e, socket, logs) = ready_catalogue(&markets, &btc_position, &btc_order);
+    assert!(e.store().market("BTC_USDC_PERP").is_none());
+    assert!(e.store().positions().is_empty());
+    let reports = logs
+        .iter()
+        .filter(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is hidden"))
+        .count();
+    assert_eq!(reports, 1, "{logs:?}");
+    e.handle(1000.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        "account.positionUpdate",
+        &LONG.replace("SOL_USDC_PERP", "BTC_USDC_PERP"),
+    );
+    let logs: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) if message.contains("BTC_USDC_PERP") => {
+                Some(message)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(logs.is_empty(), "already reported during startup: {logs:?}");
 }
 #[test]
 fn private_auth_is_single_subscription_and_watchdog_is_armed() {
@@ -226,7 +264,7 @@ fn startup_position_failure_still_loads_balance_orders_and_connects_private_sock
     assert!(e.store().loaded().balance && e.store().loaded().orders);
     assert!(!e.store().loaded().positions);
     let (e, _) = ready_position(404, "endpoint not found");
-    assert!(e.store().loaded().positions);
+    assert!(!e.store().loaded().positions);
     assert!(e.store().positions().is_empty());
 }
 
@@ -293,8 +331,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -307,7 +345,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -319,8 +362,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -334,7 +377,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -365,8 +410,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -387,8 +432,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine
@@ -442,4 +487,20 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     }
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
+}
+#[test]
+fn every_positions_404_preserves_the_last_successful_snapshot() {
+    for body in [
+        "endpoint not found",
+        r#"{"code":"NOT_FOUND","message":"gateway route missing"}"#,
+    ] {
+        let (mut e, socket) = ready();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/position"))
+            .unwrap();
+        reply(&mut e, &read, 404, body);
+        assert_eq!(e.store().positions()[0].contracts, 5.0);
+    }
 }

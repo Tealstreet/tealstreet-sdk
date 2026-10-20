@@ -1,9 +1,11 @@
 //! Rare reads return Binance-compatible JSON without touching the store.
 use crate::sign::{Credentials, Params};
 use crate::{Pending, wire};
+use safe_cex_engine::de::optional_number;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
+use safe_cex_engine::time;
 use safe_cex_engine::{Cx, Method, Query, Response, TimerId};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -474,7 +476,6 @@ impl History {
         } else {
             credentials
         };
-        let (url, headers, _) = params.into_request(Method::Get, path, auth, cx.now);
         let request = Pending::History(Request {
             command,
             window: (from.unwrap_or(0.0), to.unwrap_or(0.0)),
@@ -486,7 +487,7 @@ impl History {
         } else {
             ArrayAt::EnvelopeField("data")
         };
-        cx.request_streamed(Method::Get, url, headers, at, request);
+        crate::issue(cx, auth, Method::Get, path, params, Some(at), request);
     }
 
     pub fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -841,12 +842,6 @@ fn optional_text<'de, D: Deserializer<'de>>(de: D) -> Result<Option<String>, D::
     Option::<Text>::deserialize(de).map(|value| value.map(|value| value.0))
 }
 
-fn optional_number<'de, D: Deserializer<'de>>(de: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct Number(#[serde(deserialize_with = "wire::number")] f64);
-    Option::<Number>::deserialize(de).map(|value| value.map(|value| value.0))
-}
-
 /// RFC3339 offsets are part of the instant; never consult the host timezone.
 fn parse_time(value: &str) -> Option<f64> {
     if !value.contains('T') {
@@ -863,22 +858,8 @@ fn parse_time(value: &str) -> Option<f64> {
     if date.next().is_some() || !(1..=12).contains(&month) {
         return None;
     }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if day == 0 || day > days[(month - 1) as usize] {
+    let last = time::days_in_month(i64::from(year), i64::from(month))?;
+    if day == 0 || i64::from(day) > last {
         return None;
     }
     let (clock, offset) = if let Some(clock) = time.strip_suffix('Z') {
@@ -909,16 +890,6 @@ fn parse_time(value: &str) -> Option<f64> {
     if clock.next().is_some() || hour > 23 || minute > 59 || !(0.0..60.0).contains(&second) {
         return None;
     }
-    // Gregorian civil date to days since 1970-01-01.
-    let year = year - i32::from(month <= 2);
-    let era = year.div_euclid(400);
-    let yoe = year - era * 400;
-    let mp = month as i32 + if month > 2 { -3 } else { 9 };
-    let doy = (153 * mp + 2) / 5 + day as i32 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146097 + doe - 719468;
-    Some(
-        (f64::from(days) * 86400.0 + f64::from(hour * 3600 + minute * 60) + second - offset)
-            * 1000.0,
-    )
+    let days = time::days_from_civil(i64::from(year), i64::from(month), i64::from(day));
+    Some((days as f64 * 86400.0 + f64::from(hour * 3600 + minute * 60) + second - offset) * 1000.0)
 }

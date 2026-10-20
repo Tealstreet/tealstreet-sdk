@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus, OrderType, PositionSide};
 use safe_cex_engine::{Action, Event};
 use support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 #[test]
 fn account_bootstrap_resolves_identity_and_separates_settings() {
     let (e, _) = ready();
@@ -547,8 +550,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -564,8 +567,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -604,8 +607,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -639,8 +642,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e
@@ -656,4 +659,28 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         "completion retains one paused registration"
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
+#[test]
+fn delayed_live_execution_is_not_lost_after_five_seconds() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let event = format!(
+        r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":"late-99","order_id":"42","side":"buy","price":"90","size":"0.25","timestamp":{}}}]}}}}"#,
+        (NOW + 1.0) as u64
+    );
+    message(&mut e, s, NOW + 10_000.0, &event);
+    message(&mut e, s, NOW + 10_001.0, &event);
+    assert_eq!(fill_count(e.take_frame(NOW + 10_001.0).unwrap()), 1);
+    let history = event
+        .replace("update/account_all", "subscribed/account_all")
+        .replace("late-99", "history-100");
+    message(&mut e, s, NOW + 10_002.0, &history);
+    message(
+        &mut e,
+        s,
+        NOW + 10_003.0,
+        &history.replace("subscribed/account_all", "update/account_all"),
+    );
+    assert_eq!(e.take_frame(NOW + 10_003.0).map_or(0, fill_count), 0);
 }

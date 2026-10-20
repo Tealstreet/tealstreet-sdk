@@ -121,6 +121,16 @@ pub enum ArrayAt {
     EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
 }
 
+/// Who rejects a malformed array element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ItemCheck {
+    /// The splitter checks each element's JSON syntax before handing it over.
+    Splitter,
+    /// The venue deserializes every element with serde_json and fails the
+    /// request on any error, so a second syntax pass would only repeat it.
+    Venue,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Seeking,
@@ -160,11 +170,16 @@ pub struct ArraySplitter {
     // Only the opt-in catalog mode creates this validator for an unrelated
     // list. Its Root mode keeps at most one element and a bounded skeleton.
     ignored: Option<Box<ArraySplitter>>,
+    item_check: ItemCheck,
     invalid: bool,
 }
 
 impl ArraySplitter {
     pub fn new(at: ArrayAt) -> Self {
+        Self::with_item_check(at, ItemCheck::Splitter)
+    }
+
+    pub fn with_item_check(at: ArrayAt, item_check: ItemCheck) -> Self {
         Self {
             at,
             phase: Phase::Seeking,
@@ -181,6 +196,7 @@ impl ArraySplitter {
             envelope: Vec::new(),
             outside: Vec::new(),
             ignored: None,
+            item_check,
             invalid: false,
         }
     }
@@ -215,11 +231,21 @@ impl ArraySplitter {
         self.envelope.push(byte);
     }
 
-    pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
-        for &byte in data {
+    pub fn feed(&mut self, mut data: &[u8], mut on_item: impl FnMut(&str)) {
+        loop {
             if self.invalid {
                 return;
             }
+            if self.phase == Phase::InArray && self.ignored.is_none() {
+                data = self.feed_array(data, &mut on_item);
+                if self.invalid {
+                    return;
+                }
+            }
+            let Some((&byte, tail)) = data.split_first() else {
+                return;
+            };
+            data = tail;
             if let Some(ignored) = self.ignored.as_mut() {
                 // A function pointer keeps this recursive generic call from
                 // generating a new callback type at each instantiation.
@@ -242,19 +268,17 @@ impl ArraySplitter {
                 }
                 continue;
             }
-            if self.phase != Phase::InArray {
-                self.keep(byte);
-                if self.invalid {
-                    return;
-                }
+            // Array elements are scanned by `feed_array`; this loop only sees
+            // the envelope around the array.
+            self.keep(byte);
+            if self.invalid {
+                return;
             }
             if self.phase == Phase::Done && !matches!(self.at, ArrayAt::PathOmitLists(_)) {
                 continue;
             }
             if self.in_string {
-                if self.phase == Phase::InArray {
-                    self.item.push(byte);
-                } else if self.capturing_key {
+                if self.capturing_key {
                     self.key.push(byte);
                 }
                 if self.escaped {
@@ -274,7 +298,6 @@ impl ArraySplitter {
                 }
                 continue;
             }
-            let at_array_level = self.phase == Phase::InArray && self.depth == self.array_depth;
             match byte {
                 b'"' => {
                     self.in_string = true;
@@ -338,10 +361,7 @@ impl ArraySplitter {
                             continue;
                         }
                     }
-                    if byte == b'['
-                        && self.phase != Phase::InArray
-                        && matches!(self.at, ArrayAt::PathOmitLists(_))
-                    {
+                    if byte == b'[' && matches!(self.at, ArrayAt::PathOmitLists(_)) {
                         let mut ignored = Box::new(Self::new(ArrayAt::Root));
                         ignored.feed(b"[", ignore_item as fn(&str));
                         self.ignored = Some(ignored);
@@ -349,47 +369,106 @@ impl ArraySplitter {
                     }
                 }
                 b']' | b'}' => {
-                    if at_array_level && byte == b']' {
-                        self.emit(&mut on_item);
-                        self.phase = Phase::Done;
-                        self.depth = self.depth.saturating_sub(1);
-                        self.keep(byte);
-                        continue;
-                    }
                     if self.phase == Phase::Seeking {
                         self.containers.pop();
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
-                b',' if at_array_level => {
-                    self.emit(&mut on_item);
-                    // Collapse completed rows; preserve malformed separators.
-                    if self.envelope.ends_with(b"null,null") {
-                        self.envelope.truncate(self.envelope.len() - 5);
-                    }
-                    if self.envelope.len() >= METADATA_LIMIT {
-                        self.invalid = true;
-                        return;
-                    }
-                    self.envelope.push(b',');
-                    continue;
-                }
-                b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
                 _ if self.phase == Phase::Seeking => self.armed = false,
                 _ => {}
             }
-            if self.phase == Phase::InArray {
-                self.item.push(byte);
-            }
         }
+    }
+
+    /// Scans array elements, copying runs of ordinary bytes at once and
+    /// stopping only at bytes that change string, nesting or element state.
+    /// Returns the input after the array's closing bracket, if it closed.
+    fn feed_array<'d>(&mut self, mut data: &'d [u8], on_item: &mut impl FnMut(&str)) -> &'d [u8] {
+        while !data.is_empty() {
+            if self.in_string {
+                if self.escaped {
+                    self.escaped = false;
+                    self.item.push(data[0]);
+                    data = &data[1..];
+                    continue;
+                }
+                let len = data
+                    .iter()
+                    .position(|&byte| byte == b'\\' || byte == b'"')
+                    .unwrap_or(data.len());
+                self.item.extend_from_slice(&data[..len]);
+                data = &data[len..];
+                if let Some((&byte, tail)) = data.split_first() {
+                    self.item.push(byte);
+                    data = tail;
+                    if byte == b'\\' {
+                        self.escaped = true;
+                    } else {
+                        self.in_string = false;
+                    }
+                }
+                continue;
+            }
+            let at_array_level = self.depth == self.array_depth;
+            let len = data
+                .iter()
+                .position(|&byte| {
+                    matches!(byte, b'"' | b'[' | b'{' | b']' | b'}')
+                        || (at_array_level && matches!(byte, b',' | b' ' | b'\n' | b'\r' | b'\t'))
+                })
+                .unwrap_or(data.len());
+            self.item.extend_from_slice(&data[..len]);
+            data = &data[len..];
+            let Some((&byte, tail)) = data.split_first() else {
+                break;
+            };
+            data = tail;
+            match byte {
+                b'"' => self.in_string = true,
+                b'[' | b'{' => {
+                    self.depth += 1;
+                    self.keys.resize_with(self.depth as usize, Vec::new);
+                }
+                b']' if at_array_level => {
+                    self.emit(on_item);
+                    self.phase = Phase::Done;
+                    self.depth = self.depth.saturating_sub(1);
+                    self.keep(byte);
+                    return data;
+                }
+                b']' | b'}' => self.depth = self.depth.saturating_sub(1),
+                b',' if at_array_level => {
+                    self.emit(on_item);
+                    // Collapse completed rows; preserve malformed separators.
+                    if self.envelope.ends_with(b"null,null") {
+                        self.envelope.truncate(self.envelope.len() - 5);
+                    }
+                    if self.invalid || self.envelope.len() >= METADATA_LIMIT {
+                        self.invalid = true;
+                        return &[];
+                    }
+                    self.envelope.push(b',');
+                    continue;
+                }
+                b' ' | b'\n' | b'\r' | b'\t' if self.item.is_empty() => continue,
+                _ => {}
+            }
+            self.item.push(byte);
+        }
+        data
     }
 
     fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
         if !self.item.is_empty() {
             match std::str::from_utf8(&self.item) {
-                Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => {
-                    on_item(text.trim())
+                Ok(text)
+                    if self.item_check == ItemCheck::Venue
+                        || serde_json::from_str::<IgnoredAny>(text).is_ok() =>
+                {
+                    // JSON whitespace only: Unicode trim would accept a row
+                    // that the venue-checked mode never syntax-checks whole.
+                    on_item(text.trim_matches([' ', '\n', '\r', '\t']))
                 }
                 _ => self.invalid = true,
             }
@@ -408,6 +487,191 @@ fn ignore_item(_item: &str) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_spans_preserve_rows_and_metadata_at_every_chunk_boundary() {
+        let row = format!(
+            r#"{{"long":"{}","utf8":"{}","escaped":"\\\"\u263a\uD83D\uDE00\n\t","nested":["[}},]",{{"k":"v"}}]}}"#,
+            "ordinary ascii ".repeat(64),
+            "é中😀".repeat(32),
+        );
+        assert!(serde_json::from_str::<IgnoredAny>(&row).is_ok());
+        for (at, prefix, suffix) in [
+            (ArrayAt::Root, "[", "]"),
+            (ArrayAt::Field("data"), r#"{"data":["#, r#"],"tail":"ok"}"#),
+            (
+                ArrayAt::EnvelopeField("data"),
+                r#"{"data":["#,
+                r#"],"tail":"ok"}"#,
+            ),
+            (
+                ArrayAt::Path(&["result", "data"]),
+                r#"{"result":{"data":["#,
+                r#"]},"tail":"ok"}"#,
+            ),
+            (
+                ArrayAt::PathOmitLists(&["result", "data"]),
+                r#"{"skip":["ignored"],"result":{"data":["#,
+                r#"]},"after":["ignored"]}"#,
+            ),
+            (ArrayAt::Envelope(&[&["data"]]), r#"{"data":["#, "]}"),
+            (
+                ArrayAt::EnvelopeFieldOrNested("result", "data"),
+                r#"{"result":{"data":["#,
+                "]}}",
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("result", &["data", "other"]),
+                r#"{"result":{"other":["#,
+                "]}}",
+            ),
+        ] {
+            let body = format!("{prefix}{row}{suffix}");
+            let expected_outside = if matches!(at, ArrayAt::PathOmitLists(_)) {
+                r#"{"skip":[],"result":{"data":[]},"after":[]}"#.to_owned()
+            } else {
+                format!("{prefix}{suffix}")
+            };
+            for boundary in 0..=body.len() {
+                let mut splitter = ArraySplitter::new(at);
+                let mut rows = Vec::new();
+                for bytes in [&body.as_bytes()[..boundary], &body.as_bytes()[boundary..]] {
+                    splitter.feed(bytes, |item| rows.push(item.to_owned()));
+                }
+                assert!(splitter.finished(), "{at:?} at byte {boundary}");
+                assert_eq!(rows, [row.as_str()], "{at:?} at byte {boundary}");
+                assert_eq!(splitter.outside(), expected_outside.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn string_spans_keep_malformed_items_invalid_at_every_chunk_boundary() {
+        for row in [
+            b"\"ordinary text\x00tail\"".as_slice(),
+            b"\"ordinary text\ntail\"",
+            b"\"ordinary text\xfftail\"",
+            br#""ordinary text\qtail""#,
+            br#""ordinary text\u12x4tail""#,
+            br#""ordinary text\""#,
+            br#"{"key":"ordinary text",}"#,
+            br#""ordinary text" "second value""#,
+        ] {
+            assert!(
+                std::str::from_utf8(row)
+                    .ok()
+                    .is_none_or(|text| serde_json::from_str::<IgnoredAny>(text).is_err()),
+                "{row:?}"
+            );
+            let mut body = b"[".to_vec();
+            body.extend_from_slice(row);
+            body.extend_from_slice(b"]");
+            for boundary in 0..=body.len() {
+                let mut splitter = ArraySplitter::new(ArrayAt::Root);
+                for bytes in [&body[..boundary], &body[boundary..]] {
+                    splitter.feed(bytes, |_| panic!("malformed row emitted"));
+                }
+                assert!(!splitter.finished(), "{row:?} at byte {boundary}");
+            }
+        }
+    }
+
+    #[test]
+    fn element_scanner_frames_nesting_whitespace_and_escapes_at_every_chunk_boundary() {
+        let body = concat!(
+            "{\"data\": [ {\"a\":[1, {\"b\":\"]},\\\"x\"}], \"c\" : \"\\\\\"} ,\n",
+            "\t\"s\\\\\" , [ ] ,12 ,true,{\"d\":{\"e\":[[]]}} ],\"tail\":[1]}"
+        );
+        let expected = [
+            r#"{"a":[1, {"b":"]},\"x"}], "c" : "\\"}"#,
+            r#""s\\""#,
+            "[ ]",
+            "12",
+            "true",
+            r#"{"d":{"e":[[]]}}"#,
+        ];
+        for check in [ItemCheck::Splitter, ItemCheck::Venue] {
+            for boundary in 0..=body.len() {
+                for size in [1, 3, body.len()] {
+                    let mut splitter =
+                        ArraySplitter::with_item_check(ArrayAt::Field("data"), check);
+                    let mut rows = Vec::new();
+                    for part in [&body.as_bytes()[..boundary], &body.as_bytes()[boundary..]] {
+                        for bytes in part.chunks(size) {
+                            splitter.feed(bytes, |item| rows.push(item.to_owned()));
+                        }
+                    }
+                    assert!(splitter.finished(), "{check:?} {boundary}/{size}");
+                    assert_eq!(rows, expected, "{check:?} {boundary}/{size}");
+                    assert_eq!(splitter.outside(), br#"{"data": [],"tail":[1]}"#);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn venue_checked_items_skip_only_the_syntax_pass() {
+        let body = b"[{\"a\":1,},\"ok\",{\"b\" 2}]";
+        let mut splitter = ArraySplitter::with_item_check(ArrayAt::Root, ItemCheck::Venue);
+        let mut rows = Vec::new();
+        splitter.feed(body, |item| rows.push(item.to_owned()));
+        assert!(splitter.finished());
+        assert_eq!(rows, [r#"{"a":1,}"#, r#""ok""#, r#"{"b" 2}"#]);
+        // UTF-8, framing and the envelope are still the splitter's to reject.
+        for body in [b"[\"\xff\",1]".as_slice(), b"[1,2", b"[1,2]]"] {
+            let mut splitter = ArraySplitter::with_item_check(ArrayAt::Root, ItemCheck::Venue);
+            let mut rows = 0;
+            splitter.feed(body, |_| rows += 1);
+            assert!(!splitter.finished(), "{body:?}");
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Root);
+        let mut rows = 0;
+        splitter.feed(body, |_| rows += 1);
+        assert_eq!(rows, 0);
+        assert!(!splitter.finished());
+        // Non-JSON whitespace around a row stays in the text the venue parses.
+        for row in [
+            "{\"a\":1}\u{c}",
+            "\u{a0}{\"a\":1}",
+            "{\"a\":1}\u{2028}",
+            "\u{b}1",
+        ] {
+            for check in [ItemCheck::Splitter, ItemCheck::Venue] {
+                let mut splitter = ArraySplitter::with_item_check(ArrayAt::Root, check);
+                let mut rows = Vec::new();
+                splitter.feed(format!("[{row}]").as_bytes(), |item| {
+                    rows.push(item.to_owned())
+                });
+                assert!(
+                    rows.iter()
+                        .all(|item| serde_json::from_str::<IgnoredAny>(item).is_err()),
+                    "{check:?} {row:?} {rows:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn string_spans_do_not_relax_the_metadata_limit() {
+        let row = format!("\"{}\"", "é".repeat(METADATA_LIMIT));
+        // A streamed row is not metadata; its size cannot consume that budget.
+        let prefix = format!(r#"{{"data":[{row}],"metadata":""#);
+        let suffix = "\"}";
+        let metadata_len = METADATA_LIMIT - br#"{"data":[null],"metadata":""#.len() - suffix.len();
+        for extra in [0, 1] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Field("data"));
+            let mut rows = 0;
+            splitter.feed(prefix.as_bytes(), |_| rows += 1);
+            splitter.feed(&vec![b'x'; metadata_len + extra], |_| {
+                panic!("metadata emitted")
+            });
+            splitter.feed(suffix.as_bytes(), |_| panic!("metadata emitted"));
+            assert_eq!(rows, 1);
+            assert_eq!(splitter.finished(), extra == 0);
+            assert!(splitter.envelope.len() <= METADATA_LIMIT);
+            assert!(splitter.outside.len() <= METADATA_LIMIT);
+        }
+    }
 
     #[test]
     fn catalog_mode_omits_only_unrelated_arrays_and_retains_objects_scalars() {

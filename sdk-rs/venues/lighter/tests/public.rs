@@ -16,6 +16,10 @@ fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
     )
 }
 fn seeded() -> (Engine<Lighter>, SocketId) {
+    let (engine, socket, _) = seeded_with_poll();
+    (engine, socket)
+}
+fn seeded_with_poll() -> (Engine<Lighter>, SocketId, safe_cex_engine::TimerId) {
     let mut e = Engine::new(Lighter::new(Options {
         public_data_only: true,
         ..Options::default()
@@ -32,19 +36,27 @@ fn seeded() -> (Engine<Lighter>, SocketId) {
         })
         .unwrap();
     reply(&mut e, id, MARKETS);
-    let socket = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
-                Some(socket)
-            } else {
-                None
-            }
+    let actions: Vec<_> = e.drain_actions().collect();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let poll = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 3000.0,
+            } => Some(*timer),
+            _ => None,
         })
         .unwrap();
     e.handle(1_000.0, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
-    (e, socket)
+    (e, socket, poll)
 }
 fn send(e: &mut Engine<Lighter>, s: SocketId, t: f64, text: &str) {
     e.handle(t, Event::WsMessage { socket: s, text });
@@ -354,4 +366,102 @@ fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
     assert_eq!(e.store().ticker("ETH").unwrap().mark, 100.0);
     assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.0);
     assert_eq!(e.store().ticker("BTC").unwrap().funding_rate, 0.0001);
+}
+
+#[test]
+fn disconnect_clears_old_book_and_fences_inflight_rest_seed() {
+    let (mut e, s) = seeded();
+    book(&mut e);
+    let rest = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    send(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":10,"bids":[{"price":"99","size":"1"}],"asks":[{"price":"101","size":"1"}]}}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().best_bid(), Some(99.0));
+    e.take_frame(2001.0);
+    e.handle(
+        3000.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+    let frame = e.take_frame(3001.0).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+            kind == safe_cex_engine::wire::section::BOOK && payload[4..12] == [0; 8]
+        })
+    );
+    reply(
+        &mut e,
+        rest,
+        r#"{"bids":[{"price":"77","size":"2"}],"asks":[]}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+    send(
+        &mut e,
+        s,
+        3100.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":12,"bids":[{"price":"88","size":"1"}],"asks":[]}}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+}
+
+#[test]
+fn silent_book_is_cleared_while_other_channels_keep_socket_alive() {
+    let (mut e, socket, poll) = seeded_with_poll();
+    book(&mut e);
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, request, r#"{"bids":[],"asks":[]}"#);
+    send(
+        &mut e,
+        socket,
+        2000.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":10,"bids":[{"price":"99","size":"1"}],"asks":[]}}"#,
+    );
+    e.take_frame(2001.0);
+    send(&mut e, socket, 93000.0, r#"{"type":"pong"}"#);
+    e.handle(93001.0, Event::TimerFired { timer: poll });
+    assert!(e.book("ETH").unwrap().is_empty());
+    let frame = e.take_frame(93001.0).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(frame).any(|(kind, payload)| kind
+            == safe_cex_engine::wire::section::BOOK
+            && payload[4..12] == [0; 8])
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orderBookOrders")))
+    );
+    send(
+        &mut e,
+        socket,
+        94000.0,
+        r#"{"channel":"order_book:0","type":"update/order_book","order_book":{"begin_nonce":10,"nonce":11,"bids":[{"price":"88","size":"1"}]}}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+    send(
+        &mut e,
+        socket,
+        95000.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","order_book":{"nonce":12,"bids":[{"price":"97","size":"1"}],"asks":[]}}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().best_bid(), Some(97.0));
 }

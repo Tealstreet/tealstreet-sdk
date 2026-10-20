@@ -1,4 +1,5 @@
 import type { Axios, AxiosInstance } from 'axios';
+import type { TinyEmitter } from 'tiny-emitter';
 import type { PositionRecord } from '../journal/position.types';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
@@ -10,7 +11,6 @@ import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
 import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
-import { TinyEmitter } from 'tiny-emitter';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { deserializeCommandError } from '../commandOutcome';
@@ -77,6 +77,7 @@ import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameApplier, FrameApplyError } from '../store/frameApplier';
+import { ExchangeEmitter } from './exchangeEmitter';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -388,7 +389,7 @@ export class BaseExchange implements Exchange {
   _exchangeName: ExchangeName;
   store: Store;
   options: ExchangeOptions;
-  emitter: TinyEmitter = new TinyEmitter();
+  emitter: ExchangeEmitter;
 
   publicWebsocket?: BaseWebSocket<any>;
   publicWebsocketSecondary?: BaseWebSocket<any>;
@@ -462,6 +463,7 @@ export class BaseExchange implements Exchange {
     this._exchangeName = exchangeName;
     this.options = opts;
     this.store = store;
+    this.emitter = new ExchangeEmitter(exchangeName);
     this._activeTickerSymbols = normalizeSymbols(opts.tuning?.activeTickerSymbols || []);
 
     this.on = this.emitter.on.bind(this.emitter);
@@ -1623,7 +1625,7 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.emit('callMethod', { method, args, requestId });
+        this.emitter.dispatch('callMethod', { method, args, requestId });
       } catch (error) {
         clearTimeout(timeout);
         this.emitter.off('callMethod:done', handleDone);

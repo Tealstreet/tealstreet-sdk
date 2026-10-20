@@ -12,8 +12,10 @@ use book::BookState;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -61,15 +63,28 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
+// The private connection (index 3) is supervised by `account.supervisor`.
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 20_000.0,
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 pub struct BitgetFutures {
@@ -87,7 +102,7 @@ impl BitgetFutures {
     pub fn new(options: Options) -> Self {
         Self {
             options,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
             sockets: Default::default(),
@@ -152,6 +167,9 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        if index == 3 && self.account.supervisor.is_waiting() {
+            return;
+        }
         let url = if index == 3 {
             if self.account.uta {
                 paths::UTA_PRIVATE
@@ -167,12 +185,6 @@ impl BitgetFutures {
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some(timer) = connection.reconnect.take() {
-            cx.clear_timer(timer);
-        }
         connection.socket = Some(cx.connect_feed(
             url,
             if index == 3 {
@@ -184,8 +196,15 @@ impl BitgetFutures {
             recover,
         ));
         connection.open = false;
-        connection.last_received = cx.now;
-        connection.watchdog = Some(cx.set_timer(5_000.0));
+        if index == 3 {
+            self.account.authenticated = false;
+            self.account.supervisor.connecting(cx);
+        } else {
+            // Suppressed public feeds never open; supervising them would only churn retries.
+            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                connection.supervisor.connecting(cx);
+            }
+        }
     }
 
     fn channel(&self, socket: SocketId) -> Option<usize> {
@@ -240,17 +259,12 @@ impl BitgetFutures {
         let connection = &mut self.sockets[index];
         connection.open = false;
         connection.socket = None;
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if connection.reconnect.is_none() {
-            let delay = (1_000.0 * 2f64.powi(connection.attempts.min(5) as i32)).min(30_000.0);
-            connection.attempts += 1;
-            connection.reconnect = Some(cx.set_timer(delay));
-        }
         if index == 3 {
             self.account.authenticated = false;
+            self.account.supervisor.retry(cx);
+            return;
         }
+        connection.supervisor.retry(cx);
         if index == 0 {
             for state in self.books.values_mut() {
                 state.reset();
@@ -459,6 +473,13 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -484,18 +505,14 @@ impl Venue for BitgetFutures {
         };
         let connection = &mut self.sockets[index];
         connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = cx.now;
         connection.ping_at = cx.now;
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        connection.watchdog = Some(cx.set_timer(5_000.0));
         if index == 3 {
+            self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
             cx.send(socket, "ping");
             return;
         }
+        connection.supervisor.opened(cx);
         let mut topics: Vec<_> = cx
             .store
             .markets()
@@ -522,7 +539,11 @@ impl Venue for BitgetFutures {
         let Some(index) = self.channel(socket) else {
             return;
         };
-        self.sockets[index].last_received = cx.now;
+        if index == 3 {
+            self.account.supervisor.received(cx.now);
+        } else {
+            self.sockets[index].supervisor.received(cx.now);
+        }
         if text == "pong" {
             cx.store
                 .set_latency((cx.now - self.sockets[index].ping_at) / 2.0);
@@ -736,25 +757,29 @@ impl Venue for BitgetFutures {
         self.trade_timer(cx, timer);
         self.history_timer(cx, timer);
         for index in 0..self.sockets.len() {
-            if self.sockets[index].reconnect == Some(timer) {
-                self.sockets[index].reconnect = None;
-                self.connect(cx, index);
-            }
-            if self.sockets[index].watchdog == Some(timer) {
-                self.sockets[index].watchdog = None;
-                if cx.now - self.sockets[index].last_received >= 20_000.0 {
+            let tick = if index == 3 {
+                self.account.supervisor.on_timer(cx, timer)
+            } else {
+                self.sockets[index].supervisor.on_timer(cx, timer)
+            };
+            match tick {
+                Tick::Unhandled => continue,
+                Tick::Reconnect => self.connect(cx, index),
+                Tick::Ping => {
+                    if let Some(socket) = self.sockets[index].socket {
+                        cx.send(socket, "ping");
+                        self.sockets[index].ping_at = cx.now;
+                    }
+                }
+                Tick::TimedOut(_) => {
                     if let Some(socket) = self.sockets[index].socket {
                         cx.close(socket);
                     }
                     self.disconnected(cx, index);
-                } else if let Some(socket) = self.sockets[index].socket {
-                    if self.sockets[index].open {
-                        cx.send(socket, "ping");
-                        self.sockets[index].ping_at = cx.now;
-                    }
-                    self.sockets[index].watchdog = Some(cx.set_timer(5_000.0));
                 }
+                Tick::Handled => (),
             }
+            return;
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -865,12 +890,7 @@ impl Venue for BitgetFutures {
         self.books.get(symbol).filter(|b| b.synced).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

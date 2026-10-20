@@ -2,6 +2,7 @@ use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
@@ -35,6 +36,7 @@ pub enum Request {
 }
 
 pub struct OrderSnapshot {
+    version: u64,
     source: OrderSource,
     cursor: Option<String>,
     cursors: HashSet<String>,
@@ -73,7 +75,9 @@ struct WsPosition {
 
 #[derive(Default)]
 pub struct Account {
+    pub(crate) supervisor: Supervisor,
     pub generation: u64,
+    pub orders_version: u64,
     pub config_at: Option<f64>,
     pub uta: bool,
     pub detected: bool,
@@ -108,6 +112,20 @@ pub struct Account {
     last_payload: f64,
     write_check: Option<(TimerId, f64)>,
     degraded: bool,
+}
+
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
 }
 
 impl BitgetFutures {
@@ -431,6 +449,7 @@ impl BitgetFutures {
         self.order_page(
             cx,
             OrderSnapshot {
+                version: self.account.orders_version,
                 source: OrderSource::Normal,
                 cursor: None,
                 cursors: HashSet::new(),
@@ -748,6 +767,11 @@ impl BitgetFutures {
                 }
             }
             Request::Orders(mut snapshot) if !snapshot.invalid => {
+                if snapshot.version != self.account.orders_version {
+                    self.account.orders_in_flight = false;
+                    self.refresh_orders(cx, false);
+                    return;
+                }
                 #[derive(Deserialize)]
                 #[serde(untagged)]
                 enum Meta {
@@ -838,6 +862,9 @@ impl BitgetFutures {
                         snapshot.started,
                         snapshot.stream_revision,
                     );
+                    if !snapshot.virtual_only {
+                        cx.orders_reconciled(None);
+                    }
                     if self.account.uta && self.account.orders_dirty {
                         self.refresh_orders(cx, false);
                     }
@@ -1211,13 +1238,21 @@ impl BitgetFutures {
         };
         if header.event == "login" {
             if header.code.and_then(|n| n.0) == Some(0.0) {
+                if self.account.authenticated {
+                    return;
+                }
                 self.account.authenticated = true;
+                self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
             } else {
                 cx.log(
                     LogLevel::Error,
                     format!("Bitget private WS login failed: {}", header.msg),
                 );
+                if let Some(socket) = self.sockets[3].socket {
+                    cx.close(socket);
+                    self.disconnected(cx, 3);
+                }
             }
             return;
         }

@@ -2,6 +2,9 @@ mod support;
 use safe_cex_engine::{Action, Command, Event};
 use support::*;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const POSITION: &str = r#"{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1,"positionMode":2,"unrealized":6,"liquidatePrice":50000,"im":36,"updateTime":1700000000000}"#;
 const ORDER: &str = r#"{"orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"orderType":1,"vol":30,"dealVol":10,"price":65000,"state":2,"updateTime":1700000000000}"#;
 
@@ -143,6 +146,71 @@ fn zero_equity_is_a_value_and_does_not_fall_back_to_cash_balance() {
         r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":0,"equity":0,"cashBalance":100}]}"#,
     );
     assert_eq!(e.store().balance().total, 0.0);
+}
+
+fn currency_totals(e: &TestEngine) -> Vec<(String, f64, f64, f64, f64)> {
+    e.store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let b = &c.balance;
+            (c.currency.clone(), b.total, b.free, b.used, b.upnl)
+        })
+        .collect()
+}
+
+#[test]
+fn asset_snapshot_and_asset_push_publish_every_currency_balance() {
+    let (mut e, socket, reads, _) = private_started();
+    let r = reads.iter().find(|r| r.url.contains("assets")).unwrap();
+    response(
+        &mut e,
+        r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000,"unrealized":6,"frozenBalance":0},{"currency":"BTC","availableBalance":0.5,"cashBalance":0.75,"unrealized":0,"frozenBalance":0.3},{"currency":"","availableBalance":1,"equity":1}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 1000.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("BTC".into(), 0.75, 0.5, 0.3, 0.0),
+            ("USDT".into(), 1000.0, 964.0, 36.0, 6.0),
+        ]
+    );
+
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.asset","data":{"currency":"USDT","availableBalance":900}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1200.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1200.0, Event::TimerFired { timer });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("assets"))
+        .unwrap();
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":900,"equity":950,"unrealized":-4,"frozenBalance":0},{"currency":"USDC","availableBalance":20,"equity":20}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 950.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("USDC".into(), 20.0, 20.0, 0.0, 0.0),
+            ("USDT".into(), 950.0, 900.0, 50.0, -4.0),
+        ]
+    );
 }
 
 #[test]
@@ -666,8 +734,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -680,7 +748,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -692,8 +765,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -707,7 +780,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -738,8 +813,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -760,8 +835,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine
@@ -865,4 +940,146 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
     assert!(value(232).is_nan());
     assert!(value(240).is_nan());
     assert!(e.take_market_frame(200.).is_none());
+}
+#[test]
+fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
+    for surface in ["open_orders", "planorder", "stoporder"] {
+        let (mut e, _, reads, _) = private_started();
+        let valid = ORDER.replace("739113577038255617", "\"valid\"");
+        let unknown = valid
+            .replace("valid", "unloaded")
+            .replace("BTC_USDT", "UNLOADED_USDT");
+        let mut warnings = Vec::new();
+        for request in reads {
+            let body = if request.url.contains(surface) {
+                format!(r#"{{"success":true,"code":0,"data":[{valid},{unknown}]}}"#)
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#.into()
+            };
+            response(&mut e, &request, &body);
+            warnings.extend(e.drain_actions());
+        }
+        assert!(e.store().loaded().orders, "{surface}");
+        assert!(e.store().order("valid").is_some(), "{surface}");
+        assert!(e.store().order("unloaded").is_none());
+        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
+    }
+}
+
+#[test]
+fn unmappable_order_id_preserves_known_copy_but_empty_full_snapshot_clears_it() {
+    let (mut e, socket, reads, _) = private_started();
+    for request in reads {
+        response(&mut e, &request, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+    );
+    e.drain_actions().for_each(drop);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 5);
+    for request in reads {
+        let body = if request.url.contains("open_orders") {
+            format!(
+                r#"{{"success":true,"code":0,"data":[{}]}}"#,
+                ORDER.replace("BTC_USDT", "UNLOADED_USDT")
+            )
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &request, &body);
+    }
+    assert_eq!(
+        e.store().order("739113577038255617").unwrap().symbol,
+        "BTCUSDT"
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(300.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    e.handle(at, Event::TimerFired { timer });
+    let replacement = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement private socket");
+    assert_ne!(replacement, socket);
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        at + 1.0,
+        Event::WsMessage {
+            socket: replacement,
+            text: r#"{"channel":"rs.login","data":"success"}"#,
+        },
+    );
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 5, "reconnect must request the full snapshot");
+    for request in reads {
+        e.handle(
+            at + 2.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"success":true,"code":0,"data":[]}"#,
+                },
+            },
+        );
+    }
+    assert!(e.store().loaded().orders);
+    assert!(e.store().orders().is_empty());
+}
+
+#[test]
+fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_load() {
+    for initialized in [false, true] {
+        let (mut e, socket, mut reads, _) = private_started();
+        if initialized {
+            for request in reads {
+                response(&mut e, &request, r#"{"success":true,"code":0,"data":[]}"#);
+            }
+            ws(
+                &mut e,
+                socket,
+                &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+            );
+            e.drain_actions().for_each(drop);
+            ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+            reads = requests(&mut e);
+        }
+        let missing_id = ORDER.replace("\"orderId\":739113577038255617,", "");
+        for request in reads {
+            let body = if request.url.contains("open_orders") {
+                format!(r#"{{"success":true,"code":0,"data":[{missing_id}]}}"#)
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#.into()
+            };
+            response(&mut e, &request, &body);
+        }
+        assert_eq!(e.store().loaded().orders, initialized);
+        if initialized {
+            assert_eq!(e.store().order("739113577038255617").unwrap().amount, 0.003);
+        } else {
+            assert!(e.store().orders().is_empty());
+        }
+        assert!(e.drain_actions().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("Malformed MEXC snapshot row"))));
+    }
 }

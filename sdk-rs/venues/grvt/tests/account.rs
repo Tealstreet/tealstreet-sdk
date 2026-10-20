@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_grvt::{Grvt, Options};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 60_000.0;
+
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
 const SUMMARY: &str = r#"{"r":{"te":"100","ts2":"80","tu":"2","sas":[{"si":"777"}]}}"#;
@@ -312,6 +315,68 @@ fn zero_available_is_zero_and_auto_detected_account_precedes_reads() {
 }
 
 #[test]
+fn spot_balances_publish_summed_per_currency_balances() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","sb":[{"c":"USDT","b":"60.5"},{"c":"BTC","b":"0.25"},{"c":"USDT","b":"4.5"}]}}"#,
+        "",
+    );
+    let coins: Vec<_> = h
+        .engine
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c.currency.as_str(),
+                c.balance.total,
+                c.balance.free,
+                c.balance.used,
+                c.balance.upnl,
+            )
+        })
+        .collect();
+    assert_eq!(
+        coins,
+        [("BTC", 0.25, 0.25, 0., 0.), ("USDT", 65., 65., 0., 0.)]
+    );
+}
+
+#[test]
+fn malformed_spot_balance_row_keeps_aggregate_and_other_coins() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","spot_balances":[{"currency":"ETH","balance":"bad"},{"b":"3"},{"currency":"USDT","balance":"65"}]}}"#,
+        "",
+    );
+    let balance = h.engine.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (100., 80., 20.)
+    );
+    let coins = h.engine.store().currency_balances().unwrap();
+    assert_eq!(coins.len(), 1);
+    assert_eq!(
+        (coins[0].currency.as_str(), coins[0].balance.total),
+        ("USDT", 65.)
+    );
+    assert_eq!(skip_warnings(&h, "spot balance"), 1);
+}
+
+#[test]
 fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut proxy = Harness::new(true);
     proxy.authenticate();
@@ -412,7 +477,7 @@ fn authoritative_empty_reconciliation_removes_orders_and_malformed_does_not() {
         })
         .unwrap();
     h.timer(timer, h.now + 1000.);
-    h.reply("open_orders", r#"{"r":[{"oi":"broken"}]}"#, "");
+    h.reply("open_orders", r#"{"r":[{"broken":true}]}"#, "");
     assert_eq!(h.engine.store().orders().len(), 1);
     h.ws(&format!("{{\"s\":\"v1.order\",\"f\":{OPEN}}}"));
     let timer = h
@@ -967,7 +1032,9 @@ fn close_reauth_and_cookie_rotation_cancel_ping_and_fence_old_generation() {
                     .iter()
                     .rev()
                     .find_map(|action| match action {
-                        Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1_000. => {
+                        Action::SetTimer { timer, at_ms }
+                            if (*at_ms - h.now >= 750.) && (*at_ms - h.now <= 1000.) =>
+                        {
                             Some(*timer)
                         }
                         _ => None,
@@ -1190,8 +1257,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -1207,8 +1274,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -1249,8 +1316,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -1280,8 +1347,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e
@@ -1297,4 +1364,171 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         "completion retains one paused registration"
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn private_supervisor_retries_flaps_and_bounds_never_open_handshakes() {
+    for proxy in [false, true] {
+        let mut h = Harness::new(proxy);
+        h.authenticate();
+        h.open();
+        socket_checks::flaps(h.engine, h.socket.unwrap(), h.now);
+    }
+}
+
+#[test]
+fn proxy_pongs_cannot_extend_private_authentication_deadline() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    let socket = h.socket.unwrap();
+    let opened = h.now;
+    h.engine.handle(opened, Event::WsOpened { socket });
+    h.collect();
+    let mut timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == opened + 5000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    for offset in [5000., 10_000., 15_000.] {
+        h.now = opened + offset;
+        h.engine.handle(
+            h.now,
+            Event::WsMessage {
+                socket,
+                text: "pong",
+            },
+        );
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        if offset < 15_000. {
+            timer = h
+                .actions
+                .iter()
+                .rev()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000. => Some(*timer),
+                    _ => None,
+                })
+                .unwrap();
+        }
+    }
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    assert!(
+        private_pings(&h).is_empty(),
+        "no unauthenticated application ping"
+    );
+}
+fn skip_warnings(h: &Harness, kind: &str) -> usize {
+    h.actions
+        .iter()
+        .filter(|a| {
+            matches!(a, Action::Notice(safe_cex_engine::Notice::Log {
+                level: safe_cex_engine::LogLevel::Warning,
+                message,
+            }) if message.contains(&format!("GRVT {kind} row")))
+        })
+        .count()
+}
+fn next_orders_refresh(h: &mut Harness) {
+    h.ws(&format!("{{\"s\":\"v1.order\",\"f\":{OPEN}}}"));
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.timer(timer, h.now + 1000.);
+}
+#[test]
+fn unknown_instrument_position_row_is_skipped_without_hiding_other_positions() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let btc = r#"{"i":"BTC_USDT_Perp","s":"-2","ep":"100","ep1":"90","n":"200","l":"20","el":"140","up":"-2","mt":"CROSS","et":"1700000000000000900"}"#;
+    let foreign = btc.replace("BTC_USDT_Perp", "DOGE_USDT_Perp");
+    h.reply("positions", &format!("{{\"r\":[{foreign},{btc}]}}"), "");
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].symbol, "BTC_USDT_PERP");
+    assert_eq!(skip_warnings(&h, "position"), 1);
+}
+#[test]
+fn unknown_instrument_order_row_is_skipped_and_known_identity_keeps_stored_copy() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let foreign = OPEN
+        .replace("BTC_USDT_Perp", "DOGE_USDT_Perp")
+        .replace("0xabcd", "0xf00d")
+        .replace("9223372036854775807", "77");
+    h.reply("open_orders", &format!("{{\"r\":[{foreign},{OPEN}]}}"), "");
+    assert_eq!(h.engine.store().orders().len(), 1);
+    assert_eq!(skip_warnings(&h, "order"), 1);
+    next_orders_refresh(&mut h);
+    // The known order's row is now unmappable; a new order arrives beside it.
+    let unmappable = OPEN.replace("\"OPEN\"", "\"UNHEARD_OF\"");
+    let fresh = OPEN
+        .replace("0xabcd", "0xbeef")
+        .replace("9223372036854775807", "88");
+    h.reply(
+        "open_orders",
+        &format!("{{\"r\":[{unmappable},{fresh}]}}"),
+        "",
+    );
+    let mut ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["88", "9223372036854775807"]);
+    assert_eq!(skip_warnings(&h, "order"), 2);
+}
+const FOREIGN_MALFORMED: &str = r#"{"r":[{"oi":"0x999","m":{"co":"66"}}]}"#;
+#[test]
+fn readable_unmatched_order_row_is_foreign_once_every_native_id_is_known() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.reply("open_orders", &format!("{{\"r\":[{OPEN}]}}"), "");
+    next_orders_refresh(&mut h);
+    h.reply("open_orders", FOREIGN_MALFORMED, "");
+    assert!(h.engine.store().orders().is_empty());
+    assert_eq!(skip_warnings(&h, "order"), 1);
+}
+#[test]
+fn readable_unmatched_order_row_retains_orders_while_a_native_id_is_unknown() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.reply("open_orders", &format!("{{\"r\":[{OPEN}]}}"), "");
+    let mut unmapped = h.engine.store().orders()[0].clone();
+    unmapped.id = "55".into();
+    unmapped.client_order_id = Some("55".into());
+    h.engine.store_mut().upsert_order(unmapped);
+    next_orders_refresh(&mut h);
+    h.reply("open_orders", FOREIGN_MALFORMED, "");
+    let mut ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["55", "9223372036854775807"]);
 }

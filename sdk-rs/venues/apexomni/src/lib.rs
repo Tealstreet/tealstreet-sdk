@@ -85,7 +85,7 @@ impl ApexOmni {
             options,
             contracts: HashMap::new(),
             public: public::Public::default(),
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
         }
     }
@@ -110,7 +110,6 @@ impl ApexOmni {
         retries: u8,
     ) -> Result<RequestId, String> {
         let signed = sign::request(&self.options, cx.now, &request, legacy)?;
-        let scope = account::auth_scope(&pending);
         let url = format!("{}{}", self.rest, signed.path);
         let stream = at;
         let method = request.method;
@@ -121,15 +120,11 @@ impl ApexOmni {
             retries,
             at,
         };
-        let id = if let Some(at) = stream {
+        Ok(if let Some(at) = stream {
             cx.request_streamed_body(method, url, signed.headers, signed.body, at, pending)
         } else {
             cx.request(method, url, signed.headers, signed.body, pending)
-        };
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
-        }
-        Ok(id)
+        })
     }
 
     fn response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -238,15 +233,10 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
-    fn account_auth_outcome(
-        &self,
-        pending: &Self::Pending,
-        response: &Response<'_>,
-        now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        let _ = now;
-        self.account_auth(pending, response)
+    fn guard_order_mutations(&self) -> bool {
+        true
     }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.start_public(cx);

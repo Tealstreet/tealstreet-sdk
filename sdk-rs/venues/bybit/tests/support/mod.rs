@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketChannel,
-    SocketId, TimerId,
+    SocketId, TimerId, VenueError,
 };
 use safe_cex_venue_bybit::{BybitLinear, Options};
 
@@ -31,6 +31,8 @@ pub struct Harness {
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
+    pub startup_failures: Vec<VenueError>,
+    pub deactivated: bool,
 }
 
 impl Harness {
@@ -60,6 +62,8 @@ impl Harness {
             command_notices: Vec::new(),
             progress: Vec::new(),
             progress_at_request: Vec::new(),
+            startup_failures: Vec::new(),
+            deactivated: false,
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -120,9 +124,19 @@ impl Harness {
                     self.command_notices.push((command, "done"));
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
+                Action::Notice(Notice::StartupFailed { error }) => {
+                    self.startup_failures.push(error)
+                }
                 Action::Notice(Notice::Deactivate) => {
-                    panic!("unexpected Bybit account deactivation")
+                    assert!(
+                        !self.startup_failures.is_empty(),
+                        "unexpected Bybit account deactivation"
+                    );
+                    self.deactivated = true;
                 }
             }
         }

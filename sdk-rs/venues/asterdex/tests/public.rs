@@ -512,3 +512,96 @@ fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].symbol, "OLDUSDT");
 }
+
+#[test]
+fn disconnect_clears_visible_book_until_a_new_partial_snapshot() {
+    let mut h = Harness::ready();
+    h.subscribe();
+    h.message(DOCUMENTED_DEPTH);
+    assert!(h.engine.book("BTCUSDT").is_some());
+    h.engine.take_frame(h.now);
+    let old_socket = h.socket();
+    h.event(Event::WsClosed {
+        socket: old_socket,
+        code: 1006,
+    });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    let frame = h.engine.take_frame(h.now).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+            kind == safe_cex_engine::wire::section::BOOK && payload[4..12] == [0; 8]
+        })
+    );
+    h.event(Event::WsMessage {
+        socket: old_socket,
+        text: DOCUMENTED_DEPTH,
+    });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    h.advance(500.0);
+    let socket = h.socket();
+    assert_ne!(old_socket, socket);
+    h.event(Event::WsOpened { socket });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    h.message(DOCUMENTED_DEPTH);
+    assert!(h.engine.book("BTCUSDT").is_some());
+}
+
+#[test]
+fn malformed_market_and_ticker_rows_are_skipped_without_halting_startup() {
+    let mut h = Harness::start(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    if h.requests.iter().any(|r| r.url.ends_with("/time")) {
+        h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    }
+    h.reply(
+        "/exchangeInfo",
+        200,
+        &MARKETS.replace(
+            r#"{"symbol":"OLDUSDT""#,
+            r#"{"symbol":"BADUSDT","status":"TRADING","pricePrecision":"x"},{"symbol":"OLDUSDT""#,
+        ),
+    );
+    h.reply("/leverageBracket", 200, "[]");
+    h.reply(
+        "/ticker/24hr",
+        200,
+        &DAILY.replace('[', r#"[{"symbol":"BADUSDT","lastPrice":1},"#),
+    );
+    assert!(h.engine.store().market("BTCUSDT").is_some());
+    assert!(h.engine.store().market("BADUSDT").is_none());
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 4.000002);
+    assert!(h.requests.iter().any(|r| r.url.contains("/openInterest")));
+}
+
+#[test]
+fn supervisor_backs_off_open_flaps_and_retires_a_connection_that_never_opens() {
+    let mut h = Harness::ready();
+    let mut previous = 0.0;
+    for nominal in [500.0, 1000.0, 2000.0] {
+        let socket = h.socket();
+        h.event(Event::WsClosed { socket, code: 1006 });
+        let (timer, at) = *h.timers.last().unwrap();
+        let delay = at - h.now;
+        assert!((nominal * 0.75..=nominal).contains(&delay));
+        assert!(delay > previous);
+        previous = delay;
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        assert_ne!(h.socket(), socket);
+        if nominal < 2000.0 {
+            h.event(Event::WsOpened { socket: h.socket() });
+        }
+    }
+    let stalled = h.socket();
+    h.advance(10_000.0);
+    assert!(h.closed.contains(&stalled));
+    let count = h.sockets.len();
+    h.event(Event::WsOpened { socket: stalled });
+    h.event(Event::WsClosed {
+        socket: stalled,
+        code: 1006,
+    });
+    assert_eq!(h.sockets.len(), count);
+}

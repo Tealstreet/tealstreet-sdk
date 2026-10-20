@@ -25,3 +25,12 @@ non-finite ticker placeholders, per-execution fills and terminal dedupe,
 sequencing, contradictory ACKs, trigger-source preservation and checks, and
 fill-history query parameters. Tests derive
 from BingX's published payloads and the SDK's documented runtime contracts.
+
+Socket recovery uses independent engine `Supervisor` instances. Both bound
+connection and listen-key acquisition to 10 seconds and use capped exponential
+backoff with deterministic jitter that survives open/close flaps. Public silence
+expires after 20 seconds, with `Ping` every five seconds; private silence expires
+after 45 seconds, with `Ping` every 15 seconds. Native `Ping`/`Pong` replies remain
+unchanged. Private expiry and watchdog recovery wait for backoff before POSTing
+a fresh key. Failed token acquisition retains a minimum 30-second retry pause.
+Retired epochs fence late token and keepalive responses.

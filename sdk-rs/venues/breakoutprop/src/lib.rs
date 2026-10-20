@@ -335,12 +335,6 @@ impl BreakoutProp {
         if method == Method::Delete {
             headers.push(("If-Match", "*".into()));
         }
-        let scope = match operation {
-            Operation::Login | Operation::Discover | Operation::Portfolio { .. } => {
-                Some(safe_cex_engine::AccountReadScope::Account)
-            }
-            _ => None,
-        };
         let stream = operation.stream();
         let path = path.trim_start_matches('/');
         let mut url = String::with_capacity(BASE_URL.len() + 1 + path.len());
@@ -351,9 +345,6 @@ impl BreakoutProp {
             request.report_progress(cx);
         }
         let id = cx.request(method, url, headers, body, pending);
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
-        }
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
@@ -399,25 +390,31 @@ impl BreakoutProp {
             }
             Operation::Portfolio { .. } => (
                 Method::Get,
-                format!("accounts/{}/portfolio", wire::path_segment(account)),
+                format!(
+                    "accounts/{}/portfolio",
+                    safe_cex_engine::url::encode(account)
+                ),
                 None,
             ),
             Operation::Discover => (
                 Method::Get,
-                format!("users/{}", wire::path_segment(&self.options.key)),
+                format!("users/{}", safe_cex_engine::url::encode(&self.options.key)),
                 None,
             ),
             Operation::Instruments { .. } => (
                 Method::Get,
                 format!(
                     "instruments/query?accountCode={}",
-                    wire::path_segment(account)
+                    safe_cex_engine::url::encode(account)
                 ),
                 None,
             ),
             Operation::Details { .. } => (
                 Method::Get,
-                format!("accounts/{}/instruments/query", wire::path_segment(account)),
+                format!(
+                    "accounts/{}/instruments/query",
+                    safe_cex_engine::url::encode(account)
+                ),
                 None,
             ),
             Operation::Quotes { .. } => {
@@ -691,7 +688,9 @@ impl BreakoutProp {
                 self.auth_error = error.into();
                 if !cx.store.loaded().markets {
                     self.auth_failed = true;
-                    cx.log(LogLevel::Error, format!("DXtrade startup failed: {error}"));
+                    let message = format!("DXtrade startup failed: {error}");
+                    cx.log(LogLevel::Error, &message);
+                    cx.startup_failed(message);
                 }
                 if matches!(operation, Operation::Login) {
                     self.session.login_pending = false;
@@ -742,14 +741,13 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
-    fn account_auth_outcome(
-        &self,
-        pending: &Self::Pending,
-        response: &Response<'_>,
-        now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response, now)
+    fn guard_pending_placements(&self) -> bool {
+        true
     }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1090,6 +1088,9 @@ impl Venue for BreakoutProp {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let entry = self.books.entry(symbol).or_default();
                 entry.0 += 1;
@@ -1158,6 +1159,10 @@ impl Venue for BreakoutProp {
             }
             Command::Query { command, query } => history::query(cx, command, query),
             Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
+            Command::FetchMaxLeverage { command, .. } => cx.done(
+                command,
+                Err("Maximum leverage queries are unavailable for DXtrade".into()),
+            ),
             Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
@@ -1177,50 +1182,5 @@ impl Venue for BreakoutProp {
                 .iter()
                 .map(|(symbol, (_, book))| (symbol.as_str(), book)),
         )
-    }
-}
-
-impl BreakoutProp {
-    fn account_auth(
-        &self,
-        pending: &Pending,
-        response: &Response<'_>,
-        now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        if self.auth_failed || pending.generation != self.session.generation {
-            return None;
-        }
-        if !matches!(
-            pending.operation,
-            Operation::Login | Operation::Discover | Operation::Portfolio { .. }
-        ) {
-            return None;
-        }
-        if matches!(pending.operation, Operation::Login) && matches!(response.status, 401 | 403) {
-            return Some(Rejected);
-        }
-        if response.status == 401 {
-            return pending.auth_retried.then_some(Rejected);
-        }
-        if !(200..300).contains(&response.status) {
-            return None;
-        }
-        let mut session = session::Session::default();
-        let valid = match &pending.operation {
-            Operation::Login => session.accept(response.body, now).is_ok(),
-            Operation::Discover => session
-                .select_account(
-                    response.body,
-                    &self.options.key,
-                    self.options.subaccount.as_deref(),
-                )
-                .is_ok(),
-            Operation::Portfolio {
-                invalid, snapshot, ..
-            } => !invalid && snapshot.is_some(),
-            _ => false,
-        };
-        valid.then_some(Accepted)
     }
 }

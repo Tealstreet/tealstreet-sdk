@@ -4,28 +4,11 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse::<f64>().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
+pub use safe_cex_engine::de::{number, optional_number};
 
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
+/// Public statistics may publish `null` for an unknown figure; it reads as 0.
+pub fn number_or_zero<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(optional_number(d)?.unwrap_or(0.0))
 }
 
 pub fn timestamp(n: f64) -> f64 {
@@ -70,9 +53,9 @@ pub struct Symbol<'a> {
     pub max_leverage: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
     pub contract_val: Option<f64>,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub maker_fee_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub taker_fee_rate: f64,
 }
 impl Symbol<'_> {
@@ -126,9 +109,9 @@ impl Symbol<'_> {
 pub struct Daily<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(alias = "c", deserialize_with = "number")]
-    pub last_price: f64,
-    #[serde(alias = "o", deserialize_with = "number")]
+    #[serde(alias = "c", deserialize_with = "optional_number")]
+    pub last_price: Option<f64>,
+    #[serde(alias = "o", deserialize_with = "number_or_zero")]
     pub open_price: f64,
     #[serde(alias = "m", deserialize_with = "optional_number")]
     pub mark_price: Option<f64>,
@@ -136,15 +119,15 @@ pub struct Daily<'a> {
     pub index_price: Option<f64>,
     #[serde(alias = "P", deserialize_with = "optional_number")]
     pub price_change_percent: Option<f64>,
-    #[serde(alias = "v", deserialize_with = "number")]
+    #[serde(alias = "v", deserialize_with = "number_or_zero")]
     pub volume: f64,
-    #[serde(alias = "q", deserialize_with = "number")]
+    #[serde(alias = "q", deserialize_with = "number_or_zero")]
     pub quote_volume: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub open_interest: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub funding_rate: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_zero")]
     pub funding_time: f64,
     #[serde(deserialize_with = "optional_number")]
     pub bid_price: Option<f64>,
@@ -152,24 +135,26 @@ pub struct Daily<'a> {
     pub ask_price: Option<f64>,
 }
 impl Daily<'_> {
-    pub fn ticker(&self, symbol: &str) -> Ticker {
-        let mark = self.mark_price.unwrap_or(self.last_price);
+    /// A row without a last price cannot seed a usable ticker.
+    pub fn ticker(&self, symbol: &str) -> Option<Ticker> {
+        let last_price = self.last_price?;
+        let mark = self.mark_price.unwrap_or(last_price);
         let percentage = self
             .price_change_percent
             .map(percentage)
             .unwrap_or_else(|| {
                 if self.open_price != 0.0 {
-                    (self.last_price - self.open_price) / self.open_price * 100.0
+                    (last_price - self.open_price) / self.open_price * 100.0
                 } else {
                     0.0
                 }
             });
-        Ticker {
+        Some(Ticker {
             id: symbol.into(),
             symbol: symbol.into(),
-            bid: self.bid_price.unwrap_or(self.last_price),
-            ask: self.ask_price.unwrap_or(self.last_price),
-            last: self.last_price,
+            bid: self.bid_price.unwrap_or(last_price),
+            ask: self.ask_price.unwrap_or(last_price),
+            last: last_price,
             mark,
             index: self.index_price.unwrap_or(mark),
             percentage,
@@ -179,7 +164,7 @@ impl Daily<'_> {
             volume: self.volume,
             quote_volume: self.quote_volume,
             mid_price: None,
-        }
+        })
     }
 }
 pub fn percentage(p: f64) -> f64 {
@@ -263,12 +248,10 @@ impl<'de> Deserialize<'de> for CandleRow {
                 self,
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
-                #[derive(Deserialize)]
-                struct N(#[serde(deserialize_with = "number")] f64);
                 let mut n = [0.0; 6];
                 for slot in &mut n {
                     *slot = seq
-                        .next_element::<N>()?
+                        .next_element::<safe_cex_engine::de::Number>()?
                         .ok_or_else(|| serde::de::Error::custom("short candle"))?
                         .0;
                 }

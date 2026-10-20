@@ -249,6 +249,24 @@ describe('Rust worker engine ownership', () => {
     expect(sources).toHaveLength(1);
   });
 
+  it.each(['deactivate', 'panic'] as const)(
+    'after %s, routine demand stays silent while a new algorithm start still fails visibly',
+    async (stop) => {
+      const { worker, messages } = createWorker();
+      await start(worker);
+      if (stop === 'panic') await panic(sources[0]);
+      else worker.handlePayload({ op: 'deactivate' });
+      const before = messages.length;
+      worker.handlePayload({ op: 'ui:state', data: { activeSymbol: 'BTCUSDT' } } as never);
+      worker.handlePayload({ op: 'store', data: {} } as never);
+      worker.handlePayload({ op: 'merge-loaded', data: {} } as never);
+      worker.handlePayload({ op: 'twap:stop', data: { id: 'gone' } } as never);
+      expect(messages.slice(before).filter((message) => message.op === 'error')).toEqual([]);
+      worker.handlePayload({ op: 'twap:start', data: {} } as never);
+      expect(messages.slice(before).filter((message) => message.op === 'error')).toHaveLength(1);
+    },
+  );
+
   it('fails closed for a shared port instead of reusing it or falling back to direct feeds', async () => {
     let receive: ((event: { data: unknown }) => void) | undefined;
     const send = (data: unknown) => queueMicrotask(() => receive?.({ data }));
@@ -877,9 +895,14 @@ describe('Rust worker engine ownership', () => {
     second.worker.handlePayload(payload);
     const secondTwap = [...twapManager.runningTwaps.values()].find((twap) => twap !== firstTwap)!;
     await vi.advanceTimersByTimeAsync(0);
+    const beforePanic = first.messages.length;
     await panic(sources[0]);
     await vi.advanceTimersByTimeAsync(1000);
     expect(firstTwap.state.status).toBe(TwapStatus.Completed);
+    // The main thread persists TWAP state; a dropped final update would show
+    // (and on reload resume) a TWAP that the trap already stopped.
+    const updates = first.messages.slice(beforePanic).filter((message) => message.op === 'twap:stateUpdate');
+    expect(updates.at(-1)?.data).not.toHaveProperty(firstTwap.id);
     expect(secondTwap.state.status).toBe(TwapStatus.Running);
     expect(twapManager.runningTwaps.get(secondTwap.id)).toBe(secondTwap);
     expect(sources[2].commands.some((command) => command.op === 'placeOrders')).toBe(false);

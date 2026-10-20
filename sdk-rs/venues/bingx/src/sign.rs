@@ -1,5 +1,6 @@
 //! Sorted HMAC query signing; POST parameters retain their native JSON types.
 use safe_cex_crypto::{Encoding, hmac_sha256};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -88,7 +89,7 @@ impl Params {
             let key = read.map_or(c.key.as_str(), |r| &r.key);
             let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
             headers.push(("X-BX-APIKEY", key.to_owned()));
-            if path != "/openApi/user/auth/userDataStream" {
+            if signs(path) {
                 self = self.num("timestamp", now.floor());
                 let signature =
                     hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
@@ -117,14 +118,7 @@ impl Params {
     }
 }
 
-fn encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char)
-        } else {
-            out.push_str(&format!("%{byte:02X}"))
-        }
-    }
-    out
+/// Listen-key requests carry only the API key; every other path is signed.
+pub fn signs(path: &str) -> bool {
+    path != "/openApi/user/auth/userDataStream"
 }

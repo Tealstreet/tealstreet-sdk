@@ -853,7 +853,7 @@ describe('Rust frame recovery callers', () => {
       else await exchange.fetchLeverageForSymbol('BTCUSDT');
       expect(writer).toHaveBeenCalledExactlyOnceWith('BTCUSDT', rails);
       expect(store.fetchedLeverage.BTCUSDT).toEqual(rails);
-      expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
+      expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchLeverage', symbol: 'BTCUSDT' }, { report: false });
       applier.applyLeverage('DELISTED', rails);
       receive(exchange, fixture({ fills: 0 }));
       expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);

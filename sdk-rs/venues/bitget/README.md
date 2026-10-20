@@ -9,7 +9,12 @@ the snapshot sequence; later deltas must name the previous sequence. Gaps,
 malformed payloads and legacy checksum failures discard synchronization and
 resubscribe. A reconnect drops book state and restores active subscriptions.
 Each socket sends literal `ping` every five seconds and expires after twenty
-seconds without traffic, including while connecting.
+seconds without traffic. Private sockets use `engine::socket::Supervisor`: ten
+seconds to connect, ten seconds to authenticate independently of heartbeat
+traffic, and capped exponential retry with jitter. Rejected login closes and
+retires the socket immediately. Repeated login failures retain their backoff;
+only stable authenticated traffic resets it. A delayed post-write recovery
+retains its recovery hint and waits for any pending authentication retry.
 
 Protocol sources for the scripted tests:
 

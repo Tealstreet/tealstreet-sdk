@@ -10,6 +10,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -37,6 +38,7 @@ pub enum Pending {
         invalid: bool,
     },
     Account(account::Request),
+    Orders(account::OrdersRead),
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
@@ -45,9 +47,7 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    last_received: f64,
+    supervisor: Supervisor,
     request: u32,
 }
 struct BookState {
@@ -109,7 +109,14 @@ impl PhemexPerpetuals {
             options,
             credentials,
             read_credentials,
-            public: Connection::default(),
+            public: Connection {
+                supervisor: Supervisor::new(Config {
+                    idle_timeout_ms: 20_000.,
+                    ping_interval_ms: Some(5_000.),
+                    ..Config::default()
+                }),
+                ..Connection::default()
+            },
             books: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -154,7 +161,8 @@ impl PhemexPerpetuals {
         stream: Option<ArrayAt>,
     ) {
         // A definitive lookup must query the account that placed the order.
-        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup())
+            || matches!(&pending, Pending::Orders(_));
         let credentials = if matches!(method, Method::Get) && !primary {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {
@@ -182,10 +190,12 @@ impl PhemexPerpetuals {
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
+            return;
+        }
         self.public.socket =
             Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Public));
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.));
+        self.public.supervisor.connecting(cx);
     }
     fn send(&mut self, cx: &mut Cx<'_, Pending>, method: &str, params: String) {
         if !self.public.open {
@@ -240,7 +250,7 @@ impl PhemexPerpetuals {
             "/md/v2/fullbook",
             &format!(
                 "symbol={}&limit=1000",
-                url_encode(self.native_symbol(symbol))
+                safe_cex_engine::url::encode(self.native_symbol(symbol))
             ),
             None,
             Pending::Depth {
@@ -296,7 +306,8 @@ impl PhemexPerpetuals {
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Account(r) => self.account_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error),
+            Pending::Orders(r) => self.orders_read_failed(cx, r, error),
+            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Late),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
@@ -328,6 +339,14 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -358,7 +377,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         self.public.open = true;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.send(cx, "perp_market24h_pack_p.subscribe", "[]".into());
         for s in self.books.keys().cloned().collect::<Vec<_>>() {
             self.subscribe_book(cx, &s, true)
@@ -383,7 +402,7 @@ impl Venue for PhemexPerpetuals {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(e) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -478,10 +497,7 @@ impl Venue for PhemexPerpetuals {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t)
-        }
-        self.public.reconnect = Some(cx.set_timer(1_000.));
+        self.public.supervisor.retry(cx);
         for b in self.books.values_mut() {
             self.generation += 1;
             b.generation = self.generation;
@@ -553,7 +569,11 @@ impl Venue for PhemexPerpetuals {
         if let Ok(e) = serde_json::from_str::<Envelope<'_>>(r.body)
             && (e.error.is_some() || e.code.is_some_and(|n| n != 0))
         {
-            self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg));
+            match p {
+                Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
+                Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
+                p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
+            }
             return;
         }
         match p {
@@ -617,6 +637,7 @@ impl Venue for PhemexPerpetuals {
                 cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
             }
             Pending::Account(p) => self.account_response(cx, p, r),
+            Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::Income(p) => self.income_response(cx, p, r),
@@ -635,19 +656,17 @@ impl Venue for PhemexPerpetuals {
         if self.startup_retry == Some(timer) {
             self.startup_retry = None;
             self.start(cx)
-        } else if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx)
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 20_000. {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006)
+        } else if self.public.supervisor.owns_timer(timer) {
+            match self.public.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect_public(cx),
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = self.public.socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
                 }
-            } else {
-                self.send(cx, "server.ping", "[]".into());
-                self.public.watchdog = Some(cx.set_timer(5_000.));
+                SocketTick::Ping => self.send(cx, "server.ping", "[]".into()),
+                _ => {}
             }
         } else {
             let timed = self
@@ -791,7 +810,7 @@ impl Venue for PhemexPerpetuals {
                     "/exchange/public/md/v2/kline/list",
                     &format!(
                         "symbol={}&resolution={n}&from={:.0}&to={:.0}",
-                        url_encode(self.native_symbol(&symbol)),
+                        safe_cex_engine::url::encode(self.native_symbol(&symbol)),
                         (from / 1000.).floor(),
                         (to / 1000.).ceil()
                     ),
@@ -814,11 +833,6 @@ impl Venue for PhemexPerpetuals {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.last.is_some())
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }

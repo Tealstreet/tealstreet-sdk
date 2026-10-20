@@ -9,6 +9,8 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
+pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -32,11 +34,11 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
-        invalid: bool,
+        skipped: Skipped,
     },
     Tickers {
         rows: Vec<Ticker>,
-        invalid: bool,
+        skipped: Skipped,
     },
     Candles {
         command: CommandId,
@@ -45,13 +47,27 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last: f64,
+    authenticated: bool,
     ready: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
+}
+impl Connection {
+    fn new(private: bool) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            authenticated: false,
+            ready: None,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 90_000.0,
+                auth_timeout_ms: private.then_some(10_000.0),
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 struct BookState {
@@ -64,7 +80,6 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
-    watchdog: Option<TimerId>,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -90,16 +105,32 @@ fn quoted(s: &str) -> String {
     serde_json::to_string(s).expect("string")
 }
 
-pub(crate) fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
+/// Unmappable rows of one read or frame, reported once as a summary; the rest still commits.
+#[derive(Default)]
+pub struct Skipped {
+    count: usize,
+    first: Option<String>,
+}
+impl Skipped {
+    pub(crate) fn add(&mut self, id: Option<&str>) {
+        self.count += 1;
+        self.first
+            .get_or_insert_with(|| id.unwrap_or("without an id").into());
+    }
+    pub(crate) fn any(&self) -> bool {
+        self.count > 0
+    }
+    pub(crate) fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
+        if let Some(first) = &self.first {
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "Crypto.com skipped {} unmappable {kind} rows (first: {first})",
+                    self.count
+                ),
+            );
         }
     }
-    out
 }
 
 impl Cryptocom {
@@ -128,8 +159,7 @@ impl Cryptocom {
                 "https://api.crypto.com/exchange/v1"
             },
             options,
-            sockets: Default::default(),
-            watchdog: None,
+            sockets: [Connection::new(false), Connection::new(true)],
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -138,6 +168,10 @@ impl Cryptocom {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if self.sockets[channel].socket.is_some() {
+            return;
+        }
+        self.sockets[channel].supervisor.connecting(cx);
         let root = if self.options.testnet {
             "wss://uat-stream.3ona.co"
         } else {
@@ -337,14 +371,6 @@ impl Cryptocom {
 }
 
 impl Venue for Cryptocom {
-    fn account_auth_outcome(
-        &self,
-        pending: &Self::Pending,
-        response: &Response<'_>,
-        _now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response)
-    }
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -359,15 +385,18 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows: vec![],
                 indexes: HashMap::new(),
-                invalid: false,
+                skipped: Skipped::default(),
             },
         );
-        self.watchdog = Some(cx.set_timer(5_000.0));
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(state) = self.sockets.iter_mut().find(|s| s.socket == Some(socket)) {
+            if state.open {
+                return;
+            }
             state.open = true;
-            state.last = cx.now;
+            state.authenticated = false;
+            state.supervisor.opened(cx);
             state.ready = Some(cx.set_timer(1_000.0));
         }
     }
@@ -375,7 +404,7 @@ impl Venue for Cryptocom {
         let Some(channel) = self.sockets.iter().position(|s| s.socket == Some(socket)) else {
             return;
         };
-        self.sockets[channel].last = cx.now;
+        self.sockets[channel].supervisor.received(cx.now);
         if channel == 0
             && let Ok(push) = serde_json::from_str::<TickerPush>(text)
             && push.code == 0
@@ -397,8 +426,23 @@ impl Venue for Cryptocom {
                         envelope.id
                     ),
                 );
-            } else if channel == 1 && envelope.method == "public/auth" && envelope.code == 0 {
-                self.authenticated(cx, &envelope);
+            } else if channel == 1 && envelope.method == "public/auth" {
+                let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
+                if code != 0 {
+                    cx.log(
+                        LogLevel::Error,
+                        format!(
+                            "Crypto.com private login rejected: {} {}",
+                            envelope.code, envelope.message
+                        ),
+                    );
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1008);
+                } else if !self.sockets[channel].authenticated {
+                    self.sockets[channel].authenticated = true;
+                    self.sockets[channel].supervisor.authenticated(cx);
+                    self.authenticated(cx, &envelope);
+                }
             } else if envelope.code != 0 {
                 cx.log(
                     LogLevel::Error,
@@ -427,13 +471,12 @@ impl Venue for Cryptocom {
         if let Some(channel) = self.sockets.iter().position(|s| s.socket == Some(socket)) {
             let state = &mut self.sockets[channel];
             state.open = false;
+            state.authenticated = false;
             state.socket = None;
             if let Some(timer) = state.ready.take() {
                 cx.clear_timer(timer);
             }
-            if state.reconnect.is_none() {
-                state.reconnect = Some(cx.set_timer(1_000.0));
-            }
+            state.supervisor.retry(cx);
             if channel == 0 {
                 for state in self.books.values_mut() {
                     state.synced = false;
@@ -449,22 +492,35 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows,
                 indexes,
-                invalid,
-            } => match serde_json::from_str::<Instrument>(item) {
-                Ok(row) => {
-                    if let Some(market) = row.market() {
-                        indexes.insert(market.id.clone(), row.underlying_symbol.into());
-                        rows.push(market);
-                    }
+                skipped,
+            } => {
+                // Other instrument types carry fields this venue never reads.
+                let key = serde_json::from_str::<InstrumentKey>(item);
+                if key
+                    .as_ref()
+                    .is_ok_and(|k| k.inst_type != Some("PERPETUAL_SWAP"))
+                {
+                    return;
                 }
-                Err(_) => *invalid = true,
-            },
-            Pending::Tickers { rows, invalid } => {
+                match serde_json::from_str::<Instrument>(item) {
+                    Ok(row) => {
+                        if let Some(market) = row.market() {
+                            indexes.insert(
+                                market.id.clone(),
+                                row.underlying_symbol.unwrap_or_default().into(),
+                            );
+                            rows.push(market);
+                        }
+                    }
+                    Err(_) => skipped.add(key.ok().and_then(|k| k.symbol)),
+                }
+            }
+            Pending::Tickers { rows, skipped } => {
                 // Spot rows may contain null prices; they are outside this venue.
                 match serde_json::from_str::<TickerName>(item) {
                     Ok(name) if cx.store.market(name.i).is_none() => {}
-                    Err(_) => *invalid = true,
-                    Ok(_) => match serde_json::from_str::<TickerRow>(item) {
+                    Err(_) => skipped.add(None),
+                    Ok(name) => match serde_json::from_str::<TickerRow>(item) {
                         Ok(row) => {
                             let mut ticker = Ticker {
                                 id: row.i.into(),
@@ -474,7 +530,7 @@ impl Venue for Cryptocom {
                             row.apply(&mut ticker);
                             rows.push(ticker);
                         }
-                        Err(_) => *invalid = true,
+                        Err(_) => skipped.add(Some(name.i)),
                     },
                 }
             }
@@ -528,10 +584,11 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows,
                 indexes,
-                invalid,
+                skipped,
             } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid instrument row");
+                skipped.report(cx, "instrument");
+                if rows.is_empty() && skipped.any() {
+                    cx.log(LogLevel::Error, "no mappable Crypto.com instrument rows");
                     return;
                 }
                 self.indexes = indexes;
@@ -541,13 +598,14 @@ impl Venue for Cryptocom {
                     "/public/get-tickers",
                     Pending::Tickers {
                         rows: vec![],
-                        invalid: false,
+                        skipped: Skipped::default(),
                     },
                 );
             }
-            Pending::Tickers { rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid ticker row");
+            Pending::Tickers { rows, skipped } => {
+                skipped.report(cx, "ticker");
+                if rows.is_empty() && skipped.any() {
+                    cx.log(LogLevel::Error, "no mappable Crypto.com ticker rows");
                     return;
                 }
                 cx.store.set_tickers(rows);
@@ -600,23 +658,21 @@ impl Venue for Cryptocom {
             self.reconcile(cx);
             return;
         }
-        if self.watchdog == Some(timer) {
-            for channel in 0..2 {
-                let state = &self.sockets[channel];
-                if state.open && cx.now - state.last >= 90_000.0 {
-                    let socket = state.socket.unwrap();
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-            }
-            self.watchdog = Some(cx.set_timer(5_000.0));
-            return;
-        }
         for channel in 0..2 {
-            if self.sockets[channel].reconnect == Some(timer) {
-                self.sockets[channel].reconnect = None;
-                self.connect(cx, channel);
-                return;
+            match self.sockets[channel].supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => {
+                    self.connect(cx, channel);
+                    return;
+                }
+                Tick::TimedOut(_) => {
+                    if let Some(socket) = self.sockets[channel].socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                    return;
+                }
+                Tick::Handled | Tick::Ping => return,
+                Tick::Unhandled => {}
             }
             if self.sockets[channel].ready == Some(timer) {
                 self.sockets[channel].ready = None;
@@ -715,7 +771,6 @@ impl Venue for Cryptocom {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, s)| s.synced)
                 .map(|(symbol, s)| (symbol.as_str(), &s.book)),
         )
     }

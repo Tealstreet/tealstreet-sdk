@@ -13,69 +13,11 @@ impl Number {
     }
 }
 
+// Bitget sends "" or null for values that do not apply; both stay absent.
 impl<'de> Deserialize<'de> for Number {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct Numeric;
-        impl<'de> serde::de::Visitor<'de> for Numeric {
-            type Value = Number;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a numeric string, number, or null")
-            }
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Number, E> {
-                Ok(Number(decimal(value).filter(|v| v.is_finite())))
-            }
-            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Number, E> {
-                Ok(Number(value.is_finite().then_some(value)))
-            }
-            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Number, E> {
-                self.visit_f64(value as f64)
-            }
-            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Number, E> {
-                self.visit_f64(value as f64)
-            }
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Number, E> {
-                Ok(Number(None))
-            }
-        }
-        d.deserialize_any(Numeric)
+        safe_cex_engine::de::lenient_optional_number(d).map(Self)
     }
-}
-
-// Feed decimals whose mantissa and divisor are exact doubles need one native
-// division. Exponents and longer inputs use Rust's general float parser.
-fn decimal(text: &str) -> Option<f64> {
-    const POWERS: [f64; 16] = [
-        1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
-    ];
-    let bytes = text.as_bytes();
-    let negative = bytes.first() == Some(&b'-');
-    let digits = if negative { &bytes[1..] } else { bytes };
-    // This bound makes every intermediate integer exact without checking it
-    // again for each digit. Longer decimals use the standard parser.
-    if digits.is_empty() || digits.len() > 15 {
-        return text.parse().ok();
-    }
-    let mut mantissa = 0u64;
-    let mut point = None;
-    for (index, &byte) in digits.iter().enumerate() {
-        if byte.is_ascii_digit() {
-            mantissa = mantissa * 10 + u64::from(byte - b'0');
-        } else if byte == b'.' && point.is_none() {
-            point = Some(index);
-        } else {
-            return text.parse().ok();
-        }
-    }
-    if digits.len() == usize::from(point.is_some()) {
-        return text.parse().ok();
-    }
-    let scale = point.map_or(0, |index| digits.len() - index - 1);
-    let value = if scale == 0 {
-        mantissa as f64
-    } else {
-        (mantissa as f64) / POWERS[scale]
-    };
-    Some(if negative { -value } else { value })
 }
 
 #[derive(Deserialize)]
@@ -854,55 +796,6 @@ mod ticker_tests {
                 serde_json::from_str::<TickerRow<'_>>(text).is_err(),
                 "{text}"
             );
-        }
-    }
-}
-
-#[cfg(test)]
-mod numeric_tests {
-    use super::decimal;
-    #[test]
-    fn fixed_decimals_match_standard_float_decoding() {
-        for text in [
-            "0",
-            "-0",
-            ".1",
-            "1.",
-            "000001.001",
-            "0.000009999999999999999",
-            "9007199254740991",
-            "9007199254740992",
-            "1792428168600",
-            "81999.7",
-            "-0.00000000000000123456789",
-            "1e-23",
-            "1.234e10",
-            "+1",
-            "NaN",
-            "",
-            ".",
-            "--1",
-            "1.2.3",
-        ] {
-            assert_eq!(
-                decimal(text).map(f64::to_bits),
-                text.parse::<f64>().ok().map(f64::to_bits),
-                "{text}"
-            );
-        }
-        for value in [1, 7, 999, 123456789, 9007199254740991u64] {
-            for scale in 0..=22 {
-                let text = if scale == 0 {
-                    value.to_string()
-                } else {
-                    format!("0.{value:0width$}", width = scale)
-                };
-                assert_eq!(
-                    decimal(&text).unwrap().to_bits(),
-                    text.parse::<f64>().unwrap().to_bits(),
-                    "{text}"
-                );
-            }
         }
     }
 }

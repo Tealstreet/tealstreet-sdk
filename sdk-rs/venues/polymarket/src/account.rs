@@ -6,6 +6,7 @@ use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, RequestId, Response, Store, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -44,6 +45,7 @@ pub struct PositionSnapshot {
     rows: Vec<Position>,
     holdings: Vec<PredictionHolding>,
     ids: HashSet<String>,
+    skipped: Vec<String>,
     invalid: bool,
 }
 #[derive(Default)]
@@ -60,6 +62,7 @@ pub(crate) struct Account {
     fills: HashMap<String, f64>,
     executions: HashMap<String, HashMap<String, f64>>,
     coverage: HashMap<String, Vec<(f64, HashSet<String>)>>,
+    unlisted: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -175,7 +178,7 @@ struct Holding<'a> {
     size: Number,
     avg_price: Number,
     #[serde(default)]
-    cur_price: Option<Number>,
+    cur_price: LenientPrice,
     #[serde(default)]
     cash_pnl: Option<Number>,
     #[serde(default)]
@@ -184,6 +187,23 @@ struct Holding<'a> {
     redeemable: bool,
     #[serde(default)]
     mergeable: bool,
+}
+/// A quote that may be missing or undecodable; either way the holding still counts.
+#[derive(Default)]
+struct LenientPrice(Option<f64>);
+impl<'de> Deserialize<'de> for LenientPrice {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Input {
+            Price(Number),
+            Other(serde::de::IgnoredAny),
+        }
+        Ok(Self(match Input::deserialize(d)? {
+            Input::Price(n) => Some(n.0),
+            Input::Other(_) => None,
+        }))
+    }
 }
 #[derive(Deserialize)]
 struct Trade<'a> {
@@ -222,17 +242,6 @@ struct Maker<'a> {
     matched_amount: Number,
     price: Number,
 }
-fn encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char)
-        } else {
-            out.push_str(&format!("%{b:02X}"))
-        }
-    }
-    out
-}
 
 impl Polymarket {
     /// Signing deliberately excludes URL query parameters, as the official
@@ -262,16 +271,7 @@ impl Polymarket {
             path.split('?').next().unwrap_or(path),
             body.as_deref().unwrap_or(""),
         )?;
-        let scope = match &pending {
-            Pending::Account(Request::Balance) => Some(safe_cex_engine::AccountReadScope::Balance),
-            Pending::Account(Request::Orders(_)) => Some(safe_cex_engine::AccountReadScope::Orders),
-            _ => None,
-        };
-        let id = cx.request(method, format!("{REST}{path}"), headers, body, pending);
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
-        }
-        Ok(id)
+        Ok(cx.request(method, format!("{REST}{path}"), headers, body, pending))
     }
     pub(crate) fn private_subscription(&self) -> Option<String> {
         #[derive(Serialize)]
@@ -486,6 +486,7 @@ impl Polymarket {
                 rows: vec![],
                 holdings: vec![],
                 ids: HashSet::new(),
+                skipped: vec![],
                 invalid: false,
             }),
         );
@@ -571,32 +572,57 @@ impl Polymarket {
             Request::Positions(snapshot) => {
                 snapshot.count += 1;
                 let Ok(row) = serde_json::from_str::<Holding>(item) else {
-                    snapshot.invalid = true;
+                    // A malformed row with a known asset keeps its stored copy; an
+                    // unidentifiable one cannot prove what it would delete.
+                    #[derive(Deserialize)]
+                    struct Asset<'a> {
+                        asset: &'a str,
+                    }
+                    match serde_json::from_str::<Asset>(item) {
+                        Ok(Asset { asset })
+                            if !asset.is_empty() && snapshot.ids.insert(asset.into()) =>
+                        {
+                            snapshot.skipped.push(asset.into())
+                        }
+                        _ => snapshot.invalid = true,
+                    }
                     return;
                 };
-                if row.asset.is_empty()
-                    || !snapshot.ids.insert(row.asset.into())
-                    || row.size.0 < 0.0
-                    || !(0.0..=1.0).contains(&row.avg_price.0)
-                {
+                if row.asset.is_empty() || !snapshot.ids.insert(row.asset.into()) {
                     snapshot.invalid = true;
+                    return;
+                }
+                if row.size.0 < 0.0 || !(0.0..=1.0).contains(&row.avg_price.0) {
+                    snapshot.skipped.push(row.asset.into());
                     return;
                 }
                 if row.size.0 == 0.0 {
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
+                    if self.account.unlisted.insert(row.asset.into()) {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!(
+                                "Polymarket holding {} has no loaded market; not shown",
+                                row.asset
+                            ),
+                        );
+                    }
                     return;
                 };
+                let valid = |p: &f64| (0.0..=1.0).contains(p);
                 let price = row
                     .cur_price
-                    .map(|p| p.0)
-                    .or_else(|| cx.store.ticker(&market.symbol).map(|t| t.last))
+                    .0
+                    .filter(valid)
+                    .or_else(|| {
+                        cx.store
+                            .ticker(&market.symbol)
+                            .map(|t| t.last)
+                            .filter(valid)
+                    })
                     .unwrap_or(row.avg_price.0);
-                if !(0.0..=1.0).contains(&price) {
-                    snapshot.invalid = true;
-                    return;
-                }
                 let index = cx
                     .store
                     .market_index_by_id(row.asset)
@@ -669,7 +695,7 @@ impl Polymarket {
                 let Ok(signature) = sign::l1_signature(key, seconds.0 as u64, 0) else {
                     return;
                 };
-                let id = cx.request(
+                cx.request(
                     Method::Get,
                     format!("{REST}/auth/derive-api-key"),
                     vec![
@@ -680,11 +706,6 @@ impl Polymarket {
                     ],
                     None,
                     Pending::Account(Request::Derive),
-                );
-                cx.tag_account_read(
-                    id,
-                    safe_cex_engine::CredentialSlot::Primary,
-                    safe_cex_engine::AccountReadScope::Account,
                 );
                 return;
             }
@@ -827,6 +848,34 @@ impl Polymarket {
                     return;
                 }
                 if snapshot.revision == self.account.position_revision {
+                    if !snapshot.skipped.is_empty() {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!(
+                                "Skipped {} malformed Polymarket position rows: {}",
+                                snapshot.skipped.len(),
+                                snapshot.skipped.join(", ")
+                            ),
+                        );
+                    }
+                    for asset in &snapshot.skipped {
+                        let Some(index) = cx.store.market_index_by_id(asset) else {
+                            continue;
+                        };
+                        let symbol = &cx.store.markets()[index as usize].symbol;
+                        if let Some(known) =
+                            cx.store.positions().iter().find(|p| &p.symbol == symbol)
+                        {
+                            snapshot.rows.push(known.clone());
+                        }
+                        if let Some(known) = cx
+                            .store
+                            .prediction_holdings()
+                            .and_then(|h| h.iter().find(|h| h.market == index))
+                        {
+                            snapshot.holdings.push(*known);
+                        }
+                    }
                     cx.store.set_positions(snapshot.rows);
                     if cx.store.loaded().balance {
                         let mut balance = cx.store.balance().clone();
@@ -1102,71 +1151,6 @@ impl Polymarket {
                 self.account_placed(cx, live);
             }
         }
-    }
-}
-
-impl Polymarket {
-    pub(crate) fn account_auth_observation(
-        &self,
-        pending: &Pending,
-        response: &Response<'_>,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        let Pending::Account(r) = pending else {
-            return None;
-        };
-        if matches!(r, Request::Time | Request::Positions(_)) {
-            return None;
-        }
-        #[derive(Deserialize)]
-        struct Error<'a> {
-            error: Option<&'a str>,
-        }
-        let e: Error<'_> = serde_json::from_str(response.body).ok()?;
-        if response.status == 401
-            && match r {
-                Request::Derive => {
-                    self.account.auth_attempts >= 3 && e.error == Some("Invalid L1 Request headers")
-                }
-                Request::Balance | Request::Orders(_) => {
-                    e.error == Some("Unauthorized/Invalid api key")
-                }
-                _ => false,
-            }
-        {
-            return Some(Rejected);
-        }
-        if !(200..300).contains(&response.status) || e.error.is_some_and(|e| !e.is_empty()) {
-            return None;
-        }
-        let valid = match r {
-            Request::Derive => {
-                serde_json::from_str::<sign::Credentials>(response.body).is_ok_and(|c| {
-                    !c.api_key.is_empty()
-                        && !c.secret.is_empty()
-                        && !c.passphrase.is_empty()
-                        && sign::l2_headers(
-                            &c,
-                            self.address.as_deref().unwrap_or(""),
-                            0,
-                            Method::Get,
-                            "/data/orders",
-                            "",
-                        )
-                        .is_ok()
-                })
-            }
-            Request::Balance => {
-                #[derive(Deserialize)]
-                struct Balance {
-                    balance: Number,
-                }
-                serde_json::from_str::<Balance>(response.body).is_ok_and(|b| b.balance.0 >= 0.)
-            }
-            Request::Orders(r) => !r.invalid,
-            _ => false,
-        };
-        valid.then_some(Accepted)
     }
 }
 

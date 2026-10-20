@@ -141,11 +141,11 @@ struct FillRow<'a> {
     traded_price: &'a str,
     traded_quantity: &'a str,
     #[serde(default)]
-    fees: &'a str,
+    fees: Option<&'a str>,
     #[serde(default)]
-    fee_instrument_name: &'a str,
+    fee_instrument_name: Option<&'a str>,
     #[serde(default)]
-    taker_side: &'a str,
+    taker_side: Option<&'a str>,
     create_time: f64,
     #[serde(borrow, default)]
     create_time_ns: Option<&'a RawValue>,
@@ -153,7 +153,7 @@ struct FillRow<'a> {
 #[derive(Deserialize)]
 struct OrderHistoryRow<'a> {
     #[serde(default)]
-    avg_price: &'a str,
+    avg_price: Option<&'a str>,
     #[serde(borrow, default)]
     create_time_ns: Option<&'a RawValue>,
 }
@@ -165,7 +165,7 @@ struct IncomeRow<'a> {
     journal_type: &'a str,
     transaction_qty: &'a str,
     #[serde(default)]
-    realized_pnl: &'a str,
+    realized_pnl: Option<&'a str>,
     #[serde(borrow, default)]
     trade_id: Option<&'a RawValue>,
     event_timestamp_ms: f64,
@@ -389,16 +389,16 @@ impl Cryptocom {
                     price: num::parse(r.traded_price),
                     qty: num::parse(r.traded_quantity),
                     side: side_name(r.side),
-                    commission: -num::parse(r.fees),
-                    commission_asset: r.fee_instrument_name.into(),
-                    maker: r.taker_side == "MAKER",
+                    commission: -r.fees.map_or(0.0, num::parse),
+                    commission_asset: r.fee_instrument_name.unwrap_or_default().into(),
+                    maker: r.taker_side == Some("MAKER"),
                 };
                 request.push(identity, time, Row::Fill(row), matches);
             }),
             Kind::Orders => serde_json::from_str::<OrderRow>(item).and_then(|raw| {
                 let r: OrderHistoryRow<'_> = serde_json::from_str(item)?;
                 request.exact_page &= exact_ns(r.create_time_ns).is_some();
-                let order = raw.order(0.0);
+                let order = raw.order(0.0, None);
                 let created = raw.create_time.or(raw.time_created).unwrap_or(0.0);
                 let row = HistoricalOrder {
                     id: order.id.clone(),
@@ -407,7 +407,7 @@ impl Cryptocom {
                     kind: order.kind,
                     status: order.status,
                     price: raw.limit_price.map(num::parse).filter(|p| *p > 0.0),
-                    average_price: Some(num::parse(r.avg_price)).filter(|p| *p > 0.0),
+                    average_price: r.avg_price.map(num::parse).filter(|p| *p > 0.0),
                     amount: order.amount,
                     filled: order.filled,
                     reduce_only: order.reduce_only,
@@ -427,7 +427,7 @@ impl Cryptocom {
                 let identity = id(r.journal_id);
                 let (category, amount) = match r.journal_type {
                     "REALIZED_PNL" | "TRADING" | "SESSION_SETTLE" | "SESSION_RESET" => {
-                        ("realized_pnl", num::parse(r.realized_pnl))
+                        ("realized_pnl", r.realized_pnl.map_or(0.0, num::parse))
                     }
                     "FUNDING" => ("funding", num::parse(r.transaction_qty)),
                     "TRADE_FEE" | "LIQUIDATION_FEE" => {

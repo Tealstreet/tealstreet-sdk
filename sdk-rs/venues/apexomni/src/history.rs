@@ -157,12 +157,7 @@ fn iso_milliseconds(value: &str) -> Option<f64> {
     if !(0..24).contains(&hour) || !(0..60).contains(&minute) || !(0.0..60.0).contains(&second) {
         return None;
     }
-    let year = year - i64::from(month <= 2);
-    let era = year.div_euclid(400);
-    let yoe = year - era * 400;
-    let m = month + if month > 2 { -3 } else { 9 };
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    let days = safe_cex_engine::time::days_from_civil(year, month, day);
     Some((days * 86400 + hour * 3600 + minute * 60 - offset) as f64 * 1000.0 + second * 1000.0)
         .filter(|n| *n > 0.0)
 }

@@ -1,5 +1,6 @@
 //! Private REST and stream records. IDs use integer visitors to preserve all bits.
 use crate::wire::{Str, number};
+pub use safe_cex_engine::de::optional_number;
 use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 use std::fmt;
@@ -42,12 +43,6 @@ pub fn boolean<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
             _ => Err(serde::de::Error::custom("invalid boolean")),
         },
     }
-}
-
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
 }
 
 #[derive(Deserialize)]
@@ -126,6 +121,20 @@ pub struct PositionRow<'a> {
     pub isolated_margin: f64,
     #[serde(default, deserialize_with = "number")]
     pub initial_margin: f64,
+}
+
+#[derive(Deserialize)]
+pub struct PositionIdentity<'a> {
+    #[serde(default, borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default, borrow, rename = "positionSide")]
+    pub position_side: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct OrderIdentity<'a> {
+    #[serde(default, borrow, rename = "orderId", deserialize_with = "identifier")]
+    pub order_id: Str<'a>,
 }
 
 #[derive(Deserialize)]

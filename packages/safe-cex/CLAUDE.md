@@ -45,6 +45,14 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 `docs/plans/RUST_REWRITE.md` for deletion blockers; no TS venue may be removed
 merely because its name is registered in Rust.
 
+## Exchange event listeners
+
+`BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
+One throwing listener cannot starve later listeners for the same event; errors
+are reported through `console.error` with venue, event and original cause.
+Reporting emits no error/log event, so failures in those listeners cannot recurse.
+The inherited once/off/context and subscription-snapshot behavior stays intact.
+
 ## Rust public-feed ownership
 
 Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or
@@ -1047,11 +1055,15 @@ The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
 
-Every Rust SDK account sends its resolved Base `getTickInterval()` before native
-startup and when the multiplier or Base auth streak changes. Effective option
+Every Rust SDK account sends `setPollScale` before native startup and when the
+multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
+over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
+(Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
+cadences rather than replacing them with the metadata tick. The resolved tick also
+travels as `ceiling`, so a server multiplier or the auth-backoff cap bounds the
+slowed cadence as before unless a venue's native cadence is already slower. Effective option
 changes are checked at the existing store flush cadence. Infinity is the explicit
-`setTickInterval` control value `null`; venue constructor options do not carry a
-second polling policy. Unchanged values are suppressed, failed delivery stays
+scale `null`; venue constructor options do not carry a second polling policy. Unchanged values are suppressed, failed delivery stays
 eligible for retry, and disposal removes the multiplier listener. These controls
 govern periodic reconciliation, not socket supervision or explicit reads. Base
 auth-streak propagation alone does not prove classified native auth feedback.

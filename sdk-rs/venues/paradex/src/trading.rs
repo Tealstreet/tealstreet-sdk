@@ -6,6 +6,7 @@ use crate::{
 };
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt, Response,
 };
@@ -47,7 +48,8 @@ fn placement_receipt(payload: &Placement) -> Option<OrderIdentityReceipt> {
 enum Kind {
     Place {
         expected: Vec<Option<String>>,
-        child: bool,
+        /// The bracket leg this request places, `None` for an entry.
+        leg: Option<&'static str>,
         batch: bool,
     },
     Amend {
@@ -122,18 +124,6 @@ pub struct Trading {
     amend_locks: HashSet<String>,
 }
 
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
-}
 fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.
 }
@@ -160,6 +150,26 @@ fn native_batch(o: &PlaceOrderOpts) -> bool {
         && o.sl_trigger_type.is_none()
         && o.close != Some(true)
         && o.time_in_force != Some(TimeInForce::FillOrKill)
+}
+/// A wrong-side leg would trigger at once or never; reject it rather than place an unprotected entry.
+fn bracket_sides(o: &PlaceOrderOpts) -> Result<(), String> {
+    let Some(entry) = o.price else {
+        return Ok(());
+    };
+    let long = o.side == OrderSide::Buy;
+    for (leg, price, above) in [
+        ("take-profit", o.take_profit, long),
+        ("stop-loss", o.stop_loss, !long),
+    ] {
+        if let Some(price) = price.filter(|&p| if above { p <= entry } else { p >= entry }) {
+            let relation = if above { "above" } else { "below" };
+            let side = if long { "buy" } else { "sell" };
+            return Err(format!(
+                "Paradex {leg} {price} must be {relation} the {side} entry price {entry}"
+            ));
+        }
+    }
+    Ok(())
 }
 fn client_id() -> Result<String, String> {
     safe_cex_crypto::uuid::uuid().map(|id| format!("ts_{id}"))
@@ -310,13 +320,14 @@ fn place_operations(
             body: Some(body),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: true,
             },
         });
         chunk.clear();
         Ok(())
     }
+    orders.iter().try_for_each(bracket_sides)?;
     for o in orders {
         let execution = if capped(o) {
             if !o.max_slippage_pct.is_some_and(f64::is_finite)
@@ -355,24 +366,13 @@ fn place_operations(
             body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: false,
             },
         });
-        let brackets_valid = o.price.is_none_or(|entry| match o.side {
-            OrderSide::Buy => {
-                o.take_profit.is_none_or(|p| p > entry) && o.stop_loss.is_none_or(|p| p < entry)
-            }
-            OrderSide::Sell => {
-                o.take_profit.is_none_or(|p| p < entry) && o.stop_loss.is_none_or(|p| p > entry)
-            }
-        });
-        if !brackets_valid {
-            continue;
-        }
-        for (kind, price) in [
-            (OrderType::TakeProfit, o.take_profit),
-            (OrderType::StopLoss, o.stop_loss),
+        for (kind, leg, price) in [
+            (OrderType::TakeProfit, "take-profit", o.take_profit),
+            (OrderType::StopLoss, "stop-loss", o.stop_loss),
         ] {
             if let Some(price) = price {
                 if !positive(price) {
@@ -410,7 +410,7 @@ fn place_operations(
                     body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
                     kind: Kind::Place {
                         expected: vec![None],
-                        child: true,
+                        leg: Some(leg),
                         batch: false,
                     },
                 });
@@ -471,7 +471,7 @@ impl Trading {
                     operations: VecDeque::new(),
                     results: vec![],
                     errors: vec![],
-                    attempt_all: false,
+                    attempt_all: true,
                     placement: true,
                 },
             );
@@ -482,7 +482,7 @@ impl Trading {
             Command::PlaceOrders { command, orders } => (
                 command,
                 place_operations(&orders, cx, account, &HashMap::new(), price_bands, true),
-                false,
+                true,
                 true,
             ),
             Command::CancelOrders { command, ids } => {
@@ -562,12 +562,24 @@ impl Trading {
                         return Err("Paradex leverage must be finite".into());
                     }
                     let m = cx.store.market(&symbol).ok_or("unknown Paradex market")?;
-                    let leverage = leverage
-                        .floor()
-                        .clamp(m.limits.leverage.min.max(1.), m.limits.leverage.max.max(1.));
+                    if !m.limits.leverage.min.is_finite() || !m.limits.leverage.max.is_finite() {
+                        return Err("Paradex leverage limits must be finite".into());
+                    }
+                    let min = m.limits.leverage.min.max(1.).ceil();
+                    let max = m.limits.leverage.max.max(1.).floor();
+                    if !min.is_finite()
+                        || !max.is_finite()
+                        || min > max
+                        || max > f64::from(u32::MAX)
+                    {
+                        return Err(
+                            "Paradex leverage limits must contain a supported integer".into()
+                        );
+                    }
+                    let leverage = leverage.floor().clamp(min, max);
                     #[derive(Serialize)]
                     struct Leverage {
-                        leverage: f64,
+                        leverage: u32,
                         margin_type: &'static str,
                     }
                     Ok(VecDeque::from([Operation {
@@ -577,7 +589,7 @@ impl Trading {
                         path: format!("/account/margin/{}", encode(&symbol)),
                         body: Some(
                             serde_json::to_string(&Leverage {
-                                leverage,
+                                leverage: leverage as u32,
                                 margin_type: "CROSS",
                             })
                             .unwrap(),
@@ -731,15 +743,16 @@ impl Trading {
             );
         } else {
             let state = self.jobs.remove(&job).unwrap();
-            let result = if state.errors.is_empty() {
-                if state.placement {
-                    serde_json::to_string(&state.results).map_err(|e| e.to_string())
+            let result =
+                if state.errors.is_empty() || (state.placement && !state.results.is_empty()) {
+                    if state.placement {
+                        serde_json::to_string(&state.results).map_err(|e| e.to_string())
+                    } else {
+                        Ok("[]".into())
+                    }
                 } else {
-                    Ok("[]".into())
-                }
-            } else {
-                Err(state.errors.join("; "))
-            };
+                    Err(state.errors.join("; "))
+                };
             cx.done(state.command, result);
         }
     }
@@ -768,14 +781,33 @@ impl Trading {
             }
             return;
         }
+        if let Kind::Place {
+            expected, batch, ..
+        } = &request.kind
+        {
+            let result = crate::success(response)
+                .and_then(|()| decode_placement(response.body, expected, *batch));
+            let result = match result {
+                Ok(PlacementResult {
+                    ids,
+                    error: Some(error),
+                }) => {
+                    if let Some(job) = self.jobs.get_mut(&request.job) {
+                        job.results.extend(ids);
+                    }
+                    Err(error)
+                }
+                Ok(PlacementResult { ids, error: None }) => Ok(ids),
+                Err(error) => Err(error),
+            };
+            self.complete(cx, account, request, result, false);
+            return;
+        }
         let rails = match &request.kind {
             Kind::Rails(symbol) => Some(symbol.clone()),
             _ => None,
         };
         let result = crate::success(response).and_then(|()| match &request.kind {
-            Kind::Place {
-                expected, batch, ..
-            } => decode_placement(response.body, expected, *batch),
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
                     .map_err(|_| "invalid Paradex amend response")?;
@@ -886,21 +918,40 @@ impl Trading {
         match result {
             Ok(ids) => job.results.extend(ids),
             Err(error) => {
-                if matches!(request.kind, Kind::Place { child: true, .. }) {
-                    cx.log(
-                        LogLevel::Warning,
-                        format!("Paradex TP/SL placement failed: {error}"),
-                    );
-                    while job
-                        .operations
-                        .front()
-                        .is_some_and(|op| matches!(op.kind, Kind::Place { child: true, .. }))
-                    {
-                        job.operations.pop_front();
+                if let Kind::Place { leg, expected, .. } = &request.kind {
+                    let next_leg = match job.operations.front().map(|op| &op.kind) {
+                        Some(Kind::Place {
+                            leg: Some(next), ..
+                        }) => Some(*next),
+                        _ => None,
+                    };
+                    let message = match (leg, next_leg) {
+                        (Some(leg), Some(next)) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; still placing the {next}"
+                        ),
+                        (Some(leg), None) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; no other leg remains to send"
+                        ),
+                        (None, _) => {
+                            format!("Paradex placement failed for client IDs {expected:?}: {error}")
+                        }
+                    };
+                    cx.log(LogLevel::Error, message);
+                    // A failed entry orphans its children; a failed child must not skip its
+                    // sibling, or a rejected TP would leave the position without its SL.
+                    if leg.is_none() {
+                        while job
+                            .operations
+                            .front()
+                            .is_some_and(|op| matches!(op.kind, Kind::Place { leg: Some(_), .. }))
+                        {
+                            job.operations.pop_front();
+                        }
+                        job.errors.push(error);
                     }
                 } else {
                     job.errors.push(error);
-                    if !job.attempt_all {
+                    if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
                         job.preparing = None;
                         job.operations.clear();
                     }
@@ -1183,11 +1234,15 @@ struct Identity {
     #[serde(default)]
     client_id: Option<String>,
 }
+struct PlacementResult {
+    ids: Vec<String>,
+    error: Option<String>,
+}
 fn decode_placement(
     body: &str,
     expected: &[Option<String>],
     batch: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<PlacementResult, String> {
     #[derive(Deserialize)]
     struct Failure {
         #[serde(default)]
@@ -1234,7 +1289,7 @@ fn decode_placement(
         .iter()
         .filter(|id| !found.contains_key(*id))
         .collect();
-    if !errors.is_empty() {
+    let error = if !errors.is_empty() {
         if errors.len() != missing.len()
             || errors
                 .iter()
@@ -1242,23 +1297,23 @@ fn decode_placement(
         {
             return Err("Paradex batch success/error counts are inconsistent".into());
         }
-        return Err(format!(
-            "Paradex batch rejected {} unidentified client IDs: {}",
-            missing.len(),
+        Some(format!(
+            "Paradex batch rejected client IDs {missing:?}: {}",
             errors
                 .iter()
                 .map(|e| format!("{}: {}", e.error, e.message))
                 .collect::<Vec<_>>()
                 .join("; ")
-        ));
-    }
-    if !missing.is_empty() {
+        ))
+    } else if !missing.is_empty() {
         return Err("Paradex placement missing client results".into());
-    }
-    Ok(expected
-        .iter()
-        .map(|id| found.remove(id).unwrap())
-        .collect())
+    } else {
+        None
+    };
+    Ok(PlacementResult {
+        ids: expected.iter().filter_map(|id| found.remove(id)).collect(),
+        error,
+    })
 }
 fn decode_cancels(body: &str, ids: &[String]) -> Result<(), String> {
     #[derive(Deserialize)]
@@ -1303,7 +1358,8 @@ mod tests {
                 &expected,
                 true
             )
-            .unwrap(),
+            .unwrap()
+            .ids,
             ["1", "2"]
         );
         for body in [

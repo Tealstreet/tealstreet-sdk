@@ -17,41 +17,9 @@ fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
     Option::<BorrowedStr<'de>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
 }
 
-/// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
+/// A decimal string; empty, malformed or non-finite is NaN.
 pub fn float(text: &str) -> f64 {
-    // At most 15 digits keep both the numerator and decimal divisor exact in f64.
-    // One division then rounds the same rational as the full decimal parser.
-    if !text.is_empty() && text.len() <= 16 {
-        let short = || {
-            let (mut integer, mut divisor, mut digits) = (0u64, 0u64, 0);
-            for byte in text.bytes() {
-                if byte == b'.' && divisor == 0 {
-                    divisor = 1;
-                    continue;
-                }
-                let digit = byte.wrapping_sub(b'0');
-                if digit > 9 || digits == 15 {
-                    return None;
-                }
-                integer = integer * 10 + u64::from(digit);
-                digits += 1;
-                if divisor != 0 {
-                    divisor *= 10;
-                }
-            }
-            (digits != 0).then(|| {
-                if divisor <= 1 {
-                    integer as f64
-                } else {
-                    integer as f64 / divisor as f64
-                }
-            })
-        };
-        if let Some(value) = short() {
-            return value;
-        }
-    }
-    text.trim().parse::<f64>().unwrap_or(f64::NAN)
+    safe_cex_engine::num::parse_decimal(text).unwrap_or(f64::NAN)
 }
 
 /// An optional decimal string, NaN when absent or empty.
@@ -248,6 +216,8 @@ pub struct TickerRow<'a> {
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub price24h_pcnt: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
+    pub change24h: Opt<'a>,
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub open_interest: Opt<'a>,
     #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub funding_rate: Opt<'a>,
@@ -339,6 +309,13 @@ pub struct TickerDelta<'a> {
     pub index_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub price24h_pcnt: Option<f64>,
+    /// Option frames spell quotes and change differently from derivatives.
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub bid_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub ask_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub change24h: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub open_interest: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
@@ -419,6 +396,31 @@ impl BookLevels {
     }
 }
 
+// Field names are identifiers, so neither visitor needs to retain owned keys.
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum BookField {
+    Type,
+    Data,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier)]
+enum BookDataField {
+    #[serde(rename = "s")]
+    Symbol,
+    #[serde(rename = "u")]
+    Update,
+    #[serde(rename = "b")]
+    Bids,
+    #[serde(rename = "a")]
+    Asks,
+    #[serde(other)]
+    Other,
+}
+
 struct BookSeed<'a>(&'a mut BookLevels);
 
 impl<'de> serde::de::DeserializeSeed<'de> for BookSeed<'_> {
@@ -439,21 +441,21 @@ impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
     fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
         use serde::de::Error;
         let (mut kind, mut data) = (None, None);
-        while let Some(BorrowedStr(key)) = map.next_key()? {
-            match key.as_ref() {
-                "type" => {
+        while let Some(key) = map.next_key::<BookField>()? {
+            match key {
+                BookField::Type => {
                     if kind.is_some() {
                         return Err(M::Error::duplicate_field("type"));
                     }
                     kind = Some(map.next_value::<BorrowedStr<'de>>()?.0);
                 }
-                "data" => {
+                BookField::Data => {
                     if data.is_some() {
                         return Err(M::Error::duplicate_field("data"));
                     }
                     data = Some(map.next_value_seed(BookDataSeed(self.0))?);
                 }
-                _ => {
+                BookField::Other => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
             }
@@ -488,35 +490,35 @@ impl<'de> serde::de::Visitor<'de> for BookDataSeed<'_> {
         use serde::de::Error;
         let (mut symbol, mut update) = (None, None);
         let (mut bids, mut asks) = (false, false);
-        while let Some(BorrowedStr(key)) = map.next_key()? {
-            match key.as_ref() {
-                "s" => {
+        while let Some(key) = map.next_key::<BookDataField>()? {
+            match key {
+                BookDataField::Symbol => {
                     if symbol.is_some() {
                         return Err(M::Error::duplicate_field("s"));
                     }
                     symbol = Some(map.next_value::<BorrowedStr<'de>>()?.0);
                 }
-                "u" => {
+                BookDataField::Update => {
                     if update.is_some() {
                         return Err(M::Error::duplicate_field("u"));
                     }
                     update = Some(map.next_value()?);
                 }
-                "b" => {
+                BookDataField::Bids => {
                     if bids {
                         return Err(M::Error::duplicate_field("b"));
                     }
                     bids = true;
                     map.next_value_seed(LevelsSeed(&mut self.0.bids))?;
                 }
-                "a" => {
+                BookDataField::Asks => {
                     if asks {
                         return Err(M::Error::duplicate_field("a"));
                     }
                     asks = true;
                     map.next_value_seed(LevelsSeed(&mut self.0.asks))?;
                 }
-                _ => {
+                BookDataField::Other => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
             }
@@ -591,6 +593,25 @@ pub struct WsKline<'a> {
     pub close: Str<'a>,
     #[serde(borrow)]
     pub volume: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct TradeEvent<'a> {
+    #[serde(borrow)]
+    pub topic: Str<'a>,
+    #[serde(borrow, default)]
+    pub data: Vec<WsTrade<'a>>,
+}
+
+/// One `publicTrade` execution: time (ms), price and size.
+#[derive(Deserialize)]
+pub struct WsTrade<'a> {
+    #[serde(rename = "T")]
+    pub time: f64,
+    #[serde(rename = "p", borrow)]
+    pub price: Str<'a>,
+    #[serde(rename = "v", borrow)]
+    pub size: Str<'a>,
 }
 
 /// REST kline row: `[startTime, open, high, low, close, volume, turnover]`.
@@ -902,6 +923,12 @@ pub struct MarginModeReason<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionRow<'a> {
     #[serde(borrow, default)]
+    pub id: Opt<'a>,
+    #[serde(borrow, default)]
+    pub side: Opt<'a>,
+    #[serde(borrow, default)]
+    pub size: Opt<'a>,
+    #[serde(borrow, default)]
     pub symbol: Opt<'a>,
     #[serde(rename = "type", borrow, default)]
     pub kind: Opt<'a>,
@@ -1011,7 +1038,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }
@@ -1054,7 +1086,12 @@ mod tests {
         ] {
             assert_eq!(
                 float(text).to_bits(),
-                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                text.trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(f64::NAN)
+                    .to_bits(),
                 "changed {text:?}"
             );
         }
@@ -1126,6 +1163,65 @@ mod tests {
             levels.bids.is_empty() && levels.asks.is_empty(),
             "old scratch data leaked into omitted sides"
         );
+    }
+
+    #[test]
+    fn book_field_identifiers_accept_escaped_keys_and_reordered_fields() {
+        let mut levels = BookLevels::default();
+        let message = levels.decode(r#"{"d\u0061ta":{"\u0061":[["2","3"]],"\u0075":4,"\u0073":"BTCUSDT","\u0062":[["1","2"]]},"\u0074ype":"delta"}"#).unwrap();
+        assert_eq!(
+            (
+                message.kind.as_ref(),
+                message.symbol.as_ref(),
+                message.update
+            ),
+            ("delta", "BTCUSDT", 4)
+        );
+        assert_eq!(levels.bids, [(1.0, 2.0)]);
+        assert_eq!(levels.asks, [(2.0, 3.0)]);
+    }
+
+    #[test]
+    fn book_field_identifiers_reject_plain_and_escaped_duplicates_in_either_order() {
+        let mut levels = BookLevels::default();
+        for (field, escaped, value) in [
+            ("type", r"\u0074ype", r#""delta""#),
+            ("data", r"d\u0061ta", r#"{"s":"BTCUSDT"}"#),
+            ("s", r"\u0073", r#""BTCUSDT""#),
+            ("u", r"\u0075", "2"),
+            ("b", r"\u0062", "[]"),
+            ("a", r"\u0061", "[]"),
+        ] {
+            for (first, second) in [(field, escaped), (escaped, field)] {
+                let duplicate = format!(r#""{first}":{value},"{second}":{value}"#);
+                let text = match field {
+                    "type" => format!(r#"{{{duplicate},"data":{{"s":"BTCUSDT"}}}}"#),
+                    "data" => format!(r#"{{"type":"delta",{duplicate}}}"#),
+                    "s" => format!(r#"{{"type":"delta","data":{{{duplicate}}}}}"#),
+                    _ => format!(r#"{{"type":"delta","data":{{"s":"BTCUSDT",{duplicate}}}}}"#),
+                };
+                assert!(levels.decode(&text).is_err(), "accepted duplicate: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn book_field_identifiers_still_validate_ignored_values_and_trailing_json() {
+        let mut levels = BookLevels::default();
+        // Unknown fields, including duplicates after unescaping, stay ignored.
+        let message = levels.decode(r#"{"extra":{"x":[1,true,null]},"ex\u0074ra":false,"type":"delta","data":{"extra":[],"ex\u0074ra":{},"s":"BTCUSDT"}}"#).unwrap();
+        assert_eq!(message.update, 0);
+        assert!(levels.bids.is_empty() && levels.asks.is_empty());
+        for malformed in [
+            r#"{"type":"delta","data":{"s":"BTCUSDT"},"extra":[1,]}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","extra":[1,]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT"}} {}"#,
+        ] {
+            assert!(
+                levels.decode(malformed).is_err(),
+                "accepted malformed: {malformed}"
+            );
+        }
     }
 
     #[test]

@@ -29,7 +29,7 @@ use tokio::task::AbortHandle;
 /// What transports and timers report back to the loop.
 #[derive(Debug)]
 pub enum HostEvent {
-    TickIntervalChanged(f64),
+    PollScaleChanged(f64),
     /// Trusted host/provider ingress; network command clients cannot send it.
     PublicFeedUpdate(safe_cex_engine::PublicFeedUpdate),
     WsOpened(SocketId),
@@ -141,8 +141,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     engine.report_public_feed_error(error);
                 }
             }
-            HostEvent::TickIntervalChanged(interval_ms) => {
-                engine.handle(now, Event::TickIntervalChanged { interval_ms })
+            HostEvent::PollScaleChanged(scale) => {
+                engine.handle(now, Event::PollScaleChanged { scale })
             }
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
             HostEvent::WsBinary(socket, data) => engine.handle(
@@ -311,12 +311,13 @@ mod timer_tests {
     impl Venue for TimerVenue {
         type Pending = ();
         fn start(&mut self, _: &mut Cx<'_, ()>) {}
-        fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
+        fn on_poll_scale(&mut self, cx: &mut Cx<'_, ()>, scale: f64) {
             if let Some(timer) = self.timer.take() {
                 cx.clear_timer(timer);
             }
-            if interval_ms.is_finite() {
-                self.timer = Some(cx.set_timer(interval_ms));
+            // A 1ms native cadence keeps huge finite scales as huge finite deadlines.
+            if scale.is_finite() {
+                self.timer = Some(cx.set_timer(scale));
             }
         }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -401,7 +402,7 @@ mod timer_tests {
         let mut host = Host::new(Engine::new(TimerVenue::default()), NoNetwork);
         host.clock = || 0.;
         host.engine
-            .handle(0., Event::TickIntervalChanged { interval_ms: 1e308 });
+            .handle(0., Event::PollScaleChanged { scale: 1e308 });
         host.execute(&mut |_| {});
         let parked = host.timers.values().next().unwrap().clone();
         // Let the spawned task run: a conversion panic would finish it while
@@ -412,8 +413,8 @@ mod timer_tests {
 
         host.engine.handle(
             0.,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         host.execute(&mut |_| {});
@@ -422,7 +423,7 @@ mod timer_tests {
         assert!(parked.is_finished(), "ClearTimer aborts the parked task");
 
         host.engine
-            .handle(0., Event::TickIntervalChanged { interval_ms: 5. });
+            .handle(0., Event::PollScaleChanged { scale: 5. });
         host.execute(&mut |_| {});
         let normal = *host.timers.keys().next().unwrap();
         let event = tokio::time::timeout(Duration::from_secs(1), host.inbox.recv())

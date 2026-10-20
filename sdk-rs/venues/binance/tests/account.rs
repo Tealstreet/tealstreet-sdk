@@ -8,6 +8,9 @@ use safe_cex_engine::{Command, Event, Method, Query};
 use safe_cex_venue_binance::Options;
 use support::Harness;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 3_000.0;
+
 const POSITION_RISK: &str = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0.010","entryPrice":"95000.0","breakEvenPrice":"95010.0","markPrice":"96000.0","unRealizedProfit":"10.00","liquidationPrice":"80000.5","isolatedMargin":"0","notional":"960.0","marginAsset":"USDT","isolatedWallet":"0","initialMargin":"48","maintMargin":"3.8","positionInitialMargin":"48","openOrderInitialMargin":"0","adl":1,"bidNotional":"0","askNotional":"0","updateTime":1720736417660}]"#;
 const SYMBOL_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","isAutoAddMargin":false,"leverage":20,"maxNotionalValue":"$1000000"}]"#;
 const ACCOUNT: &str = r#"{"totalInitialMargin":"48","totalWalletBalance":"1000","availableBalance":"952","assets":[{"asset":"USDT","walletBalance":"1000.0","unrealizedProfit":"10.0","marginBalance":"1010.0","maintMargin":"3.8","initialMargin":"48.0","availableBalance":"952.0","updateTime":1625474304765},{"asset":"BTC","walletBalance":"0.0","unrealizedProfit":"0.0","initialMargin":"0","availableBalance":"0"}],"positions":[]}"#;
@@ -723,8 +726,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -737,7 +740,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -749,8 +757,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -764,7 +772,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -795,8 +805,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -817,8 +827,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine

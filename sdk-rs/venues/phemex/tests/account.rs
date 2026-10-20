@@ -4,6 +4,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
 };
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"},{"symbol":"ETHUSDC","type":"PerpetualV2","settleCurrency":"USDC","baseCurrency":"ETH","quoteCurrency":"USDC","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"result":[{"symbol":"BTCUSDT","bidRp":"69999","askRp":"70001","lastRp":"70000","markRp":"70000","indexRp":"70000","openRp":"69000","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"},{"symbol":"ETHUSDC","bidRp":"1999","askRp":"2001","lastRp":"2000","markRp":"2000","indexRp":"2000","openRp":"1900","openInterestRv":"100","fundingRateRr":"0","volumeRq":"10"}]}"#;
@@ -241,6 +244,39 @@ fn rest_and_ws_balance_conventions_match_across_currencies_and_pnl_signs() {
 }
 
 #[test]
+fn rest_and_account_push_publish_per_currency_balances() {
+    use safe_cex_engine::model::{Balance, CurrencyBalance};
+    let currency = |currency: &str, total: f64, used: f64, free: f64, upnl: f64| CurrencyBalance {
+        currency: currency.into(),
+        balance: Balance {
+            total,
+            used,
+            free,
+            upnl,
+        },
+    };
+    let (mut e, a, socket) = started();
+    seed(&mut e, &a);
+    let usdc = currency("USDC", 100., 19., 181., 100.);
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc.clone(), currency("USDT", 990., 69., 931., 10.)]
+    );
+    authenticate(&mut e, socket);
+    // The negative-used USDC row is rejected; only USDT moves.
+    ws(
+        &mut e,
+        socket,
+        r#"{"timestamp":1700000001000000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"1100","totalUsedBalanceRv":"70"},{"currency":"USDC","accountBalanceRv":"5","totalUsedBalanceRv":"-1"}]}"#,
+    );
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc, currency("USDT", 1090., 70., 1030., 10.)]
+    );
+    assert_eq!(e.store().balance().total, 1190.);
+}
+
+#[test]
 fn independent_currency_failure_keeps_prior_slice_and_flat_settings() {
     let (mut e, a, _) = started();
     seed(&mut e, &a);
@@ -325,7 +361,7 @@ fn streamed_partial_success_never_publishes_before_valid_envelope() {
     assert_eq!(e.store().positions()[0].symbol, "ETHUSDC");
 }
 #[test]
-fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
+fn missing_positions_is_failure_but_a_bad_row_keeps_the_slice_balance() {
     let (mut e, a, _) = started();
     response(
         &mut e,
@@ -334,6 +370,9 @@ fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
         200,
         r#"{"code":0,"data":{"account":{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"0"}}}"#,
     );
+    assert!(!e.store().loaded().positions);
+    assert_eq!(e.store().balance().total, 0.);
+    // A NaN row skips only that symbol; the USDC balance still updates.
     response(
         &mut e,
         NOW,
@@ -341,8 +380,24 @@ fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
         200,
         &envelope("USDC", 200., 19., &ETH.replace("\"1\"", "\"NaN\"")),
     );
-    assert!(!e.store().loaded().positions);
-    assert_eq!(e.store().balance().total, 0.);
+    assert!(e.store().position("ETHUSDC").is_none());
+    assert_eq!(e.store().balance().used, 19.);
+}
+#[test]
+fn bad_position_row_keeps_the_stored_position_and_still_refreshes_the_balance() {
+    let (mut e, a, _) = started();
+    seed(&mut e, &a);
+    let held = e.store().position("BTCUSDT").unwrap().contracts;
+    let refresh = refresh(&mut e, NOW + 2_000.);
+    response(
+        &mut e,
+        NOW + 2_000.,
+        request(&refresh, "currency=USDT").id,
+        200,
+        &envelope("USDT", 5000., 77., &BTC.replace("69000", "0")),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, held);
+    assert_eq!(e.store().balance().used, 77. + 19.);
 }
 #[test]
 fn private_auth_snapshot_and_triggered_are_nonterminal() {
@@ -779,7 +834,8 @@ fn rejected_position_cannot_supply_the_only_mode_for_snapshot_authority() {
             r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{long},{short}]}}"#
         ),
     );
-    assert!(!e.store().loaded().orders);
+    // The rest of the frame applies, but the unmodelled leg borrows no mode.
+    assert!(e.store().loaded().orders);
     assert!(e.store().positions().is_empty());
     assert!(e.store().setting("BTCUSDT").is_none());
     let corrected_long = long.replace("\"transactTimeNs\":0", "\"transactTimeNs\":1");
@@ -788,10 +844,9 @@ fn rejected_position_cannot_supply_the_only_mode_for_snapshot_authority() {
         &mut e,
         socket,
         &format!(
-            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{corrected_long},{corrected_short}]}}"#
+            r#"{{"type":"incremental","sequence":2,"positions_p":[{corrected_long},{corrected_short}]}}"#
         ),
     );
-    assert!(e.store().loaded().orders);
     assert_eq!(e.store().positions().len(), 2);
 }
 
@@ -877,7 +932,7 @@ fn complete_rest_omission_fences_same_version_ws_but_allows_old_active_rest() {
 }
 
 #[test]
-fn invalid_semantic_snapshot_cannot_consume_sequence_or_partial_authority() {
+fn invalid_semantic_rows_are_skipped_without_blocking_the_frame() {
     for bad_row in [
         format!(r#""positions_p":[{}]"#, BTC.replace("69000", "0")),
         r#""accounts_p":[{"currency":"USDT","accountBalanceRv":"9000","totalUsedBalanceRv":"-1"}]"#
@@ -892,19 +947,20 @@ fn invalid_semantic_snapshot_cannot_consume_sequence_or_partial_authority() {
             s,
             &format!(r#"{{"type":"snapshot","sequence":1,"orders_p":[],{bad_row}}}"#),
         );
-        assert!(!e.store().loaded().orders);
+        // The bad row is skipped; the frame (here the order snapshot) still applies.
+        assert!(e.store().loaded().orders);
         assert_eq!(e.store().balance(), &balance);
         assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
         ws(
             &mut e,
             s,
             &format!(
-                r#"{{"type":"snapshot","sequence":1,"orders_p":[{}],"positions_p":[{}]}}"#,
+                r#"{{"type":"incremental","sequence":2,"orders_p":[{}],"positions_p":[{}]}}"#,
                 order("New", 1),
                 BTC.replace("0.01", "0.02")
+                    .replace("1700000000000000000", "1700000000000000009")
             ),
         );
-        assert!(e.store().loaded().orders);
         assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
         assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
     }
@@ -1063,8 +1119,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 60_000.0,
+        Event::PollScaleChanged {
+            scale: 60_000.0 / POLL_MS,
         },
     );
     let slow: Vec<_> = engine
@@ -1077,7 +1133,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .collect();
     assert_eq!(slow.len(), 1, "exactly one recurring account poll");
     assert_eq!(slow[0].1, now + 60_000.0);
-    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    engine.handle(
+        now + 1.0,
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
+    );
     let fast: Vec<_> = engine
         .drain_actions()
         .filter_map(|a| match a {
@@ -1089,8 +1150,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert_eq!(fast[0].1, now + 501.0);
     engine.handle(
         now + 2.0,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let paused: Vec<_> = engine.drain_actions().collect();
@@ -1104,7 +1165,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
-        Event::TickIntervalChanged { interval_ms: 500.0 },
+        Event::PollScaleChanged {
+            scale: 500.0 / POLL_MS,
+        },
     );
     let resumed: Vec<_> = engine
         .drain_actions()
@@ -1135,8 +1198,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     let completed_at = now + 90_501.0;
     engine.handle(
         completed_at,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     assert!(
@@ -1157,8 +1220,8 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     engine.drain_actions().for_each(drop);
     engine.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: 30_000.0,
+        Event::PollScaleChanged {
+            scale: 30_000.0 / POLL_MS,
         },
     );
     let times: Vec<_> = engine
@@ -1218,7 +1281,12 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     let engine = &mut e;
     let now = NOW;
     engine.drain_actions().for_each(drop);
-    engine.handle(now, Event::TickIntervalChanged { interval_ms: 100.0 });
+    engine.handle(
+        now,
+        Event::PollScaleChanged {
+            scale: 100.0 / POLL_MS,
+        },
+    );
     let timer = engine
         .drain_actions()
         .find_map(|a| match a {
@@ -1250,7 +1318,9 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
         engine.handle(
             now + 100.0 + offset,
-            Event::TickIntervalChanged { interval_ms },
+            Event::PollScaleChanged {
+                scale: interval_ms / POLL_MS,
+            },
         );
         let times: Vec<_> = engine
             .drain_actions()
@@ -1265,4 +1335,115 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
             assert_eq!(times, vec![now + 2100.0]);
         }
     }
+}
+#[test]
+fn unsupported_order_type_or_status_skips_only_that_row() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let site = order("New", 100)
+        .replace("\"one\"", "\"site\"")
+        .replace("\"Limit\"", "\"Bracket\"");
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[{},{site}],"positions_p":[{}]}}"#,
+            order("New", 100),
+            BTC.replace("0.01", "0.02")
+        ),
+    );
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    assert!(e.store().order("site").is_none());
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
+    let filled = order("Mystery", 200)
+        .replace("\"cumQty\":\"0\"", r#""cumQty":"0.1","execID":"exec-x","execQty":"0.1","execPriceRp":"69000","tradeType":"Trade""#);
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"incremental","sequence":2,"orders_p":[{filled}],"positions_p":[{}]}}"#,
+            BTC.replace("0.01", "0.03")
+                .replace("1700000000000000000", "1700000000000000005")
+        ),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.03);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    let frame = e.take_frame(NOW).unwrap();
+    let data = execution_rows(frame, 1);
+    assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
+}
+#[test]
+fn deactivated_or_expired_row_cancels_the_open_order_and_a_later_snapshot_cannot_revive_it() {
+    for status in ["Deactivated", "Expired"] {
+        let (mut e, a, s) = started();
+        seed(&mut e, &a);
+        authenticate(&mut e, s);
+        push_orders(&mut e, s, "snapshot", 1, &order("New", 100));
+        assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+        push_orders(&mut e, s, "incremental", 2, &order(status, 200));
+        assert_eq!(
+            e.store().order("one").unwrap().status,
+            OrderStatus::Canceled,
+            "{status} left the order open"
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 200.,
+            Event::WsClosed {
+                socket: s,
+                code: 1006,
+            },
+        );
+        let (retry, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("reconnect timer");
+        e.handle(at, Event::TimerFired { timer: retry });
+        let fresh = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => Some(socket),
+                _ => None,
+            })
+            .expect("private reconnect");
+        authenticate(&mut e, fresh);
+        let other = order("New", 300).replace("\"one\"", "\"two\"");
+        let rows = format!("{},{other}", order("New", 100));
+        push_orders(&mut e, fresh, "snapshot", 1, &rows);
+        assert!(e.store().order("two").is_some(), "snapshot did not apply");
+        assert!(
+            e.store()
+                .order("one")
+                .is_none_or(|o| o.status != OrderStatus::Open),
+            "stale snapshot revived a {status} order"
+        );
+    }
+}
+#[test]
+fn bad_stream_position_row_still_applies_the_frame_balance() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, "");
+    let before = e.store().balance().used;
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"incremental","sequence":2,"timestamp":1700000000000000100,"positions_p":[{}],"accounts_p":[{{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"80"}}]}}"#,
+            BTC.replace("69000", "0")
+        ),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+    assert_ne!(e.store().balance().used, before);
+    assert_eq!(e.store().balance().used, 80. + 19.);
 }

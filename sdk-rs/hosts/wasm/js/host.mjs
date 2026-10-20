@@ -21,7 +21,8 @@ const commandTimeout = (value) => {
   return value;
 };
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
-  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
+  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode',
+  'setAccountTier']);
 class UnknownEngineActionError extends Error {}
 class CommandDiagnosticCallbackError extends Error {
   constructor(cause) { super('Command diagnostic callback failed', { cause }); }
@@ -183,7 +184,7 @@ export class EngineHost {
     let timeoutMs;
     try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
     catch (error) { return Promise.reject(error); }
-    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -567,6 +568,9 @@ export class EngineHost {
         } catch (cause) { throw new AccountAuthCallbackError(cause); }
         break;
       }
+      case 'startupFailed':
+        this.handlers.onStartupFailed?.(action.detail);
+        break;
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;

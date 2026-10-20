@@ -9,6 +9,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId,
     json::ArrayAt,
@@ -152,10 +153,7 @@ pub struct Account {
     auth_rpc: Option<u64>,
     subscriptions: HashMap<u64, String>,
     subscriptions_started: f64,
-    received: f64,
-    opened_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     retry: Option<TimerId>,
     poll: Option<TimerId>,
     repair_orders: Option<TimerId>,
@@ -198,10 +196,11 @@ impl Account {
             auth_rpc: None,
             subscriptions: HashMap::new(),
             subscriptions_started: 0.,
-            received: 0.,
-            opened_at: 0.,
-            watchdog: None,
-            reconnect: None,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                idle_timeout_ms: 90_000.,
+                ..Config::default()
+            }),
             retry: None,
             poll: None,
             repair_orders: None,
@@ -324,14 +323,13 @@ impl Account {
     }
     pub fn handles_timer(&self, timer: TimerId) -> bool {
         [
-            self.watchdog,
-            self.reconnect,
             self.retry,
             self.poll,
             self.repair_orders,
             self.repair_positions,
         ]
         .contains(&Some(timer))
+            || self.supervisor.owns_timer(timer)
     }
     pub fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.started {
@@ -443,7 +441,6 @@ impl Account {
             headers.push(("PARADEX-PARTNER", "TEALSTREET".into()));
         }
         let url = format!("{}{}", self.rest(), request.path);
-        let scope = auth_scope(&request.pending);
         let id = if let Some(at) = request.at {
             cx.request_streamed_body(
                 request.method,
@@ -456,9 +453,6 @@ impl Account {
         } else {
             cx.request(request.method, url, headers, request.body, request.pending)
         };
-        if let Some(scope) = scope {
-            cx.tag_account_read(id, safe_cex_engine::CredentialSlot::Primary, scope);
-        }
         if let Some((payload, target)) = signing
             && let Err(pending) = cx.sign_request(id, payload, target)
         {
@@ -495,11 +489,6 @@ impl Account {
             None,
             Pending::Account(Request::Auth { started: cx.now }),
         );
-        cx.tag_account_read(
-            id,
-            safe_cex_engine::CredentialSlot::Primary,
-            safe_cex_engine::AccountReadScope::Account,
-        );
         cx.route_request(id, safe_cex_engine::RequestRoute::Direct);
         if let Some(payload) = payload
             && let Err(pending) = cx.sign_request(
@@ -525,8 +514,9 @@ impl Account {
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.socket.is_none() {
+        if self.socket.is_none() && !self.supervisor.is_waiting() {
             self.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Private));
+            self.supervisor.connecting(cx);
         }
     }
     fn send_auth(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -601,10 +591,8 @@ impl Account {
         self.authenticated = false;
         self.auth_rpc = None;
         self.subscriptions.clear();
-        self.received = cx.now;
-        self.opened_at = cx.now;
+        self.supervisor.opened(cx);
         // Hosts answer RFC6455 pings; the server's SBE heartbeat proves idle liveness.
-        self.watchdog = Some(cx.set_timer(5_000.));
         self.send_auth(cx);
     }
     fn disconnect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -615,12 +603,7 @@ impl Account {
         self.authenticated = false;
         self.auth_rpc = None;
         self.subscriptions.clear();
-        if let Some(timer) = self.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.reconnect.is_none() {
-            self.reconnect = Some(cx.set_timer(1_000.));
-        }
+        self.supervisor.retry(cx);
     }
     pub fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.handles_socket(socket) {
@@ -635,7 +618,7 @@ impl Account {
             return;
         };
         if message.kind == "ping" || message.kind == "pong" {
-            self.received = cx.now;
+            self.supervisor.received(cx.now);
             return;
         }
         if message.jsonrpc != "2.0" {
@@ -670,7 +653,8 @@ impl Account {
             }
             self.auth_rpc = None;
             self.authenticated = true;
-            self.received = cx.now;
+            self.supervisor.authenticated(cx);
+            self.supervisor.received(cx.now);
             self.subscriptions_started = cx.now;
             for channel in [
                 "orders.ALL",
@@ -704,7 +688,7 @@ impl Account {
                     .map(|ack| ack.channel);
                 if channel == Some(expected.as_str()) {
                     self.subscriptions.remove(&id);
-                    self.received = cx.now;
+                    self.supervisor.received(cx.now);
                 }
             }
             return;
@@ -727,7 +711,7 @@ impl Account {
             false
         };
         if valid {
-            self.received = cx.now;
+            self.supervisor.received(cx.now);
         }
     }
     pub fn on_binary(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, bytes: &[u8]) {
@@ -737,7 +721,7 @@ impl Account {
         let result =
             crate::sbe::Frame::parse(bytes).and_then(|mut frame| self.binary(cx, &mut frame));
         match result {
-            Ok(true) => self.received = cx.now,
+            Ok(true) => self.supervisor.received(cx.now),
             Ok(false) => {}
             Err(error) => cx.log(LogLevel::Warning, error),
         }
@@ -943,21 +927,19 @@ impl Account {
     }
 
     pub fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.watchdog == Some(timer) {
-            self.watchdog = None;
-            if !self.open
-                || (!self.authenticated && cx.now - self.opened_at >= 15_000.)
-                || (!self.subscriptions.is_empty()
-                    && cx.now - self.subscriptions_started >= 15_000.)
-                || cx.now - self.received >= 90_000.
-            {
-                self.disconnect(cx);
-                return;
+        if self.supervisor.owns_timer(timer) {
+            match self.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect(cx),
+                SocketTick::TimedOut(_) => self.disconnect(cx),
+                SocketTick::Handled
+                    if self.authenticated
+                        && !self.subscriptions.is_empty()
+                        && cx.now - self.subscriptions_started >= 15_000. =>
+                {
+                    self.disconnect(cx)
+                }
+                _ => {}
             }
-            self.watchdog = Some(cx.set_timer(5_000.));
-        } else if self.reconnect == Some(timer) {
-            self.reconnect = None;
-            self.connect(cx);
         } else if self.retry == Some(timer) {
             self.retry = None;
             if self.credentials.is_none() {
@@ -1722,11 +1704,7 @@ fn scalar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     })
 }
 fn finite(input: &str) -> Result<f64, String> {
-    input
-        .parse::<f64>()
-        .ok()
-        .filter(|n| n.is_finite())
-        .ok_or_else(|| "Invalid Paradex numeric field".into())
+    safe_cex_engine::num::parse_decimal(input).ok_or_else(|| "Invalid Paradex numeric field".into())
 }
 pub fn map_order(row: &NativeOrder) -> Result<Order, String> {
     if row.id.is_empty() || row.market.is_empty() {
@@ -1975,99 +1953,5 @@ fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json:
         serde_json::from_str(text)
     } else {
         serde_json::from_str(text).map(|row| vec![row])
-    }
-}
-
-fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
-    use safe_cex_engine::AccountReadScope::*;
-    let Pending::Account(r) = pending else {
-        return None;
-    };
-    match r {
-        Request::Config => None,
-        Request::Auth { .. } => Some(Account),
-        Request::Margins { .. } => Some(Settings),
-        Request::Positions { .. } => Some(Positions),
-        Request::Balance { .. } => Some(Balance),
-        Request::Orders { .. } => Some(Orders),
-    }
-}
-impl Account {
-    pub(crate) fn auth_observation(
-        &self,
-        pending: &Pending,
-        response: &Response<'_>,
-        now: f64,
-    ) -> Option<safe_cex_engine::AuthOutcome> {
-        use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        auth_scope(pending)?;
-        let Pending::Account(r) = pending else {
-            return None;
-        };
-        #[derive(Deserialize)]
-        struct Error<'a> {
-            error: Option<&'a str>,
-        }
-        let e: Error<'_> = serde_json::from_str(response.body).ok()?;
-        let rejected = if matches!(r, Request::Auth { .. }) {
-            matches!(
-                e.error,
-                Some(
-                    "INVALID_SUBKEY"
-                        | "SUBKEY_REVOKED"
-                        | "INVALID_STARKNET_SIGNATURE"
-                        | "STARKNET_SIGNATURE_VERIFICATION_FAILED"
-                        | "INVALID_ETHEREUM_SIGNATURE"
-                        | "UNAUTHORIZED_ERROR"
-                        | "IP_NOT_ALLOWED"
-                )
-            )
-        } else {
-            matches!(
-                e.error,
-                Some(
-                    "INVALID_TOKEN"
-                        | "INVALID_TOKEN_SCOPE"
-                        | "UNAUTHORIZED_ERROR"
-                        | "IP_NOT_ALLOWED"
-                )
-            )
-        };
-        if rejected {
-            return Some(Rejected);
-        }
-        if crate::success(*response).is_err() {
-            return None;
-        }
-        let valid = match r {
-            Request::Auth { started } => {
-                #[derive(Deserialize)]
-                struct Token {
-                    jwt_token: Option<String>,
-                    token: Option<String>,
-                }
-                now < started + 300_000.
-                    && serde_json::from_str::<Token>(response.body).is_ok_and(|t| {
-                        t.jwt_token
-                            .or(t.token)
-                            .is_some_and(|s| !s.trim().is_empty())
-                    })
-            }
-            Request::Margins { invalid, .. }
-            | Request::Positions { invalid, .. }
-            | Request::Orders { invalid, .. } => !invalid,
-            Request::Balance { .. } => {
-                serde_json::from_str::<BalanceRow>(response.body).is_ok_and(|b| {
-                    b.total_collateral
-                        .or(b.account_value)
-                        .or(b.equity)
-                        .or(b.margin_balance)
-                        .or(b.wallet_balance)
-                        .is_some()
-                })
-            }
-            Request::Config => false,
-        };
-        valid.then_some(Accepted)
     }
 }
