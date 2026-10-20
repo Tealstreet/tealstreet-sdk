@@ -1,5 +1,6 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod hyro;
 mod options;
@@ -130,6 +131,7 @@ pub enum Then {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Closed(closed::Request),
 }
 
 pub struct Pending {
@@ -1619,6 +1621,7 @@ impl BybitLinear {
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             Then::History(request) => self.on_history_response(cx, request, response),
+            Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
     }
 }
@@ -1869,6 +1872,7 @@ impl Venue for BybitLinear {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             options: self.category_enabled(Category::Option),
+            closed_positions: !self.variant.is_spot(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2056,6 +2060,22 @@ impl Venue for BybitLinear {
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 

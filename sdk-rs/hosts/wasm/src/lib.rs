@@ -1523,6 +1523,10 @@ mod tests {
                     _ => QuantityUnits::Base,
                 },
                 account_tier: any(&["lighter", "lighter-robinhood"], venue),
+                closed_positions: any(
+                    &["bybit", "bybitdemo", "hyrotrader", "bybitinverse", "blofin"],
+                    venue,
+                ) || any(&OKX, venue),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

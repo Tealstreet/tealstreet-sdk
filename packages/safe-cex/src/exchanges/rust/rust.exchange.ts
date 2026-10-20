@@ -10,6 +10,7 @@ import type { Store } from '../../store/store.interface';
 import type {
   Candle,
   AccountGreeks,
+  ClosedPnlEntry,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
@@ -17,8 +18,10 @@ import type {
   ExecutionsOptions,
   FetchedLeverage,
   HistoricalOrder,
+  HistoricalTradeOptions,
   IncomeHistoryOptions,
   IncomeRecord,
+  Market,
   OHLCVOptions,
   OptionChainQuery,
   OptionChainRow,
@@ -45,6 +48,7 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
+import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -66,7 +70,10 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
+import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
+import { isBybitInverseSymbol } from '../bybit/bybit.inverse';
 import {
   HYROTRADER_PROD_URL,
   HYROTRADER_PROD_WS_URL,
@@ -80,6 +87,7 @@ import {
   withReplacementClientOrderId,
 } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
@@ -153,6 +161,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
@@ -420,6 +429,7 @@ export class RustEngineExchange extends BaseExchange {
         return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
       };
     }
+    if (capabilities.closedPositions) this.fetchClosedPnl = this.fetchReportedClosedPnl;
   }
 
   private fetchFilledQuantities = async (ids: string[]) => {
@@ -1646,6 +1656,57 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchIncomeHistoryRange = (startTime: number, endTime: number, incomeType?: string) =>
     this.command<IncomeRecord[]>({ op: 'fetchIncome', incomeType, from: startTime, to: endTime });
+
+  /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
+  private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }) =>
+    this.command<Array<Record<string, any>>>({
+      op: 'fetchClosedPositions',
+      symbol: opts.symbol,
+      from: opts.from,
+      to: opts.to,
+    });
+
+  /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
+  private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
+    if (this.isPublicDataOnly) return [];
+    let rows: Array<Record<string, any>>;
+    try {
+      // TS okx/blofin treat an empty symbol as account-wide; bybit sends it as given.
+      const symbol = okxNames.has(this.name) || this.name === 'blofin' ? opts.symbol || undefined : opts.symbol;
+      rows = await this.fetchClosedPositionRows({ ...opts, symbol });
+    } catch {
+      return [];
+    }
+    const account = opts.accountName || '';
+    const entries: ClosedPnlEntry[] = [];
+    for (const row of rows) {
+      let entry: ClosedPnlEntry | null;
+      if (okxNames.has(this.name)) {
+        const market = this.store.marketsBySymbol[opts.symbol] ?? this.store.marketsById[String(row.instId ?? '')];
+        entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
+      } else if (this.name === 'blofin') {
+        entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
+      } else {
+        entry = mapBybitClosedPnl(row, account, this.name === 'bybitinverse' || isBybitInverseSymbol(row.symbol));
+      }
+      if (entry) entries.push(entry);
+    }
+    return entries.sort((a, b) => b.closedTime - a.closedTime);
+  };
+
+  /**
+   * OKX `contractsToBase`. Engine markets carry no `ctValCcy`; an OKX inverse swap's
+   * contract value is always quote-denominated, which is the case TS converts by price.
+   */
+  private okxContractsToBase = (contractsNative: number, market: Market, referencePrice?: number) => {
+    const contractSize = market.contractSize || 1;
+    if (!market.isInverse) return multiply(contractsNative, contractSize);
+    const ticker = this.store.tickersById[market.id] ?? this.store.tickersBySymbol[market.symbol];
+    const price = [referencePrice, ticker?.mark, ticker?.last].find(
+      (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0,
+    );
+    return price ? (contractsNative * contractSize) / price : 0;
+  };
 
   fetchPublicTrades = (symbol: string, limit?: number) =>
     this.command<PublicTrade[]>({ op: 'fetchPublicTrades', symbol, limit });

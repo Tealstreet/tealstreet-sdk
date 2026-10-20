@@ -182,7 +182,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
 | --- | --- | --- | --- | --- |
-| `fetchClosedPnl` absent on Rust | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | branded fallback → empty tab; #1445 (open) adds bybit (and variants), okx, blofin | RT, B8 |
+| `fetchClosedPnl` | web `ClosedPositions.tsx:93-121`; MCP `tools.ts:182` | TS (blofin, bybit, bybitinverse, okx, bitunix) | engines with the `closedPositions` capability (bybit, bybitdemo, hyrotrader, bybitinverse, okx names, blofin) serve `fetchClosedPositions` rows, mapped by the TS mappers; others report `capabilities.closedPnl` false, as TS (bitunix stays TS only) | none (handled) |
 | `fetchHistoricalPositions` only kraken/binance/woo | web `collectAccountAxes.ts:229` (`!` asserted) | TS bitget/blofin/bybit/hyperliquid/okx/paradex | base throws `RustEngineExchange: no journal records path declared…`; #1447 (open) adds those six | RT, B8 |
 | `updateSymbolMetadata` no-op on weex | web via `callMethodInWorker` `hooks/margin/usePositionMode.ts:62`, `useMarginType.ts:62`, `useLeverageSlider.ts:235`, `hooks/market/useSymbolMetadataUpdate.ts:14` | TS weex | silent no-op | RT |
 | `recoverAfterOffline` always `true` | web `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82` (reload on `false`) | per-socket recovery | never triggers a reload; #1450 (open) recovers engine sockets, `false` only after dispose/engine death | RT, B5 |

@@ -35,6 +35,8 @@ pub struct Capabilities {
     pub quantity_units: QuantityUnits,
     /// `FetchAccountTier` / `SetAccountTier` venue actions (Lighter).
     pub account_tier: bool,
+    /// The `FetchClosedPositions` venue action: venue-reported closed-position rows.
+    pub closed_positions: bool,
 }
 
 /// How a market's order and position quantities relate to its placement units.
@@ -115,6 +117,7 @@ impl Capabilities {
         options: false,
         quantity_units: QuantityUnits::Base,
         account_tier: false,
+        closed_positions: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -148,6 +151,7 @@ impl Capabilities {
             self.order_book_query,
             self.options,
             self.account_tier,
+            self.closed_positions,
         ]
         .iter()
         .enumerate()
@@ -174,6 +178,7 @@ mod tests {
             account: AccountLookup::AfterLoad,
             client_order_lookup: true,
             options: true,
+            closed_positions: true,
             cancel_all: CancelAll::EachPlacedSymbol,
             leverage_query: LeverageQuery::OnMetadata,
             max_leverage: MaxLeverage::Unsupported,
@@ -186,7 +191,7 @@ mod tests {
         let (kind, payload) = sections(&frame).next().unwrap();
         assert_eq!(kind, section::CAPABILITIES);
         let word = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
-        assert_eq!(word(0), 1 | 1 << 10);
+        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12);
         assert_eq!(word(4), 2 | 1 << 4 | 2 << 8 | 3 << 12 | 4 << 16);
     }
 }

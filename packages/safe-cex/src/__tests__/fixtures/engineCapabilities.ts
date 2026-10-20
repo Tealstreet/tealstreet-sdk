@@ -52,6 +52,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
             ? 'inverseContractSized'
             : 'base',
     accountTier: is('lighter', 'lighter-robinhood'),
+    closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', ...OKX),
     ...overrides,
   };
   return JSON.stringify(record);

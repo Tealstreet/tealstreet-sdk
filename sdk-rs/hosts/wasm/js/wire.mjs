@@ -52,6 +52,7 @@ export const marketQuantityUnits = (flags) => {
 const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
   'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
+  'closedPositions',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
