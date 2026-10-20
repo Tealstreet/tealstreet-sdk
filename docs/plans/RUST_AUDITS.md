@@ -155,3 +155,19 @@ Before cutover: live-smoke private captures on every venue (mainnet minimum size
 for coinbase, backpack, mexc with approval), a 3–7 day read-only production
 shadow diffing full store snapshots, public fixtures re-recorded with TS, and a
 per-venue canary holding the circular-evidence venues last.
+
+## Port reviews (Opus, per venue vs TS)
+
+### OKX
+- High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
+  startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
+  blanks as 0 and continues. Parse blanks as 0, retry with backoff.
+- Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
+  for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
+  read once, so a mode change in the OKX app makes every order reject.
+- Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
+  rejected; income limit truncates.
+- Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
+  staying open, X-Perp history SWAP hardcode, market-order amend placing a new
+  order, duplicate algo cancels. Shared by both: reduce-only conditional sent
+  without `reduceOnly` and un-inverted `posSide` in hedge mode.
