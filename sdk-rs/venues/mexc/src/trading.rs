@@ -5,7 +5,9 @@ use crate::{
     wire::*,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, VenueError, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -68,6 +70,8 @@ pub struct Job {
     gap: f64,
     total_orders: usize,
     failed_index: Option<usize>,
+    /// A step took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -833,17 +837,20 @@ impl MexcFutures {
         };
         if let Err(error) = &steps {
             cx.command_error(command, error);
-            cx.done(command, Err(error.clone()));
+            cx.fail(command, not_sent(error.as_str()));
             return;
         }
         if self.credentials.is_none() {
-            cx.done(command, Err("MEXC trading needs an API key".into()));
+            cx.fail(
+                command,
+                not_sent("MEXC trading needs an API key").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         match steps {
             Err(error) => {
                 cx.command_error(command, &error);
-                cx.done(command, Err(error));
+                cx.fail(command, not_sent(error));
             }
             Ok(steps) => {
                 self.trading.queue.push_back(Job {
@@ -853,6 +860,7 @@ impl MexcFutures {
                     gap,
                     total_orders,
                     failed_index: None,
+                    effective: false,
                 });
                 self.advance_trade(cx);
             }
@@ -894,7 +902,11 @@ impl MexcFutures {
                 .order(&intent.id)
                 .is_some_and(|o| o.status == OrderStatus::Closed)
             {
-                self.trade_failed(cx, command, "MEXC original order filled during amend");
+                self.trade_failed(
+                    cx,
+                    command,
+                    not_sent("MEXC original order filled during amend"),
+                );
                 return;
             }
             self.read_amend(
@@ -932,7 +944,7 @@ impl MexcFutures {
         step = match refreshed {
             Ok(step) => step,
             Err(error) => {
-                self.trade_failed(cx, command, &error);
+                self.trade_failed(cx, command, not_sent(error));
                 return;
             }
         };
@@ -968,18 +980,24 @@ impl MexcFutures {
             self.advance_trade(cx);
         }
     }
-    pub fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, error: &str) {
+    pub fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        mut error: VenueError,
+    ) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            // Whole failures still use the plain path until MEXC migrates to `fail`.
-            if job.ids.is_empty() {
-                cx.done(command, Err(error.to_owned()));
-            } else {
-                let failed_index = job.failed_index.unwrap_or(job.ids.len());
-                let error =
-                    VenueError::new(error).partial(&job.ids, job.total_orders, failed_index);
-                cx.fail(command, error);
+            if (job.effective || !job.ids.is_empty())
+                && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
+                error.outcome = None;
             }
+            let failed_index = job.failed_index.unwrap_or(job.ids.len());
+            cx.fail(
+                command,
+                error.partial(&job.ids, job.total_orders, failed_index),
+            );
         }
         self.advance_trade(cx);
     }
@@ -1112,7 +1130,8 @@ impl MexcFutures {
                 self.advance_trade(cx);
             }
             Ok(None) => {}
-            Err(error) => self.trade_failed(cx, request.command, &error),
+            // A read before the replacement: nothing new was sent.
+            Err(error) => self.trade_failed(cx, request.command, not_sent(error)),
         }
     }
     fn optimistic(
@@ -1264,7 +1283,7 @@ impl MexcFutures {
                     self.trading.active.as_mut().unwrap().steps = steps;
                     self.advance_trade(cx);
                 }
-                Err(error) => self.trade_failed(cx, request.command, &error),
+                Err(error) => self.trade_failed(cx, request.command, not_sent(error)),
             }
             return;
         }
@@ -1273,6 +1292,8 @@ impl MexcFutures {
         {
             self.trading.next_submit = self.trading.next_submit.max(cx.now + 1500.0);
         }
+        // Set when every failure is an explicit per-order venue refusal.
+        let mut refused = false;
         let result = (|| {
             if response.status != 200 {
                 return Err(format!("MEXC HTTP {}", response.status));
@@ -1287,7 +1308,8 @@ impl MexcFutures {
                 Call::Batch { orders } => {
                     let rows: Vec<ResultRow<'_>> =
                         serde_json::from_str(e.payload()?).map_err(|e| e.to_string())?;
-                    let mut failures = if rows.len() != orders.len() {
+                    let mut unproven = rows.len() != orders.len();
+                    let mut failures = if unproven {
                         vec!["incomplete results".to_owned()]
                     } else {
                         vec![]
@@ -1310,6 +1332,7 @@ impl MexcFutures {
                             r.order_id.to_string()
                         };
                         if id.is_empty() {
+                            unproven = true;
                             failures.push("missing order id".into());
                             continue;
                         }
@@ -1317,6 +1340,7 @@ impl MexcFutures {
                         self.trading.active.as_mut().unwrap().ids.push(id);
                     }
                     if !failures.is_empty() {
+                        refused = !unproven;
                         return Err(format!(
                             "MEXC batch order placement failed: {}",
                             failures.join(", ")
@@ -1331,8 +1355,10 @@ impl MexcFutures {
                         vec![]
                     };
                     let mut errors = vec![];
+                    let mut unproven = false;
                     for id in ids {
                         if regular && !rows.iter().any(|r| r.order_id == id || r.id == id) {
+                            unproven = true;
                             errors.push(format!("{id}: missing cancel result"));
                             continue;
                         }
@@ -1360,6 +1386,7 @@ impl MexcFutures {
                         }
                     }
                     if !errors.is_empty() {
+                        refused = !unproven;
                         return Err(format!(
                             "MEXC order cancellation failed: {}",
                             errors.join(", ")
@@ -1461,11 +1488,63 @@ impl MexcFutures {
         })();
         self.trading.waiting = false;
         match result {
-            Ok(()) => self.advance_trade(cx),
+            Ok(()) => {
+                if let Some(job) = self.trading.active.as_mut() {
+                    job.effective = true;
+                }
+                self.advance_trade(cx);
+            }
             Err(error) => {
                 cx.command_error(request.command, &error);
-                self.trade_failed(cx, request.command, &error);
+                let error = write_failure(response.status, response.body, error, refused);
+                self.trade_failed(cx, request.command, error);
             }
         }
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// Classifies a failed write answer. 408/5xx and malformed or unproven 2xx
+/// answers are Unknown; undocumented venue codes stay unset.
+fn write_failure(status: u16, body: &str, message: String, refused: bool) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match status {
+        200 => {}
+        401 => return rejected(error, ErrorKind::AuthInvalid),
+        403 => return rejected(error, ErrorKind::AuthPermission),
+        429 => return rejected(error, ErrorKind::RateLimited),
+        408 => return error.outcome(Outcome::Unknown),
+        400..=499 => return rejected(error, ErrorKind::Rejected),
+        _ => return error.outcome(Outcome::Unknown),
+    }
+    let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(body) else {
+        return error.outcome(Outcome::Unknown);
+    };
+    if envelope.success == Some(true) && envelope.code == 0.0 {
+        return if refused {
+            error
+        } else {
+            error.outcome(Outcome::Unknown)
+        };
+    }
+    let mut error = error.venue_code(envelope.code.to_string());
+    if !envelope.message.is_empty() {
+        error = error.venue_message(envelope.message.into_owned());
+    }
+    match envelope.code as i64 {
+        401 | 602 => rejected(error, ErrorKind::AuthInvalid),
+        402 => rejected(error, ErrorKind::AuthExpired),
+        406 | 701..=704 => rejected(error, ErrorKind::AuthPermission),
+        510 => rejected(error, ErrorKind::RateLimited),
+        600 | 1001..=1004 | 2001..=2009 | 2011 | 2013..=2015 => {
+            rejected(error, ErrorKind::Rejected)
+        }
+        500 | 501 | 9999 => error.outcome(Outcome::Unknown),
+        _ => error,
     }
 }
