@@ -21,6 +21,7 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
 const EXECUTION_CACHE_LIMIT: usize = 4096;
+const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
 /// Reject reasons that are the user's own cancel, not an error.
 const QUIET_REJECT_REASONS: [&str; 2] = ["EC_PerCancelRequest", "EC_NoError"];
 
@@ -53,6 +54,7 @@ pub struct Mapped {
     /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
     fill_cursor: FillCursor,
+    terminal: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -121,6 +123,8 @@ pub struct AccountState {
     terminal_fills: VecDeque<String>,
     executions: HashSet<(String, String)>,
     recent_executions: VecDeque<(String, String)>,
+    terminal_orders: HashSet<String>,
+    recent_terminal_orders: VecDeque<String>,
     recent_fill_cursors: VecDeque<String>,
     ready: bool,
     revision: u32,
@@ -527,6 +531,10 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        terminal: matches!(
+            o.order_status.as_ref(),
+            "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
+        ),
         fill_cursor: FillCursor {
             quantity: filled,
             value: finite(float_of(&o.cum_exec_value))
@@ -859,9 +867,36 @@ impl BybitLinear {
         }
     }
 
-    pub(crate) fn note_order_terminal(&mut self) {
+    pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
         // Terminal rows can be removed, or share the snapshot issue timestamp.
         self.account.revision = self.account.revision.wrapping_add(1);
+        for id in ids {
+            self.remember_terminal_order(id);
+        }
+    }
+
+    fn remember_terminal_order(&mut self, id: &str) {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro())
+            || !self.account.terminal_orders.insert(id.to_owned())
+        {
+            return;
+        }
+        self.account.recent_terminal_orders.push_back(id.to_owned());
+        while self.account.recent_terminal_orders.len() > TERMINAL_ORDER_CACHE_LIMIT {
+            if let Some(old) = self.account.recent_terminal_orders.pop_front() {
+                self.account.terminal_orders.remove(&old);
+            }
+        }
+    }
+
+    fn stale_terminal_snapshot(&mut self, mapped: &Mapped) -> bool {
+        let parent = &mapped.orders[0];
+        if mapped.terminal {
+            self.remember_terminal_order(&parent.id);
+            false
+        } else {
+            parent.status == OrderStatus::Open && self.account.terminal_orders.contains(&parent.id)
+        }
     }
 
     pub(crate) fn private_ready(&self) -> bool {
@@ -1004,6 +1039,9 @@ impl BybitLinear {
         let mut orders = Vec::new();
         self.account.position_bound.clear();
         for mapped in snapshot.orders.expect("checked above") {
+            if self.stale_terminal_snapshot(&mapped) {
+                continue;
+            }
             let id = mapped.orders[0].id.clone();
             // Recovery establishes the baseline. Healthy polls cannot consume
             // executions whose order events have not arrived yet.
@@ -1449,8 +1487,13 @@ impl BybitLinear {
             return;
         };
         self.note_position_bound(&mapped);
-        if mapped.orders[0].status != OrderStatus::Open {
-            self.note_order_terminal();
+        if mapped.terminal {
+            let ids = mapped
+                .orders
+                .iter()
+                .map(|order| order.id.clone())
+                .collect::<Vec<_>>();
+            self.note_order_terminal(&ids);
         }
         match status {
             "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled" => {
@@ -1868,6 +1911,9 @@ impl BybitLinear {
         self.account.position_bound.clear();
         let mut orders = Vec::new();
         for mapped in join.rows {
+            if self.stale_terminal_snapshot(&mapped) {
+                continue;
+            }
             if mapped.position_bound {
                 self.account
                     .position_bound

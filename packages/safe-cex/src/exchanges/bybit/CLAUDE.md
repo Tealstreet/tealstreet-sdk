@@ -1941,7 +1941,10 @@ Invalid quantity/price packets do not consume identity. Older evicted IDs and
 legacy packets without `execId` have no exactly-once guarantee. Demo/Hyro
 accepted cancels and terminal stream rows advance reconciliation revisions,
 so an in-flight REST snapshot cannot restore a retired order even at the same
-engine timestamp. The inverse variant waits for authoritative order updates
+engine timestamp. Those variants retain the latest 4,096 terminal native order
+IDs across reconnects to filter replica-stale open rows in later reads too.
+Only final wire statuses establish tombstones; `Triggered`/`PendingCancel` do not.
+Older evicted order IDs have no persistent terminal-fence guarantee. The inverse variant waits for authoritative order updates
 after amend; coin-unit `remaining` and native `extra.remainingNative` stay
 separate throughout that path.
 

@@ -841,14 +841,14 @@ impl BybitLinear {
                     }
                 }
                 if !canceled.is_empty() {
-                    self.note_order_terminal();
+                    self.note_order_terminal(&canceled);
                 }
                 mark_canceled(cx, &canceled, self.local_order_lifecycle());
             }
             (Call::Cancel { ids } | Call::CancelAll { ids }, Err((_, message)))
                 if already_gone(&message) =>
             {
-                self.note_order_terminal();
+                self.note_order_terminal(&ids);
                 mark_canceled(cx, &ids, self.local_order_lifecycle());
             }
             (Call::CancelAll { ids }, Ok(body)) => {
@@ -868,7 +868,7 @@ impl BybitLinear {
                 if rejected {
                     errors.push("Bybit cancel-all was not successful".into());
                 } else {
-                    self.note_order_terminal();
+                    self.note_order_terminal(&ids);
                     mark_canceled(cx, &ids, self.local_order_lifecycle());
                 }
             }

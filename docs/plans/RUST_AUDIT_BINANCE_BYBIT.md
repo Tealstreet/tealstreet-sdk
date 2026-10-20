@@ -113,3 +113,19 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   the two new optional fields without changing Aster behavior; 99 Aster native
   tests and strict Clippy pass. Its replay gates are included for compatibility.
 - No crypto helper became unused: UUID and signing primitives remain called.
+
+### Bybit M5 follow-up review checkpoint
+
+- Root extended the reproducer to a REST read **started after** cancellation
+  acknowledgement. It still reopened a removed Demo/Hyro order: revision-only
+  fencing was insufficient against stale replicas. Captured failing test before
+  adding bounded retention of the latest 4,096 terminal native IDs.
+- Later open snapshot rows for retained IDs are filtered; unrelated active rows
+  and terminal snapshot rows still commit. Reconnect retains the fence. Only
+  explicitly final native wire statuses seed it: `Triggered` and `PendingCancel`
+  cannot suppress a still-live order with the same native ID.
+- Verification: 149 complete Bybit tests plus strict Clippy/format pass. A final
+  independent Binance account author review found no open issue and reran all
+  43 trading-variant tests successfully, including replica/reconnect/transition
+  controls. This follow-up supersedes the earlier selected WASM artifact; all
+  Bybit replay variants will be rerun on the final artifact.

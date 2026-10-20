@@ -1122,3 +1122,135 @@ fn demo_terminal_stream_at_snapshot_issue_time_cannot_be_reopened() {
     );
     assert!(h.has_request("/v5/order/realtime"));
 }
+
+#[test]
+fn local_cancel_tombstone_filters_replica_stale_reads_issued_after_ack() {
+    for variant in [Variant::Demo, Variant::Hyrotrader] {
+        let mut h = ready(variant);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"retired","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        h.command(Command::CancelOrders {
+            command: 95,
+            ids: vec!["retired".into()],
+        });
+        h.respond(
+            if variant.is_hyro() {
+                "/v5/order/cancel"
+            } else {
+                "/v5/order/cancel-batch"
+            },
+            200,
+            r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        );
+        assert!(h.engine.store().order("retired").is_none());
+        // The stale replica read starts after cancellation is already acknowledged.
+        for (terminal, reconnect) in [(false, false), (true, false), (false, true)] {
+            if reconnect {
+                let socket = h.socket("/v5/private").unwrap();
+                h.event(Event::WsClosed { socket, code: 1006 });
+                h.advance(2000.0);
+                let fresh = h.socket("/v5/private").unwrap();
+                assert_ne!(socket, fresh);
+                h.event(Event::WsOpened { socket: fresh });
+                for op in ["auth", "subscribe"] {
+                    if variant.is_hyro() {
+                        #[derive(serde::Deserialize)]
+                        struct Sent {
+                            req_id: String,
+                        }
+                        let sent = h
+                            .sent_on("/v5/private")
+                            .into_iter()
+                            .rev()
+                            .find(|message| message.contains(&format!("\"op\":\"{op}\"")))
+                            .unwrap();
+                        let sent: Sent = serde_json::from_str(&sent).unwrap();
+                        h.message(
+                            "/v5/private",
+                            &format!(
+                                r#"{{"op":"{op}","req_id":"{}","success":true}}"#,
+                                sent.req_id
+                            ),
+                        );
+                    } else {
+                        h.message("/v5/private", &format!(r#"{{"op":"{op}","success":true}}"#));
+                    }
+                }
+            } else if variant.is_hyro() {
+                h.advance(5000.0);
+            } else {
+                h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+                h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+            }
+            let other = row.replace("retired", "legitimate");
+            let stale = if terminal {
+                row.replace("New", "Cancelled")
+                    .replace(r#""leavesQty":"1""#, r#""leavesQty":"0""#)
+            } else {
+                row.to_owned()
+            };
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(
+                    r#"{{"retCode":0,"result":{{"list":[{stale},{other}],"nextPageCursor":""}}}}"#
+                ),
+            );
+            if !variant.is_hyro() {
+                h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+            }
+            if variant.is_hyro() {
+                h.respond("/v5/position/list", 200, EMPTY);
+                h.respond("/v5/account/wallet-balance", 200, WALLET);
+            }
+            assert!(
+                h.engine
+                    .store()
+                    .order("retired")
+                    .is_none_or(|o| o.status != safe_cex_engine::model::OrderStatus::Open),
+                "{variant:?}: post-ack replica resurrected retired native ID"
+            );
+            assert_eq!(
+                h.engine.store().order("legitimate").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            assert!(
+                !h.has_request("/v5/order/realtime"),
+                "{variant:?}: filtered/terminal rows must not cause a retry loop"
+            );
+        }
+    }
+}
+
+#[test]
+fn transitional_trigger_and_pending_cancel_do_not_tombstone_native_id() {
+    for status in ["Triggered", "PendingCancel"] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"transition","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(
+                r#"{{"topic":"order","data":[{}]}}"#,
+                row.replace("New", status)
+            ),
+        );
+        for body in [row.replace("New", status), row.to_owned()] {
+            h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+            h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(r#"{{"retCode":0,"result":{{"list":[{body}],"nextPageCursor":""}}}}"#),
+            );
+            h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        }
+        assert_eq!(
+            h.engine.store().order("transition").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open,
+            "{status} is transitional"
+        );
+    }
+}

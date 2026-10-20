@@ -668,8 +668,9 @@ const KNOWN_TS_FIXES = {
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
   // Trading audit: deduplicate native execId and fence acknowledged Demo/Hyro
-  // cancellations behind REST reads issued before or during the write. Native
-  // tests exercise equal-time and late-response races without normalization.
+  // cancellations behind REST reads issued before, during or after the write,
+  // with bounded native terminal retention against stale replicas. Native tests
+  // exercise equal-time and late-response races without normalization.
   bybit: (ts, rust) => {
     if (!ts.account) return;
     const output = ts;
