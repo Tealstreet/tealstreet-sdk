@@ -361,3 +361,17 @@ the backing-buffer settling deadline from1s to5s and adds GC diagnostics; CPU,
 retained-memory comparison criteria and1,258,291byte size budget are unchanged.
 Polymarket had passed the stricter1s deadline before this merge. Combined build
 and affected native/SDK/replay checks are running; merge still requires greenCI.
+
+### Coinbase landing integration
+
+Landing advanced to5c0e437faf. Resolved shared registration, harness, roster and
+wire-test conflicts without changing reviewed Polymarket venue code. Incoming
+Coinbase aliases/auth/account/currency/product/client-ID contracts are preserved.
+Independent SDK/manifest audit passes (65tests); currency and prediction frame
+review passes (13wire and14frame regressions). Engine and all87Polymarket native
+tests plus crate clippy pass. All368harness cases pass across the full runs and
+targeted rechecks: the first run encountered an unresolved SDK marker; a later
+run hit the existing200ms readiness test under build load (292ms), with its
+focused recheck running unchanged. No protocol or gate criteria were changed.
+The combined build and affected replay/SDK checks are finishing; final proof
+will be posted on the PR and merge remains conditional on greenCI.

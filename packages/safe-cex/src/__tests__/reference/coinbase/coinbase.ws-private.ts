@@ -6,12 +6,12 @@ import {
   normalizeCfmContractSize,
   resolveCoinbaseUsdEquivalentMarket,
   sign,
-} from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.utils';
+} from './coinbase.utils';
 import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { resolveTransportRouting } from '../../transport/registry';
-import { add, multiply } from '../../utils/safe-math';
-import { virtualClock } from '../../utils/virtualClock';
-import { BaseWebSocket } from '../base.ws';
+import { resolveTransportRouting } from '../../../transport/registry';
+import { add, multiply } from '../../../utils/safe-math';
+import { virtualClock } from '../../../utils/virtualClock';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
 const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
