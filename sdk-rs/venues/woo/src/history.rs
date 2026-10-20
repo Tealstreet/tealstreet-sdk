@@ -363,6 +363,50 @@ fn nonzero(value: Option<f64>) -> Option<f64> {
     value.filter(|v| *v != 0.0)
 }
 
+// Execution history accepts WOO's prefix/suffix symbols and chart aliases,
+// matching the TS venue's normalizeSymbol/normalizeRequestedSymbol boundary.
+fn transaction_symbol(raw: &str) -> String {
+    let uppercase = raw.to_uppercase();
+    let symbol = uppercase
+        .rsplit(':')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&uppercase);
+    for separator in ['_', '-'] {
+        let parts: Vec<_> = symbol.split(separator).collect();
+        if parts.len() >= 3 {
+            if matches!(parts[0], "PERP" | "SPOT") {
+                return format!("{}{}", parts[1], parts[2]);
+            }
+            if parts.last() == Some(&"PERP") {
+                return format!("{}{}", parts[0], parts[1]);
+            }
+        }
+    }
+    if !symbol.contains(['_', '-'])
+        && let Some(base) = symbol.strip_suffix("PERP")
+    {
+        return format!("{base}USDT");
+    }
+    symbol
+        .chars()
+        .filter(|c| !matches!(c, '_' | '-' | '.' | '/' | ':'))
+        .collect()
+}
+
+fn requested_symbol(raw: &str) -> String {
+    let uppercase = raw.to_uppercase();
+    let mut symbol = uppercase
+        .rsplit(':')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&uppercase);
+    for suffix in [".P", "_PERP", "-PERP", "PERP"] {
+        symbol = symbol.strip_suffix(suffix).unwrap_or(symbol);
+    }
+    transaction_symbol(&symbol.replace('/', "_"))
+}
+
 impl Woo {
     pub(crate) fn history_command(
         &mut self,
@@ -401,6 +445,11 @@ impl Woo {
             Query::PublicTrades { symbol, limit } => {
                 (Route::Trades, Some(symbol), None, None, None, None, limit)
             }
+        };
+        let symbol = if route == Route::Fills {
+            symbol.filter(|s| !s.is_empty()).map(|s| requested_symbol(&s))
+        } else {
+            symbol
         };
         if symbol
             .as_ref()
@@ -755,14 +804,14 @@ fn history_entry(r: &Request, item: &str) -> Result<Option<Entry>, String> {
     Ok(Some(match r.route {
         Route::Fills | Route::LegacyFills => {
             let row: FillRow<'_> = serde_json::from_str(item).map_err(err)?;
-            if !row.symbol.starts_with("PERP_") {
+            let symbol = transaction_symbol(&row.symbol.replace('/', "_"));
+            if symbol.is_empty() {
                 return Ok(None);
             }
             let (side, leg) = side(&row.side).ok_or("Invalid WOO execution side")?;
             if row.price <= 0.0 || row.qty <= 0.0 || row.timestamp <= 0.0 {
                 return Err("Invalid WOO execution".into());
             }
-            let symbol = compact(&row.symbol);
             let time = millis(row.timestamp);
             let id = row.id;
             Entry {

@@ -62,6 +62,47 @@ fn fill(id: u64, time: f64, side: &str) -> String {
 const ORDER: &str = r#"{"order_id":9007199254740993,"symbol":"PERP_BTC_USDT","side":"BUY","type":"IOC","status":"FILLED","price":60000,"quantity":0.01,"executed":0.01,"average_executed_price":59999,"reduce_only":true,"position_side":"SHORT","created_time":"1786603865.910","updated_time":"1786603865.920","realized_pnl":0,"total_fee":0.00181194,"fee_asset":"USDT","total_rebate":0,"rebate_asset":"USDT"}"#;
 
 #[test]
+fn execution_queries_accept_chart_aliases_and_map_native_suffix_spellings() {
+    for symbol in [
+        "woo:BTCUSDT.P",
+        "woo:btcusdt.p",
+        "PERP_BTC_USDT",
+        "BTC_USDT_PERP",
+        "BTC-USDT-PERP",
+        "BTC/USDT",
+        "BTCUSDT",
+    ] {
+        let mut e = ready();
+        let r = query(
+            &mut e,
+            Query::Fills {
+                symbol: Some(symbol.into()),
+                order_id: None,
+                from_ms: Some(NOW - 1000.0),
+                to_ms: Some(NOW + 1000.0),
+                limit: Some(2),
+            },
+        );
+        assert!(r.url.contains("symbol=PERP_BTC_USDT"), "{symbol}");
+        assert!(r.url.contains("startTime=1786603864910"));
+        assert!(r.url.contains("endTime=1786603866910"));
+        let first = fill(1, NOW, "BUY").replace("PERP_BTC_USDT", "BTC_USDT_PERP");
+        let second = fill(2, NOW + 1.0, "SELL").replace("PERP_BTC_USDT", "BTC-USDT-PERP");
+        response(
+            &mut e,
+            &r,
+            NOW + 2.0,
+            &format!(r#"{{"success":true,"data":{{"rows":[{first},{second}]}}}}"#),
+        );
+        let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 2, "{symbol}");
+        assert!(rows.as_array().unwrap().iter().all(|r| r["symbol"] == "BTCUSDT"));
+        assert!(e.store().orders().is_empty());
+        assert!(e.store().positions().is_empty());
+    }
+}
+
+#[test]
 fn fills_preserve_execution_ids_hedge_sides_and_absent_pnl_without_store_mutation() {
     let mut e = ready();
     let before = e.store().balance().clone();

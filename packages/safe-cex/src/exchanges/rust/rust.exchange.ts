@@ -373,14 +373,15 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
-    const milliseconds = (value?: number) =>
-      value === undefined || !Number.isFinite(value)
-        ? undefined
-        : Math.floor(value > 1_000_000_000_000 ? value : value * 1000);
+    const milliseconds = (value?: number) => {
+      if (value === undefined || !Number.isFinite(value) || (this.name === 'woo' && value < 0)) return undefined;
+      const alreadyMilliseconds = this.name === 'woo' ? value >= 1_000_000_000_000 : value > 1_000_000_000_000;
+      return Math.floor(alreadyMilliseconds ? value : value * 1000);
+    };
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'hyperliquid', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
