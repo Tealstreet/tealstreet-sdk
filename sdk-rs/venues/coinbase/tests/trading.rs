@@ -31,6 +31,7 @@ struct Session {
     read_portfolios_status: Option<u16>,
     key_permission_failures: u32,
     deactivated: bool,
+    warnings: Vec<String>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -64,6 +65,7 @@ impl Session {
             read_portfolios_status: None,
             key_permission_failures: 0,
             deactivated: false,
+            warnings: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -87,6 +89,10 @@ impl Session {
                     self.results.push((command, result))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
+                Action::Notice(safe_cex_engine::Notice::Log {
+                    level: safe_cex_engine::LogLevel::Warning,
+                    message,
+                }) => self.warnings.push(message.to_string()),
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
@@ -1728,6 +1734,13 @@ fn reduce_only_close_is_not_blocked_by_a_resting_full_size_take_profit() {
             .market_market_ioc
             .is_some()
     );
+    assert!(
+        s.warnings
+            .iter()
+            .any(|w| w.contains("reduce-only orders tp exceeding")),
+        "{:?}",
+        s.warnings
+    );
     s.reply(
         r,
         200,
@@ -1758,6 +1771,36 @@ fn explicit_limit_close_is_not_blocked_by_a_resting_full_size_take_profit() {
         r#"{"success":true,"success_response":{"order_id":"close"}}"#,
     );
     assert!(s.done(334).is_ok());
+}
+
+#[test]
+fn resting_full_size_limit_close_reserves_the_close_and_take_profit_pools() {
+    let mut s = Session::new("INTX", false).ready();
+    let mut close = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    close.close = Some(true);
+    close.price = Some(120.0);
+    let r = s.place(336, close.clone());
+    let client = create_wire(&r).client_order_id;
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"limit-close"}}"#,
+    );
+    assert!(s.done(336).is_ok());
+    s.message(0, "snapshot", &format!(r#"[{{"order_id":"limit-close","client_order_id":"{client}","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"2","limit_price":"120","avg_price":"0"}}]"#));
+    assert_eq!(s.e.store().order("limit-close").unwrap().close, None);
+    s.command(Command::PlaceOrders {
+        command: 337,
+        orders: vec![close],
+    });
+    assert!(s.done(337).unwrap_err().contains("exceed"));
+    let mut tp = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 0.5);
+    tp.reduce_only = Some(true);
+    s.command(Command::PlaceOrders {
+        command: 338,
+        orders: vec![tp],
+    });
+    assert!(s.done(338).unwrap_err().contains("exceed"));
 }
 
 #[test]
