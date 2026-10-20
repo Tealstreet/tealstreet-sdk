@@ -140,3 +140,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - Landing advanced during CI to6945ee83b4 (Woo1316). Merged14 features/factories/build allowlist and Woo-specific request/auth/oracle hooks, preserving Phemex bootstrap/strict audits, all host fast APIs and previous Bitget inverse controls. Independent harness, WASM/shared option and root configuration cross-reviews clean. New optional max_slippage_pct defaults absent; both explicit Phemex order constructors setNone without changing venue behavior. Incoming removal of unused hmac_sha512 retained; Phemex uses hmac_sha256.
 - Matrix32 replay gates (14public,18private) plus4Bitget contract controls.170 harness tests PASS; renewed source/build checks underway. Prior CI reported a BingX public gate failure; diagnostics must be examined and any concrete defect resolved before final merge.
+
+### BingX steady-CPU regression fix
+
+- Prior edb68f2039 CI completed17/18jobs green; only BingX public steadyCPU failed (TS43.8/Rust47.2ms), while output/totalCPU/memory passed. Independent plan and implementation audits approved the bounded per-crate release opt-level z→3 change: existing ticker indexes/sorting/numeric semantics remain intact, no threshold relaxation or unchanged retry.
+- Final-profile combined build and41host/31SDKWasm tests PASS. BingX fixed-fixture public gate PASS: TS/Rust totalCPU182.5/128.6ms, steady97.9/72.1ms, retained3.6/2.2MB;839,731bytes below1,258,291. Private38frames PASS unchanged strict correctness. Source checks alsoPASS:1086native (77Phemex), SDK6905/472files, harness170, bans/fmt/native+Wasmclippy/typecheck44/lint28. Renewed Phemex/Binance/Bitget/inverse gates and4contract controls follow on frozen source.
