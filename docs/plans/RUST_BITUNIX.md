@@ -1584,3 +1584,24 @@ new public+private Binance modes (Spot, COIN-M, PM). Rebuild Binance once for
 allfour mode gates plus newBitunix control after merge, run scoped/native/root
 quality checks and independent phase/adversarial reviews, post findings and
 push only when local gates pass. No speculative GRVT perf code to adopt.
+
+Current batch stopped after six Coinbase private gates passed. Dedicated
+coinbasespot ES256 private functional output matches after documented input
+corrections, but TS memory validation rejects net -575,120bytes: heap
+26,007,384→25,432,232 (-575,152), buffers+32, WASM0. Raw artifacts retained at
+out/coinbasespot-coinbasespot-spot-ES256-private-jsonl-86893; failed log copied
+to /tmp/bitunix-failure-coinbasespot-es256-negative-retention.log. No retry,
+clamp, negative-total waiver, retiming or baseline movement authorized here.
+
+Forensic import-only program keeps all five loaded TS namespaces and creates
+no exchange/transport/replay. Same100ms quiet/1s sampler initially reports
+25.95MB heap, then23.08MB with constant backing buffers; new_space falls
+2.93MB→8KB while old/code spaces stay stable. Thus a reclaimable loader young
+heap can enter the preconstructor baseline. Official Node24.21 and CI22.23
+V8 GC extension confirms sync collection conservatively allows native-stack
+heap pointers; asynchronous major collection runs as a nonnestable task with
+no conservative stack roots and resolves its Promise after collection.
+Investigating awaited async fullGC at the SAME existing collection point,
+with unchanged quiet/deadline/formula/thresholds. Fresh-process controls must
+prove improvement before source changes or any gate retry. Sequential probes
+whose sync baseline was already clean do not establish causality.
