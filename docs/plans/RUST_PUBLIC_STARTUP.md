@@ -1,8 +1,31 @@
 # Public startup resilience (second PR)
 
-This phase follows broker/cancel commits through `c9ba8ba2af`, which are kept on
-`feat/rust-startup-broker`. Public implementation is parked separately on
-`feat/rust-public-startup` while the first PR runs its exact-source gates.
+Active branch: `feat/rust-public-startup-resilience`, created from landing
+`9c34020741` after [broker/cancel PR #1347](https://github.com/Tealstreet/tealstreet-sdk/pull/1347)
+merged with 40/40 successful CI checks and three posted correctness reviews.
+Local first-PR evidence: 2,811 native cases / 222 targets, 590 harness tests,
+76 JS host tests, 444 Wasm SDK cases, 44 typecheck / 28 lint / 27 test tasks,
+12 public gates and 11 private gates. The failed Hyro steady-CPU sample passed
+an isolated rerun at the same source and unchanged gate thresholds.
+
+The previous public checkpoint `bfce1c1012` was cherry-picked as `21c6b8ab38`.
+Both integration conflicts preserve the landing's shared-public-feed module
+and docs alongside the new startup policy. Broker and cancellation fixes remain
+on the landing branch; no stash, rebase, force-push or master change.
+
+## Execute and review
+
+1. Integrate engine policy and all public family migrations; rerun full native
+   targets and repair outdated scripted drivers. Independent reviewer audits
+   all-malformed responses, paging, caches and safe retry identities.
+2. Repair funded private valuation boundaries and SDK readiness. A private
+   account with valid markets/account data must not be disposed by the worker's
+   ticker-dependent startup timeout. Preserve shared-feed compatibility and
+   real quote handshake requirements. Never synthesize prices or readiness.
+3. Run engine/venue/host, root, private/public replay gates; review this phase,
+   repair findings, open a PR into `feat/rust-rewrite`, post independent
+   correctness reviews, and merge only after green CI. Private row tolerance,
+   ticker selection and app payload work remain the following phase.
 
 Shared engine policy: independent public read identities retry at 1/2/4/8/16/30
 seconds (30 second cap), deduplicate pending retries and reset after success.
