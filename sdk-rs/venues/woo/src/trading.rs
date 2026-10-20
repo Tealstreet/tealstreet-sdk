@@ -1543,6 +1543,7 @@ fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
         code: Option<i64>,
+        success: Option<bool>,
     }
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
@@ -1561,7 +1562,10 @@ fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
         (_, Some(-1004 | -1005 | -1006 | -1008 | -1101 | -1102 | -1103)) => {
             rejected(error, ErrorKind::Rejected)
         }
-        _ if parsed.is_none() && response.status < 400 => error.outcome(Outcome::Unknown),
+        // A 2xx that is not an explicit `success: false` refusal proves nothing.
+        _ if response.status < 400 && parsed.is_none_or(|c| c.success != Some(false)) => {
+            error.outcome(Outcome::Unknown)
+        }
         (400..=499, None) => rejected(error, ErrorKind::Rejected),
         _ => error,
     }

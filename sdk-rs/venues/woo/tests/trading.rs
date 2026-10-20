@@ -943,6 +943,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             (None, None),
         ),
         (200, "<html>", unknown),
+        (200, r#"{"message":"ok"}"#, unknown),
         (200, r#"{"success":true,"data":{}}"#, unknown),
     ] {
         let mut e = engine();
