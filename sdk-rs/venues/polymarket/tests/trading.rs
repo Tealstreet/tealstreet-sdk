@@ -172,8 +172,12 @@ fn placement_matches_official_json_v2_and_independent_typed_data_and_hmac() {
     assert!(o.get("taker").is_none());
     // Generic dynamic EIP-712 hashing is independent from the venue's direct ABI encoder.
     let typed = json!({"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"}],"Order":[{"name":"salt","type":"uint256"},{"name":"maker","type":"address"},{"name":"signer","type":"address"},{"name":"tokenId","type":"uint256"},{"name":"makerAmount","type":"uint256"},{"name":"takerAmount","type":"uint256"},{"name":"side","type":"uint8"},{"name":"signatureType","type":"uint8"},{"name":"timestamp","type":"uint256"},{"name":"metadata","type":"bytes32"},{"name":"builder","type":"bytes32"}]},"primaryType":"Order","domain":{"name":"Polymarket CTF Exchange","version":"2","chainId":137,"verifyingContract":"0xE111180000d2663C0091e4f400237545B87B996B"},"message":{"salt":salt.to_string(),"maker":o["maker"],"signer":o["signer"],"tokenId":o["tokenId"],"makerAmount":o["makerAmount"],"takerAmount":o["takerAmount"],"side":0,"signatureType":0,"timestamp":o["timestamp"],"metadata":o["metadata"],"builder":o["builder"]}});
+    let digest = serde_json::from_value::<alloy_dyn_abi::TypedData>(typed)
+        .unwrap()
+        .eip712_signing_hash()
+        .unwrap();
     assert_eq!(
-        safe_cex_crypto::eip712::sign_typed_data(&typed.to_string(), KEY).unwrap(),
+        safe_cex_crypto::ethereum::sign_digest(digest.as_slice(), KEY).unwrap(),
         o["signature"]
     );
     let signature = safe_cex_crypto::hmac_sha256(

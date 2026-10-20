@@ -3811,6 +3811,7 @@ dependencies = [
 name = "safe-cex-venue-polymarket"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-primitives",
  "base64 0.22.1",
  "getrandom 0.2.17",

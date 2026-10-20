@@ -13,5 +13,8 @@ base64.workspace = true
 alloy-primitives.workspace = true
 getrandom.workspace = true
 
+[dev-dependencies]
+alloy-dyn-abi.workspace = true
+
 [lints]
 workspace = true

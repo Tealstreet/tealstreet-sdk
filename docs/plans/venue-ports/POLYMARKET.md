@@ -278,3 +278,13 @@ manifest/host/lockfile auditPASS: allincomingfeatures/versions retained, only
 Polymarketcrate/dep additions. Incoming host parsers are feature gated; expose
 account/book forPolymarket aswell asAster, preservingothercommandgates. Native
 feature tests and fullcombinedbuild/gates running beforePR.
+
+Incoming crypto cleanup removed dynamic typed-data production helpers; the
+Polymarket independent signing test now uses alloy-dyn-abi only as a dev
+ dependency, then the unchanged shared ECDSA primitive. Independent signing
+reviewPASS: complete V2 schema/domain unchanged, direct production ABI encoder
+not reused by the hash oracle. Lockfileaddsoneexistingdevdependencyedge only.
+Combineddefault buildPASS; all91actualWasm SDK tests and55host testsPASS.
+Root44typecheck/28lint/27testtasksPASS afterParadexintegration. Binancepublic
+PASS3runs CPU294.3/140.1ms, steady166.2/55.6ms, retained19.2/3.3MB; bothprivate
+replaysPASS. Remainingfinalnative/public/selectedbundle checks completing.
