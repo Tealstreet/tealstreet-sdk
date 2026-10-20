@@ -547,11 +547,23 @@ fn documented_algo_capacity_rejects_new_stop_but_allows_cancel_replace_at_limit(
         .unwrap();
     let info = h.requests.remove(index);
     h.reply(info,r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"},{"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}]}]}"#);
+    // Private startup begins at markets; settle the position-mode read that gates amends.
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("/positionSide/dual"))
+        .unwrap();
+    let mode = h.requests.remove(index);
+    h.reply(mode, r#"{"dualSidePosition":false}"#);
     h.engine
         .store_mut()
         .set_orders(vec![order("283194212", OrderType::StopLoss)]);
     h.place(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"triggerPrice":9200}));
-    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
+    );
     assert!(h.result(1).is_err());
     h.command(Command::AmendOrder {
         command: 2,

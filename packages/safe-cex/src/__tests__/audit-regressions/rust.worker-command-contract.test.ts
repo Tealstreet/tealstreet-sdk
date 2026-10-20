@@ -131,7 +131,9 @@ it('applies the configured deadline to the live SDK host while preserving caller
     httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,
     command: (json) => { requests.push(JSON.parse(json)); return '[]'; },
     snapshotFrame: () => new Uint8Array(),
+    // Public-only readiness needs decoded market and ticker sections as well as STATUS flags.
     takeFrame: () => new Uint8Array(consumerFrame({
+      markets: [], tickers: [],
       loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
     })),
   };
