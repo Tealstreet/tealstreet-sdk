@@ -913,3 +913,20 @@ identity waiters once; no identity reducer changes financial state.
 including 26 new controls. Strict Clippy, fmt, bans and whitespace checks PASS.
 Independent implementation review PASS. Logs: /tmp/bridge-identity3-*.log.
 SDK dispatch and final combined-WASM acceptance remain separate gates.
+
+## Phase 4d final native identity checkpoint
+
+Lighter/Robinhood resolves unsigned account selectors without initializing a
+signer, nonce or private account state. Lookup fallback and deployment routing
+are shared with startup; index zero and large decimal IDs remain exact, and
+referrals come from the selected row. MEXC and WEEX validate with the selected
+read credential, then namespace identity from a fixed SHA256 prefix of the raw
+primary key. Explicit public-only and invalid selected credentials reject before
+validation I/O; WEEX requires typed canTrade:true. Account/financial state and
+existing signing/rate behavior stay unchanged.
+
+285 native tests PASS across 26 nonempty suites (29 including empty doctests),
+including 24 new controls. Strict Clippy, fmt, bans and diff checks PASS.
+Independent correctness review PASS. Logs: /tmp/bridge-identity-final-*.log.
+This completes the planned native identity batches, not SDK dispatch or the
+final combined-WASM identity acceptance gate.

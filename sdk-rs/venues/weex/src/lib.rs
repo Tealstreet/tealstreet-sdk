@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod history;
+mod identity;
 mod paths;
 mod rate;
 mod sign;
@@ -37,6 +38,7 @@ enum Task {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Identity(CommandId),
     Daily,
     BookTickers,
     Depth {
@@ -127,6 +129,7 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
+    identity: Option<String>,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
@@ -139,6 +142,11 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let identity = options
+            .key
+            .as_deref()
+            .filter(|key| !options.public_data_only && !key.is_empty())
+            .map(identity::fingerprint);
         let read_credentials = options.read_credentials.map(|mut read| {
             if read.passphrase.is_none() {
                 read.passphrase = options.passphrase.clone();
@@ -168,6 +176,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            identity,
             read_credentials,
             private_ws_headers: options.private_ws_headers,
             books: HashMap::new(),
@@ -429,8 +438,13 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
+        if let Task::Identity(command) = task {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         cx.log(LogLevel::Warning, format!("WEEX: {error}"));
         match task {
+            Task::Identity(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 if self.startup_retry.is_none() {
@@ -696,6 +710,7 @@ impl Venue for WeexFutures {
             return;
         }
         match p.task {
+            Task::Identity(command) => self.identity_response(cx, command, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
@@ -863,6 +878,10 @@ impl Venue for WeexFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         let Some(command) = self.trade_command(cx, command) else {
             return;
         };

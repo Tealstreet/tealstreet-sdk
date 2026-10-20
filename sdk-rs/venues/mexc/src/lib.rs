@@ -1,6 +1,7 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
 mod history;
+mod identity;
 mod sign;
 mod trading;
 mod wire;
@@ -29,6 +30,7 @@ pub struct Options {
 
 pub enum Pending {
     History(history::Request),
+    Identity(CommandId),
     Trade(trading::Request),
     Account(account::Request),
     Markets { rows: Vec<Market>, failed: bool },
@@ -361,6 +363,7 @@ impl MexcFutures {
     }
     fn failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Depth { symbol, generation } => {
                 if self
                     .books
@@ -561,6 +564,7 @@ impl Venue for MexcFutures {
             return;
         }
         match pending {
+            Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 self.refresh_stop_orders(cx);
@@ -730,6 +734,7 @@ impl Venue for MexcFutures {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchAccount { command } => self.fetch_identity(cx, command),
             Command::Query { command, query } => self.start_query(cx, command, query),
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             Command::SubscribeOrderBook { symbol } => {

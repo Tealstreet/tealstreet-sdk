@@ -15,6 +15,18 @@ pub struct Lookup {
     value: String,
     address: bool,
 }
+impl Lookup {
+    pub(crate) fn path(&self) -> String {
+        if self.address {
+            format!("accountsByL1Address?l1_address={}", self.value)
+        } else {
+            format!("account?by={}&value={}", self.by, self.value)
+        }
+    }
+    pub(crate) fn is_address(&self) -> bool {
+        self.address
+    }
+}
 pub enum Request {
     Limits {
         started_at: f64,
@@ -492,6 +504,9 @@ impl Lighter {
             .api_key_index
             .as_deref()
             .and_then(|s| s.parse::<u8>().ok());
+        self.next_lookup(cx, self.lookup_candidates());
+    }
+    pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
         let mut candidates = VecDeque::new();
         let app = self
             .options
@@ -538,15 +553,11 @@ impl Lighter {
                 address: true,
             });
         }
-        self.next_lookup(cx, candidates);
+        candidates
     }
     fn next_lookup(&mut self, cx: &mut Cx<'_, Pending>, mut candidates: VecDeque<Lookup>) {
         if let Some(candidate) = candidates.pop_front() {
-            let path = if candidate.address {
-                format!("accountsByL1Address?l1_address={}", candidate.value)
-            } else {
-                format!("account?by={}&value={}", candidate.by, candidate.value)
-            };
+            let path = candidate.path();
             cx.request_streamed(
                 Method::Get,
                 format!("{}/api/v1/{path}", self.host()),
