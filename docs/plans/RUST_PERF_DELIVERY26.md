@@ -559,3 +559,32 @@ validity pair, retaining its result without retry; then freeze the 39/63 full
 collection if valid. No Rust/binary or host production code changed, so reuse
 verified releases and source checks with hashes rechecked. Full CPU/memory
 requirements, final gates and PR landing remain unfinished.
+
+## Corrected-method validity and final collection declaration
+
+The single corrected-method KuCoin pair passes both official gates with exact
+logical output. Retained memory is valid: control 5,666,996 bytes, candidate
+4,345,912 bytes; TS is 21,896,706/21,763,418 bytes. Single-run CPU values are
+unscored and do not establish an engine improvement. The negative original and
+failed lease-only trials stay preserved. `RUST_PERF_DELIVERY26_URL_VALIDITY.json.gz`
+contains the four outputs, logs, checks and readiness evidence.
+
+Original control remains `df2d6a4a03`; candidate Rust/bindings and host production
+source remain `098c150ebf`. Common helpers now match `5de776b440`, including the
+exact-URL representation correction. Only two shared files changed in the
+control; old bytes are backed up. Independent review verifies all 175 helpers
+against Git and all original 429/33/9 protected inputs/proofs unchanged.
+No Rust rebuild or repeated SDK/source checks are necessary: their production
+inputs and all 234 release artifacts are rehashed unchanged. Final harness657,
+SDK426, host172, parity39, Rust2731/209, root44/28/27, familyClippy26 and size52
+checks pass, with all earlier failures retained.
+
+Freeze 39 public profiles/63 private variants. Public profile IDs distinguish
+OKX inverse and EEA X-Perp cases from their default venue profiles. Use fixed
+20 AB/19 BA order, one official three-run public gate per arm/profile, after
+all 63 private gates once. That is 594 replay children (126 private +468 public).
+Keep full input/dependency guards, per-message recorded cadence and delivery;
+no profiling, numerical retries or additional warmups inside this collection.
+Retain numerical failures and narrower margins; stop on operational/parity/
+invalid-metric failures. Report all three-run ranges and TS drift alongside
+medians without statistical-significance claims. Full goals and PR are pending.
