@@ -98,10 +98,11 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     place(&mut e, vec![limit(), bad]);
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
 }
 
 fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
@@ -113,8 +114,8 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     assert!(
         actions.iter().all(|action| matches!(
             action,
-            Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
-                if error.contains("Bybit BBO and TickSize controls")
+            Action::Notice(Notice::CommandFailed { command: 7, error })
+                if error.message.contains("Bybit BBO and TickSize controls")
         )),
         "unexpected batch effects: {actions:?}"
     );
@@ -796,7 +797,52 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
     );
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
-            if error.contains("trailing")
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+            if error.message.contains("trailing")
     )));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::ErrorKind;
+    let failures = |e: &mut Engine<Lighter>| {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // A numeric Lighter code on a sub-500 answer is an explicit refusal.
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit()]);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":21120,"message":"invalid order"}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.message, "invalid order");
+    assert_eq!(
+        (error.kind, error.outcome, error.venue_code.as_deref()),
+        (
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
+            Some("21120")
+        )
+    );
+    // A server error does not prove anything.
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit()]);
+    reply(&mut e, &r, 503, r#"{"code":21500,"message":"busy"}"#);
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    // Preflight refusals were never sent.
+    let (mut e, _) = ready_unattributed();
+    let mut bad = limit();
+    bad.client_order_id = Some("caller".into());
+    place(&mut e, vec![bad]);
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
 }
