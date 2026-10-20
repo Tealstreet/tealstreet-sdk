@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const init = vi.hoisted(() => ({
+  woo: vi.fn(async () => undefined),
+  lighter: vi.fn(async () => undefined),
+  bitrue: vi.fn(async () => undefined),
   backpack: vi.fn(async () => undefined),
   binance: vi.fn(async () => undefined),
   bingx: vi.fn(async () => undefined),
@@ -14,6 +17,9 @@ const init = vi.hoisted(() => ({
   weex: vi.fn(async () => undefined),
 }));
 
+vi.mock('@tealstreet/safe-cex-wasm/web/bitrue', () => ({ default: init.bitrue, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/lighter', () => ({ default: init.lighter, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/woo', () => ({ default: init.woo, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/backpack', () => ({ default: init.backpack, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/binance', () => ({ default: init.binance, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bingx', () => ({ default: init.bingx, WasmEngine: class {} }));
@@ -47,14 +53,18 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.bingx).not.toHaveBeenCalled();
     expect(init.bitget).not.toHaveBeenCalled();
     expect(init.blofin).not.toHaveBeenCalled();
+    expect(init.bitrue).not.toHaveBeenCalled();
+    expect(init.lighter).not.toHaveBeenCalled();
+    expect(init.woo).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
-    const [backpack, binance, pm, bingx, bitget, bitgetusdc, blofin, bybit, cryptocom, hyperliquid, mexc, okx, weex] = await Promise.all(['backpack', 'binance', 'binancepm', 'bingx', 'bitget', 'bitgetusdc', 'blofin', 'bybit', 'cryptocom', 'hyperliquid', 'mexc', 'okx', 'weex'].map(loadWebEngine));
+    const [backpack, binance, pm, bingx, bitget, bitgetusdc, inverse, bitrue, blofin, bybit, cryptocom, hyperliquid, lighter, mexc, okx, weex, woo] = await Promise.all(['backpack', 'binance', 'binancepm', 'bingx', 'bitget', 'bitgetusdc', 'bitgetinverse', 'bitrue', 'blofin', 'bybit', 'cryptocom', 'hyperliquid', 'lighter', 'mexc', 'okx', 'weex', 'woo'].map(loadWebEngine));
     expect(binance).toBe(pm);
     expect(bitget).toBe(bitgetusdc);
-    expect(new Set([backpack, binance, bingx, bitget, blofin, bybit, cryptocom, hyperliquid, mexc, okx, weex]).size).toBe(11);
+    expect(bitget).toBe(inverse);
+    expect(new Set([backpack, binance, bingx, bitget, bitrue, blofin, bybit, cryptocom, hyperliquid, lighter, mexc, okx, weex, woo]).size).toBe(14);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

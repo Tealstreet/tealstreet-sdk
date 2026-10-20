@@ -8,14 +8,17 @@ const aliases = {
   backpack: ['backpack'],
   binance: ['binance', 'binancepm'],
   bingx: ['bingx'],
-  bitget: ['bitget', 'bitgetusdc'],
+  bitget: ['bitget', 'bitgetusdc', 'bitgetinverse'],
+  bitrue: ['bitrue'],
   blofin: ['blofin'],
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],
   hyperliquid: ['hyperliquid'],
+  lighter: ['lighter'],
   mexc: ['mexc'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],
   weex: ['weex'],
+  woo: ['woo'],
 };
 
 for (const [family, names] of Object.entries(aliases)) {

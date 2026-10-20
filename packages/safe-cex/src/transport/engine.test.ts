@@ -1,0 +1,949 @@
+import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { InternalAxiosRequestConfig } from 'axios';
+import type { BaseExchange } from '../exchanges/base';
+import type { ExchangeName, ExchangeOptions } from '../types';
+
+import { Blob as NodeBlob } from 'node:buffer';
+import { deflateSync, gzipSync } from 'node:zlib';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { accountToExchangeOptions } from '../createExchangeFromAccount';
+import { exchangeMetadata } from '../exchangeMetadata';
+import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
+import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
+import { directTransport } from './direct';
+import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { setDefaultTransport } from './registry';
+import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
+import { tealstreetTransport } from './tealstreet/tealstreetTransport';
+import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './tealstreet/transportResolution';
+import { setWsRelayEnabled } from './tealstreet/wsRelay';
+
+const mocks = vi.hoisted(() => ({
+  token: vi.fn(),
+  adapter: vi.fn(),
+  createAdapter: vi.fn(),
+  relay: vi.fn(),
+  nodeRuntime: vi.fn(() => true),
+}));
+
+vi.mock('../accessToken', () => ({ getProxyToken: mocks.token }));
+vi.mock('../index', () => ({ createExchange: vi.fn() }));
+vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: mocks.nodeRuntime }));
+// Avoid global HOW socket/token configuration. The real provider still selects
+// and configures the adapter; its returned adapter captures the final request.
+vi.mock('../httpOverWebsocket/axiosHttpOverWebsocketAdapter', () => ({
+  axiosHttpOverWebsocketAdapter: mocks.adapter,
+  bigIntAxiosHttpOverWebsocketAdapter: mocks.adapter,
+  createAxiosHttpOverWebsocketAdapter: mocks.createAdapter,
+}));
+vi.mock('@tealstreet/http-over-websocket/src/RelayWebSocket', () => ({ RelayWebSocket: mocks.relay }));
+
+type Request = Parameters<Transport['request']>[0];
+
+const makeRaw = () => ({
+  webSocketHeaders: true,
+  now: vi.fn(() => 42),
+  request: vi.fn<Transport['request']>().mockResolvedValue({ status: 200, body: new Uint8Array([123, 125]) }),
+  connect: vi.fn<Transport['connect']>(() => ({ send: vi.fn(), close: vi.fn() })),
+  setTimeout: vi.fn<Transport['setTimeout']>(),
+  clearTimeout: vi.fn<Transport['clearTimeout']>(),
+});
+
+const options = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions => ({
+  key: 'venue-key',
+  secret: 'venue-secret',
+  transport: tealstreetTransport,
+  ...extra,
+});
+
+const request = (url = 'https://api.bybit.com/v5/order/create?timestamp=123&signature=a%2Fb'): Request => ({
+  method: 'POST',
+  url,
+  headers: { 'X-BAPI-API-KEY': 'venue-key', 'Content-Type': 'application/json' },
+  body: '{"orderId":9007199254740993123,"price":"1.2300"}',
+});
+
+const browserHeaders = {
+  Origin: 'https://trade.tealstreet.io',
+  Referer: 'https://trade.tealstreet.io/',
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'cross-site',
+  'sec-fetch-dest': 'empty',
+};
+
+beforeEach(() => {
+  mocks.nodeRuntime.mockReturnValue(true);
+  mocks.token.mockResolvedValue('proxy-jwt');
+  mocks.adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => ({
+    status: 200,
+    statusText: 'OK',
+    headers: { 'content-type': 'application/json', 'x-native': 'untouched' },
+    config,
+    data: '{"orderId":9007199254740993123,"price":1.2300}',
+  }));
+  mocks.createAdapter.mockReturnValue(mocks.adapter);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  setDefaultTransport(directTransport);
+  setWsRelayEnabled(false);
+  vi.unstubAllGlobals();
+});
+
+describe('engine HTTP routing at the raw transport boundary', () => {
+  it('never sends a proxy write after disposal while its token was pending', async () => {
+    let token!: (value: string) => void;
+    mocks.token.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          token = resolve;
+        }),
+    );
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    const pending = routed.request(request());
+    const rejected = expect(pending).rejects.toThrow('disposed');
+    routed.dispose!();
+    await rejected;
+    token('late-jwt');
+    await Promise.resolve();
+    expect(raw.request).not.toHaveBeenCalled();
+  });
+
+  it('includes proxy token acquisition in the request deadline and never sends a stale write', async () => {
+    vi.useFakeTimers();
+    let token!: (value: string) => void;
+    mocks.token.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          token = resolve;
+        }),
+    );
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    const rejected = expect(routed.request(request())).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(20_000);
+    await rejected;
+    token('late-jwt');
+    await Promise.resolve();
+    expect(raw.request).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it('releases the deadline when disposed before a response stream is consumed', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+    });
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    await routed.request(request());
+    expect(vi.getTimerCount()).toBe(1);
+    routed.dispose!();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+  });
+  it('does not let signed query values select a different proxy pool', async () => {
+    const raw = makeRaw();
+    const input = request('https://api.bybit.com/v5/order/create?clientId=binance&a=1&a=2&signature=a%2Fb');
+    await createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request(
+      input,
+    );
+    expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${input.url}`);
+    expect(raw.request.mock.lastCall![0].body).toBe(input.body);
+  });
+  it('supplies proxy fetch headers in a server runtime without Node globals', async () => {
+    mocks.nodeRuntime.mockReturnValue(false);
+    const raw = { ...makeRaw(), serverHeaders: true };
+    await createEngineTransport('okx', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request(
+      request(),
+    );
+    expect(raw.request.mock.lastCall![0].headers).toMatchObject({
+      ...browserHeaders,
+      Authorization: 'Bearer proxy-jwt',
+    });
+  });
+
+  it('passes the host raw socket constructor to HOW and disposes its adapter', async () => {
+    const WebSocket = class {} as unknown as typeof globalThis.WebSocket;
+    const dispose = vi.fn();
+    const adapter = Object.assign(async (config: InternalAxiosRequestConfig) => mocks.adapter(config), { dispose });
+    mocks.createAdapter.mockReturnValue(adapter);
+    const raw = { ...makeRaw(), WebSocket, dispose: vi.fn() };
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), raw);
+    await routed.request(request());
+    expect(mocks.createAdapter).toHaveBeenCalledWith({ region: 'SG', customParser: expect.any(Function), WebSocket });
+    routed.dispose!();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(raw.dispose).toHaveBeenCalledOnce();
+  });
+  it('keeps direct URLs, signed bodies and venue credentials intact', async () => {
+    const raw = makeRaw();
+    const input = request();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    await routed.request(input);
+    expect(raw.request).toHaveBeenCalledExactlyOnceWith({ ...input, signal: expect.any(AbortSignal) });
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(mocks.createAdapter).not.toHaveBeenCalled();
+    expect(routed.now()).toBe(42);
+  });
+
+  it('uses the runtime provider and lets an account override it', async () => {
+    const raw = makeRaw();
+    const rest = vi.fn(({ config }) => ({ baseURL: `https://custom.invalid/${config.baseURL}`, proxied: false }));
+    const wsRouting = vi.fn(directTransport.wsRouting);
+    setDefaultTransport({ ...directTransport, name: 'custom', rest, wsRouting });
+    await createEngineTransport('bybit', { key: 'k', secret: 's' }, raw).request(request());
+    expect(raw.request.mock.calls[0][0].url).toBe(`https://custom.invalid/${request().url}`);
+    expect(wsRouting).toHaveBeenCalledTimes(1);
+    await createEngineTransport('bybit', options({ transport: directTransport }), raw).request(request());
+    expect(raw.request.mock.calls[1][0]).toEqual({ ...request(), signal: expect.any(AbortSignal) });
+    expect(rest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['bybit', undefined, PRIVATE_PROXY_ASIA],
+    ['bybit', 'JA', PRIVATE_PROXY_JP],
+    ['bybit', 'SG', PRIVATE_PROXY_ASIA],
+    ['okx', undefined, PRIVATE_PROXY_JP],
+    ['bitget', 'SG', PRIVATE_PROXY_JP],
+    ['grvt', 'JA', PRIVATE_PROXY_GRVT_TINY],
+  ] as const)('routes %s region=%s through its exact CORS pool', async (exchange, proxyRegion, prefix) => {
+    const raw = makeRaw();
+    const input = request(`https://${exchange}.example/api?signature=%2B%2F`);
+    if (exchange === 'grvt') input.headers.Authorization = 'venue-session';
+    await createEngineTransport(
+      exchange,
+      options({ tealstreetProxy: true, tealstreetTunnel: false, proxyRegion }),
+      raw,
+    ).request(input);
+    expect(raw.request).toHaveBeenCalledExactlyOnceWith({
+      ...input,
+      signal: expect.any(AbortSignal),
+      url: `${prefix}/${input.url}`,
+      headers: {
+        ...input.headers,
+        ...browserHeaders,
+        [exchange === 'grvt' ? 'Tealstreet-Authorization' : 'Authorization']: 'Bearer proxy-jwt',
+      },
+    });
+    expect(mocks.createAdapter).not.toHaveBeenCalled();
+  });
+
+  it('resolves the proxy token for each operation, including an initially empty credential', async () => {
+    mocks.token.mockResolvedValueOnce('').mockResolvedValueOnce('refreshed-jwt');
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    await routed.request(request());
+    await routed.request(request());
+    expect(raw.request.mock.calls[0][0].headers).not.toHaveProperty('Authorization');
+    expect(raw.request.mock.calls[1][0].headers.Authorization).toBe('Bearer refreshed-jwt');
+    expect(mocks.token).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])('overrideProxyUrl rewrites the venue URL with proxy=%s', async (tealstreetProxy) => {
+    const raw = makeRaw();
+    const input = request();
+    await createEngineTransport(
+      'bybit',
+      options({ tealstreetProxy, tealstreetTunnel: false, overrideProxyUrl: 'https://override.invalid/proxy' }),
+      raw,
+    ).request(input);
+    expect(raw.request.mock.calls[0][0].url).toBe(`https://override.invalid/proxy/${input.url}`);
+    expect(raw.request.mock.calls[0][0].headers).toEqual(
+      tealstreetProxy ? { ...input.headers, ...browserHeaders, Authorization: 'Bearer proxy-jwt' } : input.headers,
+    );
+    expect(mocks.token).toHaveBeenCalledTimes(tealstreetProxy ? 1 : 0);
+  });
+
+  it('keeps Binance public requests direct but sends unsigned listen-key requests through the private pool', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('binance', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    const publicRequest = { ...request('https://fapi.binance.com/fapi/v1/exchangeInfo'), headers: {} };
+    const listenKey = {
+      ...request('https://fapi.binance.com/fapi/v1/listenKey'),
+      headers: { 'x-mbx-apikey': 'venue-key' },
+    };
+    await routed.request(publicRequest);
+    await routed.request(listenKey);
+    expect(raw.request.mock.calls[0][0]).toEqual({ ...publicRequest, signal: expect.any(AbortSignal) });
+    expect(raw.request.mock.calls[1][0]).toEqual({
+      ...listenKey,
+      signal: expect.any(AbortSignal),
+      url: `${PRIVATE_PROXY_JP}/${listenKey.url}`,
+      headers: { ...listenKey.headers, ...browserHeaders, Authorization: 'Bearer proxy-jwt' },
+    });
+    expect(mocks.token).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['bybit', 'JA', 'JA'],
+    ['bybit', 'SG', 'SG'],
+    ['binance', 'SG', 'JA'],
+    ['phemex', 'JA', 'SG'],
+  ] as const)(
+    'HOW %s region=%s uses the resolved %s egress without parsing signed JSON',
+    async (exchange, proxyRegion, region) => {
+      vi.useFakeTimers();
+      const raw = makeRaw();
+      const input = request(`https://${exchange}.example/order?signature=a%2Fb`);
+      const response = await createEngineTransport(
+        exchange,
+        options({ tealstreetProxy: true, tealstreetTunnel: true, proxyRegion }),
+        raw,
+      ).request(input);
+      expect(mocks.createAdapter).toHaveBeenCalledExactlyOnceWith({ region, customParser: expect.any(Function) });
+      const parser = mocks.createAdapter.mock.calls[0][0].customParser;
+      expect(parser('{"id":9007199254740993123}')).toBe('{"id":9007199254740993123}');
+      expect(raw.request).not.toHaveBeenCalled();
+      expect(mocks.adapter).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          method: input.method,
+          url: input.url,
+          baseURL: input.url,
+          data: input.body,
+          timeout: 20_000,
+        }),
+      );
+      expect(mocks.adapter.mock.calls[0][0].headers.toJSON()).toEqual(input.headers);
+      expect(new TextDecoder().decode(response.body as Uint8Array)).toBe(
+        '{"orderId":9007199254740993123,"price":1.2300}',
+      );
+      expect(response.headers).toBe('content-type: application/json\nx-native: untouched');
+      expect(mocks.token).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [undefined, false, true],
+    [false, false, false],
+    [true, false, true],
+    [undefined, true, false],
+    [true, true, false],
+  ] as const)(
+    'BingX tunnel=%s publicOnly=%s preserves its explicit-false opt out',
+    async (tealstreetTunnel, publicDataOnly, tunnelled) => {
+      const raw = makeRaw();
+      await createEngineTransport('bingx', options({ tealstreetTunnel, publicDataOnly }), raw).request(
+        request('https://open-api.bingx.com/openApi/swap/v3/quote/klines'),
+      );
+      expect(mocks.adapter).toHaveBeenCalledTimes(tunnelled ? 1 : 0);
+      expect(raw.request).toHaveBeenCalledTimes(tunnelled ? 0 : 1);
+    },
+  );
+
+  it.each(['grvt', 'blofin'] as const)(
+    '%s uses its forced private proxy when the account asks for HOW',
+    async (exchange) => {
+      const raw = makeRaw();
+      const input = request(`https://${exchange}.example/orders`);
+      await createEngineTransport(exchange, options({ tealstreetTunnel: true, tealstreetProxy: false }), raw).request(
+        input,
+      );
+      expect(raw.request.mock.calls[0][0].url).toBe(
+        `${exchange === 'grvt' ? PRIVATE_PROXY_GRVT_TINY : PRIVATE_PROXY_ASIA}/${input.url}`,
+      );
+      expect(mocks.adapter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['weex', 'mexc'] as const)('%s never installs HOW, matching its TS API factory', async (exchange) => {
+    const raw = makeRaw();
+    await createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw).request(
+      request(
+        exchange === 'weex'
+          ? 'https://api-contract.weex.com/capi/v2/account/assets'
+          : 'https://api.mexc.com/api/v1/private/account/assets',
+      ),
+    );
+    expect(raw.request).toHaveBeenCalledTimes(1);
+    expect(mocks.createAdapter).not.toHaveBeenCalled();
+  });
+
+  it('keeps MEXC venue Authorization separate from the private proxy credential', async () => {
+    const raw = makeRaw();
+    await createEngineTransport('mexc', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request({
+      ...request('https://api.mexc.com/api/v1/private/order/list/open_orders'),
+      headers: { Authorization: 'venue-session' },
+    });
+    expect(raw.request.mock.lastCall![0]).toMatchObject({
+      url: `${PRIVATE_PROXY_JP}/https://api.mexc.com/api/v1/private/order/list/open_orders`,
+      headers: { Authorization: 'venue-session', 'Tealstreet-Authorization': 'Bearer proxy-jwt' },
+    });
+  });
+
+  it('fails closed if a tunnel adapter returns parsed JSON', async () => {
+    mocks.adapter.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 9007199254740992 } });
+    await expect(
+      createEngineTransport('bybit', options({ tealstreetTunnel: true }), makeRaw()).request(request()),
+    ).rejects.toThrow('raw response body');
+  });
+
+  it.each(Object.keys(exchangeMetadata) as ExchangeName[])(
+    '%s account preferences reach the TS golden HTTP route',
+    async (exchange) => {
+      // Both golden suites independently freeze account normalization and the
+      // resolver's full routing matrix. Drive their real outputs through the host
+      // rather than snapshotting a second copy of the routing table here.
+      for (const tealstreetProxy of [false, true]) {
+        for (const tealstreetTunnel of [false, true]) {
+          for (const proxyRegion of [undefined, 'JA', 'SG']) {
+            const resolved = accountToExchangeOptions(
+              {
+                exchange,
+                name: 'routing-matrix',
+                apiKey: 'key',
+                apiSecret: 'secret',
+                tealstreetProxy,
+                tealstreetTunnel,
+                proxyRegion,
+              },
+              { transport: tealstreetTransport },
+            );
+            const routing = resolveExchangeRouting(exchange, resolved);
+            const raw = makeRaw();
+            const input = {
+              ...request(`https://${exchange}.example/engine-routing`),
+              headers: { 'X-MBX-APIKEY': 'key' },
+            };
+            mocks.adapter.mockClear();
+            mocks.createAdapter.mockClear();
+            await createEngineTransport(exchange, resolved, raw).request(input);
+            const how =
+              exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+                ? !resolved.publicDataOnly
+                : exchange === 'bingx'
+                  ? resolved.tealstreetTunnel !== false
+                  : !['grvt', 'blofin', 'weex', 'mexc'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
+            const label = `${exchange} proxy=${tealstreetProxy} tunnel=${tealstreetTunnel} region=${proxyRegion}`;
+            expect(mocks.adapter.mock.calls.length, label).toBe(how ? 1 : 0);
+            if (how) {
+              expect(mocks.createAdapter.mock.calls[0][0].region, label).toBe(routing.howEgress === 'jp' ? 'JA' : 'SG');
+              expect(mocks.adapter.mock.calls[0][0].url, label).toBe(input.url);
+            } else {
+              const forceProxy = (exchange === 'grvt' || exchange === 'blofin') && resolved.tealstreetTunnel;
+              const effectiveRouting = forceProxy
+                ? resolveExchangeRouting(exchange, { ...resolved, tealstreetProxy: true })
+                : routing;
+              const prefix = resolved.tealstreetTunnel && !forceProxy ? '' : effectiveRouting.restProxyHost;
+              expect(raw.request.mock.calls[0][0].url, label).toBe(prefix ? `${prefix}/${input.url}` : input.url);
+              expect(raw.request.mock.calls[0][0].body, label).toBe(input.body);
+            }
+          }
+        }
+      }
+    },
+  );
+});
+
+const websocketHeaders = {
+  Origin: 'https://preview.tealstreet.io',
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+};
+
+const handlers = (channel: 'public' | 'private' | 'business' = 'public') => ({
+  channel,
+  onOpen: vi.fn(),
+  onMessage: vi.fn(),
+  onClose: vi.fn(),
+});
+
+describe('engine socket routing at the raw transport boundary', () => {
+  it.each(Object.keys(exchangeMetadata) as ExchangeName[])(
+    '%s routing permutations open exactly the TS channel host',
+    (exchange) => {
+      for (const tealstreetProxy of [false, true]) {
+        for (const tealstreetWsRoute of [false, true]) {
+          for (const proxyRegion of [undefined, 'JA', 'SG']) {
+            for (const bybitSiteId of [undefined, 'BRA_BTL'] as const) {
+              const opts = options({
+                tealstreetProxy,
+                tealstreetWsRoute,
+                proxyRegion,
+                bybitSiteId,
+                tealstreetTunnel: false,
+              });
+              const routing = resolveExchangeRouting(exchange, opts);
+              const raw = makeRaw();
+              const routed = createEngineTransport(exchange, opts, raw);
+              for (const [channel, route] of [
+                ['public', routing.wsPublic],
+                ['private', routing.wsPrivate],
+                ['business', routing.wsBusiness],
+              ] as const) {
+                // Deliberately opaque: role must come from the engine's explicit
+                // channel rather than a URL-name heuristic or routed host.
+                const upstream = `wss://venue.example/socket-${channel}`;
+                const handler = handlers(channel);
+                routed.connect(upstream, handler);
+                const target = route.tunnelled ? route.host! : upstream;
+                const expectedHeaders = {
+                  ...(['bybit', 'bybitinverse', 'bybitspot'].includes(exchange) && bybitSiteId
+                    ? { 'x-site-id': bybitSiteId }
+                    : {}),
+                  ...(new URL(target).hostname.endsWith('.tealstreet.io') ? websocketHeaders : {}),
+                };
+                const label = `${exchange} ${channel} proxy=${tealstreetProxy} ws=${tealstreetWsRoute} region=${proxyRegion} site=${bybitSiteId}`;
+                expect(raw.connect.mock.lastCall?.[0], label).toBe(target);
+                expect(raw.connect.mock.lastCall?.[1].headers, label).toEqual(expectedHeaders);
+                raw.connect.mockClear();
+              }
+            }
+          }
+        }
+      }
+      expect(mocks.token).not.toHaveBeenCalled();
+      expect(mocks.relay).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves native venue upgrade headers and adds WAF headers on a routed socket', () => {
+    const raw = makeRaw();
+    const handler = {
+      ...handlers('private'),
+      headers: { 'X-Venue-Auth': 'signed-upgrade', Authorization: 'venue-auth' },
+    };
+    createEngineTransport('bybit', options({ bybitSiteId: 'BRA_BTL' }), raw).connect(
+      'wss://stream.bybit.com/v5/private',
+      handler,
+    );
+    expect(raw.connect).toHaveBeenCalledExactlyOnceWith(
+      'wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private',
+      expect.objectContaining({ headers: { ...handler.headers, 'x-site-id': 'BRA_BTL', ...websocketHeaders } }),
+    );
+  });
+
+  it('browser sockets select the same host without attempting unsupported WAF upgrade headers', () => {
+    const raw = { ...makeRaw(), webSocketHeaders: false };
+    createEngineTransport('okx', options({ tealstreetProxy: true }), raw).connect(
+      'wss://ws.okx.com:8443/ws/v5/private',
+      handlers('private'),
+    );
+    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
+    expect(raw.connect.mock.lastCall?.[1].headers).toEqual({});
+  });
+
+  it('two silent connections select the sticky fallback while any message resets the streak', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: false }), raw);
+    const url = 'wss://stream.bybit.com/v5/private';
+    const connect = () => routed.connect(url, handlers('private'));
+    connect();
+    connect();
+    raw.connect.mock.lastCall![1].onMessage('{"success":false,"ret_msg":"wrong key"}');
+    connect();
+    connect();
+    expect(raw.connect.mock.lastCall?.[0]).toBe(url);
+    connect();
+    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
+    raw.connect.mock.lastCall![1].onMessage('pong');
+    connect();
+    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
+  });
+
+  it('tracks channel fallback lifetimes separately even when upstream URLs match', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('okx', options(), raw);
+    const url = 'wss://venue.example/shared-socket';
+    routed.connect(url, handlers('public'));
+    routed.connect(url, handlers('private'));
+    routed.connect(url, handlers('business'));
+    expect(raw.connect.mock.calls.map(([target]) => target)).toEqual([url, url, url]);
+  });
+
+  it('gate-enabled private sockets try relay before the passthrough and buffer sends until open', async () => {
+    setWsRelayEnabled(true);
+    const listeners = new Map<string, (event?: unknown) => void>();
+    const relay = {
+      addEventListener: vi.fn((name: string, listener: (event?: unknown) => void) => listeners.set(name, listener)),
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    mocks.relay.mockImplementation(function () {
+      return relay;
+    });
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ proxyRegion: 'JA' }), raw);
+    const url = 'wss://stream.bybit.com/v5/private';
+    routed.connect(url, handlers('private'));
+    routed.connect(url, handlers('private'));
+    const handler = handlers('private');
+    const socket = routed.connect(url, handler);
+    socket.send('{"op":"auth"}');
+    await vi.waitFor(() => expect(mocks.relay).toHaveBeenCalledTimes(1));
+    expect(mocks.relay).toHaveBeenCalledWith(
+      'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
+      [],
+      { headers: websocketHeaders, ALPNProtocols: ['http/1.1'] },
+    );
+    expect(raw.connect).toHaveBeenCalledTimes(2);
+    expect(relay.send).not.toHaveBeenCalled();
+    socket.send('queued-after-construction');
+    handler.onOpen.mockImplementation(() => socket.send('on-open-write'));
+    expect(relay.send).not.toHaveBeenCalled();
+    listeners.get('open')!();
+    expect(handler.onOpen).toHaveBeenCalledOnce();
+    expect(relay.send.mock.calls).toEqual([['{"op":"auth"}'], ['queued-after-construction'], ['on-open-write']]);
+    listeners.get('message')!({ data: 'pong' });
+    expect(handler.onMessage).toHaveBeenCalledExactlyOnceWith('pong', 42);
+    listeners.get('close')!({ code: 1001 });
+    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1001, 42);
+    socket.send('after-close');
+    expect(relay.send).toHaveBeenCalledTimes(3);
+    routed.connect(url, handlers('private'));
+    routed.connect(url, handlers('private'));
+    routed.connect(url, handlers('private'));
+    expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
+  });
+});
+
+it('direct routing forwards raw arrival timestamps without replacing them', () => {
+  const raw = makeRaw();
+  const handler = handlers();
+  createEngineTransport('okx', options(), raw).connect('wss://ws.okx.com:8443/ws/v5/public', handler);
+  raw.connect.mock.lastCall![1].onMessage('payload', 123);
+  expect(handler.onMessage).toHaveBeenCalledExactlyOnceWith('payload', 123);
+});
+
+describe('native host policy uses the same resolved routes', () => {
+  it('rejects secondary-key egress before producing a native plan or a routed transport', () => {
+    const opts = options({ secondary_key: 'read-key', secondary_secret: 'read-secret' });
+    expect(() => resolveEngineRoutingPlan('binance', opts, 'https://fapi.binance.com')).toThrow(
+      'secondary signing keys',
+    );
+    expect(() => createEngineTransport('binance', opts, makeRaw())).toThrow('secondary signing keys');
+    expect(mocks.token).not.toHaveBeenCalled();
+  });
+  it('is serializable, token-free, and matches the actual CORS/WS destinations', async () => {
+    const opts = options({ tealstreetProxy: true, tealstreetTunnel: false, proxyRegion: 'JA' });
+    const input = request('https://www.okx.com/api/v5/account/balance');
+    const plan = resolveEngineRoutingPlan('okx', opts, 'https://www.okx.com');
+    expect(JSON.parse(JSON.stringify(plan))).toEqual(plan);
+    expect(JSON.stringify(plan)).not.toMatch(/proxy-jwt|venue-key|venue-secret/);
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(plan.http).toEqual({
+      mode: 'direct',
+      prefix: PRIVATE_PROXY_JP,
+      authorize: true,
+      authorizationHeader: 'Authorization',
+      headers: browserHeaders,
+    });
+    expect(plan.ws.private.host).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
+    const raw = makeRaw();
+    await createEngineTransport('okx', opts, raw).request(input);
+    expect(raw.request.mock.lastCall?.[0].url).toBe(`${plan.http.prefix}/${input.url}`);
+    expect(plan.wsHeaders).toEqual(websocketHeaders);
+  });
+
+  it.each([
+    ['JA', 'jp'],
+    ['SG', 'asia'],
+  ] as const)('HOW region %s supplies exact native tunnel host', (proxyRegion, host) => {
+    const plan = resolveEngineRoutingPlan(
+      'bybit',
+      options({ tealstreetTunnel: true, proxyRegion }),
+      'https://api.bybit.com',
+    );
+    expect(plan.http.mode).toBe('how');
+    expect(plan.http.tunnelUrl).toBe(`wss://fsjnpy143pbz.${host}.tealstreet.io/tunnel`);
+    expect(plan.http.prefix).toBe('');
+    expect(plan.http.authorize).toBe(false);
+    expect(mocks.token).not.toHaveBeenCalled();
+  });
+
+  it('Binance native public/private policies mirror the keyless versus listen-key split', () => {
+    const plan = resolveEngineRoutingPlan(
+      'binance',
+      options({ tealstreetProxy: true, tealstreetTunnel: false }),
+      'https://fapi.binance.com',
+    );
+    expect(plan.publicHeader).toBe('X-MBX-APIKEY');
+    expect(plan.publicHttp).toMatchObject({ mode: 'direct', prefix: '', authorize: false });
+    expect(plan.http).toMatchObject({ mode: 'direct', prefix: PRIVATE_PROXY_JP, authorize: true });
+  });
+});
+
+describe('Bybit Brazil routing carries the site identity on every transport', () => {
+  it.each([
+    ['direct', false, false],
+    ['proxy', true, false],
+    ['HOW', true, true],
+  ] as const)('%s REST and the native plan preserve x-site-id', async (_mode, tealstreetProxy, tealstreetTunnel) => {
+    const opts = options({ bybitSiteId: 'BRA_BTL', tealstreetProxy, tealstreetTunnel });
+    const raw = makeRaw();
+    await createEngineTransport('bybit', opts, raw).request(request());
+    const headers = tealstreetTunnel
+      ? mocks.adapter.mock.lastCall![0].headers.toJSON()
+      : raw.request.mock.lastCall![0].headers;
+    expect(headers['x-site-id']).toBe('BRA_BTL');
+    const plan = resolveEngineRoutingPlan('bybit', opts, 'https://api.bybit.com');
+    expect(plan.http.headers['x-site-id']).toBe('BRA_BTL');
+    expect(plan.venueWsHeaders).toEqual({ 'x-site-id': 'BRA_BTL' });
+  });
+
+  it('browser Brazil sockets choose the injecting proxy without unsupported headers', () => {
+    const raw = { ...makeRaw(), webSocketHeaders: false };
+    createEngineTransport('bybit', options({ bybitSiteId: 'BRA_BTL' }), raw).connect(
+      'wss://stream.bybit.com/v5/private',
+      handlers('private'),
+    );
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private');
+    expect(raw.connect.mock.lastCall![1].headers).toEqual({});
+  });
+
+  it('Bybit demo excludes the Brazil route and site header', async () => {
+    const opts = options({ bybitSiteId: 'BRA_BTL', tealstreetTunnel: false });
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybitdemo', opts, raw);
+    await routed.request(request('https://api-demo.bybit.com/v5/account/wallet-balance'));
+    routed.connect('wss://stream-demo.bybit.com/v5/private', handlers('private'));
+    expect(raw.request.mock.lastCall![0].headers).not.toHaveProperty('x-site-id');
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://stream-demo.bybit.com/v5/private');
+    expect(raw.connect.mock.lastCall![1].headers).toEqual({});
+  });
+});
+
+const connectedRelay = async () => {
+  setWsRelayEnabled(true);
+  const listeners = new Map<string, (event?: unknown) => void>();
+  const relay = {
+    addEventListener: vi.fn((name: string, listener: (event?: unknown) => void) => listeners.set(name, listener)),
+    send: vi.fn(),
+    close: vi.fn(),
+  };
+  mocks.relay.mockImplementation(function () {
+    return relay;
+  });
+  const routed = createEngineTransport('bybit', options(), makeRaw());
+  const url = 'wss://stream.bybit.com/v5/private';
+  routed.connect(url, handlers('private'));
+  routed.connect(url, handlers('private'));
+  const handler = handlers('private');
+  const socket = routed.connect(url, handler);
+  await vi.waitFor(() => expect(listeners.has('message')).toBe(true));
+  return { relay, handler, socket, emit: (data: unknown) => listeners.get('message')!({ data }), listeners };
+};
+
+describe('relay binary frames obey the native transport text contract', () => {
+  it('decodes gzip Blob, zlib bytes, UTF-8 buffers and following text in arrival order', async () => {
+    // happy-dom's Blob lacks the stream method used by the production decoder.
+    vi.stubGlobal('Blob', NodeBlob);
+    const { emit, handler } = await connectedRelay();
+    emit(new NodeBlob([gzipSync('{"n":1}')]));
+    emit('second');
+    emit(deflateSync('{"n":3}'));
+    emit(new TextEncoder().encode('fourth').buffer);
+    emit('fifth');
+    await vi.waitFor(() =>
+      expect(handler.onMessage.mock.calls).toEqual([
+        ['{"n":1}', 42],
+        ['second', 42],
+        ['{"n":3}', 42],
+        ['fourth', 42],
+        ['fifth', 42],
+      ]),
+    );
+    expect(handler.onClose).not.toHaveBeenCalled();
+  });
+
+  it('preserves decoded relay arrivals before a remote close', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    const { emit, handler, listeners } = await connectedRelay();
+    const order: string[] = [];
+    handler.onMessage.mockImplementation((text, now) => order.push(`${text}:${now}`));
+    handler.onClose.mockImplementation((code, now) => order.push(`close:${code}:${now}`));
+    emit(new NodeBlob([gzipSync('first')]));
+    emit('second');
+    listeners.get('close')!({ code: 1001 });
+    listeners.get('error')!();
+    emit('late');
+    await vi.waitFor(() => expect(order).toEqual(['first:42', 'second:42', 'close:1001:42']));
+  });
+
+  it('malformed compression closes the relay and reports one failure despite queued frames', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    const { emit, handler, relay, listeners } = await connectedRelay();
+    emit(new Uint8Array([0x1f, 0x8b, 0]));
+    emit('after-malformed-frame');
+    emit(new Uint8Array([0x78, 0xff, 0]));
+    await vi.waitFor(() => expect(relay.close).toHaveBeenCalledExactlyOnceWith());
+    listeners.get('close')!({ code: 1007 });
+    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1007, 42);
+    expect(relay.close).toHaveBeenCalledOnce();
+    expect(handler.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('close during an asynchronous Blob decode suppresses it and all queued callbacks', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    let finish!: (bytes: ArrayBuffer) => void;
+    const bytes = new Promise<ArrayBuffer>((resolve) => {
+      finish = resolve;
+    });
+    const arrayBuffer = vi.fn(() => bytes);
+    class DelayedBlob extends NodeBlob {
+      override arrayBuffer(): Promise<ArrayBuffer> {
+        return arrayBuffer();
+      }
+    }
+    const { emit, handler, socket, relay } = await connectedRelay();
+    emit(new DelayedBlob(['pending']));
+    emit('queued-text');
+    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
+    socket.close();
+    finish(new TextEncoder().encode('pending').buffer);
+    await bytes;
+    // Let the already-started decode and the following queued text drain.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(relay.close).toHaveBeenCalledOnce();
+    expect(handler.onMessage).not.toHaveBeenCalled();
+    expect(handler.onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe('Bitget host routing keeps engine feeds and recovery independent', () => {
+  const publicUrl = 'wss://ws.bitget.com/v2/ws/public';
+  const privateUrl = 'wss://ws.bitget.com/v2/ws/private';
+  const utaUrl = 'wss://ws.bitget.com/v3/ws/private';
+  const withContext = (feed: string, recover = false, channel: 'public' | 'private' = 'public') => ({
+    ...handlers(channel),
+    context: { feed, recover },
+  });
+
+  it('starts all three same-URL public feeds directly and advances each feed independently', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    for (const feed of ['tickers', 'books', 'candles']) routed.connect(publicUrl, withContext(feed));
+    expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([publicUrl, publicUrl, publicUrl]);
+    routed.connect(publicUrl, withContext('tickers'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public');
+    // A working books feed remains direct while its sibling has fallen back.
+    raw.connect.mock.calls[1][1].onMessage('pong');
+    routed.connect(publicUrl, withContext('books'));
+    expect(raw.connect.mock.lastCall![0]).toBe(publicUrl);
+    routed.connect(publicUrl, withContext('candles'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public');
+  });
+
+  it.each(['bitget', 'bitgetinverse', 'bitgetusdc'] as const)(
+    '%s classic post-write recovery selects and sticks to the declared private fallback',
+    (exchange) => {
+      const raw = makeRaw();
+      const routed = createEngineTransport(exchange, options(), raw);
+      routed.connect(privateUrl, withContext('account', false, 'private'));
+      raw.connect.mock.lastCall![1].onMessage('{"event":"login","code":"0"}');
+      routed.connect(privateUrl, withContext('account', true, 'private'));
+      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+      routed.connect(privateUrl, withContext('account', false, 'private'));
+      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+    },
+  );
+
+  it('the direct provider keeps recovery on the real venue host', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ transport: directTransport }), raw);
+    for (let attempt = 0; attempt < 5; attempt++) routed.connect(privateUrl, withContext('account', true, 'private'));
+    expect(raw.connect.mock.calls.every(([url]) => url === privateUrl)).toBe(true);
+  });
+
+  it('UTA private sockets bypass v2 fallbacks even during recovery and repeated silence', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    for (let attempt = 0; attempt < 10; attempt++) routed.connect(utaUrl, withContext('account', true, 'private'));
+    expect(raw.connect.mock.calls.every(([url]) => url === utaUrl)).toBe(true);
+    expect(raw.connect.mock.calls.every(([, handler]) => Object.keys(handler.headers ?? {}).length === 0)).toBe(true);
+  });
+
+  it.each([
+    ['pong', true],
+    ['{"event":"login","code":"0"}', false],
+  ] as const)('private frame %s counts toward stream proof=%s', (message, fallbackExpected) => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    raw.connect.mock.lastCall![1].onMessage(message);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe(
+      fallbackExpected ? 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private' : privateUrl,
+    );
+  });
+});
+
+it('a recovery hint preserves direct routing when the only candidate is a relay', () => {
+  setWsRelayEnabled(true);
+  const raw = makeRaw();
+  const provider = {
+    ...tealstreetTransport,
+    wsRouting: (exchange: ExchangeName, opts: Partial<ExchangeOptions>) => {
+      const routing = tealstreetTransport.wsRouting(exchange, opts);
+      return { ...routing, wsPrivate: { ...routing.wsPrivate, fallback: undefined } };
+    },
+  };
+  createEngineTransport('bybit', options({ transport: provider }), raw).connect('wss://stream.bybit.com/v5/private', {
+    ...handlers('private'),
+    context: { feed: 'account', recover: true },
+  });
+  expect(raw.connect.mock.lastCall![0]).toBe('wss://stream.bybit.com/v5/private');
+  expect(mocks.relay).not.toHaveBeenCalled();
+});
+
+describe('Hyperliquid uses the factories original publicDataOnly option', () => {
+  const permutations = ([undefined, false, true] as const).flatMap((publicDataOnly) =>
+    ([undefined, false, true] as const).flatMap((tealstreetTunnel) =>
+      (['hyperliquid', 'hyperliquidspot'] as const).map((exchange) => ({ exchange, publicDataOnly, tealstreetTunnel })),
+    ),
+  );
+
+  it.each(permutations)(
+    '$exchange publicOnly=$publicDataOnly tunnel=$tealstreetTunnel matches actual TS factories',
+    async ({ exchange, publicDataOnly, tealstreetTunnel }) => {
+      const opts = options({ publicDataOnly, tealstreetTunnel });
+      const parent = { name: exchange } as BaseExchange;
+      // These are the production factories, not a copied decision expression:
+      // both perps clients and the spot client install HOW from the raw flag.
+      const clients =
+        exchange === 'hyperliquid'
+          ? [createExchangeAPI(opts, parent), createInfoAPI(opts, parent)]
+          : [createSpotAPI(opts, parent)];
+      const factoryUsesHow = clients[0].defaults.adapter === mocks.adapter;
+      expect(clients.every((client) => (client.defaults.adapter === mocks.adapter) === factoryUsesHow)).toBe(true);
+      const raw = makeRaw();
+      const host = createEngineTransport(exchange, opts, raw);
+      await host.request({ ...request('https://api.hyperliquid.xyz/info'), body: '{"type":"meta"}' });
+      await host.request({ ...request('https://api.hyperliquid.xyz/exchange'), body: '{"action":{"type":"cancel"}}' });
+      expect(mocks.adapter).toHaveBeenCalledTimes(factoryUsesHow ? 2 : 0);
+      expect(raw.request).toHaveBeenCalledTimes(factoryUsesHow ? 0 : 2);
+      expect(resolveEngineRoutingPlan(exchange, opts, 'https://api.hyperliquid.xyz').http.mode).toBe(
+        factoryUsesHow ? 'how' : 'direct',
+      );
+    },
+  );
+
+  it.each([
+    { vault: '0x1111111111111111111111111111111111111111' },
+    { applicationId: '0x2222222222222222222222222222222222222222' },
+    {},
+  ])('address-only or keyless options retain the raw undefined public flag: %j', async (identity) => {
+    const opts = options({ key: '', secret: '', tealstreetTunnel: false, ...identity });
+    expect(opts.publicDataOnly).toBeUndefined();
+    const parent = { name: 'hyperliquid' } as BaseExchange;
+    expect(createInfoAPI(opts, parent).defaults.adapter).toBe(mocks.adapter);
+    expect(createExchangeAPI(opts, parent).defaults.adapter).toBe(mocks.adapter);
+    const raw = makeRaw();
+    await createEngineTransport('hyperliquid', opts, raw).request({
+      ...request('https://api.hyperliquid.xyz/info'),
+      body: '{"type":"meta"}',
+    });
+    expect(mocks.adapter).toHaveBeenCalledTimes(1);
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
+});

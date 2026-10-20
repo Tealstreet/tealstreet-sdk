@@ -190,7 +190,7 @@ export class Tape {
     this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url));
     this.frames = this.records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close'
-      || (r.type === 'open' && (!venue.rust || this.bitget || ['mexc', 'backpack', 'hyperliquid'].includes(venue.rust))));
+      || (r.type === 'open' && (!venue.rust || this.bitget || ['mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter'].includes(venue.rust))));
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
@@ -284,12 +284,16 @@ export class Tape {
     this.requests.add(key);
     if (this.responses.isWrite(method, url)) this.writes.push(key);
     if (this.responses.isWrite(method, url) && this.venue.compareWriteOrder && this.expectedWrites[0] !== key) {
+      if (process.env.RUST_REQUEST_TRACE) console.error('unexpected write', key, 'expected', this.expectedWrites[0]);
       this.responses.unserved++;
       return { status: 599, body: '' };
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
-    const response = this.bitget
-      ? this.responses.respond(method, url, body, this.commandIndex, (record) => this.validateBitgetMatch(record, method, url, body), elapsed)
+    const response = this.bitget || this.venue.validateMatchedRequest
+      ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        this.validateBitgetMatch(record, method, url, body);
+        this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+      }, elapsed)
       : this.responses.respond(method, url, body, this.commandIndex, elapsed);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
     return response;
@@ -301,6 +305,7 @@ export class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
+    this.audit?.connected?.(url);
     const key = canonicalUrl(url, this.callerIds);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);

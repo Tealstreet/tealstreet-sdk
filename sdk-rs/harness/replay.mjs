@@ -65,6 +65,8 @@ const until = async (predicate, label) => withTimeout((async () => {
   while (!predicate()) await new Promise((resolve) => realTimeout(resolve, 5));
 })(), label, 15000);
 
+await venue.initializeReplay?.(values.impl, replayOptions);
+
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
@@ -125,6 +127,7 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
   contractSize: m.contractSize ?? null,
   // The engine frame carries trading increments (RUST_REWRITE.md MARKETS).
   precision: { amount: m.precision.amount, price: m.precision.price },
@@ -290,6 +293,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      isInverse: (markets.flags[i] & 2) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
@@ -344,12 +348,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -500,6 +506,18 @@ async function runTs() {
   };
   const options = replayOptions;
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
+  // Model worker dispatch through the exchange's real local methods.
+  exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
+    setImmediate(async () => {
+      try {
+        if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
+        const result = await exchange[method](...args);
+        exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
+      } catch (error) {
+        exchange.emitter.emit('callMethod:done', { requestId, success: false, result: { message: error.message } });
+      }
+    });
+  });
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
@@ -565,6 +583,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
+          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -615,7 +634,8 @@ async function runTsCommand(exchange, store, record) {
       await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
       return [];
     case 'cancelSymbolOrders':
-      await exchange.cancelSymbolOrders(args.symbol);
+      if (args.symbol === '') await exchange.cancelAllOrders();
+      else await exchange.cancelSymbolOrders(args.symbol);
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);
@@ -672,6 +692,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
+    ...(venue.inverseNativeAmounts ? { remainingNative: o.extra?.remainingNative } : {}),
     remaining: o.remaining,
     ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     reduceOnly: Boolean(o.reduceOnly),
@@ -685,6 +706,7 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
+    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,
@@ -740,7 +762,8 @@ writeFileSync(
       ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands,
+    commands: result.commands.map((result, index) => venue.commandResult?.(result,
+      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
   }),
 );
 realClearTimeout(replayDeadline);

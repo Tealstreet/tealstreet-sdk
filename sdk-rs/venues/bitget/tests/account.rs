@@ -177,6 +177,7 @@ fn uta_detection_uses_v3_topics_and_open_order_pagination() {
         200,
         r#"{"code":"00000","data":[]}"#,
     );
+    h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
     h.login();
     assert!(h.engine.store().hedged());
     assert!(
@@ -242,6 +243,7 @@ fn uta(strategy: &str) -> Harness {
         r#"{"code":"00000","data":{"list":[]}}"#,
     );
     h.respond("/unfilled-strategy-orders", 200, strategy);
+    h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
     h.login();
     h
 }
@@ -327,6 +329,7 @@ fn uta_close_side_stays_execution_direction_and_virtual_refresh_keeps_strategies
         r#"{"code":"00000","data":{"list":[]}}"#,
     );
     h.respond("/unfilled-strategy-orders", 200, r#"{"code":"00000","data":[{"orderId":"strategy","symbol":"BTCUSDT","qty":"1","side":"sell","posSide":"long","takeProfit":"120","stopLoss":"80"}]}"#);
+    h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
     for _ in 0..4 {
         h.timer_after(2000.0);
     }

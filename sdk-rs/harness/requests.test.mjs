@@ -486,3 +486,26 @@ test('Hyperliquid only normalizes generated cloids on new order fields', () => {
   }
   assert.notEqual(key({ action: { orders: [{ c: cloid(3) }] } }, info), key({ action: { orders: [{ c: cloid(4) }] } }, info));
 });
+
+test('WOO native topics and auth identity remain exact while fresh clocks vary', () => {
+  const url = 'wss://wss.woox.io/v2/ws/private/stream/app';
+  const options = { wooProtocol: true };
+  const keys = (value) => subscriptionKeys(url, JSON.stringify(value), new Set(), options);
+  assert.notDeepEqual(keys({ event: 'subscribe', topic: 'executionreport' }), keys({ event: 'subscribe', topic: 'algoexecutionreportv2' }));
+  for (const event of ['ping', 'pong']) assert.deepEqual(keys({ event }), []);
+  const auth = (apikey, timestamp, sign) => keys({ event: 'auth', params: { apikey, timestamp, sign } });
+  assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
+  assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
+});
+
+test('per-route request adapters preserve method normalization and exact bigint identities', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const options = venueOf('bitrue');
+  const route = 'https://fapi.bitrue.com/fapi/v2/order';
+  assert.equal(requestKey('post', route, { clientOrderId: 'first', volume: '1' }, new Set(), options),
+    requestKey('POST', route, { clientOrderId: 'second', volume: '1' }, new Set(), options));
+  const key = (id) => requestKey('POST', 'https://fixture.test/cancel', { nested: { id } });
+  assert.equal(key(9007199254740993n), requestKey('POST', 'https://fixture.test/cancel', '{"nested":{"id":9007199254740993}}'));
+  assert.notEqual(key(9007199254740993n), key(9007199254740994n));
+  assert.notEqual(key(9007199254740993n), key('9007199254740993'));
+});

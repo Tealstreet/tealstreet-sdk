@@ -264,3 +264,66 @@ fn ticker_row_storage_preserves_empty_and_multiple_rows_and_escaped_envelopes() 
     h.message(r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"101"},{"instId":"BTCUSDT","lastPr":"102"}]}"#);
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 102.0);
 }
+
+#[test]
+fn inverse_public_contracts_keep_native_precision_and_coin_product() {
+    // https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market
+    for (testnet, product) in [(false, "coin-futures"), (true, "scoin-futures")] {
+        let mut h = Harness::started(Options {
+            public_data_only: true,
+            product: Product::Inverse,
+            testnet,
+            ..Options::default()
+        });
+        assert!(
+            h.requests[0]
+                .url
+                .ends_with(&format!("productType={product}"))
+        );
+        h.respond("/contracts", 200, r#"{"code":"00000","data":[{"symbol":"BTCUSD","baseCoin":"BTC","quoteCoin":"USD","symbolStatus":"normal","pricePlace":"1","priceEndStep":"5","sizeMultiplier":"1","minTradeNum":"1","maxTradeNum":"2000","maxOrderQty":"5000","maxLever":"125"},{"symbol":"ETHUSD","baseCoin":"ETH","quoteCoin":"USD","symbolStatus":"listed","pricePlace":"2","priceEndStep":"1","sizeMultiplier":"1","minTradeNum":"1"},{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001"}]}"#);
+        h.respond("/tickers", 200, r#"{"code":"00000","data":[{"symbol":"BTCUSD","lastPr":"50000","bidPr":"49999","askPr":"50001"},{"symbol":"ETHUSD","lastPr":"2500"}]}"#);
+        let markets = h.engine.store().markets();
+        assert_eq!(markets.len(), 2);
+        assert_eq!(markets[0].is_inverse, Some(true));
+        assert_eq!(markets[0].precision.amount, 1.0);
+        assert_eq!(markets[0].precision.price, 0.5);
+        assert_eq!(markets[0].limits.amount.max, 2000.0);
+        assert_eq!(markets[1].limits.leverage.max, 20.0);
+        for (socket, _) in h.sockets.clone() {
+            h.event(Event::WsOpened { socket });
+        }
+        assert!(
+            h.sent
+                .iter()
+                .any(|(_, text)| text.contains(&product.to_uppercase()))
+        );
+        h.command(Command::SubscribeOrderBook {
+            symbol: "BTCUSD".into(),
+        });
+        h.message(r#"{"arg":{"channel":"books","instId":"BTCUSD"},"action":"snapshot","data":[{"seq":1,"bids":[["49999","1000"]],"asks":[["50001","2000"]]}]}"#);
+        assert_eq!(
+            h.engine.book("BTCUSD").unwrap().bids()[0],
+            (49999.0, 1000.0)
+        );
+    }
+}
+
+#[test]
+fn shared_public_socket_urls_keep_independent_feed_identities() {
+    let h = Harness::public();
+    let feeds: std::collections::HashSet<_> = h
+        .socket_contexts
+        .iter()
+        .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
+        .map(|(_, _, context)| context.as_ref().expect("feed context").feed)
+        .collect();
+    assert_eq!(
+        feeds,
+        std::collections::HashSet::from(["primary", "secondary-1", "secondary-2"])
+    );
+    assert!(
+        h.socket_contexts
+            .iter()
+            .all(|(_, _, context)| !context.as_ref().unwrap().recover)
+    );
+}

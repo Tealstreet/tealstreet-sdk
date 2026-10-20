@@ -13,7 +13,10 @@
       "types": "./js/wire.d.mts",
       "default": "./js/wire.mjs"
     },
-    "./workers": "./js/workers.mjs",
+    "./workers": {
+      "types": "./js/workers.d.mts",
+      "default": "./js/workers.mjs"
+    },
     "./venues": {
       "types": "./js/venues.d.mts",
       "default": "./js/venues.mjs"
@@ -105,6 +108,30 @@
     "./node/hyperliquid": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/hyperliquid/safe_cex_wasm.js"
+    },
+    "./web/bitrue": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bitrue/safe_cex_wasm.js"
+    },
+    "./node/bitrue": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bitrue/safe_cex_wasm.js"
+    },
+    "./web/lighter": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/lighter/safe_cex_wasm.js"
+    },
+    "./node/lighter": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/lighter/safe_cex_wasm.js"
+    },
+    "./web/woo": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/woo/safe_cex_wasm.js"
+    },
+    "./node/woo": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/woo/safe_cex_wasm.js"
     }
   },
   "scripts": {

@@ -178,7 +178,14 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        let socket = cx.connect(self.socket_url(channel));
+        let socket = cx.connect_channel(
+            self.socket_url(channel),
+            match channel {
+                PUBLIC => safe_cex_engine::SocketChannel::Public,
+                BUSINESS => safe_cex_engine::SocketChannel::Business,
+                _ => safe_cex_engine::SocketChannel::Private,
+            },
+        );
         let c = &mut self.connections[channel];
         c.socket = Some(socket);
         c.open = false;

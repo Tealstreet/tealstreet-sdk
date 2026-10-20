@@ -12,18 +12,24 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Header-capable raw socket constructor for HOW and relay protocol clients. */
+  WebSocket?: typeof globalThis.WebSocket;
+  /** Server fetch does not add browser Origin/Referer headers automatically. */
+  serverHeaders?: boolean;
+  dispose?(): void;
   /** Upgrade headers must be supported without dropping authentication. */
   webSocketHeaders?: boolean;
   now(): number;
   connect(
     url: string,
-    handlers: { headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
+    handlers: { context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
   ): Socket;
   request(request: {
     method: string;
     url: string;
     headers: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
   }): Promise<HttpResponse>;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;

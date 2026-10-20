@@ -19,11 +19,17 @@
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:build-profile": "bash sdk-rs/harness/build-profile.sh",
     "rust:profile": "node --expose-gc sdk-rs/harness/profile.mjs",
-    "rust:replay": "node --expose-gc sdk-rs/harness/replay.mjs",
+    "rust:replay": "node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-bitget-uta": "node sdk-rs/harness/private-tape-bitget-uta.mjs",
+    "rust:private-tape-bitgetinverse": "node sdk-rs/harness/private-tape-bitgetinverse.mjs",
+    "rust:test-bitget-parity": "node --test sdk-rs/harness/bitget-parity.integration.mjs",
+    "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
+    "rust:lighter-signing-vectors": "node --import tsx sdk-rs/harness/lighter-signing-vectors.mjs",
+    "rust:private-tape-lighter": "node sdk-rs/harness/private-tape-lighter.mjs",
     "rust:private-tape-hyperliquid": "node sdk-rs/harness/private-tape-hyperliquid.mjs",
     "rust:private-tape-mexc": "node sdk-rs/harness/private-tape-mexc.mjs",
     "rust:private-tape-bingx": "node sdk-rs/harness/private-tape-bingx.mjs",
@@ -33,7 +39,8 @@
     "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
     "rust:private-tape:weex": "node sdk-rs/harness/private-tape-weex.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
-    "rust:gate": "node sdk-rs/harness/gate.mjs"
+    "rust:gate": "node sdk-rs/harness/gate.mjs",
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

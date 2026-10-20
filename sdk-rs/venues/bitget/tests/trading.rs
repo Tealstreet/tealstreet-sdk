@@ -55,11 +55,17 @@ fn uta() -> Harness {
         200,
         r#"{"code":"00000","data":{"list":[]}}"#,
     );
-    h.respond(
-        "/unfilled-strategy-orders",
-        200,
-        r#"{"code":"00000","data":[]}"#,
-    );
+    while h
+        .requests
+        .iter()
+        .any(|r| r.url.contains("/unfilled-strategy-orders"))
+    {
+        h.respond(
+            "/unfilled-strategy-orders",
+            200,
+            r#"{"code":"00000","data":[]}"#,
+        );
+    }
     h.login();
     h.engine.store_mut().set_hedged(true);
     h
@@ -534,11 +540,13 @@ fn post_write_private_watchdog_ignores_pongs_and_promotes_classic_fallback() {
             h.event(Event::TimerFired { timer });
         }
     }
-    assert!(
-        h.sockets
-            .iter()
-            .any(|(_, url)| url.contains("/bitget/v2/private"))
-    );
+    assert!(h.socket_contexts.iter().any(|(_, url, context)| {
+        url == "wss://ws.bitget.com/v2/ws/private"
+            && context
+                .as_ref()
+                .is_some_and(|context| context.feed == "private" && context.recover)
+    }));
+    assert!(h.sockets.iter().all(|(_, url)| !url.contains("tealstreet")));
 }
 
 #[test]

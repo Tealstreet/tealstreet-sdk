@@ -1,6 +1,22 @@
 import type { Execution, HistoricalOrder } from '../types';
+import type { PositionRecord } from './position.types';
 
 import { OrderSide } from '../types';
+import { mapFoldedInterval } from './fold.position-adapter';
+import { reconstructPositionIntervals } from './position-intervals';
+
+export const wooOrdersToPositionRecords = (
+  orders: HistoricalOrder[],
+  opts: { account: string; from: number; resolveSettleCurrency: (symbol: string) => string },
+): PositionRecord[] => {
+  const records: PositionRecord[] = [];
+  for (const interval of reconstructPositionIntervals(wooOrdersToExecutions(orders))) {
+    if (interval.closedAt === undefined || interval.closedAt < opts.from) continue;
+    const record = mapFoldedInterval(interval, opts);
+    if (record) records.push({ ...record, sourceAxis: 'orders' });
+  }
+  return records;
+};
 
 /**
  * WOO round trips are folded from the ORDER axis, not from fills.

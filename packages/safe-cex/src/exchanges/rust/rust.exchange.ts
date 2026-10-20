@@ -1,3 +1,4 @@
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -25,6 +26,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -41,12 +43,16 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binancepm: 'binancepm',
   bitget: 'bitget',
   bitgetusdc: 'bitgetusdc',
+  bitgetinverse: 'bitgetinverse',
   blofin: 'blofin',
+  bitrue: 'bitrue',
   mexc: 'mexc',
+  woo: 'woo',
   bingx: 'bingx',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
+  lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -61,6 +67,12 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  woo: {
+    label: 'WOO',
+    mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
+    requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
+    isValid: (id) => /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)),
+  },
   backpack: {
     label: 'Backpack',
     requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
@@ -68,6 +80,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   },
   bitget: bitgetClientOrderIdRule,
   bitgetusdc: bitgetClientOrderIdRule,
+  bitgetinverse: bitgetClientOrderIdRule,
   hyperliquid: hyperliquidClientOrderIdRule,
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -79,6 +92,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be 1-40 characters with no uppercase letters',
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
+  bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `ts${uuid()}`.slice(0, 36) }),
@@ -138,11 +152,28 @@ export class RustEngineExchange extends BaseExchange {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc');
+    this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'woo') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+      this.fetchHistoricalPositions = async (opts) => {
+        const to = opts.to ?? Date.now();
+        const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+        const orders = await this.fetchHistoricalOrders({ from, to });
+        return wooOrdersToPositionRecords(orders, {
+          account: opts.account, from,
+          resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+        });
+      };
+    }
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'lighter') {
+      return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
+    }
     if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
     return (
       this.options.publicDataOnly === true ||
@@ -154,10 +185,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   start = async () => {
+    assertEngineAccountRouting(this.options);
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
-    if (this.name !== 'hyperliquid' && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+    if (
+      !['hyperliquid', 'lighter'].includes(this.name) &&
+      !this.isPublicDataOnly &&
+      (!this.options.key || !this.options.secret)
+    ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
@@ -166,7 +202,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = engineTransport();
+    const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -175,8 +211,15 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
-        ...(this.name === 'backpack' ? { recvWindow: this.options.extra?.recvWindow } : {}),
+        ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
+        ...(this.name === 'lighter'
+          ? {
+              apiKeyIndex: this.options.apiKeyIndex,
+              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+            }
+          : {}),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
@@ -185,16 +228,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack'
-        ? {
-            webSocketHeaders: transport.webSocketHeaders,
-            now: virtualClock.getCurrentTimeMs,
-            connect: transport.connect.bind(transport),
-            request: transport.request.bind(transport),
-            setTimeout: transport.setTimeout.bind(transport),
-            clearTimeout: transport.clearTimeout.bind(transport),
-          }
-        : transport,
+      this.name === 'backpack' ? { ...transport, now: virtualClock.getCurrentTimeMs } : transport,
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
@@ -217,7 +251,7 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (this.name !== 'mexc' || this.isPublicDataOnly) return;
+    if (!['mexc', 'woo'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
   };
@@ -289,12 +323,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.clientOrderIdRule) this.assertCallerClientOrderIds(orders);
+    this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    if (this.clientOrderIdRule) this.resolveCallerClientOrderId(opts);
+    this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
 
@@ -351,14 +385,15 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
-    const milliseconds = (value?: number) =>
-      value === undefined || !Number.isFinite(value)
-        ? undefined
-        : Math.floor(value > 1_000_000_000_000 ? value : value * 1000);
+    const milliseconds = (value?: number) => {
+      if (value === undefined || !Number.isFinite(value) || (this.name === 'woo' && value < 0)) return undefined;
+      const alreadyMilliseconds = this.name === 'woo' ? value >= 1_000_000_000_000 : value > 1_000_000_000_000;
+      return Math.floor(alreadyMilliseconds ? value : value * 1000);
+    };
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -367,7 +402,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (this.name === 'blofin') leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };

@@ -1,0 +1,443 @@
+import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { InternalAxiosRequestConfig } from 'axios';
+import type { ExchangeName, ExchangeOptions } from '../types';
+import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
+
+import { AxiosHeaders } from 'axios';
+
+import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { socketMessages } from '@tealstreet/safe-cex-wasm/host';
+import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
+import { WsDirectFallback } from '../utils/wsDirectFallback';
+import { directTransport } from './direct';
+import { getTransport } from './registry';
+import {
+  proxyAuthorizationHeader,
+  TEALSTREET_REST_HEADERS,
+  TEALSTREET_WS_HEADERS,
+  tealstreetTransport,
+} from './tealstreet/tealstreetTransport';
+import { isWsRelayEnabled } from './tealstreet/wsRelay';
+
+export interface EngineHttpRoute {
+  mode: 'direct' | 'how';
+  prefix: string;
+  authorize: boolean;
+  authorizationHeader: string;
+  headers: Record<string, string>;
+  tunnelUrl?: string;
+}
+
+export interface EngineWsRoute {
+  host?: string;
+  fallback?: string;
+  relay?: string;
+  initialSilentConnects?: number;
+  ignoredMessages?: string[];
+  directUrls?: string[];
+}
+
+/** Serializable host policy; contains no venue credentials or proxy JWT. */
+export interface EngineRoutingPlan {
+  http: EngineHttpRoute;
+  publicHttp?: EngineHttpRoute;
+  publicHeader?: string;
+  ws: { public: EngineWsRoute; private: EngineWsRoute; business: EngineWsRoute };
+  wsHeaders: Record<string, string>;
+  venueWsHeaders?: Record<string, string>;
+  socketChannels: Array<{ contains: string; channel: 'public' | 'private' | 'business' }>;
+}
+
+type Request = Parameters<Transport['request']>[0];
+
+export const assertEngineAccountRouting = (options: ExchangeOptions): void => {
+  if (options.secondary_key || options.secondary_secret) {
+    throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
+  }
+};
+
+const venueHeaders = (exchange: ExchangeName, options: ExchangeOptions): Record<string, string> =>
+  isBybitSiteIdExchange(exchange) ? getBybitSiteHeaders(options) : {};
+
+const socketChannels: EngineRoutingPlan['socketChannels'] = [
+  { contains: '/business', channel: 'business' },
+  { contains: '/ws-futures', channel: 'business' },
+  { contains: '/private', channel: 'private' },
+  { contains: '/user', channel: 'private' },
+  { contains: '/account', channel: 'private' },
+  { contains: 'listenKey=', channel: 'private' },
+];
+
+const wsRoute = (route: ResolvedWs): EngineWsRoute => ({
+  ...(route.tunnelled && route.host ? { host: route.host } : {}),
+  ...(route.fallback ? { fallback: route.fallback } : {}),
+  ...(isWsRelayEnabled() && route.relay ? { relay: route.relay } : {}),
+  ...(route.initialSilentConnects !== undefined ? { initialSilentConnects: route.initialSilentConnects } : {}),
+  ...(route.ignoredMessages ? { ignoredMessages: route.ignoredMessages } : {}),
+  ...(route.directUrls ? { directUrls: route.directUrls } : {}),
+});
+
+const resolved = (exchange: ExchangeName, options: ExchangeOptions, provider: TransportProvider) => {
+  const routing = provider.wsRouting(exchange, options);
+  const restRouting =
+    (exchange === 'grvt' || exchange === 'blofin') && options.tealstreetTunnel && !options.tealstreetProxy
+      ? provider.wsRouting(exchange, { ...options, tealstreetProxy: true })
+      : routing;
+  return { routing, restRouting };
+};
+
+/** Native launchers pass the venue's real REST base URL; never a routed URL. */
+export const resolveEngineRoutingPlan = (
+  exchange: ExchangeName,
+  options: ExchangeOptions,
+  baseURL: string,
+): EngineRoutingPlan => {
+  assertEngineAccountRouting(options);
+  const provider = getTransport(options);
+  if (provider !== directTransport && provider !== tealstreetTransport) {
+    throw new Error('Custom transports must supply their own native host routing plan');
+  }
+  const { routing, restRouting } = resolved(exchange, options, provider);
+  const http = (headers: Record<string, string>): EngineHttpRoute => {
+    const route = restRoute(provider, exchange, options, restRouting, { method: 'GET', url: baseURL, headers });
+    const target = route.baseURL ?? baseURL;
+    if (target !== baseURL && !target.endsWith(`/${baseURL}`)) throw new Error('Unsupported native URL rewrite');
+    const how =
+      usesTunnel(exchange, options) && Boolean(provider.restAdapter({ exchange, options, variant: { raw: true } }));
+    return {
+      mode: how ? 'how' : 'direct',
+      prefix: target === baseURL ? '' : target.slice(0, -baseURL.length - 1),
+      authorize: route.proxied,
+      authorizationHeader: proxyAuthorizationHeader(exchange),
+      headers: {
+        ...venueHeaders(exchange, options),
+        ...(route.proxied && provider === tealstreetTransport ? TEALSTREET_REST_HEADERS : {}),
+      },
+      ...(how ? { tunnelUrl: routing.howEgress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS } : {}),
+    };
+  };
+  return {
+    http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
+    ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
+    ws: {
+      public: wsRoute(routing.wsPublic),
+      private: wsRoute(routing.wsPrivate),
+      business: wsRoute(routing.wsBusiness),
+    },
+    wsHeaders: provider === tealstreetTransport ? { ...TEALSTREET_WS_HEADERS } : {},
+    venueWsHeaders: venueHeaders(exchange, options),
+    socketChannels,
+  };
+};
+
+const hasHeader = (headers: Record<string, string>, name: string): boolean =>
+  Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase() && Boolean(headers[key]));
+
+// Match the public Binance client, which deliberately bypasses ordinary proxy
+// routing. Private/listen-key requests carry the key even when they are unsigned.
+const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean =>
+  exchange.startsWith('binance') && !hasHeader(request.headers, 'X-MBX-APIKEY');
+
+// Factory adapter gates are distinct from saved-account metadata defaults.
+const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
+  exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+    ? !options.publicDataOnly
+    : exchange === 'bingx'
+      ? !options.publicDataOnly && options.tealstreetTunnel !== false
+      : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
+
+const restRoute = (
+  provider: TransportProvider,
+  exchange: ExchangeName,
+  options: ExchangeOptions,
+  routing: ResolvedRouting,
+  request: Request,
+  serverHeaders = false,
+): RestTransport => {
+  if (publicBinanceRequest(exchange, request)) return { baseURL: request.url, proxied: false };
+  // Factories resolve a base URL, never a signed query. Keep request data out
+  // of host selection and append its exact bytes after the provider rewrites it.
+  const baseURL = request.url.match(/^https?:\/\/[^/?#]+/i)?.[0];
+  if (!baseURL) throw new Error('Engine HTTP requires an absolute venue URL');
+  const route = provider.rest({
+    exchange,
+    options,
+    routing,
+    serverHeaders,
+    config: { baseURL, headers: request.headers },
+  });
+  return { ...route, baseURL: `${route.baseURL ?? baseURL}${request.url.slice(baseURL.length)}` };
+};
+
+const responseHeaders = (headers: unknown): string => {
+  if (!headers || typeof headers !== 'object') return '';
+  return Object.entries(headers)
+    .map(([name, value]) => `${name}: ${String(value)}`)
+    .join('\n');
+};
+
+const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      void promise.catch(() => undefined);
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+
+const httpTransport = (
+  exchange: ExchangeName,
+  options: ExchangeOptions,
+  transport: Transport,
+  provider: TransportProvider,
+  routing: ResolvedRouting,
+): { request: Transport['request']; dispose(): void } => {
+  const tunnel = usesTunnel(exchange, options);
+  const adapter = tunnel
+    ? provider.restAdapter({
+        exchange,
+        options,
+        variant: { region: routing.howEgress === 'jp' ? 'JA' : 'SG', raw: true, WebSocket: transport.WebSocket },
+      })
+    : undefined;
+  let disposed = false;
+  const pending = new Set<AbortController>();
+  const request: Transport['request'] = async (request): Promise<HttpResponse> => {
+    if (disposed) throw new Error('Engine transport disposed');
+    const controller = new AbortController();
+    pending.add(controller);
+    const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
+    const started = Date.now();
+    const cleanup = () => {
+      clearTimeout(timer);
+      pending.delete(controller);
+      signal.removeEventListener('abort', cleanup);
+    };
+    const timer = setTimeout(() => {
+      controller.abort(new Error('Engine transport request timed out'));
+      pending.delete(controller);
+    }, 20_000);
+    signal.addEventListener('abort', cleanup, { once: true });
+    try {
+      signal.throwIfAborted();
+      const route = restRoute(provider, exchange, options, routing, request, transport.serverHeaders);
+      const config = {
+        method: request.method,
+        url: route.baseURL ?? request.url,
+        baseURL: request.url,
+        headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
+        data: request.body,
+        timeout: 20_000,
+        signal,
+      } as InternalAxiosRequestConfig;
+      if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
+      signal.throwIfAborted();
+      config.timeout = Math.max(1, 20_000 - (Date.now() - started));
+      if (adapter) {
+        const response = await untilAborted(adapter(config), signal);
+        // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
+        if (typeof response.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
+        cleanup();
+        return {
+          status: response.status,
+          headers: responseHeaders(response.headers),
+          body: new TextEncoder().encode(response.data),
+        };
+      }
+      const response = await untilAborted(
+        transport.request({
+          ...request,
+          url: config.url!,
+          headers: config.headers.toJSON() as Record<string, string>,
+          signal,
+        }),
+        signal,
+      );
+      if (response.body instanceof Uint8Array) {
+        cleanup();
+        return response;
+      }
+      const body = response.body;
+      return {
+        ...response,
+        body: (async function* () {
+          const iterator = body[Symbol.asyncIterator]();
+          try {
+            for (;;) {
+              const next = await untilAborted(iterator.next(), signal);
+              if (next.done) return;
+              yield next.value;
+            }
+          } finally {
+            cleanup();
+            void iterator.return?.().catch(() => undefined);
+          }
+        })(),
+      };
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+  };
+  return {
+    request,
+    dispose: () => {
+      disposed = true;
+      for (const controller of pending) controller.abort(new Error('Engine transport disposed'));
+      pending.clear();
+      (adapter as { dispose?(): void } | undefined)?.dispose?.();
+    },
+  };
+};
+
+/** Account options are already normalized by accountToExchangeOptions. */
+export const createEngineTransport = (
+  exchange: ExchangeName,
+  options: ExchangeOptions,
+  transport: Transport,
+): Transport => {
+  assertEngineAccountRouting(options);
+  const provider = getTransport(options);
+  const { routing, restRouting } = resolved(exchange, options, provider);
+  const routes = {
+    public: wsRoute(routing.wsPublic),
+    private: wsRoute(routing.wsPrivate),
+    business: wsRoute(routing.wsBusiness),
+  };
+  const fallbacks = new Map<string, WsDirectFallback>();
+  const http = httpTransport(exchange, options, transport, provider, restRouting);
+  return {
+    webSocketHeaders: transport.webSocketHeaders,
+    now: () => transport.now(),
+    setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
+    clearTimeout: (handle) => transport.clearTimeout(handle),
+    request: http.request,
+    dispose: () => {
+      http.dispose();
+      transport.dispose?.();
+    },
+    connect: (url, handlers) => {
+      const channel =
+        handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
+      const declared = routes[channel];
+      const bypass = declared.directUrls?.includes(url);
+      const route: EngineWsRoute = bypass ? {} : declared;
+      const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;
+      let fallback = bypass ? undefined : fallbacks.get(key);
+      if (!bypass && !fallback) {
+        fallback = new WsDirectFallback(2, route.initialSilentConnects);
+        fallbacks.set(key, fallback);
+      }
+      if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
+      const target = fallback?.resolveUrl(route.host ?? url, route.relay, route.fallback) ?? url;
+      const connection = provider.wsConnection(target);
+      const upgrade = AxiosHeaders.from(handlers.headers ?? {});
+      if (transport.webSocketHeaders) {
+        upgrade.set(venueHeaders(exchange, options));
+        if (connection) upgrade.set(connection.headers);
+      }
+      const headers = upgrade.toJSON() as Record<string, string>;
+      const receive = (text: string, receivedAt?: number) => {
+        if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
+        if (receivedAt === undefined) handlers.onMessage(text);
+        else handlers.onMessage(text, receivedAt);
+      };
+      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive });
+      let socket: { send(text: string): void; close(): void } | undefined;
+      let closed = false;
+      let closing = false;
+      let opened = false;
+      let decode: ReturnType<typeof socketMessages> | undefined;
+      const pending: string[] = [];
+      void import('@tealstreet/http-over-websocket/src/RelayWebSocket')
+        .then(({ RelayWebSocket }) => {
+          if (closed) return;
+          const relayOptions = {
+            headers: { ...connection.headers, ...headers },
+            ALPNProtocols: ['http/1.1'],
+          };
+          const relay = transport.WebSocket
+            ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
+            : new RelayWebSocket(target, [], relayOptions);
+          socket = relay;
+          relay.addEventListener('open', () => {
+            if (!closed) {
+              opened = true;
+              for (const text of pending) relay.send(text);
+              pending.length = 0;
+              handlers.onOpen();
+            }
+          });
+          const finish = (code?: number, receivedAt?: number) => {
+            if (closed) return;
+            closed = true;
+            pending.length = 0;
+            handlers.onClose(code, receivedAt);
+          };
+          decode = socketMessages(
+            (text, receivedAt) => {
+              if (!closed) receive(text, receivedAt);
+            },
+            (_error, receivedAt) => {
+              if (!closed) {
+                closing = true;
+                pending.length = 0;
+                decode!.close(1007, receivedAt);
+                // Browser close() forbids protocol error codes.
+                relay.close();
+              }
+            },
+            finish,
+          );
+          const close = (code: number) => {
+            closing = true;
+            decode!.close(code, transport.now());
+          };
+          relay.addEventListener('message', (event) => {
+            if (!closed && !closing) decode!((event as MessageEvent).data, transport.now());
+          });
+          relay.addEventListener('close', (event) => close((event as CloseEvent).code));
+          relay.addEventListener('error', () => close(1006));
+        })
+        .catch(() => {
+          if (!closed) {
+            closed = true;
+            handlers.onClose(1006);
+          }
+        });
+      return {
+        send: (text) => {
+          if (closed || closing) return;
+          if (socket && opened) socket.send(text);
+          else {
+            if (pending.length >= 100) {
+              closed = true;
+              pending.length = 0;
+              decode?.cancel();
+              socket?.close();
+              handlers.onClose(1006, transport.now());
+            } else pending.push(text);
+          }
+        },
+        close: () => {
+          closed = true;
+          pending.length = 0;
+          decode?.cancel();
+          socket?.close();
+        },
+      };
+    },
+  };
+};

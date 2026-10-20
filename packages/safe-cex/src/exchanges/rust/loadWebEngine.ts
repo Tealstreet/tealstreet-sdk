@@ -8,6 +8,9 @@ const pending = new Map<VenueFamily, Promise<WasmEngineModule>>();
 // Literal imports keep each venue in its own browser chunk.
 const importEngine = (family: VenueFamily) => {
   switch (family) {
+    case 'woo': return import('@tealstreet/safe-cex-wasm/web/woo');
+    case 'lighter': return import('@tealstreet/safe-cex-wasm/web/lighter');
+    case 'bitrue': return import('@tealstreet/safe-cex-wasm/web/bitrue');
     case 'backpack': return import('@tealstreet/safe-cex-wasm/web/backpack');
     case 'binance': return import('@tealstreet/safe-cex-wasm/web/binance');
     case 'bingx': return import('@tealstreet/safe-cex-wasm/web/bingx');

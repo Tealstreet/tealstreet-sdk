@@ -23,6 +23,7 @@ pub enum Product {
     #[default]
     Usdt,
     Usdc,
+    Inverse,
 }
 
 #[derive(Default)]
@@ -97,6 +98,8 @@ impl BitgetFutures {
             (Product::Usdt, true) => "susdt-futures",
             (Product::Usdc, false) => "usdc-futures",
             (Product::Usdc, true) => "susdc-futures",
+            (Product::Inverse, false) => "coin-futures",
+            (Product::Inverse, true) => "scoin-futures",
         }
     }
 
@@ -106,6 +109,30 @@ impl BitgetFutures {
             (Product::Usdt, true) => "SUSDT",
             (Product::Usdc, false) => "USDC",
             (Product::Usdc, true) => "SUSDC",
+            (Product::Inverse, _) => "BTC",
+        }
+    }
+
+    fn inverse(&self) -> bool {
+        self.options.product == Product::Inverse
+    }
+
+    fn quote(&self) -> &'static str {
+        if self.inverse() { "USD" } else { self.coin() }
+    }
+
+    pub(crate) fn margin_coin<'a>(
+        &self,
+        cx: &'a Cx<'_, Pending>,
+        symbol: &str,
+    ) -> Result<&'a str, String> {
+        if self.inverse() {
+            cx.store
+                .market(symbol)
+                .map(|m| m.base.as_str())
+                .ok_or_else(|| format!("unknown Bitget market {symbol}"))
+        } else {
+            Ok(self.coin())
         }
     }
 
@@ -123,14 +150,14 @@ impl BitgetFutures {
         let url = if index == 3 {
             if self.account.uta {
                 paths::UTA_PRIVATE
-            } else if self.account.fallback {
-                paths::PRIVATE_FALLBACK
             } else {
                 paths::PRIVATE
             }
         } else {
             paths::PUBLIC
         };
+        let recover =
+            index == 3 && std::mem::take(&mut self.account.needs_recovery) && !self.account.uta;
         let connection = &mut self.sockets[index];
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
@@ -141,7 +168,16 @@ impl BitgetFutures {
         if let Some(timer) = connection.reconnect.take() {
             cx.clear_timer(timer);
         }
-        connection.socket = Some(cx.connect(url));
+        connection.socket = Some(cx.connect_feed(
+            url,
+            if index == 3 {
+                safe_cex_engine::SocketChannel::Private
+            } else {
+                safe_cex_engine::SocketChannel::Public
+            },
+            ["primary", "secondary-1", "secondary-2", "private"][index],
+            recover,
+        ));
         connection.open = false;
         connection.last_received = cx.now;
         connection.watchdog = Some(cx.set_timer(5_000.0));
@@ -474,7 +510,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::History(request) => self.query_item(request, item),
+            Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
                 generation,
@@ -485,7 +521,7 @@ impl Venue for BitgetFutures {
                 }
             }
             Pending::Markets { rows, invalid } => match serde_json::from_str::<Contract>(item) {
-                Ok(row) if row.quote_coin == self.coin() => {
+                Ok(row) if row.quote_coin == self.quote() => {
                     if row.symbol.is_empty()
                         || row.base_coin.is_empty()
                         || row.price_place.0.is_none()
@@ -496,7 +532,21 @@ impl Venue for BitgetFutures {
                     {
                         *invalid = true;
                     } else {
-                        let mapped = market(&row);
+                        let mut mapped = market(&row);
+                        if self.inverse() {
+                            if row.min_lever.get() == 0.0 {
+                                mapped.limits.leverage.min = 1.0;
+                            }
+                            mapped.is_inverse = Some(true);
+                            mapped.limits.amount.max = row
+                                .max_trade_num
+                                .0
+                                .filter(|n| *n > 0.0)
+                                .unwrap_or(f64::INFINITY);
+                            if row.max_lever.get() == 0.0 {
+                                mapped.limits.leverage.max = 20.0;
+                            }
+                        }
                         if !mapped.precision.price.is_finite() || mapped.precision.price <= 0.0 {
                             *invalid = true;
                         } else {

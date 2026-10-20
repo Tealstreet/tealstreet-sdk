@@ -6,16 +6,20 @@ const families = Object.freeze({
   bingx: 'bingx',
   bitget: 'bitget',
   bitgetusdc: 'bitget',
+  bitgetinverse: 'bitget',
+  bitrue: 'bitrue',
   blofin: 'blofin',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
+  lighter: 'lighter',
   mexc: 'mexc',
   okx: 'okx',
   okxeu: 'okx',
   okxdemo: 'okx',
   okxeudemo: 'okx',
   weex: 'weex',
+  woo: 'woo',
 });
 
 export function venueFamily(venue) {

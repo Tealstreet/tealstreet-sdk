@@ -4,19 +4,24 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
-    feature = "venue-backpack",
+    feature = "venue-bitrue",
     feature = "venue-binance",
-    feature = "venue-bingx",
-    feature = "venue-bitget",
     feature = "venue-blofin",
     feature = "venue-bybit",
+    feature = "venue-woo",
     feature = "venue-cryptocom",
-    feature = "venue-hyperliquid",
+    feature = "venue-bingx",
     feature = "venue-mexc",
-    feature = "venue-okx",
-    feature = "venue-weex"
+    feature = "venue-bitget",
+    feature = "venue-backpack",
+    feature = "venue-weex",
+    feature = "venue-hyperliquid",
+    feature = "venue-lighter",
+    feature = "venue-okx"
 )))]
-compile_error!("safe-cex-wasm requires at least one venue-* feature");
+compile_error!(
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, okx, woo or weex"
+);
 
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
@@ -30,6 +35,8 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "venue-bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
+#[cfg(feature = "venue-bitrue")]
+use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 #[cfg(feature = "venue-blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "venue-bybit")]
@@ -38,12 +45,16 @@ use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "venue-hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "venue-lighter")]
+use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "venue-mexc")]
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "venue-okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "venue-weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+#[cfg(feature = "venue-woo")]
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -88,28 +99,43 @@ impl<V: Venue> AnyEngine for Engine<V> {
 }
 
 #[cfg(any(
-    feature = "venue-backpack",
     feature = "venue-binance",
-    feature = "venue-bingx",
-    feature = "venue-bitget",
     feature = "venue-blofin",
     feature = "venue-bybit",
+    feature = "venue-woo",
     feature = "venue-cryptocom",
-    feature = "venue-hyperliquid",
+    feature = "venue-bingx",
     feature = "venue-mexc",
-    feature = "venue-okx",
-    feature = "venue-weex"
+    feature = "venue-bitget",
+    feature = "venue-bitrue",
+    feature = "venue-backpack",
+    feature = "venue-weex",
+    feature = "venue-hyperliquid",
+    feature = "venue-lighter",
+    feature = "venue-okx"
 ))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "venue-lighter")]
+    #[serde(default)]
+    api_key_index: Option<String>,
+    #[cfg(feature = "venue-lighter")]
+    #[serde(default)]
+    #[serde(deserialize_with = "optional_lighter_index")]
+    lighter_integrator_account_index: Option<u64>,
+    #[cfg(feature = "venue-lighter")]
+    #[serde(default)]
+    lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "venue-binance",
-        feature = "venue-bitget",
         feature = "venue-blofin",
         feature = "venue-bybit",
+        feature = "venue-woo",
         feature = "venue-cryptocom",
         feature = "venue-hyperliquid",
+        feature = "venue-lighter",
+        feature = "venue-bitget",
         feature = "venue-okx"
     ))]
     #[serde(default)]
@@ -120,18 +146,22 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(feature = "venue-backpack")]
+    #[cfg(any(feature = "venue-backpack", feature = "venue-bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
-        feature = "venue-bitget",
-        feature = "venue-blofin",
         feature = "venue-okx",
-        feature = "venue-weex"
+        feature = "venue-weex",
+        feature = "venue-blofin",
+        feature = "venue-bitget"
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(feature = "venue-hyperliquid")]
+    #[cfg(any(
+        feature = "venue-hyperliquid",
+        feature = "venue-lighter",
+        feature = "venue-woo"
+    ))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "venue-hyperliquid")]
@@ -147,7 +177,6 @@ struct EngineOptions {
     #[serde(default)]
     private_ws_headers: bool,
 }
-
 #[cfg(feature = "venue-hyperliquid")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,12 +185,32 @@ struct HyperliquidBuilder {
     fee_tenths_bps: u32,
 }
 
+#[cfg(feature = "venue-lighter")]
+fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Index {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Index>::deserialize(d)?
+        .map(|index| match index {
+            Index::Number(n) => Ok(n),
+            Index::Text(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
+        })
+        .transpose()
+}
+
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
     WsConnect {
         socket: u32,
         url: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        channel: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<&'a safe_cex_engine::SocketContext>,
         #[serde(skip_serializing_if = "Option::is_none")]
         headers: Option<Vec<(&'static str, &'a str)>>,
     },
@@ -218,8 +267,16 @@ impl ActionOut<'_> {
         // Fixed field names, punctuation and numeric identifiers fit in this
         // allowance. Variable strings include JSON escaping and their quotes.
         128 + match self {
-            Self::WsConnect { url, headers, .. } => {
+            Self::WsConnect {
+                url,
+                headers,
+                channel,
+                context,
+                ..
+            } => {
                 json_string_length(url)
+                    + channel.map_or(0, json_string_length)
+                    + context.map_or(0, |context| json_string_length(context.feed))
                     + headers.as_ref().map_or(0, |headers| {
                         headers
                             .iter()
@@ -251,6 +308,14 @@ impl ActionOut<'_> {
     }
 }
 
+fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
+    match channel {
+        safe_cex_engine::SocketChannel::Public => "public",
+        safe_cex_engine::SocketChannel::Private => "private",
+        safe_cex_engine::SocketChannel::Business => "business",
+    }
+}
+
 fn encode(actions: &[Action]) -> String {
     if actions.is_empty() {
         return String::new();
@@ -258,18 +323,29 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
-            Action::WsConnect { socket, url } => ActionOut::WsConnect {
+            Action::WsConnect {
+                socket,
+                url,
+                channel,
+                context,
+            } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: None,
             },
             Action::WsConnectWithHeaders {
                 socket,
                 url,
                 headers,
+                channel,
+                context,
             } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
@@ -372,6 +448,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -410,10 +490,6 @@ enum CommandIn {
         to: Option<f64>,
         #[serde(default)]
         limit: Option<u32>,
-    },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
     },
     #[serde(rename_all = "camelCase")]
     FindOrderByClientOrderId {
@@ -489,6 +565,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -538,7 +615,6 @@ impl From<CommandIn> for Command {
                     limit,
                 },
             },
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchPublicTrades {
                 command,
                 symbol,
@@ -598,20 +674,23 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
-    #[wasm_bindgen(constructor)]
     #[cfg(any(
-        feature = "venue-backpack",
         feature = "venue-binance",
-        feature = "venue-bingx",
-        feature = "venue-bitget",
         feature = "venue-blofin",
         feature = "venue-bybit",
+        feature = "venue-woo",
         feature = "venue-cryptocom",
-        feature = "venue-hyperliquid",
+        feature = "venue-bingx",
         feature = "venue-mexc",
-        feature = "venue-okx",
-        feature = "venue-weex"
+        feature = "venue-bitget",
+        feature = "venue-bitrue",
+        feature = "venue-backpack",
+        feature = "venue-weex",
+        feature = "venue-hyperliquid",
+        feature = "venue-lighter",
+        feature = "venue-okx"
     ))]
+    #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
         #[cfg(feature = "venue-weex")]
@@ -622,19 +701,23 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
-            #[cfg(feature = "venue-mexc")]
-            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-            }))),
-            #[cfg(feature = "venue-binance")]
-            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+            #[cfg(feature = "venue-lighter")]
+            "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
-                portfolio_margin: venue == "binancepm",
+                application_id: options.application_id,
+                api_key_index: options.api_key_index,
+                integrator_account_index: options.lighter_integrator_account_index,
+                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+            }))),
+            #[cfg(feature = "venue-bitrue")]
+            "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
             }))),
             #[cfg(feature = "venue-backpack")]
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
@@ -651,6 +734,20 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
             }))),
+            #[cfg(feature = "venue-mexc")]
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "venue-binance")]
+            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                portfolio_margin: venue == "binancepm",
+            }))),
             #[cfg(feature = "venue-bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
                 public_data_only: options.public_data_only,
@@ -665,6 +762,14 @@ impl WasmEngine {
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
             }))),
+            #[cfg(feature = "venue-woo")]
+            "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+            }))),
             #[cfg(feature = "venue-bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
                 testnet: options.testnet,
@@ -673,7 +778,7 @@ impl WasmEngine {
                 secret: options.secret,
             }))),
             #[cfg(feature = "venue-bitget")]
-            "bitget" | "bitgetusdc" => {
+            "bitget" | "bitgetusdc" | "bitgetinverse" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
                     && options.secret.as_ref().is_some_and(|s| !s.is_empty())
@@ -687,7 +792,9 @@ impl WasmEngine {
                     key: options.key,
                     secret: options.secret,
                     passphrase: options.passphrase,
-                    product: if venue == "bitgetusdc" {
+                    product: if venue == "bitgetinverse" {
+                        Product::Inverse
+                    } else if venue == "bitgetusdc" {
                         Product::Usdc
                     } else {
                         Product::Usdt
@@ -892,5 +999,36 @@ mod action_tests {
         assert!(
             matches!(Command::from(wire), Command::FetchLeverage { command:17, symbol } if symbol == "BTCUSDT")
         );
+    }
+    #[test]
+    fn preserves_socket_routing_identity_and_omits_absent_metadata() {
+        let encoded = encode(&[
+            Action::WsConnect {
+                socket: SocketId(1),
+                url: "wss://example.test".into(),
+                channel: Some(safe_cex_engine::SocketChannel::Business),
+                context: Some(safe_cex_engine::SocketContext {
+                    feed: "swap\nfeed",
+                    recover: true,
+                }),
+            },
+            Action::WsConnectWithHeaders {
+                socket: SocketId(2),
+                url: "wss://example.test/private".into(),
+                headers: vec![("x-auth", "signed".into())],
+                channel: None,
+                context: None,
+            },
+        ]);
+        let rows: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(rows[0]["channel"], "business");
+        assert_eq!(rows[0]["context"]["feed"], "swap\nfeed");
+        assert_eq!(rows[0]["context"]["recover"], true);
+        assert_eq!(
+            rows[1]["headers"][0],
+            serde_json::json!(["x-auth", "signed"])
+        );
+        assert!(rows[1].get("channel").is_none());
+        assert!(rows[1].get("context").is_none());
     }
 }

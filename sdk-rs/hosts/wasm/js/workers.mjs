@@ -10,51 +10,139 @@
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
+/** Header-capable WebSocket constructor for HOW/relay in Workers. */
+export class WorkersWebSocket extends EventTarget {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  CONNECTING = 0;
+  OPEN = 1;
+  CLOSING = 2;
+  CLOSED = 3;
+  readyState = 0;
+  onopen = null;
+  onmessage = null;
+  onclose = null;
+  onerror = null;
+  socket = undefined;
+  binary = 'arraybuffer';
+  abort = new AbortController();
+
+  constructor(url, protocols = [], options = {}) {
+    super();
+    this.url = url;
+    const headers = { ...options.headers, Upgrade: 'websocket' };
+    const selectedProtocols = typeof protocols === 'string' ? protocols : protocols.join(', ');
+    if (selectedProtocols) headers['Sec-WebSocket-Protocol'] = selectedProtocols;
+    fetch(url.replace(/^ws/, 'http'), { headers, signal: this.abort.signal }).then(
+      (response) => {
+        const socket = response.webSocket;
+        if (!socket) return this.fail();
+        this.socket = socket;
+        if (this.readyState !== this.CONNECTING) {
+          try { socket.close(); } catch { /* already closed */ }
+          return;
+        }
+        socket.binaryType = this.binary;
+        socket.addEventListener('message', (event) => {
+          if (this.readyState === this.OPEN) this.emit(new MessageEvent('message', { data: event.data }));
+        });
+        socket.addEventListener('close', (event) => this.finish(event.code ?? 1006, event.reason ?? '', event.wasClean ?? false));
+        socket.addEventListener('error', () => this.fail());
+        socket.accept();
+        this.readyState = this.OPEN;
+        this.emit(new Event('open'));
+      },
+      () => { if (this.readyState !== this.CLOSED) this.fail(); },
+    ).catch(() => { if (this.readyState !== this.CLOSED) this.fail(); });
+  }
+
+  get binaryType() { return this.binary; }
+  set binaryType(value) {
+    this.binary = value;
+    if (this.socket) this.socket.binaryType = value;
+  }
+  get bufferedAmount() { return this.socket?.bufferedAmount ?? 0; }
+  get extensions() { return this.socket?.extensions ?? ''; }
+  get protocol() { return this.socket?.protocol ?? ''; }
+
+  emit(event) {
+    this[`on${event.type}`]?.(event);
+    this.dispatchEvent(event);
+  }
+
+  finish(code, reason, wasClean) {
+    if (this.readyState === this.CLOSED) return;
+    this.readyState = this.CLOSED;
+    const event = new Event('close');
+    Object.assign(event, { code, reason, wasClean });
+    this.emit(event);
+  }
+
+  fail() {
+    if (this.readyState === this.CLOSED) return;
+    this.emit(new Event('error'));
+    this.finish(1006, 'WebSocket transport failed', false);
+    try { this.socket?.close(); } catch { /* transport already failed */ }
+  }
+
+  send(data) {
+    if (this.readyState !== this.OPEN) throw new Error('WebSocket is not open');
+    this.socket.send(data);
+  }
+
+  close(code = 1000, reason = '') {
+    if (this.readyState === this.CLOSED || this.readyState === this.CLOSING) return;
+    const connecting = this.readyState === this.CONNECTING;
+    this.readyState = this.CLOSING;
+    this.abort.abort();
+    try { this.socket?.close(code, reason); } catch { /* make close observable below */ }
+    if (connecting || !this.socket) this.finish(code, reason, true);
+  }
+
+  terminate() {
+    this.close();
+    this.finish(1000, '', true);
+  }
+}
+
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
   webSocketHeaders: true,
+  serverHeaders: true,
+  WebSocket: WorkersWebSocket,
   now: () => Date.now(),
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
-    let socket;
-    let receive;
+    const socket = new WorkersWebSocket(url, [], { headers });
     let localClose = false;
+    let closing = false;
     let reported = false;
     const reportClose = (code, receivedAt) => {
       if (!reported) { reported = true; onClose(code, receivedAt); }
     };
+    const receive = socketMessages(onMessage, (_error, receivedAt) => {
+      closing = true;
+      receive.close(1007, receivedAt);
+      socket.close();
+    }, reportClose);
     const close = (code, receivedAt) => {
-      if (localClose || !receive) reportClose(code, receivedAt);
+      closing = true;
+      if (localClose) reportClose(code, receivedAt);
       else receive.close(code, receivedAt);
     };
-    // Workers open client WebSockets with an upgrade request over https.
-    fetch(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } }).then(
-      (response) => {
-        socket = response.webSocket;
-        if (!socket) return close(1006, Date.now());
-        socket.accept();
-        receive = socketMessages(onMessage, (_error, receivedAt) => {
-          receive.close(1007, receivedAt);
-          socket.close();
-        }, reportClose);
-        socket.addEventListener('message', (event) => receive(event.data, Date.now()));
-        socket.addEventListener('close', (event) => close(event.code, Date.now()));
-        socket.addEventListener('error', () => close(1006, Date.now()));
-        if (localClose) { receive.cancel(); socket.close(); }
-        else onOpen();
-      },
-      () => close(1006, Date.now()),
-    );
+    socket.onopen = () => { if (!closing) onOpen(); };
+    socket.onmessage = (event) => receive(event.data, Date.now());
+    socket.onclose = (event) => close(event.code, Date.now());
+    socket.onerror = () => close(1006, Date.now());
     return {
-      send: (text) => socket?.send(text),
-      close: () => {
-        localClose = true;
-        receive?.cancel();
-        socket?.close();
-      },
+      send: (text) => { if (!closing) socket.send(text); },
+      close: () => { localClose = true; closing = true; receive.cancel(); socket.close(); },
     };
   },
-  async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
+  async request({ method, url, headers, body, signal }) {
+    const deadline = AbortSignal.timeout(20_000);
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
@@ -79,9 +167,11 @@ const KEEPALIVE_MS = 30_000;
 /**
  * A Durable Object class running one engine. `loadEngine(venue)` resolves the
  * venue-specific wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
- * gives the store and book cadences in ms.
+ * gives the store and book cadences in ms. Account-backed deployments supply
+ * `createTransport(venue, options, raw)` from safe-cex createEngineTransport;
+ * the default is an explicitly direct engine host.
  */
-export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60 } }) =>
+export const createEngineObject = ({ loadEngine, createTransport, flush = { store: 250, books: 60 } }) =>
   class EngineObject {
     constructor(state) {
       this.state = state;
@@ -129,7 +219,13 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
           // Leaving invalidates this attempt even if another client reconnects
           // before its module finishes loading.
           if (this.starting !== starting || this.clients.size === 0) return;
-          const transport = workersTransport();
+          if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
+            || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
+            client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
+            return;
+          }
+          const raw = workersTransport();
+          const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
           const host = new EngineHost(
             new WasmEngine(message.venue, JSON.stringify({ ...message.options, privateWsHeaders: transport.webSocketHeaders })),
             transport,

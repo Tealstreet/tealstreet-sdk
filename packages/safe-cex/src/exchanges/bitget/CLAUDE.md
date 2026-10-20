@@ -16,6 +16,26 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitget.ts
 
+## Rust engine parity
+
+The engine (`sdk-rs/venues/bitget`) supports `bitget`, `bitgetusdc` and
+`bitgetinverse`. Inverse order amount/filled and placement sizes preserve the TS
+native units; only remaining and position display sizes use the TS price-based
+8-decimal conversion. Collateral uses each market's base coin and preserves the
+per-coin balance map through worker frames.
+
+UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
+without assuming trade rows are gross PnL. Classic trailing modifies through
+`modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
+parameters. Size-only edits preserve original callback parameters and activation
+basis. Unsupported external opening, ambiguous exposure, limit-execution or
+index-triggered trailing configurations remain visible and cancelable; edits
+fail before canceling them.
+
+Documented native regressions and private tapes cover these engine paths; the TS
+implementation below remains the replay reference for its supported overlap.
+See `docs/plans/RUST_BITGET_PARITY.md` for verification and explicit TS fixes.
+
 ## UTA Support Status
 
 Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade

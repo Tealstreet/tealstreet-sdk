@@ -240,3 +240,29 @@ async fn command_time_precedes_arrivals_while_its_ready_prefix_drains() {
         [(70.0, "before"), (80.0, "command"), (90.0, "later")]
     );
 }
+
+#[tokio::test]
+async fn standalone_event_channel_preserves_delivery_and_receiver_drop_cancellation() {
+    let (events, mut received) = Events::channel();
+    assert!(matches!(
+        received.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
+    events
+        .send_at(HostEvent::WsOpened(SocketId(7)), 12.0)
+        .unwrap();
+    events
+        .send(HostEvent::WsMessage(SocketId(7), "arrival".into()))
+        .unwrap();
+    assert!(matches!(
+        received.recv().await,
+        Some(HostEvent::WsOpened(SocketId(7)))
+    ));
+    assert!(
+        matches!(received.try_recv(), Ok(HostEvent::WsMessage(SocketId(7), text)) if text == "arrival")
+    );
+    assert!(!events.sender.is_closed());
+    drop(received);
+    events.closed().await;
+    assert!(events.send(HostEvent::WsClosed(SocketId(7), 1000)).is_err());
+}

@@ -33,6 +33,21 @@ by venue, and aliases share their family's module. The default Cargo features
 retain all registered venues for workspace checks. CI builds isolated modules
 and enforces each fixed budget from `harness/wasm-budgets.json`.
 
+## Account transport routing
+
+Venues emit real URLs and logical socket roles; the core never chooses a proxy.
+`RustEngineExchange` applies the registered safe-cex transport through
+`createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
+Explicit headless/direct options stay direct. `createEngineObject` accepts the
+same factory as `createTransport` for account-backed Workers deployments and
+refuses proxy/tunnel flags when no factory is configured.
+
+Native launchers serialize the TS-resolved, token-free routing policy and supply
+a context token callback to `NetworkTransport::with_routing`; see
+[`hosts/native/README.md`](hosts/native/README.md). No routing table is compiled
+into the native host. Secondary signing keys remain unsupported and fail before
+engine startup, so the host cannot silently bypass their distinct read egress.
+
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape

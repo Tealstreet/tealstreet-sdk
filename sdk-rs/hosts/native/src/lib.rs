@@ -5,10 +5,15 @@
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod routing;
 #[cfg(test)]
 mod tests;
 mod transport;
 
+pub use routing::{
+    HttpRoute, HttpRouteMode, ProxyTokenFuture, ProxyTokenProvider, RoutingPlan, SocketChannel,
+    SocketChannelRule, WsRoute, WsRoutes,
+};
 pub use transport::{NetworkTransport, Transport};
 
 use safe_cex_engine::{
@@ -53,7 +58,40 @@ pub struct Events {
     clock: fn() -> f64,
 }
 
+/// Receives transport events when observing a standalone transport. The host
+/// keeps these same events' arrival timestamps internally for engine dispatch.
+pub struct EventReceiver {
+    receiver: mpsc::UnboundedReceiver<QueuedEvent>,
+}
+
+impl EventReceiver {
+    pub async fn recv(&mut self) -> Option<HostEvent> {
+        self.receiver.recv().await.map(|queued| queued.event)
+    }
+
+    pub fn try_recv(&mut self) -> Result<HostEvent, mpsc::error::TryRecvError> {
+        self.receiver.try_recv().map(|queued| queued.event)
+    }
+}
+
 impl Events {
+    /// Create an event channel for a standalone transport observer.
+    pub fn channel() -> (Self, EventReceiver) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (
+            Self {
+                sender,
+                clock: now_ms,
+            },
+            EventReceiver { receiver },
+        )
+    }
+
+    /// Complete when the host inbox is gone so in-flight requests can cancel.
+    pub async fn closed(&self) {
+        self.sender.closed().await;
+    }
+
     /// Enqueue a transport event without blocking, preserving arrival order.
     pub fn send(&self, event: HostEvent) -> Result<(), mpsc::error::SendError<HostEvent>> {
         self.send_at(event, (self.clock)())
@@ -275,19 +313,35 @@ impl<V: Venue, T: Transport> Host<V, T> {
         actions.extend(self.engine.drain_actions());
         for action in actions.drain(..) {
             match action {
-                Action::WsConnect { socket, url } => {
-                    let outgoing = self.transport.connect(socket, url, self.events.clone());
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                    context,
+                } => {
+                    let outgoing = self.transport.connect_context(
+                        socket,
+                        url,
+                        vec![],
+                        channel,
+                        context,
+                        self.events.clone(),
+                    );
                     self.sockets.insert(socket, outgoing);
                 }
                 Action::WsConnectWithHeaders {
                     socket,
                     url,
                     headers,
+                    channel,
+                    context,
                 } => {
-                    let outgoing = self.transport.connect_with_headers(
+                    let outgoing = self.transport.connect_context(
                         socket,
                         url,
                         headers,
+                        channel,
+                        context,
                         self.events.clone(),
                     );
                     self.sockets.insert(socket, outgoing);

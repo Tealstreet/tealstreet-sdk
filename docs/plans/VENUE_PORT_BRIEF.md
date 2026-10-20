@@ -34,6 +34,13 @@ A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `
   cancel-all, leverage, margin type, position mode; queries (fills, order
   history, income, public trades) in Binance `history.rs`'s JSON shapes.
 - A liveness watchdog on every socket with the venue's ping protocol.
+- Tag every socket with `Cx::connect_channel` (or
+  `connect_with_headers_channel`) and `SocketChannel::{Public, Private, Business}`.
+  Keep the venue's real URL; hosts apply the TS account routing policy. Roles
+  are required even when public and private feeds share a URL.
+  Independent feeds sharing a role and URL use `Cx::connect_feed` with a stable
+  feed identity. Its recovery hint reports missing protocol payloads; hosts
+  select a declared fallback. Never embed Tealstreet URLs inside venue code.
 - Tests from the venue's documented payload examples.
 
 Register it (the workspace picks up `venues/*` itself): `hosts/wasm`

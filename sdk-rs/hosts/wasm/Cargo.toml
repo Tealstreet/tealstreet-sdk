@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
-default = ["venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-hyperliquid", "venue-mexc", "venue-okx", "venue-weex"]
+default = ["venue-bitrue", "venue-lighter", "venue-woo", "venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-hyperliquid", "venue-mexc", "venue-okx", "venue-weex"]
 venue-backpack = ["dep:safe-cex-venue-backpack"]
 venue-binance = ["dep:safe-cex-venue-binance"]
 venue-bingx = ["dep:safe-cex-venue-bingx"]
@@ -22,8 +22,15 @@ venue-mexc = ["dep:safe-cex-venue-mexc"]
 venue-okx = ["dep:safe-cex-venue-okx"]
 venue-weex = ["dep:safe-cex-venue-weex"]
 
+venue-bitrue = ["dep:safe-cex-venue-bitrue"]
+venue-lighter = ["dep:safe-cex-venue-lighter"]
+venue-woo = ["dep:safe-cex-venue-woo"]
+
 [dependencies]
 safe-cex-engine.workspace = true
+safe-cex-venue-woo = { workspace = true, optional = true }
+safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }
+safe-cex-venue-bitrue = { workspace = true, optional = true }
 safe-cex-venue-backpack = { path = "../../venues/backpack", optional = true }
 safe-cex-venue-binance = { workspace = true, optional = true }
 safe-cex-venue-bingx = { workspace = true, optional = true }

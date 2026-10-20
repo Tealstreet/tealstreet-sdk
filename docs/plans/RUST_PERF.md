@@ -653,3 +653,25 @@ lookups invoke no URL parser, while unknown/live/object/invalid URLs preserve
 strict fallback behavior. Only fixture metadata lookup changed; signature,
 subscription, query/caller-ID and generation checks remain exact. No benchmark
 has yet been rerun after this source change.
+
+
+Resume/integration phase: fetch found106 incoming commits through31ec401f60,
+including Bitrue, Lighter, WOO, Bitget inverse/UTA parity and account transport
+routing. Merge landing first; keep nested crate structure and incoming socket
+roles/feed recovery/cancellation while preserving timed batched delivery and
+per-family packages. Native, Rust build and harness conflicts each receive an
+independent scoped audit; root resolves JS host/Workers lifecycle integration.
+Adapt the full14-family registry, static loaders, feature checks and CI roster;
+new size caps use the same predeclared3% rule after measurement. Existing fitting
+caps remain fixed. All previous9/11 cohorts remain historical observations.
+
+After merge: regenerate all private variant tapes and validate every current
+public fixture; refresh an exact31ec401f60 original-runtime control and identical
+shared helper closure. The landing source now includes its own single-feature
+build flags; preserve its original default aggregate baseline instead of mixing
+it with old11 aggregate/source hashes. Optional one-pass decoder prototype stays
+design-only until integration checks pass. Then use fixed diagnostic samples to
+choose whether a production change is justified; predeclare final balanced
+before/after comparisons only once sources/builds are frozen. No favorable
+stopping or hidden initial regressions. Merge phase79 JS host tests currently
+pass, including newly landed routed transport/Workers constructor tests.
