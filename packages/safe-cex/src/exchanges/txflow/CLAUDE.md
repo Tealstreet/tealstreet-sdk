@@ -87,6 +87,14 @@ venue code; hosts select proxy/tunnel policy.
   intents made before metadata arrives. Candles use `/api-ws`; historical
   candles use `candleSnapshot` and engine-second output timestamps.
 
+With Rust public-feed policy `Disabled` or `Shared`, native metadata and ticker
+seeds still use REST. The public API socket is suppressed; the node account
+socket retains private subscriptions, reconciliation, pings and rate-limit
+recovery, while skipping public contexts, books and candles on every connection.
+Unsolicited public payloads cannot overwrite shared prices on that account
+socket. Private equity/PnL remain the venue's authoritative account fields;
+provider tickers do not recompute them.
+
 ## Private data and reconciliation
 
 REST account state, orders and executions reconcile every five seconds;
