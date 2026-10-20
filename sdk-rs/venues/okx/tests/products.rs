@@ -179,6 +179,15 @@ fn index_underlying_updates_every_matching_swap_and_xperp() {
     assert_eq!(e.store().ticker("BTCUSD").unwrap().index, 41000.0);
     assert_eq!(e.store().ticker("BTCUSD261225").unwrap().index, 41000.0);
     assert_eq!(e.store().ticker("BTCUSDT261225").unwrap().index, 40000.0);
+    ws(
+        &mut e,
+        public,
+        r#"{"arg":{"channel":"index-tickers","instId":"BTC-USDT"},"data":[{"instId":"BTC-USDT","idxPx":"42000"},{"instId":"UNKNOWN-USD","idxPx":"1"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().index, 42000.0);
+    assert_eq!(e.store().ticker("BTCUSDT261225").unwrap().index, 42000.0);
+    assert_eq!(e.store().ticker("BTCUSD").unwrap().index, 41000.0);
+    assert_eq!(e.store().ticker("BTCUSD261225").unwrap().index, 41000.0);
 }
 #[test]
 fn mixed_private_snapshots_commit_union_and_inverse_risk_in_usd() {

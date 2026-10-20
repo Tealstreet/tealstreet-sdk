@@ -230,3 +230,21 @@ than treating the original port boundary as a waiver.
 - Six new mixed-product tests and the complete GRVT91/91 suite PASS; strict
   all-target Clippy PASS. Independent phase review PASS with no findings
   (`/tmp/parity-grvt-phase-a-review.md`). Trading changes follow separately.
+
+### Public gate measurement and index dispatch
+
+- Merged-harness OKX linear and inverse public gates PASS. The first EEA gate
+  matched exact output/memory but failed CPU while overlapping the root suite;
+  the failed raw measurements are retained. One fixed three-pair control after
+  that suite ended PASS on unchanged806844-byte WASM: main1.05x, steady1.08x,
+  retained3.36x. Host load remained high, so this is not an idle-machine claim.
+- Source inspection found a concrete independent hot path:3359 EEA index-price
+  rows repeatedly scan750products (~2.52million comparisons and3359 temporary
+  vectors). Derive underlying-to-instrument IDs once after the complete catalog
+  commits and borrow them on updates. Exact underlying/native identities and
+  SWAP/X-Perp fanout remain; no financial conversion or gate threshold changes.
+- Extended underlying-isolation/unknown-index checks; OKX89/89 and strict
+  all-target Clippy PASS. Independent review and rebuilt public gates follow.
+- Independent index-dispatch review PASS with no findings
+  (`/tmp/parity-okx-index-review.md`); only committed current-market IDs enter
+  the derived map, and incomplete catalogs do not publish a new index.

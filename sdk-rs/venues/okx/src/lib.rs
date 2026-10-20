@@ -111,6 +111,7 @@ pub struct Okx {
     indexes: HashSet<String>,
     candles: HashMap<(String, String), u32>,
     products: HashMap<String, Product>,
+    underlying_products: HashMap<String, Vec<String>>,
 }
 
 impl Okx {
@@ -142,6 +143,7 @@ impl Okx {
             indexes: HashSet::new(),
             candles: HashMap::new(),
             products: HashMap::new(),
+            underlying_products: HashMap::new(),
         }
     }
 
@@ -485,22 +487,9 @@ impl Okx {
             return;
         }
         let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
-            let direct = [p.inst_id];
-            let indexed: Vec<_>;
-            let ids = if channel == "index-tickers" {
-                indexed = self
-                    .products
-                    .iter()
-                    .filter(|(_, product)| product.underlying == p.inst_id)
-                    .map(|(id, _)| id.as_str())
-                    .collect();
-                indexed.as_slice()
-            } else {
-                &direct
-            };
-            for &id in ids {
+            let mut update = |id: &str| {
                 let Some(m) = cx.store.market_by_id(id) else {
-                    continue;
+                    return;
                 };
                 let symbol = m.symbol.clone();
                 if channel == "mark-price" {
@@ -527,6 +516,15 @@ impl Okx {
                     }
                     _ => {}
                 });
+            };
+            if channel == "index-tickers" {
+                if let Some(ids) = self.underlying_products.get(p.inst_id) {
+                    for id in ids {
+                        update(id);
+                    }
+                }
+            } else {
+                update(p.inst_id);
             }
         });
     }
@@ -870,6 +868,15 @@ impl Venue for Okx {
                     return;
                 }
                 cx.store.set_markets(rows);
+                self.underlying_products.clear();
+                for market in cx.store.markets() {
+                    if let Some(product) = self.products.get(&market.id) {
+                        self.underlying_products
+                            .entry(product.underlying.clone())
+                            .or_default()
+                            .push(market.id.clone());
+                    }
+                }
                 self.list(
                     cx,
                     "/api/v5/market/tickers?instType=SWAP",
