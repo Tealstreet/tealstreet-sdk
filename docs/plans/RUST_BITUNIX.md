@@ -2501,3 +2501,31 @@ SDK typecheck also passes after harness changes, bypassing Turbo's cache for
 imports outside the package. Strict all-target native Clippy passes after the
 stale test helper correction. Full native tests and WASM lint continue before
 release replay; no new performance result is claimed yet.
+
+
+KuCoin Spot integration guard phase frozen and independently reviewed PASS.
+Incoming HTTP connectId/body-ID normalization is narrowed to source-proven
+creation entropy: only generated alphanumeric clientOid (1..21 characters) on
+POST /api/v1/hf/orders may vary; caller IDs, alteration/cancel targets, unknown
+query/body fields, generic clock/signature names and financial wire types stay
+exact. Socket connectId remains transport-only and protocol state belongs to
+each physical socket, including parallel peers, close/replacement and unsubscribe.
+
+Raw auth now reuses uniqueRequestHeaders, rejects exact-origin aliases with
+userinfo or fragments, and returns false on duplicate headers so sticky failed
+attempt auditing remains visible if the venue catches the failure. All four
+generic body names are explicitly preserved: KuCoin authenticates in headers.
+Fail-before production-constructor controls reproduce query/socket ownership,
+four header/URL aliases and four signed unsupported body fields. Independent
+review re-signs eighteen negative requests, each rejected with unserved=1 and
+the ACK retained before the honest original succeeds exactly once; actual
+socket sibling/replacement/readiness checks also pass. All 61 focused controls
+and final aggregate 837/837 helpers pass, with syntax/diff checks. No fixture,
+output repair, economic projection, deadline or threshold change.
+
+Fresh paced KuCoin public capture now completes strict production TS functional
+replay (692 futures markets/tickers, both requested books), eliminating the
+old impossible startup prefix without relaxing the scheduler. Log/result are
+/tmp/bitunix-1a10-kucoin-causal-functional-ts.{log,json}. This diagnostic runs
+during native compilation; its timings are not performance-gate evidence.
+A rebuilt Rust functional replay and quiet sequential gates remain required.
