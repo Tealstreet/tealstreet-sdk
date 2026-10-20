@@ -162,12 +162,27 @@ fn a_venue_rejection_fails_the_whole_read_instead_of_returning_a_partial_history
     h.respond(
         "/v5/position/closed-pnl",
         200,
-        r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+        r#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
     );
     assert_eq!(
         h.result(5),
         Some(&Err(
-            "bybit closed-PnL fetch failed: invalid request".to_owned()
+            "bybit closed-PnL fetch failed: params error".to_owned()
+        ))
+    );
+    // 10002 is Bybit's receive-window rejection; its text is replaced so no signed
+    // payload reaches a notice (#1351).
+    fetch(&mut h, 15, None, Some(1.0), Some(2.0));
+    h.respond(
+        "/v5/position/closed-pnl",
+        200,
+        r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+    );
+    assert_eq!(
+        h.result(15),
+        Some(&Err(
+            "bybit closed-PnL fetch failed: Bybit request timestamp outside receive window (retCode 10002)"
+                .to_owned()
         ))
     );
 }
