@@ -102,3 +102,12 @@ Commands, tape hashes and raw logs are preserved in
 `RUST_PERF_PRIVATE43.json.gz`. Private CPU and memory remain informational;
 no widening is claimed from these correctness runs. Final manifest creation,
 three diagnostics, 25 public gates and 250 paired comparisons remain pending.
+
+Inputs are now frozen before the first performance child. Manifest SHA256:
+`49aceb5db298da248374538d9f47547bca522d48c508831fa778cb4893d5d2f0`.
+Post-verification passes across 60,724 logical fingerprints / 30,527 physical
+files, with independent review of source pins, proofs, physical bindings and
+the literal manifest pins in both drivers. All owned jobs are quiet.
+`RUST_PERF_INPUTS25.json.gz` preserves the manifest, verification, reviewed
+drivers and preparation proofs. The separate original 24-family control is
+built and audited for follow-up integration; it is excluded from this cohort.
