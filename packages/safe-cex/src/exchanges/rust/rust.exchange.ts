@@ -35,8 +35,8 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
-import { uuid } from '../../utils/uuid';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
+import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import {
   ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
@@ -58,10 +58,11 @@ import {
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
-import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
+import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
+import { hasSharedTickerValues, RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -124,7 +125,9 @@ const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
-const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
+const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
+  mint: () => `tealstreet-${uuid()}`,
+});
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   coinbase: coinbaseClientOrderIdRule,
   coinbasespot: coinbaseClientOrderIdRule,
@@ -175,7 +178,8 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   },
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   grvt: {
-    label: 'GRVT', requirement: 'be a canonical decimal integer between 1 and 9223372036854775807',
+    label: 'GRVT',
+    requirement: 'be a canonical decimal integer between 1 and 9223372036854775807',
     isValid: (id) => /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n,
   },
   kucoin: patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/),
@@ -237,6 +241,29 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private publicFeedDisabled = false;
+
+  get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
+    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  override disablePublicWebsockets(): void {
+    if (this.hasStarted) throw new Error('Disable Rust public sockets before startup');
+    this.publicFeedDisabled = true;
+  }
+  private sharedPublicFeed?: RustPublicFeedClient;
+  private requestSharedSnapshot = false;
+  private sharedPublicReady = false;
+  private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
+
+  /** Public providers observe applied native ticker frames, without replacing onFrame. */
+  observePublicFeed(observer: { updated(catalogChanged: boolean): void; closed(): void }): () => void {
+    this.publicFeedObservers.add(observer);
+    return () => {
+      this.publicFeedObservers.delete(observer);
+    };
+  }
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
@@ -246,6 +273,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
+  private readonly feedBookListeners = new Set<(book: OrderBook) => void>();
+  private readonly feedCandleListeners = new Set<(candle: Candle) => void>();
 
   /**
    * Receives each frame after this exchange has applied it. When the worker
@@ -307,7 +336,8 @@ export class RustEngineExchange extends BaseExchange {
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
       this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
-        if (this.host && !this.isDisposed) void this.host.command({ op: 'setTickInterval', interval: this.getTickInterval() });
+        if (this.host && !this.isDisposed)
+          void this.host.command({ op: 'setTickInterval', interval: this.getTickInterval() });
       });
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
@@ -379,8 +409,14 @@ export class RustEngineExchange extends BaseExchange {
       : Boolean(this.options.secret);
   }
   private updateTickerSymbols = () => {
+    this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
     if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
+
+  /** Startup is single-use; metadata factories can replace an already-started instance. */
+  get hasStarted(): boolean {
+    return this.startup !== undefined;
+  }
 
   // Startup is single-use, including failures; a retry needs a new account instance.
   start = (): Promise<void> => {
@@ -394,6 +430,14 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
+    if (this.options.externalPublicData) {
+      throw new Error(
+        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+      );
+    }
+    if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
+      throw new Error('privateOnly conflicts with direct publicFeed policy');
+    }
     assertEngineAccountRouting(this.options, this.name);
     if (this.name === 'breakoutprop' && (!this.options.key || !this.options.secret)) {
       throw new Error('BreakoutProp market data requires a legacy DXtrade username and password');
@@ -418,7 +462,16 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
+      ![
+        'hyperliquid',
+        'paradex',
+        'lighter',
+        'lighter-robinhood',
+        'txflow',
+        'coinbase',
+        'coinbasespot',
+        'polymarket',
+      ].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
@@ -431,7 +484,10 @@ export class RustEngineExchange extends BaseExchange {
       }
       const { apiKey, apiSecret, apiPassphrase, signerType = 0, funderAddress } = this.options.polymarket ?? {};
       const credentials = [apiKey, apiSecret, apiPassphrase];
-      if (credentials.some((value) => value !== undefined) && !credentials.every((value) => typeof value === 'string' && value.trim())) {
+      if (
+        credentials.some((value) => value !== undefined) &&
+        !credentials.every((value) => typeof value === 'string' && value.trim())
+      ) {
         throw new Error('Polymarket requires all three L2 API credentials together');
       }
       if (![0, 1, 2, 3].includes(signerType)) throw new Error('Invalid Polymarket signature type');
@@ -508,15 +564,26 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
+        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+          ? { recvWindow: this.options.extra?.recvWindow }
+          : {}),
         applicationId,
-        ...((orderlyNames.has(this.name) || this.name === 'breakoutprop') ? { tickInterval: this.options.extra?.tickInterval } : {}),
-        ...(this.name === 'breakoutprop' ? { subaccount: this.options.subaccount, tickInterval: this.getTickInterval(), pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY } : {}),
+        ...(orderlyNames.has(this.name) || this.name === 'breakoutprop'
+          ? { tickInterval: this.options.extra?.tickInterval }
+          : {}),
+        ...(this.name === 'breakoutprop'
+          ? {
+              subaccount: this.options.subaccount,
+              tickInterval: this.getTickInterval(),
+              pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY,
+            }
+          : {}),
         ...(['lighter', 'lighter-robinhood'].includes(this.name)
           ? {
               apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
               lighterRemoteSigner: Boolean(this.options.remoteSigner),
-              lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)?.lighterSignerProvider,
+              lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
+                ?.lighterSignerProvider,
               lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
               lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
             }
@@ -524,14 +591,18 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
-        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name) ? {
-          enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
-          enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
-        } : {}),
-        ...(this.name === 'grvt' ? {
-          grvtTradingAccountId: this.options.grvtTradingAccountId,
-          grvtSignerAddress: this.options.grvtSignerAddress,
-        } : {}),
+        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)
+          ? {
+              enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
+              enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
+            }
+          : {}),
+        ...(this.name === 'grvt'
+          ? {
+              grvtTradingAccountId: this.options.grvtTradingAccountId,
+              grvtSignerAddress: this.options.grvtSignerAddress,
+            }
+          : {}),
         ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
         ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress, payloadSigner: Boolean(this.options.payloadSigner) } : {}),
         ...(this.name === 'asterdex'
@@ -550,6 +621,7 @@ export class RustEngineExchange extends BaseExchange {
             }
           : {}),
         ...transport.engineOptions,
+        publicFeed: { mode: this.publicFeedMode },
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
@@ -573,6 +645,37 @@ export class RustEngineExchange extends BaseExchange {
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+    if (this.options.publicFeed?.mode === 'shared') {
+      this.sharedPublicFeed = new RustPublicFeedClient(
+        this.options.publicFeed.port,
+        rustPublicFeedIdentity(this.name, this.options),
+        async (update) => {
+          await this.host?.command(update);
+          const wasReady = this.sharedPublicReady;
+          if (
+            this.requestSharedSnapshot &&
+            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && hasSharedTickerValues(ticker))
+          )
+            this.sharedPublicReady = true;
+          this.host?.flush();
+          // An unchanged provider snapshot produces no frame or store notification.
+          if (!wasReady && this.sharedPublicReady) for (const wake of this.startupWaiters) wake();
+        },
+        (error) => {
+          this.startupFailure = error;
+          for (const wake of this.startupWaiters) wake();
+          this.emitAndLogError(error);
+          this.dispose();
+        },
+      );
+      try {
+        await this.sharedPublicFeed.connect();
+      } catch (error) {
+        this.dispose();
+        throw error;
+      }
+      if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+    }
     this.host.start();
     this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
@@ -619,6 +722,14 @@ export class RustEngineExchange extends BaseExchange {
     return { frame, fetchedLeverage };
   }
 
+  /** A late shared subscriber receives the current native book without waiting for a trade. */
+  snapshotOrderBook = (symbol: string): OrderBook | undefined => {
+    const snapshot = this.snapshotFrame();
+    return snapshot
+      ? this.applier.books(new Frame(snapshot)).find((entry) => entry.symbol === symbol)?.orderbook
+      : undefined;
+  };
+
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
@@ -639,9 +750,10 @@ export class RustEngineExchange extends BaseExchange {
       if (recover) this.recoverEngineFrame();
       return;
     }
+    const previousMarkets = this.store.markets;
     let needsSnapshot = false;
     try {
-      this.applier.apply(frame, !this.onFrame);
+      this.applier.apply(frame, !this.onFrame || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
       console.error('Engine frame apply failed', error);
@@ -655,36 +767,72 @@ export class RustEngineExchange extends BaseExchange {
         return [];
       }
     };
+    const catalogChanged = previousMarkets !== this.store.markets;
+    if (this.publicFeedObservers.size) {
+      let publicChanged = catalogChanged;
+      try {
+        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas());
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine public feed section failed', error);
+      }
+      if (publicChanged)
+        for (const observer of this.publicFeedObservers)
+          this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+    }
+    let sharedFailure: Error | undefined;
+    let sendSharedSnapshot = false;
+    if (this.sharedPublicFeed && this.store.loaded.markets && (catalogChanged || !this.requestSharedSnapshot)) {
+      try {
+        this.sharedPublicFeed.validateMarkets(this.store.markets);
+        if (!this.requestSharedSnapshot) {
+          this.requestSharedSnapshot = true;
+          sendSharedSnapshot = true;
+        }
+      } catch (error) {
+        sharedFailure = error instanceof Error ? error : new Error(String(error));
+        this.startupFailure = sharedFailure;
+      }
+    }
     for (const fill of read(() => this.applier.fills(frame)))
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
-    if (!this.onFrame) {
+    if (!this.onFrame || this.feedBookListeners.size) {
       for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
         const listeners = this.bookListeners.get(symbol);
         if (this.name !== 'asterdex')
-          listeners?.forEach((listener) => this.dispatchFrameEvent(() => listener(orderbook)));
+          listeners?.forEach((listener) => {
+            if (!this.onFrame || this.feedBookListeners.has(listener))
+              this.dispatchFrameEvent(() => listener(orderbook));
+          });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
-            if (listeners.has(id))
+            if (listeners.has(id) && (!this.onFrame || this.feedBookListeners.has(listener)))
               this.dispatchFrameEvent(() =>
-                listener(
-                  this.name === 'asterdex'
-                    ? {
-                        bids: orderbook.bids.map((level) => ({ ...level })),
-                        asks: orderbook.asks.map((level) => ({ ...level })),
-                      }
-                    : orderbook,
-                ),
+                listener({
+                  bids: orderbook.bids.map((level) => ({ ...level })),
+                  asks: orderbook.asks.map((level) => ({ ...level })),
+                }),
               );
           }
       }
+    }
+    if (!this.onFrame || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
-        this.candleListeners
-          .get(`${symbol}:${interval}`)
-          ?.forEach((listener) => this.dispatchFrameEvent(() => listener(candle)));
+        this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
+          if (!this.onFrame || this.feedCandleListeners.has(listener))
+            this.dispatchFrameEvent(() => listener(candle));
+        });
       }
     }
     this.dispatchFrameEvent(() => this.onFrame?.(buffer));
-    if (needsSnapshot && recover) this.recoverEngineFrame();
+    if (sharedFailure) {
+      const failure = sharedFailure;
+      this.dispatchFrameEvent(() => this.emitAndLogError(failure));
+      this.dispose();
+    } else {
+      if (sendSharedSnapshot) this.dispatchFrameEvent(() => this.sharedPublicFeed?.send({ op: 'snapshot' }));
+      if (needsSnapshot && recover) this.recoverEngineFrame();
+    }
   }
 
   private recoverEngineFrame() {
@@ -716,7 +864,7 @@ export class RustEngineExchange extends BaseExchange {
       const ready = () => {
         const loaded = this.store.loaded;
         const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
-        return loaded.markets && loaded.tickers && account;
+        return loaded.markets && loaded.tickers && account && (!this.sharedPublicFeed || this.sharedPublicReady);
       };
       let unsubscribe = () => {};
       const wake = () => {
@@ -756,21 +904,39 @@ export class RustEngineExchange extends BaseExchange {
       const loaded = () => {
         if (this.startupFailure) return finish({ error: this.startupFailure.message });
         if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
-        if (started && (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers))) finish({ error: '', balance: this.store.balance });
+        if (
+          started &&
+          (this.store.loaded.balance ||
+            (this.name === 'breakoutprop' &&
+              this.isPublicDataOnly &&
+              this.store.loaded.markets &&
+              this.store.loaded.tickers))
+        )
+          finish({ error: '', balance: this.store.balance });
       };
       this.emitter.on('error', onError);
       const unsubscribe = this.store.subscribe(loaded);
       const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
       loaded();
-      if (!settled) this.start().then(() => { started = true; loaded(); }, (error) => onError(String(error?.message ?? error)));
+      if (!settled)
+        this.start().then(
+          () => {
+            started = true;
+            loaded();
+          },
+          (error) => onError(String(error?.message ?? error)),
+        );
     });
   };
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+    if (this.isDisposed) return Promise.reject(new Error(`${this.name} engine disposed`));
     if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
     if (['coinbase', 'coinbasespot'].includes(this.name)) {
-      const invalid = (value: unknown): boolean => typeof value === 'number' ? !Number.isFinite(value)
-        : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
+      const invalid = (value: unknown): boolean =>
+        typeof value === 'number'
+          ? !Number.isFinite(value)
+          : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
       if (invalid(command)) return Promise.reject(new Error('Coinbase command numbers must be finite'));
     }
     return this.host.command(command) as Promise<T>;
@@ -871,7 +1037,8 @@ export class RustEngineExchange extends BaseExchange {
       if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
       return { userId };
     }
-    if (this.name === 'asterdex' || this.name === 'polymarket') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
+    if (this.name === 'asterdex' || this.name === 'polymarket')
+      return this.command<ExchangeAccount>({ op: 'fetchAccount' });
     if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
     if (!this.host) await this.start();
     await this.untilLoaded();
@@ -930,6 +1097,9 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchTickers = async () => this.store.tickers;
 
+  /** Native reconciliation owns refresh; account consumers read the current balance. */
+  fetchBalance = async () => this.store.balance;
+
   fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
     this.assertOptionQueries();
     for (const field of ['expiry', 'strikeMin', 'strikeMax'] as const) {
@@ -973,8 +1143,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
-    if (this.name !== 'asterdex' && this.name !== 'polymarket') throw new Error('Orderbook snapshot queries are unavailable for this venue');
-    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit: this.name === 'asterdex' ? limit ?? 100 : limit });
+    if (this.name !== 'asterdex' && this.name !== 'polymarket')
+      throw new Error('Orderbook snapshot queries are unavailable for this venue');
+    return this.command<OrderBook>({
+      op: 'fetchOrderBook',
+      symbol,
+      limit: this.name === 'asterdex' ? (limit ?? 100) : limit,
+    });
   };
 
   private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
@@ -994,8 +1169,10 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
-    if (['coinbase', 'coinbasespot'].includes(this.name)
-      && [opts.from, opts.to].some((value) => value !== undefined && !Number.isFinite(value))) {
+    if (
+      ['coinbase', 'coinbasespot'].includes(this.name) &&
+      [opts.from, opts.to].some((value) => value !== undefined && !Number.isFinite(value))
+    ) {
       return Promise.reject(new Error('Coinbase history bounds must be finite'));
     }
     const milliseconds = (value?: number) => {
@@ -1006,7 +1183,20 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'kraken', 'woo', 'coinbase', 'coinbasespot'].includes(this.name)
+      ...([
+        'apexomni',
+        'blofin',
+        'bitrue',
+        'grvt',
+        'hyperliquid',
+        'paradex',
+        'lighter',
+        'lighter-robinhood',
+        'kraken',
+        'woo',
+        'coinbase',
+        'coinbasespot',
+      ].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -1015,7 +1205,20 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
+      if (
+        [
+          'asterdex',
+          'blofin',
+          'bitrue',
+          'grvt',
+          'paradex',
+          'txflow',
+          'coinbase',
+          'coinbasespot',
+          'polymarket',
+        ].includes(this.name) ||
+        orderlyNames.has(this.name)
+      )
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         this.host?.flush();
@@ -1040,7 +1243,10 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'txflow' && (opts?.orderId !== undefined || opts?.status !== undefined)) {
       return Promise.reject(new Error('TxFlow order history does not support orderId or status filters'));
     }
-    if (['coinbase', 'coinbasespot'].includes(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+    if (
+      ['coinbase', 'coinbasespot'].includes(this.name) &&
+      (opts?.orderId !== undefined || opts?.status !== undefined)
+    ) {
       return Promise.reject(new Error('Coinbase order history does not support orderId or status filters'));
     }
     if (orderlyNames.has(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
@@ -1076,6 +1282,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!listeners) {
       listeners = new Map();
       this.bookListeners.set(symbol, listeners);
+      if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: true });
       void this.command({ op: 'subscribeOrderBook', symbol });
     }
     const listenerId =
@@ -1086,8 +1293,20 @@ export class RustEngineExchange extends BaseExchange {
       if (!listeners!.delete(listenerId)) return;
       if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
         this.bookListeners.delete(symbol);
+        if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: false });
         void this.command({ op: 'unsubscribeOrderBook', symbol });
       }
+    };
+  };
+
+  /** Provider listeners still receive data when normal callbacks are handled by the frame consumer. */
+  listenOrderBookForFeed = (symbol: string, callback: (book: OrderBook) => void) => {
+    const listener = (book: OrderBook) => callback(book);
+    this.feedBookListeners.add(listener);
+    const stop = this.listenOrderBook(symbol, listener);
+    return () => {
+      this.feedBookListeners.delete(listener);
+      stop();
     };
   };
 
@@ -1098,6 +1317,8 @@ export class RustEngineExchange extends BaseExchange {
     if (!listeners) {
       listeners = new Set();
       this.candleListeners.set(key, listeners);
+      if (this.sharedPublicFeed)
+        this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: true });
       void this.command({ op: 'subscribeCandles', symbol: opts.symbol, interval });
     }
     listeners.add(callback);
@@ -1105,12 +1326,32 @@ export class RustEngineExchange extends BaseExchange {
       listeners!.delete(callback);
       if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
         this.candleListeners.delete(key);
+        if (this.sharedPublicFeed)
+          this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: false });
         void this.command({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
       }
     };
   };
 
+  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
+
+  listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    const listener = (candle: Candle) => callback(candle);
+    this.feedCandleListeners.add(listener);
+    const stop = this.listenOHLCV(opts, listener);
+    return () => {
+      this.feedCandleListeners.delete(listener);
+      stop();
+    };
+  };
+
   dispose() {
+    this.sharedPublicFeed?.dispose();
+    this.sharedPublicFeed = undefined;
+    for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
+    this.publicFeedObservers.clear();
+    this.feedBookListeners.clear();
+    this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
     this.flushTimers.forEach(clearInterval);

@@ -435,6 +435,112 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
+  it('isolates public observers and provider listeners before forwarding valid account frames', () => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    const snapshot = vi.fn();
+    installHost(exchange, snapshot);
+    const observer = vi.fn(() => {
+      throw new Error('public observer failed');
+    });
+    const laterObserver = vi.fn();
+    exchange.observePublicFeed({ updated: observer, closed: vi.fn() });
+    exchange.observePublicFeed({ updated: laterObserver, closed: vi.fn() });
+    const provider = vi.fn(() => {
+      throw new Error('provider listener failed');
+    });
+    const laterProvider = vi.fn();
+    const ordinary = vi.fn();
+    const internal = exchange as unknown as {
+      bookListeners: Map<string, Map<number, () => void>>;
+      feedBookListeners: Set<() => void>;
+    };
+    internal.bookListeners.set('BTCUSDT', new Map([[1, provider], [2, laterProvider], [3, ordinary]]));
+    internal.feedBookListeners.add(provider);
+    internal.feedBookListeners.add(laterProvider);
+    const fills: OrderFillEvent[] = [];
+    const accountAtFill: unknown[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => {
+      fills.push(fill);
+      accountAtFill.push({ total: store.balance.total, orderId: store.orders[0]?.id });
+    });
+    let forwarded: ArrayBuffer | undefined;
+    const forward = vi.fn((buffer: ArrayBuffer) => {
+      forwarded = structuredClone(buffer, { transfer: [buffer] });
+    });
+    exchange.onFrame = forward;
+    const bytes = fixture();
+    expect(() => receive(exchange, bytes)).not.toThrow();
+    expect(observer).toHaveBeenCalledExactlyOnceWith(true);
+    expect(laterObserver).toHaveBeenCalledExactlyOnceWith(true);
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(laterProvider).toHaveBeenCalledTimes(1);
+    expect(ordinary).not.toHaveBeenCalled();
+    expect(laterProvider.mock.invocationCallOrder[0]).toBeLessThan(forward.mock.invocationCallOrder[0]);
+    expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
+    expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1' }));
+    expect(store.positions[0].contracts).toBe(0.5);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(bytes.byteLength).toBe(0);
+    expect(new Frame(forwarded!).balance()?.total).toBe(42);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(exchange.isDisposed).toBe(false);
+    exchange.dispose();
+  });
+
+  it('delivers original account fills and frame before shared catalog validation failure disposes the account', () => {
+    vi.spyOn(console, 'trace').mockImplementation(() => {});
+    const store = new DefaultStore();
+    store.update({ loaded: { ...store.loaded, markets: true } });
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    const snapshot = vi.fn();
+    installHost(exchange, snapshot);
+    const failure = new Error('shared catalog mismatch');
+    const sequence: string[] = [];
+    const shared = {
+      validateMarkets: vi.fn(() => {
+        sequence.push('validate');
+        throw failure;
+      }),
+      send: vi.fn(),
+      dispose: vi.fn(() => sequence.push('dispose')),
+    };
+    (exchange as unknown as { sharedPublicFeed: unknown }).sharedPublicFeed = shared;
+    const fills: OrderFillEvent[] = [];
+    const accountAtFill: unknown[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => {
+      sequence.push('fill');
+      accountAtFill.push({
+        disposed: exchange.isDisposed,
+        total: store.balance.total,
+        orderId: store.orders[0]?.id,
+        contracts: store.positions[0]?.contracts,
+      });
+      fills.push(fill);
+    });
+    const errors: unknown[] = [];
+    const error = vi.fn((message: string) => {
+      sequence.push('error');
+      errors.push({ message, disposed: exchange.isDisposed });
+    });
+    exchange.on('error', error);
+    exchange.onFrame = vi.fn(() => sequence.push('frame'));
+    const bytes = fixture();
+    expect(() => receive(exchange, bytes)).not.toThrow();
+    expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
+    expect(accountAtFill).toEqual(Array(2).fill({ disposed: false, total: 42, orderId: 'order-1', contracts: 0.5 }));
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(shared.validateMarkets).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ symbol: 'BTCUSDT' })]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([{ message: failure.message, disposed: false }]);
+    expect(shared.send).not.toHaveBeenCalled();
+    expect(shared.dispose).toHaveBeenCalledTimes(1);
+    expect(sequence).toEqual(['validate', 'fill', 'fill', 'frame', 'error', 'dispose']);
+    expect(exchange.isDisposed).toBe(true);
+    expect(snapshot).not.toHaveBeenCalled();
+    expect((exchange as unknown as { startupFailure: Error }).startupFailure).toBe(failure);
+  });
+
   it('returns engine snapshot bundles through the typed worker method and rejects TS-only exchanges', async () => {
     const store = new DefaultStore();
     const worker = new RustEngineExchange('binance', { key: '', secret: '' }, store);

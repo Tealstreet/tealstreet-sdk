@@ -68,6 +68,52 @@ export function consumerFrame(
         rows.map((m) => m.makerFee ?? NaN),
       ],
     );
+    const classifications = rows
+      .map((market, index) => ({ market, index }))
+      .filter(({ market }) =>
+        ['symbolType', 'marketRegion', 'underlyingTicker'].some((field) => market.info?.[field] !== undefined),
+      );
+    if (classifications.length)
+      table(
+        16,
+        [
+          classifications.length,
+          ...classifications.map(({ index }) => index),
+          ...classifications.flatMap(({ market }) => [
+            ref(market.info?.symbolType),
+            ref(market.info?.marketRegion),
+            ref(market.info?.underlyingTicker),
+          ]),
+        ],
+        [],
+      );
+    const products = rows
+      .map((market, index) => ({ market, index }))
+      .filter(({ market }) => market.option || ['FUTURE', 'CALL', 'PUT'].includes(market.info?.instrumentKind));
+    if (products.length)
+      table(
+        17,
+        [
+          products.length,
+          ...products.map(({ index }) => index),
+          ...products.map(({ market }) =>
+            market.option
+              ? market.option.right === 'call' ? 2 : 3
+              : ['FUTURE', 'CALL', 'PUT'].indexOf(market.info?.instrumentKind) + 1,
+          ),
+          ...products.flatMap(({ market }) => [
+            ref(market.option?.underlying ?? market.info?.underlying),
+            ref(market.option?.settleAsset),
+            ref(market.option?.premiumAsset),
+            ref(market.option?.style),
+            ref(market.option?.settlement),
+          ]),
+        ],
+        [
+          products.map(({ market }) => market.option?.expiry ?? market.info?.expiry ?? NaN),
+          products.map(({ market }) => market.option?.strike ?? market.info?.strike ?? NaN),
+        ],
+      );
   }
   if (data.tickers)
     table(

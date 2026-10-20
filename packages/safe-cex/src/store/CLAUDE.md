@@ -24,7 +24,8 @@ frames still derive identity from symbol and position mode.
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
 and ticker `midPrice`, including clearing midpoint on packed and object worker
-updates. Orders, positions, fills and settings retain explicit symbols for rows
+updates. Shared public ticker updates also preserve midpoint: omitted keeps the
+cached value, a number replaces it, and null clears it across native polling. Orders, positions, fills and settings retain explicit symbols for rows
 missing from MARKETS. `FrameApplier` owns fetched-leverage writes, including rare
 query results; a SETTINGS replacement remains authoritative. Frame forwarding
 also sends changed query-derived leverage and includes it in late snapshots,

@@ -171,6 +171,19 @@ omitted FILLS.orderId. Corrected tests preserve their original data assertions;
 36 BreakoutProp public tests and 262 WASM consumer tests pass. The initial CI
 also hit Paradex size and two small CPU comparisons; fixed-budget integration
 and final green-CI verification remain in progress.
+Integrated landing PR #1342 (`fc809a9d85`), retaining its public-feed ownership,
+provider callbacks before transfers, lazy text codecs and fixed-budget Paradex
+profile alongside all wire repairs. The integration revealed shared public feeds
+omitting midpoint; explicit numeric/null/omitted updates now preserve/change/
+clear midpoint through the native cached feed and emitted frames. A JSON control
+against the incoming DTO failed at runtime; the repaired native target passes
+9 tests. Two binary wrapper regressions cover observer/provider exceptions and
+catalog validation failures without losing original fills or frame forwarding.
+The measured settings-helper size experiment grew WASM by 34 bytes and was
+removed; no speculative engine optimization or budget increase is retained.
+Integrated checks pass: 95 all-feature engine unit tests plus 9 shared-feed
+integration tests, native format/Clippy/bans, 62 SDK tests and SDK typecheck/lint.
+Real WASM midpoint/provider validation, rebuilt replay gates and CI follow.
 
 ## Security
 
