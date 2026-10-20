@@ -17,6 +17,7 @@ const aliases = {
   kraken: ['kraken', 'krakenspot'],
   asterdex: ['asterdex'],
   kucoin: ['kucoin'],
+  kucoinspot: ['kucoinspot'],
   backpack: ['backpack'],
   binance: ['binance', 'binancepm', 'binancespot', 'binanceinverse'],
   bingx: ['bingx'],

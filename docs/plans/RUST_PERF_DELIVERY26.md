@@ -610,3 +610,29 @@ than hiding failures behind successful-only summaries. Open a reviewable PR as
 soon as the implementation and required checks support it; final landing still
 requires green CI and the requested correctness reviews. Full performance
 requirements remain unfulfilled.
+
+## Current landing integration plan (27 packages)
+
+Resolve the latest landing merge while preserving engine reservation hints,
+raw-arrival FIFO, native cancellation, and incoming pending signing, symbol-aware
+commands and prediction feature gates. Keep KuCoin futures separate from the
+new optional Spot module: register `venue-kucoinspot`, browser/Node exports,
+literal browser imports and family registry. The provisional Spot budget is
+708,608 bytes (landed 687,701 plus 3%, rounded to KiB); measure the new build
+before claiming this cap passes. Other caps remain unchanged.
+
+Incoming build profiles retain Paradex host/engine O2 and Bitrue venue O3;
+default and selected builds must use identical per-family commands. These are
+new source-bound comparisons, not evidence for older compiler experiments.
+Signing completions, rejection and timeout must join the same raw-input FIFO
+with their captured completion time. Three regressions reproduce overtaking
+before that integration repair; all 80 host tests pass afterward.
+
+Finish in committable phases: (1) independent merge reviews plus source,
+typecheck, lint and repository tests; (2) fresh 27 release packages, actual-WASM
+SDK/host/parity checks and measured caps; (3) current-roster gates and honest
+before/after evidence, followed by PR correctness reviews and green CI. Preserve
+the completed 26-package artifacts before rebuilding. Keep operational failures
+visible and do not adjust collector limits or retry numerical outcomes. Draft
+PR publication may precede final measurements to make the implementation
+reviewable; readiness and merge still require the outstanding checks.

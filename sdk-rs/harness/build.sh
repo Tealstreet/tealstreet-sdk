@@ -32,8 +32,17 @@ if [[ $# -gt 0 ]]; then
   families=("$selected")
 fi
 for family in "${families[@]}"; do
-  cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown \
-    --no-default-features --features "venue-$family"
+  build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
+    --no-default-features --features "venue-$family")
+  if [[ $family == paradex ]]; then
+    # Standalone signing builds trade host/engine optimization for the venue size gate.
+    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level=2'
+      --config 'profile.release.package.safe-cex-engine.opt-level=2')
+  elif [[ $family == bitrue ]]; then
+    # Keep the landed standalone decoder throughput profile; aggregate defaults differ.
+    build_args+=(--config 'profile.release.package.safe-cex-venue-bitrue.opt-level=3')
+  fi
+  cargo build "${build_args[@]}"
   for target in web nodejs; do
     out="hosts/wasm/pkg/${target/nodejs/node}/$family"
     wasm-bindgen --remove-name-section --remove-producers-section --target "$target" --out-dir "$out" \

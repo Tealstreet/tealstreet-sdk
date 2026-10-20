@@ -22,6 +22,7 @@ import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
+import { kucoinspot } from './kucoinspot.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
@@ -1913,6 +1914,7 @@ export const VENUES = {
     ...kucoin,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
+  kucoinspot,
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
   bybitspot: bybit('bybitspot', 'BybitSpotExchange'),

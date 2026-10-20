@@ -29,6 +29,8 @@ const importEngine = (family: VenueFamily) => {
       return import('@tealstreet/safe-cex-wasm/web/asterdex');
     case 'kucoin':
       return import('@tealstreet/safe-cex-wasm/web/kucoin');
+    case 'kucoinspot':
+      return import('@tealstreet/safe-cex-wasm/web/kucoinspot');
     case 'orderly':
       return import('@tealstreet/safe-cex-wasm/web/orderly');
     case 'woo':

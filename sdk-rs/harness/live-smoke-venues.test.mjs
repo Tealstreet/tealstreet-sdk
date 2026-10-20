@@ -7,7 +7,8 @@ const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
 
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'].includes(venue)) {
+    // KuCoin Spot needs a separate host and sizing review.
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -25,7 +26,7 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });

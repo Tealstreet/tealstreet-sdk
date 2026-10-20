@@ -9,6 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
+# Optional convenience text entrypoints are omitted from binary Paradex builds.
+text-ingress = []
 # Polling-only builds trade parser bytes for lower first-subscription CPU.
 cold-subscriptions = []
 default = [
@@ -29,6 +31,7 @@ default = [
     "venue-orderly",
     "venue-asterdex",
     "venue-kucoin",
+    "venue-kucoinspot",
     "venue-kraken",
     "venue-apexomni",
     "venue-paradex",
@@ -39,32 +42,33 @@ default = [
     "venue-breakoutprop",
     "venue-txflow",
 ]
-venue-backpack = ["dep:safe-cex-venue-backpack"]
-venue-binance = ["dep:safe-cex-venue-binance"]
-venue-bingx = ["dep:safe-cex-venue-bingx"]
-venue-bitget = ["dep:safe-cex-venue-bitget"]
-venue-blofin = ["dep:safe-cex-venue-blofin"]
-venue-bybit = ["dep:safe-cex-venue-bybit"]
-venue-cryptocom = ["dep:safe-cex-venue-cryptocom"]
-venue-hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
-venue-mexc = ["dep:safe-cex-venue-mexc"]
-venue-okx = ["dep:safe-cex-venue-okx"]
-venue-weex = ["dep:safe-cex-venue-weex"]
-venue-bitrue = ["dep:safe-cex-venue-bitrue"]
-venue-lighter = ["dep:safe-cex-venue-lighter"]
-venue-woo = ["dep:safe-cex-venue-woo"]
-venue-orderly = ["dep:safe-cex-venue-orderly"]
-venue-asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-engine/command-asterdex"]
-venue-kucoin = ["dep:safe-cex-venue-kucoin"]
-venue-kraken = ["dep:safe-cex-venue-kraken"]
-venue-apexomni = ["dep:safe-cex-venue-apexomni", "safe-cex-engine/command-apexomni"]
+venue-backpack = ["dep:safe-cex-venue-backpack", "text-ingress"]
+venue-binance = ["dep:safe-cex-venue-binance", "text-ingress"]
+venue-bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
+venue-bitget = ["dep:safe-cex-venue-bitget", "text-ingress"]
+venue-blofin = ["dep:safe-cex-venue-blofin", "text-ingress"]
+venue-bybit = ["dep:safe-cex-venue-bybit", "text-ingress"]
+venue-cryptocom = ["dep:safe-cex-venue-cryptocom", "text-ingress"]
+venue-hyperliquid = ["dep:safe-cex-venue-hyperliquid", "text-ingress"]
+venue-mexc = ["dep:safe-cex-venue-mexc", "text-ingress"]
+venue-okx = ["dep:safe-cex-venue-okx", "text-ingress"]
+venue-weex = ["dep:safe-cex-venue-weex", "text-ingress"]
+venue-bitrue = ["dep:safe-cex-venue-bitrue", "text-ingress"]
+venue-lighter = ["dep:safe-cex-venue-lighter", "text-ingress"]
+venue-woo = ["dep:safe-cex-venue-woo", "text-ingress"]
+venue-orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
+venue-asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-engine/command-asterdex", "text-ingress"]
+venue-kucoin = ["dep:safe-cex-venue-kucoin", "text-ingress"]
+venue-kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "safe-cex-engine/command-kucoinspot", "text-ingress"]
+venue-kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
+venue-apexomni = ["dep:safe-cex-venue-apexomni", "safe-cex-engine/command-apexomni", "text-ingress"]
 venue-paradex = ["dep:safe-cex-venue-paradex"]
-venue-phemex = ["dep:safe-cex-venue-phemex"]
-venue-coinbase = ["dep:safe-cex-venue-coinbase"]
-venue-polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymarket"]
-venue-grvt = ["dep:safe-cex-venue-grvt"]
-venue-breakoutprop = ["dep:safe-cex-venue-breakoutprop", "cold-subscriptions"]
-venue-txflow = ["dep:safe-cex-venue-txflow"]
+venue-phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
+venue-coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
+venue-polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymarket", "text-ingress"]
+venue-grvt = ["dep:safe-cex-venue-grvt", "text-ingress"]
+venue-breakoutprop = ["dep:safe-cex-venue-breakoutprop", "cold-subscriptions", "text-ingress"]
+venue-txflow = ["dep:safe-cex-venue-txflow", "text-ingress"]
 
 # Keep landing feature names available to direct Cargo callers.
 backpack = ["venue-backpack"]
@@ -84,6 +88,7 @@ woo = ["venue-woo"]
 orderly = ["venue-orderly"]
 asterdex = ["venue-asterdex"]
 kucoin = ["venue-kucoin"]
+kucoinspot = ["venue-kucoinspot"]
 kraken = ["venue-kraken"]
 apexomni = ["venue-apexomni"]
 paradex = ["venue-paradex"]

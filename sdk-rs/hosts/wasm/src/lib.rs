@@ -14,6 +14,7 @@
     feature = "venue-asterdex",
     feature = "venue-breakoutprop",
     feature = "venue-kucoin",
+    feature = "venue-kucoinspot",
     feature = "venue-polymarket",
     feature = "venue-blofin",
     feature = "venue-bybit",
@@ -33,7 +34,7 @@
     feature = "venue-okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -74,7 +75,11 @@ use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOpt
 #[cfg(feature = "venue-kraken")]
 use safe_cex_venue_kraken::{Kraken, KrakenSpot, Options as KrakenOptions};
 #[cfg(feature = "venue-kucoin")]
-use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
+use safe_cex_venue_kucoin::Kucoin;
+#[cfg(any(feature = "venue-kucoin", feature = "venue-kucoinspot"))]
+use safe_cex_venue_kucoin::Options as KucoinOptions;
+#[cfg(feature = "venue-kucoinspot")]
+use safe_cex_venue_kucoin::spot::KucoinSpot;
 #[cfg(feature = "venue-lighter")]
 use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "venue-mexc")]
@@ -105,6 +110,7 @@ use batch::{MessageBatch, Payload, dispatch_events};
 mod profile;
 
 trait AnyEngine {
+    #[cfg(feature = "venue-coinbase")]
     fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
@@ -114,6 +120,7 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "venue-coinbase")]
     fn account_id(&self) -> Option<String> {
         Engine::account_id(self).map(str::to_owned)
     }
@@ -142,7 +149,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
-#[cfg(feature = "venue-kucoin")]
+#[cfg(any(feature = "venue-kucoin", feature = "venue-kucoinspot"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KucoinExtra {
@@ -158,6 +165,7 @@ struct KucoinExtra {
     feature = "venue-asterdex",
     feature = "venue-breakoutprop",
     feature = "venue-kucoin",
+    feature = "venue-kucoinspot",
     feature = "venue-polymarket",
     feature = "venue-blofin",
     feature = "venue-bybit",
@@ -218,6 +226,7 @@ struct EngineOptions {
         feature = "venue-apexomni",
         feature = "venue-asterdex",
         feature = "venue-kucoin",
+        feature = "venue-kucoinspot",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-woo",
@@ -245,6 +254,7 @@ struct EngineOptions {
         feature = "venue-asterdex",
         feature = "venue-breakoutprop",
         feature = "venue-kucoin",
+        feature = "venue-kucoinspot",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
@@ -271,6 +281,9 @@ struct EngineOptions {
     #[cfg(feature = "venue-paradex")]
     #[serde(default)]
     subkey_address: Option<String>,
+    #[cfg(feature = "venue-paradex")]
+    #[serde(default)]
+    payload_signer: bool,
     #[cfg(any(
         feature = "venue-backpack",
         feature = "venue-bitrue",
@@ -280,6 +293,7 @@ struct EngineOptions {
     recv_window: Option<f64>,
     #[cfg(any(
         feature = "venue-kucoin",
+        feature = "venue-kucoinspot",
         feature = "venue-okx",
         feature = "venue-weex",
         feature = "venue-blofin",
@@ -314,7 +328,7 @@ struct EngineOptions {
     #[serde(default)]
     asterdex: AsterConfig,
 
-    #[cfg(feature = "venue-kucoin")]
+    #[cfg(any(feature = "venue-kucoin", feature = "venue-kucoinspot"))]
     #[serde(default)]
     extra: Option<KucoinExtra>,
     #[cfg(feature = "venue-weex")]
@@ -420,9 +434,15 @@ enum ActionOut<'a> {
         #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u32>,
         url: &'a str,
-        headers: Vec<(&'static str, &'a str)>,
+        headers: Vec<(&'a str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
         body: Option<&'a str>,
+    },
+    SignPayload {
+        request: u32,
+        payload: &'a safe_cex_engine::PayloadSignRequest,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u32,
     },
     SetTimer {
         timer: u32,
@@ -494,6 +514,14 @@ impl ActionOut<'_> {
                         .sum::<usize>()
                     + body.map_or(0, json_string_length)
             }
+            Self::SignPayload { payload, .. } => {
+                // Nested payload field names add punctuation beyond the outer allowance.
+                64 + json_string_length(payload.exchange_name)
+                    + json_string_length(&payload.key)
+                    + json_string_length(&payload.payload)
+                    + json_string_length(payload.scheme)
+                    + json_string_length(payload.encoding)
+            }
             Self::Log { message, .. } => json_string_length(message),
             Self::Done { result, error, .. } => {
                 result.map_or(0, json_string_length) + error.map_or(0, json_string_length)
@@ -561,8 +589,23 @@ fn encode(actions: &[Action]) -> String {
                     .headers
                     .iter()
                     .map(|(name, value)| (*name, value.as_str()))
+                    .chain(
+                        request
+                            .signer_headers
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value.as_str())),
+                    )
                     .collect(),
                 body: request.body.as_deref(),
+            },
+            Action::SignPayload {
+                request,
+                payload,
+                timeout_ms,
+            } => ActionOut::SignPayload {
+                request: request.0,
+                payload,
+                timeout_ms: *timeout_ms,
             },
             Action::SetTimer { timer, at_ms } => ActionOut::SetTimer {
                 timer: timer.0,
@@ -621,6 +664,7 @@ impl WasmEngine {
         feature = "venue-asterdex",
         feature = "venue-breakoutprop",
         feature = "venue-kucoin",
+        feature = "venue-kucoinspot",
         feature = "venue-polymarket",
         feature = "venue-blofin",
         feature = "venue-bybit",
@@ -714,6 +758,7 @@ impl WasmEngine {
                 key: options.key,
                 paradex_address: options.paradex_address,
                 subkey_address: options.subkey_address,
+                payload_signer: options.payload_signer,
             }))),
             #[cfg(feature = "venue-apexomni")]
             "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
@@ -864,6 +909,16 @@ impl WasmEngine {
                     },
                 })))
             }
+            #[cfg(feature = "venue-kucoinspot")]
+            "kucoinspot" => Box::new(Engine::new(KucoinSpot::new(KucoinOptions {
+                read_credentials: options.read_credentials.clone(),
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+            }))),
             #[cfg(feature = "venue-kucoin")]
             "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
                 read_credentials: options.read_credentials.clone(),
@@ -1032,6 +1087,7 @@ impl WasmEngine {
 
     /// Like `wsMessage`, returning `undefined` when there are no host actions.
     /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
+    #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageActions)]
     pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
         let actions = self.ws_message(socket, text, now);
@@ -1039,6 +1095,7 @@ impl WasmEngine {
     }
 
     /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
+    #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageBytes)]
     pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
         let text = std::str::from_utf8(bytes).ok()?;
@@ -1133,6 +1190,47 @@ impl WasmEngine {
         self.flush()
     }
 
+    #[wasm_bindgen(js_name = payloadSigned)]
+    pub fn payload_signed(
+        &mut self,
+        request: u32,
+        signature: &str,
+        headers: &str,
+        now: f64,
+    ) -> String {
+        let request = RequestId(request);
+        match payload_headers(headers) {
+            Some(headers) => self.inner.handle(
+                now,
+                Event::PayloadSigned {
+                    request,
+                    signature,
+                    headers,
+                },
+            ),
+            None => self.inner.handle(
+                now,
+                Event::PayloadSignFailed {
+                    request,
+                    error: "Invalid payload signer headers",
+                },
+            ),
+        }
+        self.flush()
+    }
+
+    #[wasm_bindgen(js_name = payloadSignFailed)]
+    pub fn payload_sign_failed(&mut self, request: u32, error: &str, now: f64) -> String {
+        self.inner.handle(
+            now,
+            Event::PayloadSignFailed {
+                request: RequestId(request),
+                error,
+            },
+        );
+        self.flush()
+    }
+
     pub fn timer(&mut self, timer: u32, now: f64) -> String {
         let timer = TimerId(timer);
         self.inner.handle(now, Event::TimerFired { timer });
@@ -1176,6 +1274,9 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
+    // Only Coinbase exposes its selected portfolio through the SDK account API.
+    // Keep the optional ABI out of single-venue artifacts that cannot use it.
+    #[cfg(feature = "venue-coinbase")]
     #[wasm_bindgen(js_name = accountId)]
     pub fn account_id(&self) -> Option<String> {
         self.inner.account_id()
@@ -1206,12 +1307,25 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
+    let mut headers = Vec::new();
+    if !text.is_empty() {
+        for line in text.split('\n') {
+            let (name, value) = line.split_once(':')?;
+            headers.push((name.into(), value.into()));
+        }
+    }
+    Some(headers)
+}
+
 #[cfg(test)]
 mod action_tests {
     use super::*;
     use safe_cex_engine::Command;
+    #[cfg(any(feature = "venue-asterdex", feature = "venue-kucoinspot"))]
+    use safe_cex_engine::model::CancelOrderRef;
     #[cfg(feature = "venue-asterdex")]
-    use safe_cex_engine::model::{CancelOrderRef, StpMode};
+    use safe_cex_engine::model::StpMode;
 
     #[test]
     fn subscription_json_preserves_escaped_and_unicode_messages() {
@@ -1245,6 +1359,7 @@ mod action_tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            #[cfg(feature = "venue-coinbase")]
             fn account_id(&self) -> Option<String> {
                 None
             }
@@ -1287,25 +1402,37 @@ mod action_tests {
             r#"{"op":"setTickInterval","interval":2000}"#,
             r#"{"op":"setTickInterval","interval":null}"#,
         ];
+        let mut dispatched = 0;
         for (index, json) in commands.iter().enumerate() {
             let now = index as f64 + 0.5;
-            assert_eq!(engine.command(json, now).unwrap(), "");
-            assert_eq!(drains.get(), index + 1);
-            assert_eq!(events.borrow().len(), index + 1);
-            assert_eq!(
-                events.borrow()[index],
-                (
-                    now,
-                    safe_cex_engine::command::decode_host_input(json).unwrap()
-                )
-            );
+            match safe_cex_engine::command::decode_host_input(json) {
+                Ok(expected) => {
+                    assert_eq!(engine.command(json, now).unwrap(), "");
+                    assert_eq!(events.borrow()[dispatched], (now, expected));
+                    dispatched += 1;
+                }
+                Err(_) => {
+                    // JsError construction invokes JS and cannot run on a native target.
+                    // Native tests cover decoder rejection; WASM also checks the host ABI.
+                    #[cfg(target_arch = "wasm32")]
+                    assert!(engine.command(json, now).is_err());
+                }
+            }
+            assert_eq!(drains.get(), dispatched);
+            assert_eq!(events.borrow().len(), dispatched);
         }
     }
 
     #[test]
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [
-            ("getAccount", cfg!(feature = "venue-apexomni")),
+            (
+                "getAccount",
+                cfg!(any(
+                    feature = "venue-apexomni",
+                    feature = "venue-kucoinspot"
+                )),
+            ),
             (
                 "fetchAccount",
                 cfg!(any(
@@ -1361,6 +1488,7 @@ mod action_tests {
                 timeout_ms: route.map(|_| 5_000),
                 url: "https://venue.test/time".into(),
                 headers: vec![],
+                signer_headers: vec![],
                 body: None,
             })
         })
@@ -1412,12 +1540,76 @@ mod action_tests {
         }
     }
 
+    #[test]
+    fn payload_signing_capacity_covers_nested_escaped_fields_without_growth() {
+        let escaped = "\"\\\n\u{0000}東京".repeat(500);
+        let payload = safe_cex_engine::PayloadSignRequest {
+            exchange_name: "paradex",
+            key: escaped.clone(),
+            payload: escaped.clone(),
+            scheme: "stark",
+            encoding: "hex",
+        };
+        let out = ActionOut::SignPayload {
+            request: u32::MAX,
+            payload: &payload,
+            timeout_ms: u32::MAX,
+        };
+        let mut reserved = Vec::with_capacity(out.capacity_hint());
+        let capacity = reserved.capacity();
+        serde_json::to_writer(&mut reserved, &out).unwrap();
+        assert_eq!(reserved.capacity(), capacity);
+        let decoded: serde_json::Value = serde_json::from_slice(&reserved).unwrap();
+        assert_eq!(decoded["op"], "signPayload");
+        assert_eq!(decoded["request"], u32::MAX);
+        assert_eq!(decoded["timeoutMs"], u32::MAX);
+        assert_eq!(decoded["payload"]["key"], escaped);
+        assert_eq!(decoded["payload"]["payload"], escaped);
+    }
+
+    #[test]
+    fn delegated_header_lines_preserve_value_bytes_and_reject_malformed_lines() {
+        assert_eq!(payload_headers(""), Some(vec![]));
+        assert_eq!(
+            payload_headers("X-Empty:\nX-Exact:  a:b:c \t"),
+            Some(vec![
+                ("X-Empty".into(), String::new()),
+                ("X-Exact".into(), "  a:b:c \t".into()),
+            ])
+        );
+        for invalid in ["missing-colon", "\n", "X-Proof:a\n", "X-Proof:a\ninvalid"] {
+            assert_eq!(payload_headers(invalid), None);
+        }
+    }
+
+    #[test]
+    fn amendment_symbol_context_is_preserved_for_spot_builds() {
+        let wire = safe_cex_engine::command::decode_command(
+            r#"{"op":"amendOrderWithSymbol","command":19,"id":"unobserved","symbol":"BTC-USDT","price":100}"#,
+        );
+        #[cfg(feature = "venue-kucoinspot")]
+        assert!(
+            matches!(wire.unwrap(), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
+            if id == "unobserved" && symbol == "BTC-USDT")
+        );
+        #[cfg(not(feature = "venue-kucoinspot"))]
+        assert!(wire.is_err());
+        let legacy = safe_cex_engine::command::decode_command(
+            r#"{"op":"amendOrder","command":19,"id":"legacy","symbol":"ignored","price":100}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(legacy, Command::AmendOrder { command: 19, id, price: Some(100.0), amount: None } if id == "legacy")
+        );
+    }
+
     #[derive(Default)]
     struct Messages {
         actions: Vec<Action>,
     }
 
     impl AnyEngine for Messages {
+        #[cfg(feature = "venue-coinbase")]
         fn account_id(&self) -> Option<String> {
             None
         }
@@ -1452,6 +1644,7 @@ mod action_tests {
         }
     }
 
+    #[cfg(feature = "text-ingress")]
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
@@ -1474,6 +1667,7 @@ mod action_tests {
         assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
     }
 
+    #[cfg(feature = "text-ingress")]
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
@@ -1551,7 +1745,7 @@ mod action_tests {
         assert_eq!(batched.ws_events(&[]).unwrap(), "");
     }
 
-    #[cfg(feature = "venue-asterdex")]
+    #[cfg(any(feature = "venue-asterdex", feature = "venue-kucoinspot"))]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire = safe_cex_engine::command::decode_command(
@@ -1574,6 +1768,16 @@ mod action_tests {
             r#"{"op":"setStpMode","command":19,"mode":"EXPIRE_MAKER"}"#,
         ];
         for (index, json) in commands.into_iter().enumerate() {
+            if index == 0 {
+                assert_eq!(
+                    safe_cex_engine::command::decode_command(json).is_ok(),
+                    cfg!(any(
+                        feature = "venue-asterdex",
+                        feature = "venue-kucoinspot"
+                    ))
+                );
+                continue;
+            }
             let parsed = safe_cex_engine::command::decode_command(json);
             #[cfg(feature = "venue-asterdex")]
             match (index, parsed.unwrap()) {

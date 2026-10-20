@@ -16,6 +16,7 @@ function importEngine(family) {
     case 'kraken': return import('../pkg/web/kraken/safe_cex_wasm.js');
     case 'asterdex': return import('../pkg/web/asterdex/safe_cex_wasm.js');
     case 'kucoin': return import('../pkg/web/kucoin/safe_cex_wasm.js');
+    case 'kucoinspot': return import('../pkg/web/kucoinspot/safe_cex_wasm.js');
     case 'backpack': return import('../pkg/web/backpack/safe_cex_wasm.js');
     case 'binance': return import('../pkg/web/binance/safe_cex_wasm.js');
     case 'bingx': return import('../pkg/web/bingx/safe_cex_wasm.js');

@@ -688,6 +688,7 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::CancelOrders { command, .. }
         | Command::CancelOrdersWithSymbols { command, .. }
         | Command::AmendOrder { command, .. }
+        | Command::AmendOrderWithSymbol { command, .. }
         | Command::CancelSymbolOrders { command, .. }
         | Command::SetLeverage { command, .. }
         | Command::SetMarginType { command, .. }

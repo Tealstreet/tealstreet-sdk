@@ -96,6 +96,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   bitgetusdc: 'ACCESS-KEY',
   bitgetinverse: 'ACCESS-KEY',
   kucoin: 'KC-API-KEY',
+  kucoinspot: 'KC-API-KEY',
   mexc: 'ApiKey',
   bingx: 'X-BX-APIKEY',
   bitrue: 'X-CH-APIKEY',
@@ -127,6 +128,7 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
       'bitgetusdc',
       'bitgetinverse',
       'kucoin',
+      'kucoinspot',
       'blofin',
       'weex',
     ].includes(exchange) &&
@@ -256,7 +258,9 @@ const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'hyperliquid' || exchange === 'hyperliquidspot' || exchange === 'paradex'
+  exchange === 'paradex'
+    ? !options.publicDataOnly && !options.payloadSigner
+    : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
     ? !options.publicDataOnly
     : exchange === 'bingx'
       ? !options.publicDataOnly && options.tealstreetTunnel !== false
@@ -320,7 +324,7 @@ const httpTransport = (
   provider: TransportProvider,
   routing: ResolvedRouting,
   publicPrefix?: string,
-): { request: Transport['request']; dispose(): void } => {
+): { mode: 'direct' | 'how'; request: Transport['request']; dispose(): void } => {
   const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
@@ -440,6 +444,7 @@ const httpTransport = (
     }
   };
   return {
+    mode: adapter ? 'how' : 'direct',
     request,
     dispose: () => {
       disposed = true;
@@ -512,6 +517,7 @@ export const createEngineTransport = (
   return {
     // Protocol negotiation must use the same resolved route as connect(),
     // including hosts (such as Workers) which construct the engine themselves.
+    httpMode: http.mode,
     engineOptions: {
       ...transport.engineOptions,
       ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),

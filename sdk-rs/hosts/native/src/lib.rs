@@ -16,7 +16,9 @@ pub use routing::{
     SocketChannelRule, WsRoute, WsRoutes,
 };
 pub use server::{FrameServer, ServerConfig};
-pub use transport::{NetworkTransport, Transport};
+pub use transport::{
+    NetworkTransport, PayloadSigner, PayloadSignerFuture, PayloadSignerResult, Transport,
+};
 
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue,
@@ -42,6 +44,8 @@ pub enum HostEvent {
     HttpChunk(RequestId, Vec<u8>),
     HttpEnd(RequestId),
     HttpFailed(RequestId, String),
+    PayloadSigned(RequestId, PayloadSignerResult),
+    PayloadSignFailed(RequestId, String),
     Timer(TimerId),
 }
 
@@ -421,6 +425,21 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     error: &error,
                 },
             ),
+            HostEvent::PayloadSigned(request, result) => engine.handle(
+                now,
+                Event::PayloadSigned {
+                    request,
+                    signature: &result.signature,
+                    headers: result.headers,
+                },
+            ),
+            HostEvent::PayloadSignFailed(request, error) => engine.handle(
+                now,
+                Event::PayloadSignFailed {
+                    request,
+                    error: &error,
+                },
+            ),
             HostEvent::Timer(timer) => {
                 self.timers.remove(&timer);
                 engine.handle(now, Event::TimerFired { timer })
@@ -478,6 +497,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.sockets.remove(&socket);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
+                Action::SignPayload {
+                    request,
+                    payload,
+                    timeout_ms,
+                } => self
+                    .transport
+                    .sign_payload(request, payload, timeout_ms, self.events.clone()),
                 Action::SetTimer { timer, at_ms } => {
                     let delay = (at_ms - (self.clock)()).max(0.0);
                     let deadline = Duration::try_from_secs_f64(delay / 1000.0)

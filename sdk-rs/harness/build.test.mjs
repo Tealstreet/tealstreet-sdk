@@ -9,6 +9,13 @@ const script = new URL('./build.sh', import.meta.url);
 const manifest = readFileSync(new URL('../hosts/wasm/Cargo.toml', import.meta.url), 'utf8');
 const families = [...manifest.matchAll(/^venue-([a-z0-9-]+) = /gm)].map((match) => match[1]);
 
+function expectedCargoCommand(family) {
+  let command = `cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features venue-${family}`;
+  if (family === 'paradex') command += ' --config profile.release.package.safe-cex-wasm.opt-level=2 --config profile.release.package.safe-cex-engine.opt-level=2';
+  if (family === 'bitrue') command += ' --config profile.release.package.safe-cex-venue-bitrue.opt-level=3';
+  return command;
+}
+
 function build(args) {
   const root = mkdtempSync(join(tmpdir(), 'safe-cex-build-'));
   const bin = join(root, 'bin');
@@ -41,7 +48,7 @@ test('venue selector builds one isolated family and emits both family packages',
     assert.equal(run.result.status, 0, run.result.stderr);
     const cargo = run.calls.filter((line) => line.startsWith('cargo '));
     assert.equal(cargo.length, 1);
-    assert.match(cargo[0], /--no-default-features --features venue-okx$/);
+    assert.equal(cargo[0], expectedCargoCommand('okx'));
     assert.equal(run.calls.filter((line) => line.startsWith('bindgen ')).length, 2);
     assert(run.calls.some((line) => line.includes('--out-dir hosts/wasm/pkg/web/okx')));
     assert.equal(readFileSync(join(run.root, 'hosts/wasm/pkg/node/okx/package.json'), 'utf8').trim(), '{"type":"commonjs"}');
@@ -54,12 +61,26 @@ test('default builds each manifest family separately', () => {
   try {
     assert.equal(run.result.status, 0, run.result.stderr);
     const cargo = run.calls.filter((line) => line.startsWith('cargo '));
-    assert.equal(cargo.length, families.length);
+    assert.deepEqual(cargo, families.map(expectedCargoCommand));
     for (const family of families) {
-      assert(cargo.some((line) => line.endsWith(`--no-default-features --features venue-${family}`)));
       assert(existsSync(join(run.root, `hosts/wasm/pkg/node/${family}/package.json`)));
     }
   } finally { run.dispose(); }
+});
+
+test('selected Paradex and Bitrue builds preserve their exact isolated profiles', () => {
+  for (const family of ['paradex', 'bitrue']) {
+    const run = build(['--venue', family]);
+    try {
+      assert.equal(run.result.status, 0, run.result.stderr);
+      assert.deepEqual(run.calls.filter((line) => line.startsWith('cargo ')), [expectedCargoCommand(family)]);
+      const bindings = run.calls.filter((line) => line.startsWith('bindgen '));
+      assert.equal(bindings.length, 2);
+      for (const target of ['web', 'node'])
+        assert(bindings.some((line) => line.includes(`--out-dir hosts/wasm/pkg/${target}/${family} `)));
+      assert(!existsSync(join(run.root, 'hosts/wasm/pkg/node/okx')));
+    } finally { run.dispose(); }
+  }
 });
 
 test('invalid selectors fail before any build', () => {

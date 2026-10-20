@@ -238,6 +238,14 @@
     "./node/txflow": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/txflow/safe_cex_wasm.js"
+    },
+    "./web/kucoinspot": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/kucoinspot/safe_cex_wasm.js"
+    },
+    "./node/kucoinspot": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/kucoinspot/safe_cex_wasm.js"
     }
   },
   "scripts": {

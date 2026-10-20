@@ -13,6 +13,7 @@ const families = Object.freeze({
   krakenspot: 'kraken',
   asterdex: 'asterdex',
   kucoin: 'kucoin',
+  kucoinspot: 'kucoinspot',
   backpack: 'backpack',
   binance: 'binance',
   binancepm: 'binance',

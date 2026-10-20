@@ -51,6 +51,7 @@ if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync('sdk-rs/harness/out', { recursive: true });
 mkdirSync(outDir);
+console.log(`Replay output: ${outDir}`);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -183,6 +184,15 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
 const KNOWN_TS_FIXES = {
+  // KuCoin Spot: emit each native execution once even across replay, preserve
+  // newer private state across stale REST snapshots, and retain good orders
+  // when active-symbol discovery fails or active-order rows have invalid
+  // financial geometry. Reject malformed WS order/execution quantities and
+  // missing/null required REST balances rather than committing coerced zeros.
+  // Encode caller order IDs as URL components on cancel.
+  // Native regressions cover these cases;
+  // standard replay compares both outputs without rewriting either result.
+  kucoinspot() {},
   hyperliquidspot: {
     // Paired reference fixes retain native spot IDs for coinless contexts and
     // return string IDs for both resting and filled placement ACKs. Native
