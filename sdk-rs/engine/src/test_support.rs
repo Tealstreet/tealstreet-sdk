@@ -35,18 +35,6 @@ impl<V: Venue, F: FnMut(&mut V, &mut Cx<'_, V::Pending>)> Venue for ProbeVenue<V
     }
 }
 
-/// Start `venue` through a probe that runs `start`, returning the HTTP
-/// requests it emitted.
-pub fn probe_requests<V: Venue>(
-    venue: V,
-    now: f64,
-    start: impl FnMut(&mut V, &mut Cx<'_, V::Pending>),
-) -> Vec<HttpRequest> {
-    let mut engine = Engine::new(ProbeVenue::new(venue, start));
-    engine.start(now);
-    http_requests(&mut engine)
-}
-
 /// Drain the engine's queued actions, keeping only HTTP requests.
 pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
     engine

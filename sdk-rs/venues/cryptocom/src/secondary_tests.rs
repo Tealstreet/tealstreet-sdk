@@ -36,7 +36,7 @@ fn probe(
 fn posted_read_keeps_primary_identity_with_secondary_configured() {
     let mut engine = Engine::new(probe(Cryptocom::new(options())));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine).into_iter().collect();
+    let requests: Vec<_> = http_requests(&mut engine);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, Method::Post);
     let expected = sign::Credentials {

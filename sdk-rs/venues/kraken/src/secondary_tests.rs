@@ -123,7 +123,7 @@ fn equal_api_keys_share_nonce_clock_but_keep_selected_signing_secrets() {
     opts.read_credentials.as_mut().unwrap().key = "primary-key".into();
     let mut engine = Engine::new(probe(Kraken::new(opts)));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = http_requests(&mut engine).into_iter().collect();
+    let requests: Vec<_> = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
     let mut previous = 0;
     for request in requests {

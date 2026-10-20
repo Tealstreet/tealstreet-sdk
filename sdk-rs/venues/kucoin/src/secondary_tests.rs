@@ -122,13 +122,7 @@ fn public_only_options() -> Options {
 fn public_only_signing_helpers_do_not_reintroduce_secondary_identity() {
     let mut engine = Engine::new(probe(Kucoin::new(public_only_options())));
     engine.start(1700000000000.0);
-    let requests = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let requests = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
     for request in requests {
         // Attribution remains public; no primary, secondary or partner auth leaks.
@@ -170,13 +164,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
             },
         }),
     );
-    let requests = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let requests = http_requests(&mut engine);
     assert_eq!(requests.len(), 1);
     let request = &requests[0];
     assert_eq!(request.method, Method::Get);
