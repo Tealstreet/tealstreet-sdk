@@ -1242,6 +1242,11 @@ pub trait Venue {
     fn supports_amend_order_with_symbol(&self) -> bool {
         false
     }
+    /// Opt in only when `on_command` answers `Command::FetchAccount`; others
+    /// reject it at once instead of leaving the caller to its deadline.
+    fn supports_account_identity(&self) -> bool {
+        false
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
     fn on_venue_action(
@@ -1650,6 +1655,11 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(Command::Venue { command, action }) => {
                 self.venue.on_venue_action(&mut cx, command, action);
+            }
+            Event::Command(Command::FetchAccount { command })
+                if !self.venue.supports_account_identity() =>
+            {
+                unsupported_venue_action(&mut cx, command);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.supports_amend_order_with_symbol() =>
@@ -3188,6 +3198,20 @@ mod streaming_tests {
         assert!(
             engine.take_market_frame(2.).is_none(),
             "baseline must remain the last flushed size"
+        );
+    }
+
+    #[test]
+    fn account_identity_on_a_venue_without_it_fails_at_once() {
+        let mut engine = frame_engine();
+        engine.handle(0.0, Event::Command(Command::FetchAccount { command: 8 }));
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 8, result }) => Some(result),
+            _ => None,
+        });
+        assert_eq!(
+            result,
+            Some(Err("This action is not supported on this venue".into()))
         );
     }
 

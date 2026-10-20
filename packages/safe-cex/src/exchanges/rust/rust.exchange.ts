@@ -1291,16 +1291,31 @@ export class RustEngineExchange extends BaseExchange {
     try {
       try {
         const orders: PlaceOrderOpts[] = [];
+        // One unusable position (an unlisted market, a missing inverse notional)
+        // must not stop the others from closing; it fails the nuke afterwards.
+        const skipped: string[] = [];
         for (const position of await this.fetchPositions()) {
-          const quantities = [position.contracts, position.notional ?? 0, position.extra?.contractsNative ?? 0];
-          if (!quantities.every(Number.isFinite)) this.rejectPreflight(`Invalid close size for ${position.symbol}`);
-          if (quantities.every((value) => value === 0)) continue;
           const market = this.store.marketsBySymbol[position.symbol];
-          if (!market) this.rejectPreflight(`Market not found for symbol: ${position.symbol}`);
-          if (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
-            this.rejectPreflight(`Invalid contract size for ${position.symbol}`);
+          if (!market) {
+            if (position.contracts !== 0) skipped.push(`${position.symbol}: market not found`);
+            continue;
+          }
+          const sized = market.isInverse ? position.notional : position.contracts;
+          const native = position.extra?.contractsNative;
+          if (
+            sized === undefined ||
+            !Number.isFinite(sized) ||
+            (native !== undefined && !Number.isFinite(native)) ||
+            (market.contractSize !== undefined && (!Number.isFinite(market.contractSize) || market.contractSize < 0))
+          ) {
+            skipped.push(`${position.symbol}: invalid close size`);
+            continue;
+          }
           const amount = nativePositionSize(position, market);
-          if (!Number.isFinite(amount) || amount < 0) this.rejectPreflight(`Invalid close size for ${position.symbol}`);
+          if (!Number.isFinite(amount) || amount < 0) {
+            skipped.push(`${position.symbol}: invalid close size`);
+            continue;
+          }
           if (amount > 0) orders.push({
             symbol: position.symbol,
             side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
@@ -1312,6 +1327,7 @@ export class RustEngineExchange extends BaseExchange {
         // One batch retains native partial/unknown outcomes without replaying
         // a close against positions that have not yet reconciled.
         if (orders.length) await this.placeOrders(orders);
+        if (skipped.length) throw new Error(`Nuke could not close ${skipped.join('; ')}`);
       } catch (error) {
         this.reportCommandError(error);
         failed = true;

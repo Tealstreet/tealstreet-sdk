@@ -473,6 +473,9 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

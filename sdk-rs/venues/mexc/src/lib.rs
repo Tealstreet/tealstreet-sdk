@@ -500,6 +500,9 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }

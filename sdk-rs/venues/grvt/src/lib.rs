@@ -646,6 +646,9 @@ impl Grvt {
     }
 }
 impl Venue for Grvt {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public quotes cannot make an unseeded account appear loaded.

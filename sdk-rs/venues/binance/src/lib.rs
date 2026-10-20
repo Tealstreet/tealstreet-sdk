@@ -1154,6 +1154,9 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {

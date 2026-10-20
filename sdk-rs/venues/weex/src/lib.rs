@@ -523,6 +523,9 @@ fn interval(i: &str, stream: bool) -> bool {
     ) || (stream && matches!(i, "2h" | "6h"))
 }
 impl Venue for WeexFutures {
+    fn supports_account_identity(&self) -> bool {
+        true
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }

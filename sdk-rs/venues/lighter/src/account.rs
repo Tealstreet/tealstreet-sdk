@@ -507,6 +507,14 @@ impl Lighter {
         self.next_lookup(cx, self.lookup_candidates());
     }
     pub(crate) fn lookup_candidates(&self) -> VecDeque<Lookup> {
+        self.candidates(true)
+    }
+    /// Identity reads never fall back to the API key index: after a transient
+    /// address-lookup failure it names someone else's account.
+    pub(crate) fn identity_candidates(&self) -> VecDeque<Lookup> {
+        self.candidates(false)
+    }
+    fn candidates(&self, key_index: bool) -> VecDeque<Lookup> {
         let mut candidates = VecDeque::new();
         let app = self
             .options
@@ -539,7 +547,7 @@ impl Lighter {
                 address: false,
             });
         }
-        if let Some(key) = self.options.api_key_index.as_deref().and_then(index) {
+        if key_index && let Some(key) = self.options.api_key_index.as_deref().and_then(index) {
             candidates.push_back(Lookup {
                 by: "index",
                 value: key.to_string(),
