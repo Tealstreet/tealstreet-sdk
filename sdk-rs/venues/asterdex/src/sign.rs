@@ -564,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn query_optional_empty_and_replace_preserve_order() {
+    fn query_optional_empty_and_replace_keep_field_sequence() {
         assert_eq!(
             Query::new()
                 .str("a", "1")

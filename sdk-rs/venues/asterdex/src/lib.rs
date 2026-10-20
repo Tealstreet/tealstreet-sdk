@@ -1053,7 +1053,7 @@ impl Venue for AsterDex {
                     .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
                     .map(|s| {
                         format!(
-                            "{{\"long\":{},\"short\":{}}}",
+                            "{{\"buyLeverage\":{},\"sellLeverage\":{}}}",
                             num::format(s.leverage),
                             num::format(s.leverage)
                         )

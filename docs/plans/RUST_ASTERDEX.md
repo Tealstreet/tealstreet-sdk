@@ -151,3 +151,16 @@ for green CI, merge, and cut a fresh follow-up branch.
   tests and wrapper35 tests pass. Package typecheck, scoped lint and syntax pass.
 - Final integrated artifact build/replays and broad CI are next; previous
   single-lane numbers remain explicitly preliminary.
+
+### Integrated review fixes
+
+- Final independent review corrected the native FetchLeverage JSON contract to
+  buyLeverage/sellLeverage; native assertion and 15-command tape expectations agree.
+- Banned-pattern scan now passes after renaming a test whose name matched the
+  JSON map-order ban; signer behavior is unchanged. Workspace all-target clippy
+  and WASM-target clippy pass. Root integrated typecheck44/44 and lint28/28 pass.
+- Integrated transport207/207, native stalled-body deadline and host25/25 pass.
+  Rebuilt selected Aster artifact; public replay first stopped before comparison
+  because Node backing-buffer baseline did not settle under shared host load.
+  This failed attempt is retained; thresholds remain unchanged. Final V1 private
+  correctness passes (14frames, four native writes); remaining gates continue.

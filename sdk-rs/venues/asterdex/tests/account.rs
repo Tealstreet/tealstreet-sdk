@@ -378,5 +378,5 @@ fn leverage_metadata_command_completes_from_native_settings() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(output, json!({"long":10,"short":10}));
+    assert_eq!(output, json!({"buyLeverage":10,"sellLeverage":10}));
 }
