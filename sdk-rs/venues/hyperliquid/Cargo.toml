@@ -14,5 +14,8 @@ getrandom.workspace = true
 miniz_oxide = "0.8"
 rmp-serde = "1.3"
 
+[dev-dependencies]
+alloy-dyn-abi.workspace = true
+
 [lints]
 workspace = true

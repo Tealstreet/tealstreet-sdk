@@ -90,6 +90,7 @@ const options = {
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
+await venue.prepareReplay?.({ isPrivate, options });
 await venue.initializeReplay?.(values.impl, options);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
@@ -194,9 +195,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+    connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (data) => typeof data === 'string' ? onMessage(data) : onBinary?.(data), onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -345,6 +346,8 @@ const commandArgs = ({ t, type, expected, ...args }) => args;
 async function tsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
   switch (op) {
+    case 'getAccount':
+      return exchange.getAccount();
     case 'placeOrders':
       return exchange.placeOrders(args.orders);
     case 'cancelOrders':
@@ -516,7 +519,8 @@ async function runTs() {
     const requestBody =
       init.body ??
       (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
     return new Response([204, 205, 304].includes(status) ? null : body, { status });
   };
   // Header-capable Node sockets resolve `ws` directly instead of the global.
@@ -568,6 +572,7 @@ async function runTs() {
     return response;
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+  await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const clock = isPrivate && !venue.virtualPrivateClock ? undefined : new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate);
@@ -600,7 +605,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;

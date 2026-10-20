@@ -11,5 +11,8 @@ safe-cex-venue-hyperliquid.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 
+[dev-dependencies]
+alloy-dyn-abi.workspace = true
+
 [lints]
 workspace = true

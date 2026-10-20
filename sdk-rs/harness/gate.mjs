@@ -151,6 +151,34 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // Paired production fixes, compared without rewriting either replay result:
+  // preserve full-depth incremental books; verify subscription acknowledgements;
+  // fence polled candles against newer trades and reject older trade buckets;
+  // apply every per-market BBO/summary update; emit unique private executions;
+  // clear closed positions and classify CLOSED orders without reopening them;
+  // negotiate/decode mandatory SBE 1:2; use RFC6455 rather than invalid JSON
+  // heartbeats and accept the documented auth node identity; preserve
+  // venue JWT Authorization beside Tealstreet-Authorization on routed requests;
+  // preserve native client IDs and canonical time-in-force; derive account UPnL
+  // from positions; support idempotent cross-margin/one-way mode settings;
+  // validate public-trade query windows and deduplicate native fill IDs/quantity.
+  // Walk empty history cursor pages and keep polled candle buckets/volume monotonic.
+  // Rust also fences lagging order-repair rows with native timestamps/exact fill
+  // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
+  // adversarial native tests cover this without rewriting TS replay output.
+  paradex() {},
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+  apexomni: [],
   kraken: {
     output: fixKrakenOutput,
     fixes: [

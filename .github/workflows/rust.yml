@@ -104,6 +104,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - venue: apexomni
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-apexomni
           - venue: asterdex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-asterdex
@@ -158,6 +161,9 @@ jobs:
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
+          - venue: paradex
+            books: BTC-USD-PERP,ETH-USD-PERP
+            private_script: rust:private-tape-paradex
           - venue: txflow
             books: BTC-USDC,ETH-USDC
             private_script: rust:private-tape-txflow

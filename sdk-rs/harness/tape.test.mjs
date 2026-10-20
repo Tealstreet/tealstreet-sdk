@@ -1469,3 +1469,47 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
+
+
+test('wait markers advance virtual timers and onTick without sockets or commands, including Bitget', async () => {
+  const clock = new ReplayClock(1000);
+  clock.install();
+  try {
+    const tape = new Tape([{ type: 'wait', t: 50, url: 'wss://must-not-connect.test' }], { rust: 'bitget' });
+    tape.socketFor = () => assert.fail('wait performed a socket lookup');
+    tape.deliverFrame = () => assert.fail('wait delivered a Bitget frame');
+    tape.respond = () => assert.fail('wait performed an HTTP request');
+    const observed = [];
+    const count = await tape.play((time) => observed.push(['tick', time]), undefined,
+      () => assert.fail('wait executed a command'), clock,
+      () => setTimeout(() => observed.push(['timer']), 10));
+    assert.equal(count, 1);
+    assert.equal(tape.time, 50);
+    assert.equal(Date.now(), 1050);
+    assert.deepEqual(observed, [['timer'], ['tick', 50]]);
+    assert.equal(tape.commandIndex, 0);
+    assert.deepEqual(tape.results, []);
+  } finally { clock.restore(); }
+});
+
+test('paced waits observe real timer work without socket traffic or extra commands', async () => {
+  const tape = new Tape([{ type: 'wait', t: 30 }], {}, true);
+  tape.socketFor = () => assert.fail('wait performed a socket lookup');
+  tape.respond = () => assert.fail('wait performed an HTTP request');
+  let fired = false;
+  const ticks = [];
+  const before = performance.now();
+  const count = await tape.play((time) => ticks.push(time), undefined,
+    () => assert.fail('wait executed a command'), undefined,
+    () => setTimeout(() => { fired = true; }, 5));
+  assert(performance.now() - before >= 25);
+  assert.equal(fired, true);
+  assert.equal(count, 1);
+  assert.deepEqual(ticks, [30]);
+  assert.equal(tape.commandIndex, 0);
+});
+
+test('wait markers reject absent, negative and nonfinite observation times', () => {
+  for (const time of [undefined, -1, NaN, Infinity, '30'])
+    assert.throws(() => new Tape([{ type: 'wait', t: time }]), /Invalid replay wait timestamp/);
+});

@@ -257,3 +257,20 @@ and all local gates passing. Cut a fresh branch from fetched landing afterward.
 - Remaining: final gate review, full root/host/workspace checks, latest landing
   merge, PR code-correctness reviews, green exact-head CI, merge and follow-up
   branch. No merge or completion claim yet.
+
+### Landing integration checkpoint
+
+Merged landing commit `1f9e9a5206` (Paradex and ApeX Omni). Retained incoming
+workspace layout, binary host/engine support, routing, features, constructors,
+client-ID rules, harness profiles, CI rows and roster entries. An independent
+code-correctness review caught TxFlow missing from the incoming conditional
+Wasm `secret` field; corrected and verified the single-venue constructor build.
+The landing removed unused dynamic EIP-712 production helpers: TxFlow's
+independent test oracle now imports ABI decoding as a dev dependency rather
+than restoring those helpers. Production signing still uses only prehashed
+EIP-712 and the reused Hyperliquid preimage.
+
+Merged-state checks: all-feature native Wasm check, TxFlow-only check, all
+TxFlow tests, full safe-cex typecheck, and 323/323 harness tests pass. Independent
+integration review accepted. Release rebuild and final replay/whole-workspace
+checks follow this commit; the interrupted pre-merge build is not gate evidence.

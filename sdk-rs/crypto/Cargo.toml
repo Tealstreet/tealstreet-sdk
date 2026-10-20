@@ -14,13 +14,11 @@ poseidon-hash.workspace = true
 goldilocks-crypto.workspace = true
 getrandom.workspace = true
 alloy-primitives.workspace = true
-alloy-dyn-abi.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true
 starknet-crypto.workspace = true
-starknet-core.workspace = true
 franklin-crypto.workspace = true
 zeroize.workspace = true
 
@@ -30,6 +28,8 @@ getrandom_04.workspace = true
 
 
 [dev-dependencies]
+alloy-signer = { workspace = true, features = ["eip712"] }
+alloy-dyn-abi.workspace = true
 serde.workspace = true
 
 [lints]

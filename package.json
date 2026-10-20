@@ -27,6 +27,7 @@
     "rust:private-tape-bitgetinverse": "node sdk-rs/harness/private-tape-bitgetinverse.mjs",
     "rust:test-bitget-parity": "node --test sdk-rs/harness/bitget-parity.integration.mjs",
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
+    "rust:private-tape-paradex": "node sdk-rs/harness/private-tape-paradex.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
     "rust:lighter-signing-vectors": "node --import tsx sdk-rs/harness/lighter-signing-vectors.mjs",
     "rust:private-tape-kraken": "node sdk-rs/harness/private-tape-kraken.mjs",
@@ -50,7 +51,8 @@
     "rust:public-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader --public",
     "rust:replay": "ESBUILD_WORKER_THREADS=0 node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
-    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
+    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
