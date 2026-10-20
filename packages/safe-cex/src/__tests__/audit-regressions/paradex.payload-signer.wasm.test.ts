@@ -15,6 +15,7 @@ it.each([false, true])(
     const vector = vectors.cases[0];
     const requests: Array<Parameters<Transport['request']>[0]> = [];
     const signatures: PayloadSignerRequest[] = [];
+    const signingHeaders: string[] = [];
     const errors: unknown[] = [];
     let legacyControls = 0;
     let binaryEntry = '';
@@ -86,6 +87,10 @@ it.each([false, true])(
             legacyControls += 1;
             return super.wsMessage(socket, text, now);
           }
+          payloadSigned(request: number, signature: string, headers: string, now: number) {
+            signingHeaders.push(headers);
+            return super.payloadSigned(request, signature, headers, now);
+          }
         },
       };
     });
@@ -137,7 +142,9 @@ it.each([false, true])(
       expect(auth.headers['PARADEX-STARKNET-SIGNATURE']).toBe('opaque signer answer 1');
       expect(auth.headers['PARADEX-STARKNET-ACCOUNT']).toBe(vector.address);
       expect(auth.headers['X-Signer-Proof']).toBe('proof-1');
-      expect(auth.headers['X-Exact']).toBe('  proof:with:colons  ');
+      // The ABI preserves bytes; the routing transport then applies standard Headers OWS normalization.
+      expect(signingHeaders[0]).toContain('X-Exact:  proof:with:colons  \nX-Empty:');
+      expect(auth.headers['X-Exact']).toBe('proof:with:colons');
       expect(auth.headers['X-Empty']).toBe('');
       await expect(
         exchange.placeOrder({
@@ -153,7 +160,8 @@ it.each([false, true])(
       expect(JSON.parse(placed.body!)[0].signature).toBe('opaque signer answer 2');
       expect(placed.headers.Authorization).toBe('Bearer delegated-jwt');
       expect(placed.headers['X-Signer-Proof']).toBe('proof-2');
-      expect(placed.headers['X-Exact']).toBe('  proof:with:colons  ');
+      expect(signingHeaders[1]).toContain('X-Exact:  proof:with:colons  \nX-Empty:');
+      expect(placed.headers['X-Exact']).toBe('proof:with:colons');
       expect(placed.headers['X-Empty']).toBe('');
       expect(errors).toEqual([]);
       expect(binaryEntry).toBe('function');

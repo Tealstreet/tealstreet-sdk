@@ -95,6 +95,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    #[cfg(feature = "coinbase")]
     fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
@@ -104,6 +105,7 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "coinbase")]
     fn account_id(&self) -> Option<String> {
         Engine::account_id(self).map(str::to_owned)
     }
@@ -1317,6 +1319,9 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
+    // Only Coinbase exposes its selected portfolio through the SDK account API.
+    // Keep the optional ABI out of single-venue artifacts that cannot use it.
+    #[cfg(feature = "coinbase")]
     #[wasm_bindgen(js_name = accountId)]
     pub fn account_id(&self) -> Option<String> {
         self.inner.account_id()
@@ -1466,6 +1471,7 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        #[cfg(feature = "coinbase")]
         fn account_id(&self) -> Option<String> {
             None
         }

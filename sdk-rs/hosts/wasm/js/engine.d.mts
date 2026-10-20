@@ -2,7 +2,8 @@
 import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
-  accountId(): string | undefined;
+  /** Available in builds with Coinbase portfolio selection. */
+  accountId?(): string | undefined;
   constructor(venue: string, optionsJson: string);
   start(now: number): string;
   command(json: string, now: number): string;
