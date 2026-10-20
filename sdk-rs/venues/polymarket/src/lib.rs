@@ -873,7 +873,9 @@ impl Venue for Polymarket {
                         return;
                     }
                 }
-                if rejected || accepted != requested.len() || accepted == 0 {
+                // CLOB omits tokens without a book: an omitted token is unseeded, not a
+                // failed batch. Malformed rows or a wholly empty batch still retry.
+                if rejected || accepted == 0 {
                     cx.log(
                         LogLevel::Warning,
                         "Incomplete Polymarket midpoint rows; preserving prior quotes",

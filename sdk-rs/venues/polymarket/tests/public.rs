@@ -600,7 +600,7 @@ fn failed_midpoint_batch_retries_without_blocking_or_repeating_later_batches() {
             .len(),
         100
     );
-    h.response("/midpoints", 200, r#"{"1":"0.5","101":"0.99"}"#);
+    h.response("/midpoints", 200, r#"{"1":"0.5","2":"bad","101":"0.99"}"#);
     assert_eq!(h.e.store().ticker("batch-Outcome1").unwrap().last, 0.5);
     assert!(h.e.store().ticker("batch-Outcome101").is_none());
     let last = h
@@ -646,13 +646,32 @@ fn failed_midpoint_batch_retries_without_blocking_or_repeating_later_batches() {
 }
 
 #[test]
-fn omitted_midpoint_is_retried_while_the_supplied_peer_is_usable() {
+fn omitted_midpoint_is_an_unseeded_token_not_a_failed_batch() {
     let mut h = H::new();
     h.response("/markets", 200, MARKETS);
+    // CLOB omits tokens without a book; the batch is still complete.
     h.response("/midpoints", 200, &format!(r#"{{"{TOKEN}":"0.5"}}"#));
     assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.5);
     assert!(h.e.store().ticker("election-No").is_none());
     assert!(h.e.store().loaded().tickers);
+    h.now += 60_000.;
+    let due: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= h.now)
+        .map(|(timer, _)| *timer)
+        .collect();
+    for timer in due {
+        h.event(Event::TimerFired { timer });
+    }
+    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
+}
+
+#[test]
+fn empty_midpoint_batch_is_still_retried() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    h.response("/midpoints", 200, "{}");
     let timer = h
         .timers
         .iter()
@@ -666,7 +685,5 @@ fn omitted_midpoint_is_retried_while_the_supplied_peer_is_usable() {
         200,
         &format!(r#"{{"{TOKEN}":"0.6","2":"0.4"}}"#),
     );
-    assert_eq!(h.e.store().ticker("election-Yes").unwrap().last, 0.6);
     assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.4);
-    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
 }
