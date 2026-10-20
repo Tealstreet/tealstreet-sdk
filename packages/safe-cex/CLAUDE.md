@@ -148,6 +148,21 @@ allowlist carries `errorReported`; frozen errors use weak object metadata rather
 than message matching or a retained operation ledger. Subscription commands own
 their rejected promises without reporting the same failure a second time.
 
+## Rust socket health
+
+Engine venues own their sockets and reconnect policy; the wasm host only
+observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
+private) open/first-frame/close state, at one property write per frame.
+`RustEngineExchange` exposes one `RustSocketHandle` per channel through the
+`BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
+`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
+changes and every 5 s, never through the TS watchdog. A private socket is healthy
+for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
+`auth.rejected` events raise `authFailureStreak`; a private stream delivering
+again resets it.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native
