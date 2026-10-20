@@ -118,3 +118,11 @@ live trading, weakened parity oracle, or performance threshold changes.
   44 typecheck, 28 lint and 27 test tasks (7679 safe-cex tests in each run).
   An actual scanner export of all 130 changed files found zero leaks; exact
   known public vectors use both a path AND byte-match exemption.
+- A final recording review added explicit secondary/read-key credential aliases
+  and removed the unused arbitrary `secrets` container from the protocol schema.
+  Its new regression passes; final harness count is 590/590.
+- Full workspace testing exposed an existing contract for invalid native polling
+  inputs: NaN, negative infinity, zero and negative values preserve the previous
+  policy. The engine now retains that behavior while bounding positive finite
+  values and preserving explicit positive-infinity pause; independent re-review
+  accepted the correction. The workspace suite is rerunning after the change.

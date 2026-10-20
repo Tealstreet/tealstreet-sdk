@@ -7,7 +7,7 @@ import { POLYMARKET_REPLAY } from './polymarket.mjs';
 import { ASTER_PRIVATE_KEY, ASTER_USER, ASTER_SIGNER } from './asterdex-requests.mjs';
 
 const normalized = (name) => String(name).split('.').at(-1).toLowerCase().replace(/[-_]/g, '');
-const credentialNames = new Set(['key', 'apikey', 'secret', 'apisecret', 'privatekey', 'passphrase', 'password', 'authorization', 'cookie', 'setcookie']);
+const credentialNames = new Set(['key', 'apikey', 'readkey', 'readsecret', 'secondarykey', 'secondarysecret', 'secret', 'apisecret', 'privatekey', 'passphrase', 'password', 'authorization', 'cookie', 'setcookie']);
 const sessionNames = new Set(['session', 'sessionid', 'token', 'accesstoken', 'refreshtoken', 'authtoken', 'sessiontoken', 'sessionkey', 'listenkey', 'jwt', 'jwttoken', 'auth', 'bearer']);
 const signatureNames = new Set(['signature', 'sig', 'sign', 'signedchallenge', 'authent']);
 // Header signatures conventionally end in a delimited SIGN (ACCESS-SIGN,

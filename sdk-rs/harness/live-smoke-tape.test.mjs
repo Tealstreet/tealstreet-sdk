@@ -589,3 +589,18 @@ test('compressed recording bombs fail before an expanded secret-bearing message 
   const oversized = gzipSync(Buffer.alloc(16 * 1024 * 1024 + 1, 'x'));
   assert.throws(() => scrub.binary(oversized), /cannot safely redact/);
 });
+
+
+test('secondary credential aliases and arbitrary secret containers never borrow economic field exemptions', () => {
+  const scrub = createSmokeRedactor();
+  const original = { readKey: 'private-read-key', readSecret: 'private-read-secret',
+    secondary_key: 'private-secondary-key', secondary_secret: 'private-secondary-secret',
+    secrets: { price: 'hidden-under-economic-name' },
+    note: 'private-read-key private-read-secret private-secondary-key private-secondary-secret hidden-under-economic-name',
+    price: '100' };
+  const safe = scrub.redact(original);
+  for (const secret of [...Object.values(original).slice(0, 4), original.secrets.price])
+    assert.ok(!JSON.stringify(safe).includes(secret));
+  assert.ok(!Object.hasOwn(safe, 'secrets'));
+  assert.equal(safe.price, '100');
+});
