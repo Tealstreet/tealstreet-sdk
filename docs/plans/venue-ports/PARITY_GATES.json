@@ -1,0 +1,1014 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS for the exact standard artifacts, source heads and tapes below.",
+  "runtimeSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+  "normalEgress": true,
+  "wasmByteBudget": 1258291,
+  "environment": {
+    "platform": "darwin-arm64",
+    "node": "22.23.3",
+    "yarn": "1.22.21",
+    "rustc": "1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "1.99.0 (5f94df478 2026-08-27)",
+    "wasmBindgen": "0.2.129",
+    "cargoIncremental": false,
+    "cargoBuildJobs": 2,
+    "target": "wasm32-unknown-unknown"
+  },
+  "criteria": {
+    "public": "Exact output parity; Rust median main-thread CPU, steady CPU and retained bytes strictly below TS.",
+    "private": "Exact output parity; paced CPU/memory are informational.",
+    "processCpu": "Informational; includes background compilation and GC threads.",
+    "retainedMemory": "Unclamped heap delta + backing-buffer delta + reserved WASM linear memory; baselineBeforeSetup and settled async major GC."
+  },
+  "rawMetricColumns": [
+    "cpuMs",
+    "steadyCpuMs",
+    "processCpuMs",
+    "retainedBytes",
+    "heapRetainedBytes",
+    "bufferRetainedBytes",
+    "wasmBytes"
+  ],
+  "artifacts": {
+    "paradex": {
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "standardBuildCommand": "corepack yarn -s rust:build-wasm --venue paradex",
+      "bytesPerArtifact": 1258055,
+      "sha256": "d6aef4f270652d49f04d18d6d885db67775b4841ee9e48925164959309cb3cff",
+      "formats": [
+        "web",
+        "node"
+      ],
+      "cargoOverrides": [
+        "profile.release.package.safe-cex-wasm.opt-level=2"
+      ]
+    },
+    "binance": {
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "standardBuildCommand": "corepack yarn -s rust:build-wasm --venue binance",
+      "bytesPerArtifact": 908744,
+      "sha256": "a870c78e4ddc12aeda7188b6c8559acca46f92ef449c155df609e6248f356b05",
+      "formats": [
+        "web",
+        "node"
+      ],
+      "cargoOverrides": []
+    },
+    "bitrue": {
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "standardBuildCommand": "corepack yarn -s rust:build-wasm --venue bitrue",
+      "bytesPerArtifact": 811137,
+      "sha256": "dfc00fbd08c0a33b313b37653a2060103be332837d70c2c53e3ec44a3d260354",
+      "formats": [
+        "web",
+        "node"
+      ],
+      "cargoOverrides": [
+        "profile.release.package.safe-cex-venue-bitrue.opt-level=3"
+      ]
+    },
+    "polymarket": {
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "standardBuildCommand": "corepack yarn -s rust:build-wasm --venue polymarket",
+      "bytesPerArtifact": 854277,
+      "sha256": "c466044860e645f81dda094633a5a976421ddfc38a0027098e2b54ff65fc73c1",
+      "formats": [
+        "web",
+        "node"
+      ],
+      "cargoOverrides": []
+    }
+  },
+  "sdkBoundary": [
+    {
+      "venue": "paradex",
+      "command": "SAFE_CEX_WASM_TESTS=1 corepack yarn workspace @tealstreet/safe-cex test-unit src/__tests__/audit-regressions/paradex.payload-signer.wasm.test.ts",
+      "passed": 2,
+      "artifactSha256": "d6aef4f270652d49f04d18d6d885db67775b4841ee9e48925164959309cb3cff",
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "e58d45edae8dcd38eea83df221b34ace2cce962dc78033197dca1c24580c4bfb",
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a"
+    },
+    {
+      "venue": "bitrue",
+      "command": "SAFE_CEX_WASM_TESTS=1 corepack yarn workspace @tealstreet/safe-cex test-unit src/__tests__/audit-regressions/bitrue.rust-boundary.wasm.test.ts",
+      "passed": 1,
+      "artifactSha256": "dfc00fbd08c0a33b313b37653a2060103be332837d70c2c53e3ec44a3d260354",
+      "sourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "ece8c495cace31fc202df91603efba4fa6270a1b2175fa68458b2662f210200d",
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a"
+    }
+  ],
+  "gates": [
+    {
+      "venue": "paradex",
+      "stage": "public",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue paradex --tape sdk-rs/harness/fixtures/paradex-public.jsonl.gz --runs 3 --books BTC-USD-PERP,ETH-USD-PERP",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/paradex-public.jsonl.gz",
+        "sha256": "fdb1906898575c1491542dcff1f9d9810be6451b00d5ccea4634e60aa74bee31",
+        "records": 15223
+      },
+      "artifactRef": "paradex",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "db7c7a0e2cc4403ec57f74d7ba4361caa452c7cd591b4e3e4eab8e46834d3bbb",
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "frames": 15085,
+          "markets": 66,
+          "tickers": 66,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              1445.516,
+              820.008,
+              1679.943,
+              19194009,
+              19117328,
+              76681,
+              0
+            ],
+            [
+              599.711,
+              320.381,
+              745.394,
+              18818209,
+              18741528,
+              76681,
+              0
+            ],
+            [
+              633.185,
+              334.471,
+              786.835,
+              18798809,
+              18722128,
+              76681,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "8304aa12e20fac801420460045dfe6c67bf6ee0c43c4f2e862549dd7def79073",
+            "8580834d60741fd4ed5a6bc03930a98a11460bfbf40077ee96c954a5e1576be6",
+            "27aa3daf1da23388a7cd3d815129260449c24a9ac5dd4738d6952ac78cd7e618"
+          ],
+          "median": {
+            "cpuMs": 633.185,
+            "steadyCpuMs": 334.471,
+            "processCpuMs": 786.835,
+            "retainedBytes": 18818209
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 3,
+          "frames": 15085,
+          "markets": 66,
+          "tickers": 66,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              616.549,
+              286.437,
+              780.793,
+              2359252,
+              1673168,
+              30724,
+              655360
+            ],
+            [
+              585.095,
+              270.541,
+              732.056,
+              2355204,
+              1669120,
+              30724,
+              655360
+            ],
+            [
+              558.604,
+              248.38,
+              706.282,
+              2347188,
+              1661104,
+              30724,
+              655360
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "f213f3e22dfcfe53e7339764288c69af52ec71a677a444bd38ddddefda41dfcc",
+            "73709decabb178bc00900959fee6c16ba6fafd8389ebb1de962622ed9a36c93b",
+            "ce3d2835af826db1d174fe27e3df01c4480d40afd43ce867a69c2de4c92e88e5"
+          ],
+          "median": {
+            "cpuMs": 585.095,
+            "steadyCpuMs": 270.541,
+            "processCpuMs": 732.056,
+            "retainedBytes": 2355204
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "paradex",
+      "stage": "private",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue paradex --tape sdk-rs/harness/tapes/paradex-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/paradex-private.jsonl",
+        "sha256": "ae8cdce9e499d7294906e1b9b9e28482a9df60f49871fd6f96ddefb1e148d090",
+        "records": 65
+      },
+      "artifactRef": "paradex",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "97ab85e05953b05ae19a87bb2fe2cc38341b41f7f113444a497538c72a4765b6",
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "frames": 33,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 15,
+          "writeCount": 9,
+          "rawMetricsByRun": [
+            [
+              518.554,
+              194.002,
+              689.57,
+              38193369,
+              38110672,
+              82697,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "7a084f4f00bec5304de0db12af21463fc6d2e63e14c86b86adb2564cff39a3a8"
+          ],
+          "median": {
+            "cpuMs": 518.554,
+            "steadyCpuMs": 194.002,
+            "processCpuMs": 689.57,
+            "retainedBytes": 38193369
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 1,
+          "frames": 33,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 15,
+          "writeCount": 9,
+          "rawMetricsByRun": [
+            [
+              315.517,
+              117.596,
+              401.531,
+              6692667,
+              6106904,
+              61475,
+              524288
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "82a7b78e8ef02180d8ac3683e785ece8cbdc6b30bafc299255d9f2a2aa9a3d08"
+          ],
+          "median": {
+            "cpuMs": 315.517,
+            "steadyCpuMs": 117.596,
+            "processCpuMs": 401.531,
+            "retainedBytes": 6692667
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "binance",
+      "stage": "public",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue binance --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT,SOLUSDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/binance-public.jsonl.gz",
+        "sha256": "cc3f426ededcee74edd3e70d4b20c564867a8009a325b43a422fbfd9f6460790",
+        "records": 886
+      },
+      "artifactRef": "binance",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "5c4969f2fecf68c8182aa72f6f969e8209d6cc397c4ab902e4403bf63e53264f",
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "frames": 873,
+          "markets": 917,
+          "tickers": 783,
+          "books": 3,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              268.988,
+              151.849,
+              313.644,
+              16435185,
+              16367400,
+              67785,
+              0
+            ],
+            [
+              270.735,
+              144.546,
+              312.398,
+              16457729,
+              16389944,
+              67785,
+              0
+            ],
+            [
+              284.875,
+              161.551,
+              329.753,
+              16445121,
+              16377336,
+              67785,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "c3d65af0562f17f6838fa9ddec6f31c4c79f72d636c06b9a05ffc72355919d34",
+            "e471ebef1b6d4b2542c7f55a878fdb707bc905971ff66a6ba8d664f926344dc0",
+            "b81d3155c6fd99925d47ab7e98882ea721462db1aa718059470941b05d0b089f"
+          ],
+          "median": {
+            "cpuMs": 270.735,
+            "steadyCpuMs": 151.849,
+            "processCpuMs": 313.644,
+            "retainedBytes": 16445121
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 3,
+          "frames": 873,
+          "markets": 917,
+          "tickers": 783,
+          "books": 3,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              147.651,
+              79.819,
+              208.989,
+              2547652,
+              606120,
+              434204,
+              1507328
+            ],
+            [
+              152.023,
+              64.8,
+              217.665,
+              2542868,
+              601336,
+              434204,
+              1507328
+            ],
+            [
+              135.892,
+              58.706,
+              204.64,
+              2546196,
+              604664,
+              434204,
+              1507328
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "48649e9252af4870b2e93e1f9284f5c64f8d848e1455d27508ffa67c4d5dbabc",
+            "d3e7cff1c7f3502090dcd94846b71abe8a6c27b1ebf5a5ffc6f8c1dc6addc0e6",
+            "c9622b6e1da13a0f7090d5c2562e019e9f76db36e40f61158032ae32b457ecaf"
+          ],
+          "median": {
+            "cpuMs": 147.651,
+            "steadyCpuMs": 64.8,
+            "processCpuMs": 208.989,
+            "retainedBytes": 2546196
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "binance",
+      "stage": "private",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue binance --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/binance-private.jsonl",
+        "sha256": "9b46b2fd7806f2f227b9bd20968c0f599fc57a9121dde099c7fe166a9c4b3d30",
+        "records": 30
+      },
+      "artifactRef": "binance",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "8b7820ea781900bc05c1f6230842b1ec8a01a5304febe4c36cf654027c369030",
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "frames": 14,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 3,
+          "writeCount": 4,
+          "rawMetricsByRun": [
+            [
+              86.018,
+              13.228,
+              197.318,
+              13436537,
+              13368752,
+              67785,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "f36af497d9689345029e25c627732a5692034bb4656e52fcaf7eac507432d839"
+          ],
+          "median": {
+            "cpuMs": 86.018,
+            "steadyCpuMs": 13.228,
+            "processCpuMs": 197.318,
+            "retainedBytes": 13436537
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 1,
+          "frames": 14,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 3,
+          "writeCount": 4,
+          "rawMetricsByRun": [
+            [
+              36.712,
+              15.744,
+              44.216,
+              1061236,
+              718960,
+              14596,
+              327680
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "969fa4995a3114a8f190728a9acec955e02320cb88f7018cac02333655785e48"
+          ],
+          "median": {
+            "cpuMs": 36.712,
+            "steadyCpuMs": 15.744,
+            "processCpuMs": 44.216,
+            "retainedBytes": 1061236
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "bitrue",
+      "stage": "public",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/fixtures/bitrue-public.jsonl.gz --runs 3 --books E-BTC-USDT,E-ETH-USDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/bitrue-public.jsonl.gz",
+        "sha256": "c14f33838eb646a729d41e6522473c3889bfe5f11b4b1ff97347ea32cccc01cd",
+        "records": 3210
+      },
+      "artifactRef": "bitrue",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "47c3e53bf660795040a4ff374cde955b2873e2925e4e22e84e3244e3d3770161",
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "frames": 3208,
+          "markets": 778,
+          "tickers": 778,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              282.816,
+              180.489,
+              412.709,
+              16041593,
+              15972784,
+              68809,
+              0
+            ],
+            [
+              233.059,
+              135.269,
+              361.938,
+              16006025,
+              15937216,
+              68809,
+              0
+            ],
+            [
+              174.351,
+              101.25,
+              280.779,
+              15960153,
+              15891344,
+              68809,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "610b38a328b99d66fa799f07a7a57875f0b627f24db2f395767401abe5f73779",
+            "065c2d98574f8b8d1f694369c99f76446f119d5bb076e99243ccad2a433ff4c0",
+            "a6827344195b43199b0a0f95305ca8dfaa8b9a1a2d85194f0a90333c74e38cef"
+          ],
+          "median": {
+            "cpuMs": 233.059,
+            "steadyCpuMs": 135.269,
+            "processCpuMs": 361.938,
+            "retainedBytes": 16006025
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 3,
+          "frames": 3208,
+          "markets": 778,
+          "tickers": 778,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              216.571,
+              121.187,
+              396.367,
+              2663300,
+              1240800,
+              177316,
+              1245184
+            ],
+            [
+              151.376,
+              80.146,
+              316.272,
+              2634692,
+              1212192,
+              177316,
+              1245184
+            ],
+            [
+              135.845,
+              61.242,
+              296.898,
+              2637844,
+              1215344,
+              177316,
+              1245184
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "a623b97d3b364b68718d6670b1bee565853eccc741aea38ab953716850b91fab",
+            "bbea29c98e517b31bb72b4277882ba5f50d0e9d99d95e86c3850477cca10de19",
+            "624ee72e57a8c7dcd2f45752ca97e23c9c2d2314eeca7407131c3215e210ac2a"
+          ],
+          "median": {
+            "cpuMs": 151.376,
+            "steadyCpuMs": 80.146,
+            "processCpuMs": 316.272,
+            "retainedBytes": 2637844
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "bitrue",
+      "stage": "private",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/tapes/bitrue-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/bitrue-private.jsonl",
+        "sha256": "325e398a11f6b11f3f5e571da5eace8af9b472dbe751f17783e1110630961661",
+        "records": 39
+      },
+      "artifactRef": "bitrue",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "f9070b4abcf90ee351af03ad981cb51cd7d66daf0780cd37f1e583bb494d1cc5",
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "frames": 23,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 8,
+          "writeCount": 5,
+          "rawMetricsByRun": [
+            [
+              100.048,
+              58.365,
+              180.003,
+              13969201,
+              13900392,
+              68809,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "9a4fed2e75956628697eab9cb5a5dde81ee1747d2025640e39c5eb4a8b17fd86"
+          ],
+          "median": {
+            "cpuMs": 100.048,
+            "steadyCpuMs": 58.365,
+            "processCpuMs": 180.003,
+            "retainedBytes": 13969201
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 1,
+          "frames": 23,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 8,
+          "writeCount": 5,
+          "rawMetricsByRun": [
+            [
+              46.683,
+              25.568,
+              53.46,
+              1086444,
+              753136,
+              5628,
+              327680
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "39828d9e610bb06de806292647d4af5590d8d881f572600abd3671f04ff43ddb"
+          ],
+          "median": {
+            "cpuMs": 46.683,
+            "steadyCpuMs": 25.568,
+            "processCpuMs": 53.46,
+            "retainedBytes": 1086444
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "polymarket",
+      "stage": "public",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue polymarket --tape sdk-rs/harness/fixtures/polymarket-public.jsonl.gz --runs 3 --books xi-jinping-out-before-2027-Yes,will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568-Yes",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/polymarket-public.jsonl.gz",
+        "sha256": "f1a86e811a74d05a449c8bab25aaab471055844390f5490d55dbd3e088c6b7a3",
+        "records": 185
+      },
+      "artifactRef": "polymarket",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "ac3131a85c2ea581edad9df974540945eca08e8b4e90d32907e352dd674f1849",
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "frames": 182,
+          "markets": 4,
+          "tickers": 4,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              32.75,
+              10.454,
+              61.881,
+              23483121,
+              23412328,
+              70793,
+              0
+            ],
+            [
+              28.971,
+              9.765,
+              51.225,
+              23524761,
+              23453968,
+              70793,
+              0
+            ],
+            [
+              28.186,
+              11.257,
+              30.95,
+              23469817,
+              23399024,
+              70793,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "b473dffc9fee26cf0cd289ef7c17380c7108c6075b924e0fccfadb28fe7284f6",
+            "25100958bd001a9669505f11d19e64c9e13b25e9410b0b9ce444442ef9b5b142",
+            "24c2b0c9b2768e254b84f2bc54025d64025041e283ff4d00945bbda4a38ae058"
+          ],
+          "median": {
+            "cpuMs": 28.971,
+            "steadyCpuMs": 10.454,
+            "processCpuMs": 51.225,
+            "retainedBytes": 23483121
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 3,
+          "frames": 182,
+          "markets": 4,
+          "tickers": 4,
+          "books": 2,
+          "commands": 0,
+          "writeCount": 0,
+          "rawMetricsByRun": [
+            [
+              26.078,
+              7.856,
+              44.805,
+              4915260,
+              4570984,
+              16596,
+              327680
+            ],
+            [
+              23.322,
+              4.852,
+              41.505,
+              4914876,
+              4570600,
+              16596,
+              327680
+            ],
+            [
+              24.515,
+              5.599,
+              45.4,
+              4914668,
+              4570392,
+              16596,
+              327680
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "43d93bbfc5f7575e008efa1c5b6c53a9e773c93d1eaeaabb80b6c60e091d27c1",
+            "2d2115604026d8e39590cca8b980e8d0d4d098e51e85a576b1aa96c89c9d1c83",
+            "b50cbef95471cc27c3c54d9d28b3e0b628f0f182190fffe7e697c25af6e92413"
+          ],
+          "median": {
+            "cpuMs": 24.515,
+            "steadyCpuMs": 5.599,
+            "processCpuMs": 44.805,
+            "retainedBytes": 4914876
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    },
+    {
+      "venue": "polymarket",
+      "stage": "private",
+      "harnessSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "command": "corepack yarn -s rust:gate --venue polymarket --tape sdk-rs/harness/tapes/polymarket-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/polymarket-private.jsonl",
+        "sha256": "452e70e2382906994d6bf0c50303163ad21082de7d76c7176581e01c4a71affa",
+        "records": 33
+      },
+      "artifactRef": "polymarket",
+      "normalEgress": true,
+      "pass": true,
+      "sourceHeadBefore": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "sourceHeadAfter": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "logSha256": "b9b9baf2238551553c8b588051c4b03213600611250c3d825704ebbf3b381de8",
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "frames": 20,
+          "markets": 4,
+          "tickers": 4,
+          "books": 0,
+          "commands": 8,
+          "writeCount": 5,
+          "rawMetricsByRun": [
+            [
+              79.714,
+              57.384,
+              141.006,
+              24055441,
+              23984648,
+              70793,
+              0
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "341c588b4e558573dc40909fd2edb56f00f5ba10650dbf09c3b2e14c70ba85e0"
+          ],
+          "median": {
+            "cpuMs": 79.714,
+            "steadyCpuMs": 57.384,
+            "processCpuMs": 141.006,
+            "retainedBytes": 24055441
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        },
+        "rust": {
+          "runs": 1,
+          "frames": 20,
+          "markets": 4,
+          "tickers": 4,
+          "books": 0,
+          "commands": 8,
+          "writeCount": 5,
+          "rawMetricsByRun": [
+            [
+              65.812,
+              43.947,
+              100.915,
+              5255764,
+              4921088,
+              6996,
+              327680
+            ]
+          ],
+          "rawResultSha256ByRun": [
+            "cf1cb0969fb1cf1d9f25c56547e2a4f4292c25ecb537480f86dea9fc06782f00"
+          ],
+          "median": {
+            "cpuMs": 65.812,
+            "steadyCpuMs": 43.947,
+            "processCpuMs": 100.915,
+            "retainedBytes": 5255764
+          },
+          "requestAudit": "unserved, missingWrites, unusedWrites, invalidSignatures = 0; protocolErrors = []"
+        }
+      }
+    }
+  ],
+  "historicalFailures": [
+    {
+      "venue": "paradex",
+      "sourceHead": "8189e057d21b1899c5de47c40f0293ef2430d8df",
+      "bytesPerArtifact": 1258633,
+      "sha256": "8d424fdb2bb0654613595d80ad7a93cc329989f78d99d848fe4dd0d4b8b39c6b",
+      "result": "FAIL fixed WASM size budget by 342 bytes; no SDK/performance gates run.",
+      "resolutionCommit": "41e28f774aba143e524a295b6bc58c1537751e7a",
+      "resolution": "Use static typed-data schemas with unchanged hashes/field order; standard artifact shrank 578 bytes. Budget/profile unchanged."
+    },
+    {
+      "venue": "bitrue",
+      "sourceHead": "d784821eeda65eadd95922456a61df85f05ecf44",
+      "profile": "venue opt-level=z",
+      "publicTapeSha256": "c14f33838eb646a729d41e6522473c3889bfe5f11b4b1ff97347ea32cccc01cd",
+      "tsMainThreadCpuMs": 259.623,
+      "rustMainThreadCpuMs": 259.853,
+      "result": "FAIL main-thread CPU; parity/steady CPU/memory passed.",
+      "resolutionCommit": "bb174eef0c7e75745c14b9dbd34792c9189d680b",
+      "resolution": "Standalone Bitrue venue opt-level=3 passed size, main-thread CPU, steady CPU, memory, private and actual SDK gates. Combined builds retain z profile."
+    }
+  ],
+  "integrationVerification": {
+    "runtimeSourceHead": "41e28f774aba143e524a295b6bc58c1537751e7a",
+    "combinedBuild": {
+      "command": "corepack yarn -s rust:build-wasm",
+      "pass": true,
+      "bytesPerArtifact": 10966865,
+      "sha256": "0d0d73a71c0ae1ee8991c3d2f1df57fbbf9e57e91710162aad2e10fb87a28948",
+      "formats": [
+        "web",
+        "node"
+      ],
+      "purpose": "Default-feature integration artifact; standalone artifacts use the fixed per-venue byte budget.",
+      "log": "/tmp/parity-final6-combined-build.log",
+      "logSha256": "6de93ef85bd126b515dc88b33f16812367f6afbda1c88102a131e1793d7264b2"
+    },
+    "checks": [
+      {
+        "name": "native workspace baseline",
+        "sourceHead": "32c1b7fd7aebb4faf5fe8aea24147c4d15733eca",
+        "passed": 2437,
+        "log": "/tmp/parity-gaps-final5-native.log",
+        "logSha256": "35a440671257b9171e37057f9f4b440fcd44fb38d27862fcbdf88822662f88c3"
+      },
+      {
+        "name": "Paradex static-schema follow-up",
+        "passed": 115,
+        "log": "/tmp/parity-static-schema-tests.log",
+        "logSha256": "0cf63ba481b8332ba10b4c19fe5ba26470d28aeef7354073f334c9835f173c3b"
+      },
+      {
+        "name": "engine default features",
+        "passed": 74,
+        "log": "/tmp/parity-static-schema-engine-default.log",
+        "logSha256": "472359e49938e8e9f18b5daed19f9b55125fb107f7ab501faf22e360030c3673"
+      },
+      {
+        "name": "standalone Paradex host",
+        "passed": 6,
+        "log": "/tmp/parity-static-schema-wasm-default.log",
+        "logSha256": "0d9cfc0839ab0ce8d462e6c54fe1e5a176a9ff3837ec2c9a402e35b10387b95a"
+      },
+      {
+        "name": "native frame integration",
+        "passed": 1,
+        "log": "/tmp/parity-final6-frame-wire.log",
+        "logSha256": "39592e3f1a209ebb6741c5879fd5566bb30371eb0e8a1b3f5ebdc18b20544321"
+      },
+      {
+        "name": "scripted live-smoke integration",
+        "passed": 9,
+        "log": "/tmp/parity-final6-live-smoke.log",
+        "logSha256": "941c55a94e38d1d82ad6297e3cc85dd518ffc1b97d84cb5405fc55e753c5c12d"
+      },
+      {
+        "name": "JS host",
+        "passed": 74,
+        "log": "/tmp/parity-final6-wasm-host.log",
+        "logSha256": "59ea1eecf947cdf11788c751f4caafddcea33be65efe687bdebc14db71a20600"
+      },
+      {
+        "name": "combined SDK/WASM",
+        "passed": 385,
+        "filesPassed": 13,
+        "log": "/tmp/parity-final6-sdk-wasm.log",
+        "logSha256": "75dba309078212cf8dd7bb1ca4afd57d81f43ed1738c8048f94bda85805fbf7a"
+      },
+      {
+        "name": "repository tests",
+        "tasksPassed": 27,
+        "safeCexPassedPerInvocation": 7384,
+        "log": "/tmp/parity-gaps-final5-repo-tests.log",
+        "logSha256": "0996cf16fc30664529a78ff9eaf230be3dd453d4d8b74407ac23c3bddfb0fc14"
+      },
+      {
+        "name": "harness",
+        "passed": 540,
+        "log": "/tmp/parity-gaps-final5-harness.log",
+        "logSha256": "4c699cc85becdc813420eabbd56eaed7e33316a4a8da082372a45eb60528fad6"
+      },
+      {
+        "name": "typecheck",
+        "tasksPassed": 44,
+        "log": "/tmp/parity-final6-typecheck.log",
+        "logSha256": "89a1ee4e55f584a436872146d927375507c7d427c712770a28e7f07590f4e8e4"
+      },
+      {
+        "name": "lint",
+        "tasksPassed": 28,
+        "log": "/tmp/parity-final6-lint.log",
+        "logSha256": "d4f65cb275b85ebdcd0d71681ba0263c4e90e04129d6b238e286896e6f92c89f"
+      }
+    ]
+  }
+}

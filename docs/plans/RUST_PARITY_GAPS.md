@@ -176,38 +176,12 @@ showed narrow margins. The standard standalone build now uses venue-crate
 steady CPU, at 810,579 bytes. The combined build retains its size profile. The
 failed checkpoint is retained, and no failed gate is reported as passed.
 
-## Historical gate checkpoint (superseded by final refresh)
+## Historical gate checkpoints
 
-All gates use normal egress comparison. The GRVT landing's symmetric
-before-verifier-setup baseline and async major-GC measurement are retained;
-performance checkpoints from before that merge have been refreshed.
-
-| Venue | Public frames | TS/Rust CPU ms | TS/Rust retained bytes | Private frames/commands | Status |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Paradex | 15,085 | 1,362.011 / 1,143.063 | 18,758,073 / 2,352,276 | 33 / 15 | PASS, 3 public runs; SDK 2 |
-| Binance | 873 | 298.521 / 157.508 | 16,384,705 / 2,511,524 | 14 / 3 | PASS, 3 public runs |
-| Bitrue | 3,208 | 219.584 / 188.339 | 15,936,841 / 2,643,036 | 23 / 8 | PASS, 3 public runs; SDK 1 |
-| KuCoin Spot | 26,427 | 924.078 / 811.831 | 16,646,745 / 3,295,436 | 22 / 13 | PASS before Breakout integration; revalidation pending |
-| KuCoin futures | pending fresh capture | pending | pending | pending | Pending package handoff |
-| Polymarket packaging | 182 | 51.406 / 38.879 | 23,449,233 / 4,926,228 | 20 / 8 | PASS, 3 public runs |
-
-Paradex public capture has 66 markets/tickers and two books. Binance has 917
-markets, 783 tickers and three books. Both post-GRVT standard artifact hashes
-match their earlier builds byte for byte. Exact commands, tape hashes, raw runs
-and artifact provenance are in `/tmp/parity-paradex-proof.json` and
-`/tmp/parity-binance-proof.json`; final numbers will be retained here and in PR.
-
-Repository verification passes: **2,334 native workspace tests**, fmt,
-workspace/all-target Clippy, wasm32 Clippy and bans; root typecheck **44 tasks**,
-lint **28 tasks**, harness **425 tests**, repository tests **27 tasks** with
-safe-cex **7,355 tests in each test-ci/test-unit invocation**. The final repository
-run uses serial Turbo tasks and four Vitest workers after import/constructor
-wall-clock timeouts under parallel load; assertions and timeouts are unchanged.
-Spot's final ticker/ACK adjustments pass its full 137-test crate and Clippy.
-
-Remaining: post-Breakout integration checks and artifact provenance; KuCoin
-futures fresh capture/public gate; combined build/host/SDK tests; PR correctness
-reviews and exact-head green CI.
+Earlier integration and performance checkpoints are preserved in this branch's
+commits. The final frozen-source results below supersede their counts and
+measurements. All replays retain normal egress comparison, the fixed size
+budget and the landing branch's memory-measurement semantics.
 
 ## Latest integration checkpoint
 
@@ -328,3 +302,44 @@ standalone Paradex host tests pass. The standard artifact measures 1,258,055
 bytes (578 bytes saved; 236 bytes below budget), with identical web/Node SHA256
 `d6aef4f270652d49f04d18d6d885db67775b4841ee9e48925164959309cb3cff`.
 Performance gates still require the final committed build and CPU release.
+
+## Frozen-source replay gates
+
+Measured source: `41e28f774aba143e524a295b6bc58c1537751e7a`. All six standard
+artifacts and all **12 replay gates PASS**, with normal egress comparison.
+Each public result is the median of three runs; private results are correctness
+gates with one run. Byte budget: **1,258,291**, unchanged.
+
+| Venue | WASM bytes | Public frames | TS/Rust CPU ms | TS/Rust retained bytes | Private frames/commands |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,258,055 | 15,085 | 633.185 / 585.095 | 18,818,209 / 2,355,204 | 33 / 15 |
+| bitrue | 811,137 | 3,208 | 233.059 / 151.376 | 16,006,025 / 2,637,844 | 23 / 8 |
+| kucoinspot | 674,211 | 26,427 | 746.411 / 651.586 | 16,726,649 / 3,299,836 | 22 / 13 |
+| kucoin | 775,517 | 8,306 | 454.303 / 246.211 | 18,940,113 / 3,330,628 | 32 / 17 |
+| binance | 908,744 | 873 | 270.735 / 147.651 | 16,445,121 / 2,546,196 | 14 / 3 |
+| polymarket | 854,277 | 182 | 28.971 / 24.515 | 23,483,121 / 4,914,876 | 20 / 8 |
+
+All public gates also pass strict steady CPU and retained-memory comparisons.
+Exact artifact/tape hashes, commands, raw measurements and source attribution:
+[four-artifact evidence](venue-ports/PARITY_GATES.json) and
+[KuCoin evidence](venue-ports/KUCOIN_GATES.json). Independent review validated
+all 12 PASS logs and 48 raw runs, clean request/protocol audits, hashes and
+unmodified memory arithmetic. Standalone actual SDK tests pass: Paradex 2,
+Bitrue 1 and KuCoin Spot 1.
+
+Repository verification passes: the `32c1b7fd7a` baseline has 2,437 native
+workspace tests; fmt, workspace
+all-target and wasm32 Clippy, bans; 44 typecheck tasks, 28 lint tasks, 540
+harness tests and 27 repository test tasks (safe-cex 7,384 tests in each
+test-ci/test-unit invocation). The signing optimization additionally passes
+115 fresh Paradex tests, 74 default-engine tests and six standalone Paradex
+host tests. Fresh KuCoin native tests pass 138 including 38 Spot, with Clippy.
+
+The combined build, native-frame integration (1), scripted live-smoke
+integration (9), JS host tests (74) and combined SDK/WASM tests (385 in
+13 files) pass. Final typecheck (44 tasks) and lint (28 tasks) also pass.
+All local gates are green; next are the PR correctness reviews and exact-head CI.
+
+Final evidence review caught a manifest key collision between the combined
+artifact hash and build-log hash. The fields are now distinct (`sha256` and
+`logSha256`), checked against both actual binaries and every recorded log.

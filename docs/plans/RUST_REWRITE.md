@@ -398,16 +398,16 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
-| Bitrue futures | done (#1314); open-order client-ID lookup parity follow-up in `RUST_PARITY_GAPS.md`; TS has no complete order/PnL/funding histories or mode changes |
+| Bitrue futures | done (#1314); cache/open-order client-ID lookup parity implemented and gated ([evidence](RUST_PARITY_GAPS.md)); TS has no complete order/PnL/funding histories or hedge/margin mode changes |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
 | WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
-| KuCoin spot | parity follow-up in `RUST_PARITY_GAPS.md` |
+| KuCoin spot | Implemented and gated: HF spot public/private/trading, caller IDs and supported queries/settings; [scope and evidence](RUST_PARITY_GAPS.md) |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running; [GRVT fixture profiling](GRVT_RUST_PERF.md) hands off measured replay audit overhead |
 | GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing |
-| Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; delegated signing follow-up in `RUST_PARITY_GAPS.md` |
+| Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; remote/payload signing implemented and gated ([scope and evidence](RUST_PARITY_GAPS.md)) |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
 | Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
@@ -493,6 +493,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `bitrue` | Opt-in; futures, no implicit spot coverage. |
 | `cryptocom` | Opt-in; preserve account/product option and routing gates. |
 | `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
+| `kucoinspot` | Opt-in HF spot; native spot IDs/base units, trade-account currency balances, caller-context amendments/cancels and fixed spot settings. Keep the [supported scope and replay/SDK evidence](venue-ports/KUCOIN_SPOT.md); no futures alias. |
 | `hyperliquid` | Opt-in perps/HIP-3; spot absent, wallet/builder/agent and caller-ID helpers still imported. |
 | `kraken` | Opt-in futures; spot remains TS. |
 | `lighter` | Opt-in; retain wallet/account-tier exports; broker alias and remote-signing modes unresolved. |
@@ -504,7 +505,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
-| `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `bitunix`, `hyperliquidspot`, `krakenspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
 
@@ -636,6 +637,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `weex` | `WEEX` | `KEY`, `SECRET`, `PASSPHRASE` | None wired; explicit `--mainnet` only. WS upgrade headers enabled. |
 | `bitrue` | `BITRUE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. |
 | `kucoin` | `KUCOIN` | `KEY`, `SECRET`, `PASSPHRASE` | None wired; engine explicitly rejects testnet. Explicit `--mainnet` only. Bullet-derived sockets are limited to the reviewed `ws-api-futures.kucoin.com` origin. |
+| `kucoinspot` | — | — | No reviewed Spot endpoint/sizing profile; every live-smoke mode refuses before credential access. The futures profile is not reused. |
 | `polymarket` | `POLYMARKET` | `PRIVATE_KEY` | None wired; explicit `--mainnet` only. Optional complete L2 tuple: `API_KEY`, `API_SECRET`, `API_PASSPHRASE`; absent tuple derives credentials with L1 auth. Optional `FUNDER_ADDRESS`, `SIGNER_TYPE` (`0`–`3`; default `0`). |
 | `hyrotrader` | — | — | No reviewed built-in profile; refused, including with `--mainnet`. Simulation URLs cannot be inferred safely from caller-supplied endpoints. |
 | `grvt` | — | — | Newly landed during this harness change. Engine has testnet endpoints, but its pinned replay auth/routing contract currently accepts production origins only. No reviewed live-smoke profile yet; refused before credential access. |

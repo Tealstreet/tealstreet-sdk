@@ -78,11 +78,12 @@ tape hashes, audit results, and median measurements:
 
 | Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
 | --- | --- | --- | --- | --- |
-| Spot | 822.038 / 697.728 | 548.043 / 476.942 | 16,705,601 / 3,302,492 | 672,731 |
-| Futures | 1,085.112 / 772.439 | 728.631 / 487.446 | 18,952,785 / 3,291,556 | 775,102 |
+| Spot | 746.411 / 651.586 | 496.422 / 437.491 | 16,726,649 / 3,299,836 | 674,211 |
+| Futures | 454.303 / 246.211 | 279.948 / 142.243 | 18,940,113 / 3,330,628 | 775,517 |
 
 Spot private correctness passes twenty-two frames and thirteen commands; futures
 passes thirty-two frames and seventeen commands. Every request, write,
 signature and protocol audit is clean. The actual Spot SDK/WASM boundary test
-passes, and the focused native suite passes 137 tests, including 38 Spot tests,
-with all-target Clippy warnings denied. The fixed 1,258,291-byte budget is unchanged.
+passes, and the native suite passes 138 tests, including 38 Spot tests,
+with Clippy warnings denied at the same frozen source as the artifact gates.
+The fixed 1,258,291-byte budget is unchanged.
