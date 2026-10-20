@@ -375,10 +375,11 @@ properties into worker messages. Known venue rejections are not relabelled as
 unknown. Timeouts end the caller's wait; they do not prove cancellation or permit
 placement replay.
 
-The fallback knows only the RPC method: dispatched `setLeverage`,
-`changeMarginType`, `changePositionMode`, and `scheduleCancel` are interrupted
-writes, while reads receive no write-outcome marker. It must not parse CLI text
-or invent caller/native IDs. `exec-result.error` and
+The fallback knows only the RPC method and its arguments: dispatched
+`WORKER_WRITE_METHODS` (leverage/margin/mode, `scheduleCancel`, and the
+main-thread trading methods) are interrupted writes and carry the caller client
+IDs in their placement arguments, while reads receive no write-outcome marker.
+It must not parse CLI text or invent native IDs. `exec-result.error` and
 `updatePositions:done.reason` remain strings; optional `errorDetails` carries the
 original structured failure when it is still available.
 

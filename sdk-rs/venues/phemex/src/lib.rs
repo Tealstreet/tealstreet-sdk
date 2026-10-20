@@ -8,7 +8,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Market, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -78,7 +78,7 @@ pub struct PhemexPerpetuals {
     read_credentials: Option<sign::Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     generation: u64,
     native_symbols: HashMap<String, String>,
     startup_retry: Option<TimerId>,
@@ -320,7 +320,7 @@ impl PhemexPerpetuals {
         match pending {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Late),
+            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
@@ -354,6 +354,11 @@ impl Venue for PhemexPerpetuals {
 
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+
+    // A panic close must always go out; late landings are canceled after the read.
+    fn fence_uncertain_cancel_all(&self) -> bool {
+        false
     }
 
     type Pending = Pending;
@@ -399,13 +404,16 @@ impl Venue for PhemexPerpetuals {
             self.subscribe_book(cx, &s, true)
         }
         for (s, i) in self.candles.keys().cloned().collect::<Vec<_>>() {
+            let Some(n) = resolution(i) else {
+                continue;
+            };
             self.send(
                 cx,
                 "kline_p.subscribe",
                 format!(
                     "[{},{}]",
                     serde_json::to_string(self.native_symbol(&s)).unwrap(),
-                    resolution(&i).unwrap()
+                    n
                 ),
             );
         }
@@ -496,9 +504,9 @@ impl Venue for PhemexPerpetuals {
                 for r in k.kline_p.into_iter().rev() {
                     for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                         s == &e.symbol.to_ascii_uppercase()
-                            && resolution(i).is_some_and(|n| n as f64 == r.1.0)
+                            && resolution(*i).is_some_and(|n| n as f64 == r.1.0)
                     }) {
-                        cx.candle(s, i, r.candle());
+                        cx.candle(s, *i, r.candle());
                     }
                 }
             }
@@ -752,7 +760,8 @@ impl Venue for PhemexPerpetuals {
                 self.subscribe_book(cx, &symbol, false);
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(n) = resolution(&interval) else {
+                let Some(n) = resolution(interval) else {
+                    cx.log(LogLevel::Error, interval.unsupported("Phemex"));
                     return;
                 };
                 let key = (symbol.clone(), interval);
@@ -775,7 +784,7 @@ impl Venue for PhemexPerpetuals {
                 );
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(n) = self.candles.get_mut(&key) {
                     *n -= 1;
                     if *n > 0 {
@@ -783,7 +792,7 @@ impl Venue for PhemexPerpetuals {
                     }
                 }
                 self.candles.remove(&key);
-                if let Some(n) = resolution(&interval) {
+                if let Some(n) = resolution(interval) {
                     self.send(
                         cx,
                         "kline_p.unsubscribe",
@@ -810,8 +819,8 @@ impl Venue for PhemexPerpetuals {
                     );
                     return;
                 }
-                let Some(n) = resolution(&interval) else {
-                    cx.done(command, Err("unsupported Phemex candle interval".into()));
+                let Some(n) = resolution(interval) else {
+                    cx.done(command, Err(interval.unsupported("Phemex")));
                     return;
                 };
                 let to = to_ms.unwrap_or(cx.now);
