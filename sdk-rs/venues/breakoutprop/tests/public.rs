@@ -171,6 +171,77 @@ fn malformed_quote_snapshot_keeps_last_known_good_tickers_and_book() {
     assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(3656.01));
 }
 
+fn quote_snapshot_rig() -> Rig {
+    let mut rig = Rig::defaults();
+    for symbol in ["ETHUSD", "BTCUSD"] {
+        rig.command(Command::SubscribeOrderBook {
+            symbol: symbol.into(),
+        });
+    }
+    for body in [
+        LOGIN.to_owned(),
+        USER.to_owned(),
+        INSTRUMENTS.replace("XBTUSD", "BTCUSD"),
+        DETAILS.replace("XBTUSD", "BTCUSD"),
+        r#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":10,"ask":11,"time":"2024-12-11T07:55:11.000Z"},{"symbol":"BTCUSD","type":"Quote","bid":20,"ask":21,"time":"2024-12-11T07:55:11.000Z"}]}"#.into(),
+    ] {
+        let request = rig.next_request();
+        rig.reply(&request, 200, &body);
+    }
+    rig
+}
+
+#[test]
+fn shared_quote_timestamp_keeps_all_rows_and_different_invalid_time_rejects_atomically() {
+    let mut rig = quote_snapshot_rig();
+    assert_eq!(rig.engine.store().tickers().len(), 2);
+    assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(10.0));
+    assert_eq!(rig.engine.book("BTCUSD").unwrap().best_bid(), Some(20.0));
+    let before = rig.engine.store().tickers().to_vec();
+    for time in [
+        "2024-02-30T07:55:11.000Z",
+        "2024-12-11T07:55:11.000+25:00",
+        "not-a-date",
+        "",
+    ] {
+        let poll = rig.next_request();
+        rig.reply(&poll, 200, &format!(r#"{{"events":[{{"symbol":"ETHUSD","type":"Quote","bid":30,"ask":31,"time":"2024-12-11T07:55:11.000Z"}},{{"symbol":"BTCUSD","type":"Quote","bid":40,"ask":41,"time":"{time}"}}]}}"#));
+        assert_eq!(rig.engine.store().tickers(), before, "{time}");
+        assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(10.0));
+        assert_eq!(rig.engine.book("BTCUSD").unwrap().best_bid(), Some(20.0));
+    }
+    let poll = rig.next_request();
+    rig.reply(&poll, 200, r#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":30,"ask":31,"time":"2024-12-11T07:55:12Z"},{"symbol":"BTCUSD","type":"Quote","bid":40,"ask":41,"time":"2024-12-11T08:55:12+01:00"}]}"#);
+    assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(30.0));
+    assert_eq!(rig.engine.book("BTCUSD").unwrap().best_bid(), Some(40.0));
+}
+
+#[test]
+fn failed_quote_stream_retry_discards_cached_snapshot_rows_and_revalidates_new_time() {
+    let mut rig = quote_snapshot_rig();
+    let before = rig.engine.store().tickers().to_vec();
+    let poll = rig.next_request();
+    rig.engine.handle(
+        rig.now,
+        Event::HttpStart {
+            request: poll.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    rig.engine.handle(rig.now, Event::HttpChunk { request: poll.id, data: br#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":30,"ask":31,"time":"2024-12-11T07:55:11.000Z"},"# });
+    rig.failure(&poll);
+    let retry = rig.next_request();
+    rig.reply(&retry, 200, r#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":50,"ask":51,"time":"2024-02-30T07:55:11.000Z"},{"symbol":"BTCUSD","type":"Quote","bid":60,"ask":61,"time":"2024-02-30T07:55:11.000Z"}]}"#);
+    assert_eq!(rig.engine.store().tickers(), before);
+    assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(10.0));
+    let poll = rig.next_request();
+    rig.reply(&poll, 200, r#"{"events":[{"symbol":"ETHUSD","type":"Quote","bid":50,"ask":51,"time":"2024-12-11T07:55:11.000Z"},{"symbol":"BTCUSD","type":"Quote","bid":60,"ask":61,"time":"2024-12-11T07:55:11.000Z"}]}"#);
+    assert_eq!(rig.engine.store().tickers().len(), 2);
+    assert_eq!(rig.engine.book("ETHUSD").unwrap().best_bid(), Some(50.0));
+    assert_eq!(rig.engine.book("BTCUSD").unwrap().best_bid(), Some(60.0));
+}
+
 #[test]
 fn first_401_refreshes_and_resends_once_while_second_fails() {
     let mut rig = Rig::defaults();

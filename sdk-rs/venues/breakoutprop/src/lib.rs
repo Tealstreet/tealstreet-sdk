@@ -86,6 +86,7 @@ pub(crate) enum Operation {
     Quotes {
         rows: Vec<Ticker>,
         invalid: bool,
+        validated_time: Option<String>,
     },
     Portfolio {
         revision: u64,
@@ -131,9 +132,14 @@ impl Operation {
                 rows.clear();
                 *invalid = false;
             }
-            Self::Quotes { rows, invalid } => {
+            Self::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 rows.clear();
                 *invalid = false;
+                *validated_time = None;
             }
             Self::Candles { rows, invalid, .. } => {
                 rows.clear();
@@ -481,6 +487,7 @@ impl BreakoutProp {
                 Operation::Quotes {
                     rows: Vec::new(),
                     invalid: false,
+                    validated_time: None,
                 },
             );
         }
@@ -855,12 +862,20 @@ impl Venue for BreakoutProp {
                     self.join_markets(cx);
                 }
             }
-            Operation::Quotes { rows, invalid } => {
+            Operation::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 self.quotes_pending = false;
                 if invalid {
                     self.fail_operation(
                         cx,
-                        Operation::Quotes { rows, invalid },
+                        Operation::Quotes {
+                            rows,
+                            invalid,
+                            validated_time,
+                        },
                         "Invalid DXtrade quotes response",
                     );
                 } else {
@@ -928,7 +943,11 @@ impl Venue for BreakoutProp {
                     _ => *invalid = true,
                 }
             }
-            Operation::Quotes { rows, invalid } => {
+            Operation::Quotes {
+                rows,
+                invalid,
+                validated_time,
+            } => {
                 match serde_json::from_str::<wire::Quote<'_>>(item) {
                     Ok(row)
                         if row.kind == "Quote"
@@ -937,9 +956,15 @@ impl Venue for BreakoutProp {
                             && row.bid > 0.0
                             && row.ask.is_finite()
                             && row.ask > 0.0
-                            && wire::timestamp(&row.time).is_ok()
+                            && (validated_time.as_deref() == Some(row.time.as_ref())
+                                || wire::timestamp(&row.time).is_ok())
                             && !rows.iter().any(|old| old.symbol == row.symbol) =>
                     {
+                        // DXtrade quotes share a snapshot time; validate identical
+                        // bytes once within this response, never across retries.
+                        if validated_time.as_deref() != Some(row.time.as_ref()) {
+                            *validated_time = Some(row.time.into_owned());
+                        }
                         rows.push(Ticker {
                             id: row.symbol.to_string(),
                             symbol: row.symbol.into_owned(),

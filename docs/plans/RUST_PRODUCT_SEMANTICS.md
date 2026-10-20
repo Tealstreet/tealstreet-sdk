@@ -233,3 +233,15 @@ Paradex local WASM shrank from 1,277,137 to 1,253,328 bytes with identical budge
 and build settings. Its unchanged public and private gates both PASS: public
 main CPU 760.7 vs TS 917.9 ms, steady 368.3 vs 492.2 ms, retained 2.1 vs 18.9 MB. No benchmark
 fixture, metric boundary, timeout or performance threshold was relaxed.
+
+Feature pruning made the local Breakout startup control pass (23.2 vs TS 29.6 ms),
+but steady CPU still failed 9.8 vs 9.4 ms. Its quote snapshots repeated the same
+successful timestamp validation 55 times for 11 unique snapshot times. A bounded
+per-inflight snapshot cache reuses only successful validation of identical raw
+bytes and clears on retry; all other input uses the unchanged RFC3339 parser.
+Native 105 and strict Clippy PASS; new multi-market malformed and stream-retry
+regressions preserve whole-snapshot atomicity. Final unchanged public gate PASS:
+main 17.5 vs TS 20.8 ms, steady 6.0 vs 10.0 ms, retained 0.8 vs 11.8 MB. Private correctness
+and all 4 compiled Breakout integration tests PASS; private CPU is informational.
+The CPU diagnostic used a code-identical named copy solely to inspect samples,
+without changing official bindings, measurement boundaries or benchmark input.
