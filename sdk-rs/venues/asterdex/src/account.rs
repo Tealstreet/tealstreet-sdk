@@ -2,6 +2,7 @@
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
 use safe_cex_engine::model::*;
+use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
@@ -249,10 +250,6 @@ fn status(text: &str) -> Option<OrderStatus> {
         _ => return None,
     })
 }
-fn finite(text: &str) -> Option<f64> {
-    let x = text.parse::<f64>().ok()?;
-    x.is_finite().then_some(x)
-}
 fn trigger(kind: OrderType, text: Option<&str>) -> Option<StopTriggerType> {
     if !matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
         return None;
@@ -266,12 +263,12 @@ fn trigger(kind: OrderType, text: Option<&str>) -> Option<StopTriggerType> {
 pub(crate) fn order_from_wire(row: &OrderRow<'_>) -> Option<Order> {
     let o = &row.row;
     let kind = order_type(&o.kind)?;
-    let amount = finite(&o.orig_qty)?;
-    let filled = finite(&o.executed_qty)?;
+    let amount = parse_decimal(&o.orig_qty)?;
+    let filled = parse_decimal(&o.executed_qty)?;
     let stop = o
         .stop_price
         .as_deref()
-        .and_then(finite)
+        .and_then(parse_decimal)
         .filter(|x| *x > 0.0);
     Some(Order {
         id: o.order_id.to_string(),
@@ -280,7 +277,7 @@ pub(crate) fn order_from_wire(row: &OrderRow<'_>) -> Option<Order> {
         symbol: o.symbol.to_string(),
         kind,
         side: order_side(&o.side),
-        price: stop.unwrap_or(finite(&o.price)?),
+        price: stop.unwrap_or(parse_decimal(&o.price)?),
         amount,
         filled,
         remaining: (amount - filled).max(0.0),
@@ -540,7 +537,7 @@ impl AsterDex {
                     return;
                 };
                 let r = p.row;
-                let Some(amount) = finite(&r.position_amt) else {
+                let Some(amount) = parse_decimal(&r.position_amt) else {
                     skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
                     return;
                 };
@@ -570,7 +567,7 @@ impl AsterDex {
                     &*r.notional,
                     &*r.liquidation_price,
                 ]
-                .map(finite);
+                .map(parse_decimal);
                 let [Some(entry), Some(upnl), Some(notional), Some(liquidation)] = values else {
                     skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
                     return;
@@ -730,7 +727,7 @@ impl AsterDex {
                         &*r.total_open_order_initial_margin,
                         &*r.total_unrealized_profit,
                     ]
-                    .map(finite);
+                    .map(parse_decimal);
                     if let [
                         Some(total),
                         Some(free),
@@ -745,7 +742,7 @@ impl AsterDex {
                                 .filter(|a| {
                                     a.wallet_balance
                                         .as_deref()
-                                        .and_then(finite)
+                                        .and_then(parse_decimal)
                                         .is_some_and(|x| x != 0.0)
                                 })
                                 .map(|a| a.asset.to_string()),
@@ -1033,13 +1030,16 @@ impl AsterDex {
             .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
         let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
             .then(|| {
-                let qty = o.l.as_deref().and_then(finite).filter(|x| *x > 0.0)?;
+                let qty =
+                    o.l.as_deref()
+                        .and_then(parse_decimal)
+                        .filter(|x| *x > 0.0)?;
                 let price = o
                     .last_price
                     .as_deref()
-                    .and_then(finite)
+                    .and_then(parse_decimal)
                     .filter(|x| *x > 0.0)
-                    .or_else(|| o.ap.as_deref().and_then(finite).filter(|x| *x > 0.0))?;
+                    .or_else(|| o.ap.as_deref().and_then(parse_decimal).filter(|x| *x > 0.0))?;
                 Some((price, qty))
             })
             .flatten();
@@ -1063,7 +1063,7 @@ impl AsterDex {
             }
         }
         // REST progress describes order state, not executions already delivered to the caller.
-        if let (Some((price, qty)), Some(filled)) = (fill, finite(&o.z)) {
+        if let (Some((price, qty)), Some(filled)) = (fill, parse_decimal(&o.z)) {
             let execution_previous = self.account.execution_progress(&id, filled);
             if execution.is_none() && filled > execution_previous {
                 cx.fill(Fill {
@@ -1082,7 +1082,8 @@ impl AsterDex {
         let Some(status) = status(&o.status) else {
             return;
         };
-        let [Some(amount), Some(filled), Some(price)] = [&*o.q, &*o.z, &*o.p].map(finite) else {
+        let [Some(amount), Some(filled), Some(price)] = [&*o.q, &*o.z, &*o.p].map(parse_decimal)
+        else {
             return;
         };
         if status == OrderStatus::Open
@@ -1122,7 +1123,7 @@ impl AsterDex {
             self.account.order_position_sides.insert(id.clone(), side);
         }
         self.account.order_revision += 1;
-        let stop = o.sp.as_deref().and_then(finite).filter(|x| *x > 0.0);
+        let stop = o.sp.as_deref().and_then(parse_decimal).filter(|x| *x > 0.0);
         let order = Order {
             id: id.clone(),
             parent_id: None,
@@ -1171,13 +1172,13 @@ impl AsterDex {
             p.s.is_empty()
                 || [&*p.pa, &*p.ep, &*p.up, &*p.cr]
                     .into_iter()
-                    .any(|x| finite(x).is_none())
+                    .any(|x| parse_decimal(x).is_none())
         }) || event.a.balances.iter().any(|b| {
             b.a.is_empty()
-                || finite(&b.wb).is_none()
-                || finite(&b.cw).is_none()
-                || finite(&b.wb)
-                    .zip(finite(&b.cw))
+                || parse_decimal(&b.wb).is_none()
+                || parse_decimal(&b.cw).is_none()
+                || parse_decimal(&b.wb)
+                    .zip(parse_decimal(&b.cw))
                     .is_some_and(|(total, free)| total < free)
         }) {
             return;
@@ -1302,9 +1303,9 @@ impl AsterDex {
         };
         if event.balances.iter().any(|b| {
             b.a.is_empty()
-                || finite(&b.f).is_none()
-                || finite(&b.l).is_none()
-                || finite(&b.l).is_some_and(|used| used < 0.0)
+                || parse_decimal(&b.f).is_none()
+                || parse_decimal(&b.l).is_none()
+                || parse_decimal(&b.l).is_some_and(|used| used < 0.0)
         }) {
             return;
         }

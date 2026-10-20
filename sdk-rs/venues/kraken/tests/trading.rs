@@ -946,23 +946,34 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
 }
 #[test]
-fn zero_bracket_legs_are_absent_like_ts() {
-    let (mut e, _) = ready();
-    let mut o = limit();
-    o.stop_loss = Some(0.0);
-    o.take_profit = Some(0.0);
-    place(&mut e, vec![o]);
-    let entry = http(&mut e, "sendorder");
-    ack(&mut e, &entry, "entry", "placed");
-    let out = e.drain_actions().collect::<Vec<_>>();
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(ids), .. }) if ids == r#"["entry"]"#)));
-    let mut market = limit();
-    market.kind = OrderType::Market;
-    market.price = None;
-    market.stop_loss = Some(0.0);
-    place(&mut e, vec![market]);
-    let entry = http(&mut e, "sendorder");
-    ack(&mut e, &entry, "market", "placed");
-    assert_eq!(done(&mut e).unwrap(), r#"["market"]"#);
+fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
+    for (command, kind) in [
+        (42, r#""type":"market""#),
+        (43, r#""type":"limit","price":100"#),
+    ] {
+        let (mut e, _) = ready();
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![serde_json::from_str(&format!(
+                    r#"{{"symbol":"PF_XBTUSD",{kind},"side":"buy","amount":1,"stopLoss":0,"takeProfit":0}}"#
+                ))
+                .unwrap()],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let writes = actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            .count();
+        assert_eq!(writes, 1, "{kind}: only the entry is sent");
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )),
+            "{kind}"
+        );
+    }
 }

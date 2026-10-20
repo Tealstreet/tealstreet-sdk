@@ -1,6 +1,7 @@
 //! Rare reads return Binance-compatible JSON without touching the store.
 use crate::sign::{Credentials, Params};
 use crate::{Pending, wire};
+use safe_cex_engine::de::optional_number;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
@@ -839,12 +840,6 @@ fn optional_text<'de, D: Deserializer<'de>>(de: D) -> Result<Option<String>, D::
     #[derive(Deserialize)]
     struct Text(#[serde(deserialize_with = "text")] String);
     Option::<Text>::deserialize(de).map(|value| value.map(|value| value.0))
-}
-
-fn optional_number<'de, D: Deserializer<'de>>(de: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct Number(#[serde(deserialize_with = "wire::number")] f64);
-    Option::<Number>::deserialize(de).map(|value| value.map(|value| value.0))
 }
 
 /// RFC3339 offsets are part of the instant; never consult the host timezone.

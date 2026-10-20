@@ -230,9 +230,9 @@ impl Kraken {
         let mut steps = VecDeque::new();
         for opts in orders {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
-            // A zero leg means "none", matching the TS truthiness check.
-            let stop_loss = opts.stop_loss.filter(|p| *p != 0.);
-            let take_profit = opts.take_profit.filter(|p| *p != 0.);
+            // A zero bracket price means "no leg", as on the other venues.
+            let leg = |price: Option<f64>| price.filter(|p| *p != 0.0);
+            let (stop_loss, take_profit) = (leg(opts.stop_loss), leg(opts.take_profit));
             if stop_loss.is_some() || take_profit.is_some() {
                 if opts.kind != OrderType::Limit {
                     return Err(
