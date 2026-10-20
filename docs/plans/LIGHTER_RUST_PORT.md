@@ -164,3 +164,18 @@ public/private roles for identical URLs. Added the new optional slippage field
 to Bitrue's amendment constructor. Earlier broad checks are superseded by the
 merged source; rerun native/wasm, wrapper/transport, harness and replay gates.
 Pre-integration combined Wasm boundary: 31 tests; JS/Workers host: 25 tests.
+
+### Final local gates on integrated source
+
+- Format, bans, workspace all-target Clippy, 897 native tests and Wasm Clippy pass.
+- Harness: 169 tests; real Wasm boundary: 35; host: 34; targeted wrapper and
+  transport: 501. Root typecheck: 44 tasks; lint: 28 tasks, all pass.
+- Lighter public PASS: 8,875 frames, 213 markets/tickers, ETH/BTC books;
+  TS/Rust main CPU 673.0/371.6 ms (1.81x), steady 428.1/221.4 ms (1.93x),
+  retained 3.0/1.8 MB (1.68x). Single-venue Wasm 961,991 bytes versus 1,258,291.
+- Lighter private PASS: 14 events, eight commands, 11 signed transactions in
+  ten HTTP writes. Private CPU/memory are informative, not performance gates.
+- Binance public PASS: CPU 271.0/128.8 ms (2.10x), steady 158.3/60.6 ms
+  (2.61x), retained 4.2/2.2 MB (1.89x). Binance private PASS: 14 events.
+- Full repository tests are running separately; next: PR adversarial review,
+  findings posted to PR, fix/review loop and green-CI merge into landing.
