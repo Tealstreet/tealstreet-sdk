@@ -668,6 +668,8 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "kraken")]
             "krakenspot" => Box::new(Engine::new(KrakenSpot::new(KrakenOptions {
+                // Spot private reads are POSTs and retain primary credentials.
+                read_credentials: None,
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,

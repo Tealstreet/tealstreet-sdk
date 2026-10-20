@@ -541,3 +541,9 @@ than treating the original port boundary as a waiver.
 - Source remains frozen during final verification. Persistent PR comments/body
   will carry actual final aggregate receipts; no old gate numbers are relabeled
   as current. Merge remains gated on exact-head green CI and review convergence.
+
+- Merged combined build found one compile-time constructor seam: incoming
+  KrakenSpot shares KrakenOptions and must initialize the sweep's new optional
+  read-credential field. Its private reads are primary-signed POSTs, so set
+  that field to None explicitly. Original failed build retained; repeat the
+  affected build/native/WASM checks on the fixed union.
