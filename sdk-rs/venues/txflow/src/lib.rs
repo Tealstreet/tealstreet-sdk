@@ -106,8 +106,10 @@ pub struct TxFlow {
     candles: HashMap<(String, String), usize>,
     ticker_queue: VecDeque<u32>,
     seed_tickers: Vec<Ticker>,
+    ticker_seeded: std::collections::HashSet<u32>,
     ticker_timer: Option<TimerId>,
-    meta_timer: Option<TimerId>,
+    discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
@@ -126,8 +128,10 @@ impl TxFlow {
             candles: Default::default(),
             ticker_queue: Default::default(),
             seed_tickers: Vec::new(),
+            ticker_seeded: Default::default(),
             ticker_timer: None,
-            meta_timer: None,
+            discovery: Default::default(),
+            live_tickers: Default::default(),
         }
     }
     pub(crate) fn rest(&self) -> &'static str {
@@ -193,23 +197,31 @@ impl TxFlow {
             },
         );
     }
+    fn ticker_request(&self, cx: &mut Cx<'_, Pending>, asset: u32) {
+        let id = cx.request(
+            Method::Post,
+            format!("{}/info", self.rest()),
+            vec![
+                ("Content-Type", "application/json".into()),
+                ("x-api-version", API_VERSION.into()),
+            ],
+            Some(format!(
+                "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
+            )),
+            Pending::Ticker { asset },
+        );
+        cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
+    }
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
-            let id = cx.request(
-                Method::Post,
-                format!("{}/info", self.rest()),
-                vec![
-                    ("Content-Type", "application/json".into()),
-                    ("x-api-version", API_VERSION.into()),
-                ],
-                Some(format!(
-                    "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
-                )),
-                Pending::Ticker { asset },
-            );
-            cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
-        } else {
-            cx.store.set_tickers(std::mem::take(&mut self.seed_tickers));
+            self.ticker_request(cx, asset);
+        } else if !self.seed_tickers.is_empty()
+            && self.ticker_seeded.len() == self.seed_tickers.len()
+        {
+            self.ticker_seeded.clear();
+            let mut rows = std::mem::take(&mut self.seed_tickers);
+            self.live_tickers.finish(cx.store, &mut rows);
+            cx.store.set_tickers(rows);
             self.open_sockets(cx);
         }
     }
@@ -296,20 +308,46 @@ impl TxFlow {
         cx.store
             .update_ticker(symbol, |t| Self::context_update(t, c));
     }
+    fn context_mask(c: &Context) -> u16 {
+        (u16::from(c.last_price.is_some_and(|n| n > 0.0)) << 2)
+            | (u16::from(c.mark_px.is_some()) << 3)
+            | (u16::from(c.oracle_px.is_some()) << 4)
+            | (u16::from(c.prev_day_px.is_some_and(|n| n > 0.0)) << 5)
+            | (u16::from(c.open_interest.is_some()) << 6)
+            | (u16::from(c.funding.is_some()) << 7)
+            | (u16::from(c.next_funding_time.is_some()) << 8)
+            | (u16::from(c.day_base_vlm.is_some()) << 9)
+            | (u16::from(c.day_ntl_vlm.is_some()) << 10)
+            | if c.mid_px.is_some_and(|n| n > 0.0) {
+                safe_cex_engine::startup::LiveTickers::MID_PRICE
+            } else {
+                0
+            }
+    }
     fn context_update(t: &mut Ticker, c: Context) {
-        t.mark = c.mark_px;
-        t.index = c.oracle_px;
-        t.open_interest = c.open_interest * c.mark_px;
-        t.funding_rate = c.funding / 100.0;
-        t.funding_time = c.next_funding_time.unwrap_or(0.0);
-        if c.mid_px > 0.0 {
-            t.mid_price = Some(c.mid_px);
+        if let Some(mark) = c.mark_px {
+            t.mark = mark;
         }
-        if c.last_price > 0.0 {
-            t.last = c.last_price;
+        if let Some(index) = c.oracle_px {
+            t.index = index;
         }
-        if c.prev_day_px > 0.0 {
-            t.percentage = (t.last - c.prev_day_px) / c.prev_day_px * 100.0;
+        if let Some(open_interest) = c.open_interest {
+            t.open_interest = open_interest * t.mark;
+        }
+        if let Some(funding) = c.funding {
+            t.funding_rate = funding / 100.0;
+        }
+        if let Some(next) = c.next_funding_time {
+            t.funding_time = next;
+        }
+        if let Some(mid) = c.mid_px.filter(|n| *n > 0.0) {
+            t.mid_price = Some(mid);
+        }
+        if let Some(last) = c.last_price.filter(|n| *n > 0.0) {
+            t.last = last;
+        }
+        if let Some(previous) = c.prev_day_px.filter(|n| *n > 0.0) {
+            t.percentage = (t.last - previous) / previous * 100.0;
         }
         if let Some(volume) = c.day_base_vlm {
             t.volume = volume;
@@ -318,19 +356,45 @@ impl TxFlow {
             t.quote_volume = volume;
         }
     }
-    fn ticker_update(t: &mut Ticker, row: TickerRow, seed: bool) {
-        t.last = row.last_price;
-        t.volume = row.coin_vlm;
-        t.quote_volume = row.day_ntl_vlm;
-        t.percentage = if row.prev_day_px > 0.0 {
-            (row.last_price - row.prev_day_px) / row.prev_day_px * 100.0
-        } else {
-            0.0
-        };
+    fn ticker_mask(row: &TickerRow, seed: bool) -> u16 {
+        let mut mask = (u16::from(row.last_price.is_some()) << 2)
+            | (u16::from(row.prev_day_px.is_some()) << 5)
+            | (u16::from(row.coin_vlm.is_some()) << 9)
+            | (u16::from(row.day_ntl_vlm.is_some()) << 10);
         if seed {
-            t.mark = row.mark_px;
-            t.index = row.oracle_px;
-            t.open_interest = row.open_interest * row.mark_px;
+            mask |= (u16::from(row.mark_px.is_some()) << 3)
+                | (u16::from(row.oracle_px.is_some()) << 4)
+                | (u16::from(row.open_interest.is_some()) << 6);
+        }
+        mask | row.node_ctx.as_ref().map_or(0, Self::context_mask)
+    }
+    fn ticker_update(t: &mut Ticker, row: TickerRow, seed: bool) {
+        if let Some(last) = row.last_price {
+            t.last = last;
+        }
+        if let Some(volume) = row.coin_vlm {
+            t.volume = volume;
+        }
+        if let Some(volume) = row.day_ntl_vlm {
+            t.quote_volume = volume;
+        }
+        if let Some(previous) = row.prev_day_px {
+            t.percentage = if previous > 0.0 {
+                (t.last - previous) / previous * 100.0
+            } else {
+                0.0
+            };
+        }
+        if seed {
+            if let Some(mark) = row.mark_px {
+                t.mark = mark;
+            }
+            if let Some(index) = row.oracle_px {
+                t.index = index;
+            }
+            if let Some(open_interest) = row.open_interest {
+                t.open_interest = open_interest * t.mark;
+            }
         }
         if let Some(ctx) = row.node_ctx {
             Self::context_update(t, ctx);
@@ -356,19 +420,25 @@ impl TxFlow {
         match frame {
             PublicFrame::Contexts(rows) => {
                 for row in rows.ctxs {
-                    if let Some(symbol) = self.coin_symbol(&row.coin) {
-                        Self::context(cx, symbol, row.ctx);
+                    if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
+                        let mask = Self::context_mask(&row.ctx);
+                        Self::context(cx, &symbol, row.ctx);
+                        self.live_tickers.record(cx.store, &symbol, mask);
                     }
                 }
             }
             PublicFrame::Context(row) => {
-                if let Some(symbol) = self.coin_symbol(&row.coin) {
-                    Self::context(cx, symbol, row.ctx);
+                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
+                    let mask = Self::context_mask(&row.ctx);
+                    Self::context(cx, &symbol, row.ctx);
+                    self.live_tickers.record(cx.store, &symbol, mask);
                 }
             }
             PublicFrame::Ticker(row) => {
-                if let Some(symbol) = self.symbol(row.instrument_id) {
-                    Self::apply_ticker(cx, symbol, row, false);
+                if let Some(symbol) = self.symbol(row.instrument_id).map(str::to_owned) {
+                    let mask = Self::ticker_mask(&row, false);
+                    Self::apply_ticker(cx, &symbol, row, false);
+                    self.live_tickers.record(cx.store, &symbol, mask);
                 }
             }
             PublicFrame::Depth(row) => {
@@ -669,7 +739,10 @@ impl Venue for TxFlow {
                 for (symbol, ladder) in &mut self.books {
                     ladder.book.clear();
                     ladder.time = None;
-                    cx.book_changed(symbol);
+                    // Only a published book needs clearing; others were never sent.
+                    if ladder.published {
+                        cx.book_changed(symbol);
+                    }
                 }
                 let books = self
                     .books
@@ -747,7 +820,9 @@ impl Venue for TxFlow {
             for (symbol, ladder) in &mut self.books {
                 ladder.book.clear();
                 ladder.time = None;
-                cx.book_changed(symbol);
+                if ladder.published {
+                    cx.book_changed(symbol);
+                }
             }
             self.account_disconnected(cx);
         }
@@ -857,6 +932,7 @@ impl Venue for TxFlow {
                 self.coins = coins;
                 self.instruments = instruments;
                 self.ticker_queue = ticker_queue;
+                self.ticker_seeded.clear();
                 self.historical_assets = historical_assets;
                 self.historical_coins = historical_coins;
                 let tickers = markets
@@ -871,8 +947,11 @@ impl Venue for TxFlow {
                     .retain(|symbol, _| self.assets.contains_key(symbol));
                 self.candles
                     .retain(|(symbol, _), _| self.assets.contains_key(symbol));
+                self.discovery.succeeded(cx, &None);
                 cx.store.set_markets(markets);
+                self.open_sockets(cx);
                 self.seed_tickers = tickers;
+                self.live_tickers.begin();
                 self.next_ticker(cx);
             }
             Pending::Ticker { asset } => {
@@ -888,7 +967,19 @@ impl Venue for TxFlow {
                             .find(|t| t.id == asset.to_string())
                         {
                             Self::ticker_update(ticker, reply.data, true);
+                        } else if let Some(symbol) = cx
+                            .store
+                            .markets()
+                            .iter()
+                            .find(|m| m.id == asset.to_string())
+                            .map(|m| m.symbol.clone())
+                        {
+                            cx.store.update_ticker(&symbol, |ticker| {
+                                Self::ticker_update(ticker, reply.data, true)
+                            });
                         }
+                        self.ticker_seeded.insert(asset);
+                        self.discovery.succeeded(cx, &Some(asset));
                     }
                     _ => {
                         self.on_request_failed(
@@ -920,9 +1011,9 @@ impl Venue for TxFlow {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Meta { rows, valid } => match serde_json::from_str(item) {
+            Pending::Meta { rows, valid: _ } => match serde_json::from_str(item) {
                 Ok(row) => rows.push(row),
-                Err(_) => *valid = false,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
                 Ok(row) => rows.push(row.candle()),
@@ -936,13 +1027,13 @@ impl Venue for TxFlow {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Meta { .. } => {
-                cx.log(LogLevel::Error, error);
-                self.meta_timer = Some(cx.set_timer(5000.0));
+                cx.log(LogLevel::Warning, error);
+                self.discovery.failed(cx, None);
             }
             Pending::Ticker { asset } => {
                 cx.log(LogLevel::Warning, error);
-                self.ticker_queue.push_front(asset);
-                self.ticker_timer = Some(cx.set_timer(5000.0));
+                self.discovery.failed(cx, Some(asset));
+                self.ticker_timer = Some(cx.set_timer(25.0));
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
@@ -953,9 +1044,12 @@ impl Venue for TxFlow {
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
-        if self.meta_timer == Some(timer) {
-            self.meta_timer = None;
-            self.metadata(cx);
+        if let Some(asset) = self.discovery.on_timer(timer) {
+            if let Some(asset) = asset {
+                self.ticker_request(cx, asset);
+            } else {
+                self.metadata(cx);
+            }
         }
         if self.ticker_timer == Some(timer) {
             self.ticker_timer = None;

@@ -50,6 +50,25 @@ pub enum Request {
         orders: Vec<Order>,
         valid: bool,
     },
+    Backfill {
+        run: Backfill,
+        executions: Vec<Execution>,
+        oldest: f64,
+        count: usize,
+    },
+}
+#[derive(Clone)]
+pub struct Backfill {
+    since: f64,
+    epoch: u64,
+    page: u32,
+    cursor: Option<String>,
+    retried: bool,
+}
+pub struct Execution {
+    id: String,
+    timestamp: f64,
+    fill: Fill,
 }
 #[derive(Default)]
 struct Connection {
@@ -92,6 +111,14 @@ pub struct Account {
     heal: Option<TimerId>,
     seen_fills: HashSet<String>,
     fill_queue: VecDeque<String>,
+    newest_fill: f64,
+    live_after: Option<f64>,
+    /// Earliest account-payload silence not yet covered by a completed backfill.
+    outage: Option<f64>,
+    outage_epoch: u64,
+    session_start: Option<f64>,
+    baselined: bool,
+    backfill_retry: Option<(TimerId, Backfill)>,
 }
 #[derive(Default)]
 pub struct Snapshot {
@@ -178,14 +205,16 @@ struct PositionWire<'a> {
         alias = "entry_price"
     )]
     avg_entry_price: Num,
+    #[serde(default, alias = "positionValue")]
+    position_value: Option<Num>,
     #[serde(default, alias = "unrealizedPnl")]
-    unrealized_pnl: Num,
+    unrealized_pnl: Option<Num>,
     #[serde(default, alias = "realizedPnl")]
     realized_pnl: Option<Num>,
     #[serde(default, alias = "initialLeverage", alias = "initial_leverage")]
     leverage: Option<Num>,
     #[serde(default, alias = "initialMarginFraction")]
-    initial_margin_fraction: Option<Num>,
+    initial_margin_fraction: Option<MarginFraction>,
     #[serde(default, alias = "marginMode")]
     margin_mode: Option<Atom<'a>>,
     #[serde(default, alias = "liquidationPrice")]
@@ -328,6 +357,10 @@ struct TradeWire<'a> {
     #[serde(default, borrow)]
     bid_id: Atom<'a>,
     #[serde(default, borrow)]
+    ask_id_str: Atom<'a>,
+    #[serde(default, borrow)]
+    bid_id_str: Atom<'a>,
+    #[serde(default, borrow)]
     ask_account_id: Atom<'a>,
     #[serde(default, borrow)]
     bid_account_id: Atom<'a>,
@@ -423,17 +456,47 @@ fn address(text: &str) -> Option<String> {
 fn ratio(n: f64) -> f64 {
     if n > 1.0 { n / 10000.0 } else { n }
 }
-// Account positions use ratio, percent, or integer fraction ticks. Public
-// market risk metadata keeps its separate fixed-tick contract in `ratio`.
-fn position_margin_ratio(value: f64) -> Option<f64> {
-    if !value.is_finite() || value <= 0.0 {
-        None
-    } else if value > 100.0 {
-        Some(value / 10000.0)
-    } else if value > 1.0 {
-        Some(value / 100.0)
-    } else {
-        Some(value)
+/// Position `initial_margin_fraction`: the venue sends a percent string
+/// (`"20.00"` = 5x); a bare integer is the 1/10,000 tick form tx payloads use.
+/// A percent above 100 is impossible, so it reads as ticks as in TS.
+enum MarginFraction {
+    Percent(f64),
+    Ticks(f64),
+}
+impl<'de> Deserialize<'de> for MarginFraction {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = MarginFraction;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a percent string or tick integer")
+            }
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                s.trim()
+                    .parse()
+                    .map(MarginFraction::Percent)
+                    .map_err(E::custom)
+            }
+            fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<Self::Value, E> {
+                Ok(MarginFraction::Ticks(n as f64))
+            }
+            fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<Self::Value, E> {
+                Ok(MarginFraction::Ticks(n as f64))
+            }
+            fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<Self::Value, E> {
+                Ok(MarginFraction::Percent(n))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+impl MarginFraction {
+    fn ratio(&self) -> Option<f64> {
+        let ratio = match *self {
+            Self::Percent(n) if n <= 100.0 => n / 100.0,
+            Self::Percent(n) | Self::Ticks(n) => n / 10000.0,
+        };
+        (ratio.is_finite() && ratio > 0.0 && ratio <= 1.0).then_some(ratio)
     }
 }
 fn margin(value: Option<&Atom<'_>>) -> Option<MarginType> {
@@ -454,16 +517,18 @@ fn millis(time: f64) -> f64 {
 fn normalized(text: &str) -> String {
     text.to_ascii_uppercase().replace(['-', ' '], "_")
 }
+/// Seconds, milliseconds or microseconds to milliseconds.
+fn venue_millis(time: f64) -> f64 {
+    if time >= 100_000_000_000_000.0 {
+        time / 1000.0
+    } else {
+        millis(time)
+    }
+}
 fn event_time(updated: Option<&Num>, transaction: Option<&Num>) -> Option<f64> {
     transaction
         .filter(|n| n.0 > 0.0)
-        .map(|n| {
-            if n.0 >= 100_000_000_000_000.0 {
-                n.0 / 1000.0
-            } else {
-                millis(n.0)
-            }
-        })
+        .map(|n| venue_millis(n.0))
         .or_else(|| updated.filter(|n| n.0 > 0.0).map(|n| millis(n.0)))
 }
 
@@ -763,6 +828,8 @@ impl Lighter {
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
         self.account.connection.recovery_started = None;
+        self.account.session_start.get_or_insert(cx.now);
+        self.account.live_after = self.account.outage.map(|outage| self.cutoff(outage));
         self.subscribe_private(cx, socket);
         cx.send(
             socket,
@@ -771,6 +838,19 @@ impl Lighter {
         self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
         self.refresh_account(cx);
         self.refresh_orders(cx);
+        if let Some(since) = self.account.live_after {
+            if let Some((timer, _)) = self.account.backfill_retry.take() {
+                cx.clear_timer(timer);
+            }
+            let run = Backfill {
+                since,
+                epoch: self.account.outage_epoch,
+                page: 1,
+                cursor: None,
+                retried: false,
+            };
+            self.request_backfill(cx, run);
+        }
         true
     }
     pub(crate) fn account_close(
@@ -784,6 +864,8 @@ impl Lighter {
         }
         self.account.connection.open = false;
         self.account.connection.socket = None;
+        let connection = &self.account.connection;
+        self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
         if let Some(t) = self.account.connection.watchdog.take() {
             cx.clear_timer(t);
         }
@@ -832,8 +914,13 @@ impl Lighter {
                                 .last_recovery
                                 .is_none_or(|at| cx.now - at >= 180_000.0)
                         {
+                            let quiet_since =
+                                connection.last_payload.unwrap_or(connection.connected_at);
                             self.account.connection.last_recovery = Some(cx.now);
                             self.account.connection.recovery_started = Some(cx.now);
+                            self.arm_outage(quiet_since);
+                            self.account.live_after =
+                                self.account.outage.map(|outage| self.cutoff(outage));
                             self.subscribe_private(cx, socket);
                         }
                         cx.send(
@@ -853,6 +940,16 @@ impl Lighter {
             self.refresh_limits(cx);
             return true;
         }
+        if self
+            .account
+            .backfill_retry
+            .as_ref()
+            .is_some_and(|(t, _)| *t == timer)
+        {
+            let (_, run) = self.account.backfill_retry.take().unwrap();
+            self.request_backfill(cx, run);
+            return true;
+        }
         if self.account.heal == Some(timer) {
             self.account.heal = None;
             self.refresh_account(cx);
@@ -863,7 +960,7 @@ impl Lighter {
     }
     fn position_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: PositionWire<'_>,
         market_hint: Option<&str>,
     ) -> Option<(Option<Position>, String, f64, MarginType)> {
@@ -896,7 +993,7 @@ impl Lighter {
             .or_else(|| {
                 wire.initial_margin_fraction
                     .as_ref()
-                    .and_then(|n| position_margin_ratio(n.0))
+                    .and_then(MarginFraction::ratio)
                     .map(|n| 1.0 / n)
             })
             .or_else(|| {
@@ -981,17 +1078,33 @@ impl Lighter {
                 }
             }
         }
+        let reported_pnl = wire.unrealized_pnl.map(|n| n.0);
+        let unrealized_pnl = reported_pnl
+            .or_else(|| {
+                cx.store
+                    .position(symbol)
+                    .filter(|prior| prior.side == side)
+                    .map(|prior| prior.unrealized_pnl)
+            })
+            .filter(|pnl| pnl.is_finite())
+            .unwrap_or(0.0);
+        if reported_pnl.is_none() {
+            cx.log(
+                LogLevel::Warning,
+                "Lighter position PnL unavailable; retaining prior valuation",
+            );
+        }
         Some((
             Some(Position {
                 id: symbol.into(),
                 symbol: symbol.into(),
                 side,
                 entry_price: entry,
-                notional: contracts * entry,
+                notional: wire.position_value.map_or(contracts * entry, |n| n.0.abs()),
                 leverage,
                 margin_type: Some(margin_type),
                 position_mode: Some(PositionMode::Oneway),
-                unrealized_pnl: wire.unrealized_pnl.0,
+                unrealized_pnl,
                 realized_pnl: wire.realized_pnl.map(|n| n.0),
                 contracts,
                 liquidation_price: liquidation,
@@ -1005,7 +1118,7 @@ impl Lighter {
     }
     fn snapshot_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: AccountWire<'_>,
     ) -> Result<Snapshot, String> {
         if let Some(identity) = wire.index.as_ref()
@@ -1031,8 +1144,10 @@ impl Lighter {
             ..Snapshot::default()
         };
         if let Some(raw) = wire.positions {
+            let mut unmapped_owned = false;
             let mut invalid_limits = false;
             each_row(raw, |row: PositionWire<'_>, hint| {
+                let owned = row.size.as_ref().is_some_and(|n| n.0 != 0.0);
                 let symbol = if !row.symbol.is_empty() {
                     Some(row.symbol.as_ref())
                 } else {
@@ -1061,7 +1176,7 @@ impl Lighter {
                         || row
                             .initial_margin_fraction
                             .as_ref()
-                            .is_some_and(|n| n.0 > 0.0));
+                            .is_some_and(|n| n.ratio().is_some()));
                 if let Some((position, symbol, leverage, margin)) = self.position_row(cx, row, hint)
                 {
                     if known {
@@ -1071,8 +1186,13 @@ impl Lighter {
                     if let Some(position) = position {
                         snapshot.positions.push(position);
                     }
+                } else if owned {
+                    unmapped_owned = true;
                 }
             })?;
+            if unmapped_owned {
+                return Err("Lighter owned position has unavailable market metadata".into());
+            }
             if invalid_limits {
                 return Err("Invalid Lighter market leverage limits".into());
             }
@@ -1108,16 +1228,20 @@ impl Lighter {
             &wire.market_id.0
         };
         let symbol = if !wire.symbol.is_empty() {
-            wire.symbol.as_ref()
+            Some(wire.symbol.as_ref())
         } else {
-            match self.symbol_for_id(market_id) {
-                Some(s) => s,
-                None => return Ok(None),
-            }
+            self.symbol_for_id(market_id)
         };
-        if cx.store.market(symbol).is_none() {
-            return Ok(None);
-        }
+        let Some(symbol) = symbol.filter(|symbol| cx.store.market(symbol).is_some()) else {
+            let status = normalized(&wire.status);
+            if matches!(status.as_str(), "FILLED" | "EXPIRED" | "REJECTED")
+                || status.starts_with("CANCELED")
+                || status.starts_with("CANCELLED")
+            {
+                return Ok(None);
+            }
+            return Err("Lighter working order has unavailable market metadata".into());
+        };
         let existing = cx
             .store
             .orders()
@@ -1304,6 +1428,23 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { .. } | Request::ChangeTier { .. } => {}
+            Request::Backfill {
+                executions,
+                oldest,
+                count,
+                ..
+            } => {
+                *count += 1;
+                let Some(account) = self.account.account_index.map(|a| a.to_string()) else {
+                    return;
+                };
+                if let Ok(trade) = serde_json::from_str::<TradeWire<'_>>(item)
+                    && let Some(execution) = self.execution(cx, &trade, None, &account)
+                {
+                    *oldest = oldest.min(execution.timestamp);
+                    executions.push(execution);
+                }
+            }
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1428,20 +1569,17 @@ impl Lighter {
             });
         }
         {
-            let upnl = cx
-                .store
-                .positions()
-                .iter()
-                .map(|p| {
-                    cx.store.ticker(&p.symbol).map_or(0.0, |t| {
-                        if p.side == PositionSide::Long {
-                            (t.last - p.entry_price) * p.contracts
-                        } else {
-                            (p.entry_price - t.last) * p.contracts
-                        }
-                    })
-                })
-                .sum::<f64>();
+            let upnl = cx.store.positions().iter().try_fold(0.0, |sum, position| {
+                let value = sum + position.unrealized_pnl;
+                value.is_finite().then_some(value)
+            });
+            let Some(upnl) = upnl else {
+                cx.log(
+                    LogLevel::Warning,
+                    "Lighter position PnL invalid; preserving previous balance",
+                );
+                return;
+            };
             cx.store.set_balance(Balance {
                 total: snapshot.equity - upnl,
                 upnl,
@@ -1492,6 +1630,51 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
             Request::ChangeTier { command } => self.tier_changed(cx, command, response),
+            Request::Backfill {
+                run,
+                mut executions,
+                oldest,
+                count,
+            } => {
+                if !ok {
+                    let message = status.as_ref().map_or("", |s| s.message.as_ref());
+                    let error = format!("HTTP {} {message}", response.status);
+                    self.backfill_failed(cx, run, error);
+                    return;
+                }
+                executions.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                for execution in executions {
+                    self.observe_execution(cx, execution, run.since);
+                }
+                #[derive(Deserialize)]
+                struct Page<'a> {
+                    #[serde(default, borrow)]
+                    next_cursor: Option<Cow<'a, str>>,
+                }
+                let next = serde_json::from_str::<Page<'_>>(response.body)
+                    .ok()
+                    .and_then(|p| p.next_cursor)
+                    .filter(|c| !c.is_empty() && Some(c.as_ref()) != run.cursor.as_deref())
+                    .map(Cow::into_owned);
+                if count >= 100 && oldest >= run.since {
+                    if let Some(next) = next.filter(|_| run.page < 20) {
+                        let run = Backfill {
+                            page: run.page + 1,
+                            cursor: Some(next),
+                            ..run
+                        };
+                        self.request_backfill(cx, run);
+                        return;
+                    }
+                    cx.log(
+                        LogLevel::Warning,
+                        "Lighter fill backfill stopped before the outage start; older fills may be missing",
+                    );
+                }
+                if self.account.outage_epoch == run.epoch {
+                    self.account.outage = None;
+                }
+            }
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1647,6 +1830,7 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
+            Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
             Request::ChangeTier { command } => cx.done(
                 command,
                 Err(format!(
@@ -1719,6 +1903,9 @@ impl Lighter {
             || payload.trades.is_some()
             || payload.account.is_some()
             || payload.balances.is_some();
+        if meaningful || frame.kind.starts_with("subscribed") {
+            self.account.baselined = true;
+        }
         if meaningful {
             self.account.connection.last_payload = Some(cx.now);
             self.account.connection.recovery_started = None;
@@ -1825,97 +2012,188 @@ impl Lighter {
                 cx.log(LogLevel::Warning, e);
             }
         }
+        let live_after = if frame.kind.starts_with("subscribed") {
+            self.account.live_after.unwrap_or(f64::INFINITY)
+        } else {
+            f64::NEG_INFINITY
+        };
         for raw in [payload.fills, payload.trades].into_iter().flatten() {
             let result = each_row(raw, |trade: TradeWire<'_>, hint| {
-                let execution_id = if !trade.trade_id_str.0.is_empty() {
-                    trade.trade_id_str.0.as_ref()
-                } else if !trade.trade_id.0.is_empty() {
-                    trade.trade_id.0.as_ref()
-                } else {
-                    trade.fill_id.0.as_ref()
-                };
-                if execution_id.is_empty() {
-                    return;
+                if let Some(execution) = self.execution(cx, &trade, hint, &account) {
+                    self.observe_execution(cx, execution, live_after);
                 }
-                let market = if trade.market_id.0.is_empty() {
-                    hint.unwrap_or_default()
-                } else {
-                    &trade.market_id.0
-                };
-                let timestamp = millis(trade.timestamp.0);
-                let symbol = if !trade.symbol.is_empty() {
-                    trade.symbol.as_ref()
-                } else {
-                    match self.symbol_for_id(market) {
-                        Some(s) => s,
-                        None => return,
-                    }
-                };
-                let side = if trade.ask_account_id.0 == account {
-                    OrderSide::Sell
-                } else if trade.bid_account_id.0 == account {
-                    OrderSide::Buy
-                } else {
-                    if !trade.ask_account_id.0.is_empty() || !trade.bid_account_id.0.is_empty() {
-                        return;
-                    }
-                    match trade.side.to_ascii_uppercase().as_str() {
-                        "BUY" => OrderSide::Buy,
-                        "SELL" => OrderSide::Sell,
-                        _ => match trade.is_ask.as_ref() {
-                            Some(ask) => {
-                                if ask.get() {
-                                    OrderSide::Sell
-                                } else {
-                                    OrderSide::Buy
-                                }
-                            }
-                            None => return,
-                        },
-                    }
-                };
-                if trade.price.0 <= 0.0 || trade.size.0 <= 0.0 {
-                    return;
-                }
-                let order = if !trade.order_id.0.is_empty() {
-                    trade.order_id.0.as_ref()
-                } else if side == OrderSide::Sell {
-                    trade.ask_id.0.as_ref()
-                } else {
-                    trade.bid_id.0.as_ref()
-                };
-                if order.is_empty() || timestamp <= 0.0 || timestamp > cx.now + 1000.0 {
-                    return;
-                }
-                let symbol = symbol.to_owned();
-                let market = cx.store.market(&symbol).map_or(market, |m| m.id.as_str());
-                let id = format!("{market}:{execution_id}");
-                if !self.account.seen_fills.insert(id.clone()) {
-                    return;
-                }
-                self.account.fill_queue.push_back(id);
-                while self.account.fill_queue.len() > 8192 {
-                    if let Some(id) = self.account.fill_queue.pop_front() {
-                        self.account.seen_fills.remove(&id);
-                    }
-                }
-                // Subscription history is baseline; delayed update executions remain live.
-                if frame.kind.starts_with("subscribed") {
-                    return;
-                }
-                self.trade_execution_observed(order, timestamp);
-                cx.fill(Fill {
-                    order_id: order.into(),
-                    symbol,
-                    side,
-                    price: trade.price.0,
-                    amount: trade.size.0,
-                });
             });
             if let Err(e) = result {
                 cx.log(LogLevel::Warning, e);
             }
         }
         true
+    }
+    fn execution(
+        &self,
+        cx: &Cx<'_, Pending>,
+        trade: &TradeWire<'_>,
+        hint: Option<&str>,
+        account: &str,
+    ) -> Option<Execution> {
+        let execution_id = [&trade.trade_id_str, &trade.trade_id, &trade.fill_id]
+            .into_iter()
+            .map(|id| id.0.as_ref())
+            .find(|id| !id.is_empty())?;
+        let market = if trade.market_id.0.is_empty() {
+            hint.unwrap_or_default()
+        } else {
+            &trade.market_id.0
+        };
+        let symbol = if !trade.symbol.is_empty() {
+            trade.symbol.as_ref()
+        } else {
+            self.symbol_for_id(market)?
+        };
+        let side = if trade.ask_account_id.0 == account {
+            OrderSide::Sell
+        } else if trade.bid_account_id.0 == account {
+            OrderSide::Buy
+        } else {
+            if !trade.ask_account_id.0.is_empty() || !trade.bid_account_id.0.is_empty() {
+                return None;
+            }
+            match trade.side.to_ascii_uppercase().as_str() {
+                "BUY" => OrderSide::Buy,
+                "SELL" => OrderSide::Sell,
+                _ => {
+                    if trade.is_ask.as_ref()?.get() {
+                        OrderSide::Sell
+                    } else {
+                        OrderSide::Buy
+                    }
+                }
+            }
+        };
+        if trade.price.0 <= 0.0 || trade.size.0 <= 0.0 {
+            return None;
+        }
+        let (id, id_str) = if side == OrderSide::Sell {
+            (&trade.ask_id, &trade.ask_id_str)
+        } else {
+            (&trade.bid_id, &trade.bid_id_str)
+        };
+        let order = [&trade.order_id, id_str, id]
+            .into_iter()
+            .map(|id| id.0.as_ref())
+            .find(|id| !id.is_empty())?;
+        // A venue clock ahead of the host is still a real execution; keep its time.
+        let timestamp = venue_millis(trade.timestamp.0);
+        if timestamp <= 0.0 {
+            return None;
+        }
+        let market = cx.store.market(symbol).map_or(market, |m| m.id.as_str());
+        Some(Execution {
+            id: format!("{market}:{execution_id}"),
+            timestamp,
+            fill: Fill {
+                order_id: order.into(),
+                symbol: symbol.into(),
+                side,
+                price: trade.price.0,
+                amount: trade.size.0,
+            },
+        })
+    }
+    /// Records an execution once; it is emitted unless it predates `live_after`.
+    fn observe_execution(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        execution: Execution,
+        live_after: f64,
+    ) {
+        if !self.account.seen_fills.insert(execution.id.clone()) {
+            return;
+        }
+        self.account.fill_queue.push_back(execution.id);
+        while self.account.fill_queue.len() > 8192 {
+            if let Some(id) = self.account.fill_queue.pop_front() {
+                self.account.seen_fills.remove(&id);
+            }
+        }
+        self.account.newest_fill = self.account.newest_fill.max(execution.timestamp);
+        // Subscription history is baseline; delayed update executions remain live.
+        if execution.timestamp < live_after {
+            return;
+        }
+        self.trade_execution_observed(&execution.fill.order_id, execution.timestamp);
+        cx.fill(execution.fill);
+    }
+    /// Account payloads stopped at `quiet_since`; executions after it may be
+    /// missing until a backfill completes. Only after a baseline, so pre-session
+    /// history is never replayed as new.
+    fn arm_outage(&mut self, quiet_since: f64) {
+        if !self.account.baselined {
+            return;
+        }
+        let earliest = self
+            .account
+            .outage
+            .map_or(quiet_since, |o| o.min(quiet_since));
+        self.account.outage = Some(earliest);
+        self.account.outage_epoch += 1;
+    }
+    /// Executions at or after this time are emitted from history, once.
+    fn cutoff(&self, outage: f64) -> f64 {
+        // Up to 10 s before the outage absorbs clock skew; seen_fills dedupes.
+        let floor = (outage - 10_000.0).max(self.account.session_start.unwrap_or(f64::MIN));
+        self.account.newest_fill.clamp(floor, outage.max(floor))
+    }
+    fn backfill_failed(&mut self, cx: &mut Cx<'_, Pending>, mut run: Backfill, error: String) {
+        if run.retried {
+            cx.log(
+                LogLevel::Warning,
+                format!("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect: {error}"),
+            );
+            return;
+        }
+        cx.log(
+            LogLevel::Info,
+            format!("Lighter fill backfill failed, retrying: {error}"),
+        );
+        run.retried = true;
+        if let Some((timer, _)) = self.account.backfill_retry.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
+    }
+    fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
+        let auth = match self.account_auth(cx.now) {
+            Ok(auth) => auth,
+            Err(e) => {
+                cx.log(
+                    LogLevel::Warning,
+                    format!(
+                        "Lighter fill backfill skipped; fills during the outage may be missing: {e}"
+                    ),
+                );
+                return;
+            }
+        };
+        let account = self.account.account_index.unwrap();
+        let mut url = format!(
+            "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",
+            self.host()
+        );
+        if let Some(cursor) = &run.cursor {
+            url.push_str(&format!("&cursor={}", safe_cex_engine::url::encode(cursor)));
+        }
+        cx.request_streamed(
+            Method::Get,
+            url,
+            vec![("authorization", auth)],
+            json::ArrayAt::Field("trades"),
+            Pending::Account(Request::Backfill {
+                run,
+                executions: Vec::new(),
+                oldest: f64::INFINITY,
+                count: 0,
+            }),
+        );
     }
 }

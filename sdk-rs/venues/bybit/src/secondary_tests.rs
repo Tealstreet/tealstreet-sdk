@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, Engine, ReadCredentials};
 fn options() -> Options {
     Options {
@@ -14,10 +15,10 @@ fn options() -> Options {
     }
 }
 
-struct Probe(BybitLinear);
-impl Venue for Probe {
-    type Pending = Pending;
-    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+fn probe(
+    venue: BybitLinear,
+) -> ProbeVenue<BybitLinear, impl FnMut(&mut BybitLinear, &mut Cx<'_, Pending>)> {
+    ProbeVenue::new(venue, |venue, cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
             let rest = Rest {
                 method,
@@ -27,37 +28,16 @@ impl Venue for Probe {
                 signed: true,
                 resent: false,
             };
-            self.0.send(cx, rest, Then::Tickers(vec![]));
+            venue.send(cx, rest, Then::Tickers(vec![]));
         }
-    }
-
-    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
-    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
-    fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
-    fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
-    fn book(&self, _: &str) -> Option<&Book> {
-        None
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(std::iter::empty())
-    }
+    })
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(Probe(BybitLinear::new(options())));
+    let mut engine = Engine::new(probe(BybitLinear::new(options())));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
+    let requests: Vec<_> = http_requests(&mut engine)
+        .into_iter()
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);

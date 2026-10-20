@@ -130,7 +130,7 @@ impl Venue for Paradex {
             Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
-                if cx.store.loaded().tickers {
+                if cx.store.loaded().markets {
                     self.account.start(cx);
                 }
             }

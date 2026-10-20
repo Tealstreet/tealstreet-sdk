@@ -80,6 +80,7 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -134,6 +135,28 @@ impl Skipped {
 }
 
 impl Cryptocom {
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.get(
+            cx,
+            if tickers {
+                "/public/get-tickers"
+            } else {
+                "/public/get-instruments"
+            },
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    skipped: Skipped::default(),
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    indexes: HashMap::new(),
+                    skipped: Skipped::default(),
+                }
+            },
+        );
+    }
     pub fn new(options: Options) -> Self {
         let credentials = if options.public_data_only {
             None
@@ -160,6 +183,7 @@ impl Cryptocom {
             },
             options,
             sockets: [Connection::new(false), Connection::new(true)],
+            discovery: Default::default(),
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -382,15 +406,7 @@ impl Venue for Cryptocom {
             cx.log(LogLevel::Error, error);
             return;
         }
-        self.get(
-            cx,
-            "/public/get-instruments",
-            Pending::Markets {
-                rows: vec![],
-                indexes: HashMap::new(),
-                skipped: Skipped::default(),
-            },
-        );
+        self.discovery_read(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(state) = self.sockets.iter_mut().find(|s| s.socket == Some(socket)) {
@@ -590,30 +606,22 @@ impl Venue for Cryptocom {
                 skipped,
             } => {
                 skipped.report(cx, "instrument");
-                if rows.is_empty() && skipped.any() {
-                    cx.log(LogLevel::Error, "no mappable Crypto.com instrument rows");
+                if rows.is_empty() {
+                    if skipped.any() {
+                        cx.log(LogLevel::Error, "no mappable Crypto.com instrument rows");
+                    } else {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Crypto.com instrument list has no usable rows",
+                        );
+                    }
+                    self.discovery.failed(cx, false);
                     return;
                 }
                 self.indexes = indexes;
                 cx.store.set_markets(rows);
-                self.get(
-                    cx,
-                    "/public/get-tickers",
-                    Pending::Tickers {
-                        rows: vec![],
-                        skipped: Skipped::default(),
-                    },
-                );
-            }
-            Pending::Tickers { rows, skipped } => {
-                skipped.report(cx, "ticker");
-                if rows.is_empty() && skipped.any() {
-                    cx.log(LogLevel::Error, "no mappable Crypto.com ticker rows");
-                    return;
-                }
-                cx.store.set_tickers(rows);
-                self.market_channels(cx);
-                self.connect(cx, 0);
+                self.discovery.succeeded(cx, &false);
+                self.discovery_read(cx, true);
                 if self.credentials.is_some() {
                     self.private_start(cx);
                 } else {
@@ -621,6 +629,20 @@ impl Venue for Cryptocom {
                     cx.store.set_positions(vec![]);
                     cx.store.set_orders(vec![]);
                 }
+            }
+            Pending::Tickers { rows, skipped } => {
+                skipped.report(cx, "ticker");
+                if rows.is_empty() {
+                    if skipped.any() {
+                        cx.log(LogLevel::Error, "no mappable Crypto.com ticker rows");
+                    }
+                    self.discovery.failed(cx, true);
+                    return;
+                }
+                self.discovery.succeeded(cx, &true);
+                cx.store.set_tickers(rows);
+                self.market_channels(cx);
+                self.connect(cx, 0);
             }
             Pending::Candles {
                 command,
@@ -643,10 +665,15 @@ impl Venue for Cryptocom {
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            _ => cx.log(LogLevel::Error, error),
+            Pending::Markets { .. } => self.discovery.failed(cx, false),
+            Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
+        }
         if let Some(request) = self.history.waiting.remove(&timer) {
             self.history_request(cx, request);
             return;

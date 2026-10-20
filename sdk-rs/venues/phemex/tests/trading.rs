@@ -50,14 +50,22 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: Value) -> Ve
 fn done(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result.clone())
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
+            _ => None,
         })
         .expect("command completed")
+}
+
+fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command")
 }
 
 fn command(e: &mut Engine<PhemexPerpetuals>, c: Command) -> Vec<Action> {
@@ -73,12 +81,22 @@ fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
     }));
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
-    let a = raw(&mut e, &requests(&a)[0], PRODUCTS);
-    let a = raw(&mut e, &requests(&a)[0], DAILY);
+    let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
+    let ticker = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("24hr/all"))
+        .unwrap();
+    a.extend(raw(&mut e, &ticker, DAILY));
+    a.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr/all")));
     let socket = a
         .iter()
         .filter_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
+            if let Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } = a
+            {
                 Some(*socket)
             } else {
                 None
@@ -1429,10 +1447,12 @@ fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
             },
         );
         assert!(writes(&a).is_empty());
-        assert!(
-            !a.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 42, .. })))
-        );
+        assert!(!a.iter().any(|a| matches!(
+            a,
+            Action::Notice(
+                Notice::CommandDone { command: 42, .. } | Notice::CommandFailed { command: 42, .. }
+            )
+        )));
         let mut reply = ack(&create, "native-accepted");
         reply["data"]["ordStatus"] = json!(status);
         let a = respond(&mut e, &create, reply);
@@ -1736,19 +1756,18 @@ fn queued_cancel_all_continues_after_proven_rejection() {
         },
     );
     assert!(writes(&a).is_empty());
-    assert!(
-        !a.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 112, .. })))
-    );
+    assert!(!a.iter().any(|a| matches!(
+        a,
+        Action::Notice(
+            Notice::CommandDone { command: 112, .. } | Notice::CommandFailed { command: 112, .. }
+        )
+    )));
     let mut reply = ack(&create, "rejected-native");
     reply["data"]["ordStatus"] = json!("Rejected");
     let a = respond(&mut e, &create, reply);
     assert!(a.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone {
-            command: 111,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 111, .. })
     )));
     let cancel = writes(&a)
         .into_iter()
@@ -2107,6 +2126,44 @@ fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_re
     assert_eq!(p(r, "shortLeverageRr"), Some("37".into()));
 }
 
+#[test]
+fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
+    let app = |kind: &str, price: f64, trigger: Option<f64>| {
+        let mut o: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","side":"sell","type":kind,"notional":690,"timeInForce":"GoodTillCancel","reduceOnly":true,"price":price,"amount":0.01})).unwrap();
+        o.trigger_price = trigger;
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        }
+    };
+    for (kind, price) in [("stop_market", 68000.), ("take_profit_market", 71000.)] {
+        let mut sent = vec![];
+        for trigger in [Some(price), None] {
+            let mut e = engine();
+            let a = command(&mut e, app(kind, price, trigger));
+            let w = writes(&a);
+            assert_eq!(w.len(), 1, "{kind}: {:?}", done(&a));
+            let mut params = params(&w[0]);
+            params.retain(|(k, _)| k != "clOrdID");
+            params.sort();
+            sent.push((
+                w[0].method,
+                w[0].url.split_once('?').unwrap().0.to_owned(),
+                params,
+            ));
+        }
+        assert!(
+            sent[0].2.contains(&("stopPxRp".into(), price.to_string())),
+            "{kind}"
+        );
+        assert_eq!(sent[0], sent[1], "{kind}");
+    }
+    let mut e = engine();
+    let a = command(&mut e, app("stop_market", 68000., Some(67900.)));
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+}
+
 fn at(e: &mut Engine<PhemexPerpetuals>, now: f64, event: Event<'_>) -> Vec<Action> {
     e.handle(now, event);
     e.drain_actions().collect()
@@ -2327,8 +2384,25 @@ fn definite_rejection_owes_no_open_order_read() {
         r#"{"code":11001,"msg":"insufficient available balance","data":null}"#,
     );
     assert!(done(&a).is_err());
+    assert_eq!(
+        failure(&a).outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
     assert!(open_order_reads(&a).is_empty());
     assert_eq!(cancel_all_ids(&mut e, 1002., 152).unwrap(), ["old-live"]);
+}
+
+#[test]
+fn unproven_and_lost_writes_report_an_unknown_outcome() {
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let create = place_at(&mut e, 1000., 141, "unknown-caller");
+    let a = reply(&mut e, 1001., &create, 200, UNPROVEN_ACK);
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::Unknown));
+
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let create = place_at(&mut e, 1000., 142, "lost-caller");
+    let a = reply(&mut e, 1001., &create, 502, "Bad Gateway");
+    assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
 
 #[test]

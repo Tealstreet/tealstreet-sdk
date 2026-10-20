@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions, Market, Ticker } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +30,20 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const market: Market = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+};
+const ticker = {
+  id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
+  percentage: 0, fundingRate: 0, volume: 0, quoteVolume: 0, openInterest: 0,
+} as Ticker;
+
 function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOptions> = {}) {
   const commands: Control[] = [];
   const events: string[] = [];
@@ -37,9 +51,12 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
   let onControl = (_control: Control): void => {};
   let release!: () => void;
   const idle = () => '[]';
+  // Startup is authorized by native market identity and ticker state, not just flags.
   const ready = () =>
     new Uint8Array(
       consumerFrame({
+        markets: [market],
+        tickers: [{ ...ticker }],
         loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
       }),
     );

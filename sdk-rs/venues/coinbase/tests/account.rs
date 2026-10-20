@@ -394,6 +394,7 @@ fn held_scan() -> (Session, HttpRequest) {
     for _ in 0..150 {
         let requests = s.collect();
         if requests.is_empty() {
+            assert!(!s.timers.is_empty(), "stalled: {:?}", s.urls);
             s.fire();
             continue;
         }
@@ -413,6 +414,7 @@ fn complete_scan(s: &mut Session, held: HttpRequest, body: &str) {
     for _ in 0..150 {
         let requests = s.collect();
         if requests.is_empty() {
+            assert!(!s.timers.is_empty(), "stalled: {:?}", s.urls);
             s.fire();
             continue;
         }
@@ -1004,6 +1006,37 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
+#[test]
+fn cfm_product_failure_survives_spot_success_during_seeding() {
+    let mut s = Session::new("DEFAULT", false);
+    let mut failed = false;
+    for _ in 0..100 {
+        if failed {
+            break;
+        }
+        let requests = s.collect();
+        if requests.is_empty() {
+            assert!(!s.timers.is_empty(), "stalled: {:?}", s.urls);
+            s.fire();
+            continue;
+        }
+        for r in requests {
+            let cfm =
+                r.url.contains("/brokerage/products?") && r.url.contains("product_type=FUTURE");
+            if cfm && !failed {
+                failed = true;
+                s.reply(r, 503, "temporary failure");
+            } else {
+                s.answer(r);
+            }
+        }
+    }
+    assert!(failed, "CFM products were never requested");
+    let s = s.ready();
+    assert!(s.e.store().market("BTC-CDE").is_some());
+    assert!(s.e.store().market("BTC-USD").is_some());
+}
+
 #[test]
 fn unmappable_cfm_position_row_neither_blocks_startup_nor_invents_a_flat_position() {
     let mut s = Session::new("DEFAULT", false);

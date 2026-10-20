@@ -58,24 +58,29 @@ pub fn bootstrap_with_wallet(
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, META);
-    let r = requests(&mut e).pop().unwrap();
+    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let index = actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetCtx"))
+        .unwrap();
+    let Action::Http(r) = actions.remove(index) else {
+        unreachable!()
+    };
     reply(
         &mut e,
         &r,
         r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
     );
-    let timer = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
+    actions.extend(e.drain_actions());
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 25.0 => Some(*timer),
+            _ => None,
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    actions.extend(e.drain_actions());
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -86,7 +91,7 @@ pub fn bootstrap_with_wallet(
     let refresh = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5025.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
