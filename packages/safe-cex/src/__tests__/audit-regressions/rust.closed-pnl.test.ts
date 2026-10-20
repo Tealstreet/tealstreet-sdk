@@ -98,7 +98,10 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     for (const name of ['okx', 'blofin'] as const) {
       const { exchange, command } = make(name, []);
       await exchange.fetchClosedPnl({ symbol: '', accountName: 'a' });
-      expect(command).toHaveBeenCalledWith({ op: 'fetchClosedPositions', symbol: undefined, from: undefined, to: undefined });
+      expect(command).toHaveBeenCalledWith(
+        { op: 'fetchClosedPositions', symbol: undefined, from: undefined, to: undefined },
+        { report: true },
+      );
     }
   });
 
