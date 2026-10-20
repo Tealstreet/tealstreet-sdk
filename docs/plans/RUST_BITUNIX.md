@@ -2050,3 +2050,28 @@ fail-before pacing and queued-job controls, preserve all90HL cases/spotmode,
 independent audit, rebuild and NEW actual live public recording after corrected
 native pacing. Preserve obsolete capture as evidence; never retime/pad it.
 Final release gates/PR push/CI/merge remain outstanding.
+
+Budget phase plan audited against actual Axios callsites: new HLhttp.rs owns
+xhr3/1000ms admission plus one weighted FIFO50ms/unit for /info and /exchange.
+infoXhr/unlimited bypass ONLY first layer; direct maxBuilderFee fetch bypasses
+BOTH. Actual spot API imports the same weighted limiter (old spot.rateLimiter
+is unused). Use Engine-owned state consistent with sans-I/O architecture;
+no static runtime or cross-engine host policy rewrite in this correction.
+Weights: userRole60; mids/book/orderStatus/clearinghouse/spotState/exchangeStatus2;
+other info20 plus only documented top-level explicit limit extras; action
+1+floor(batch/40). Nested candle req and response row counts do not add cost.
+
+Replace incompatible account1000/min burst/row topups and trading334ms-only
+pacing. Preserve typed Pending/ArrayAt/stream ownership and every existing
+state/retry/late-fill/ACK fence. Revalidate queued active/amend ownership and
+sign fresh only at real dispatch; expired/stale jobs cannot send after slot
+wait, and unknown writes never retry. Startup independently enqueues core
+meta→fees→perpDexs in TS order, waits all settled, then serialHIP3; cache fees
+for final catalog and remove old late fee/duplicate discovery requests.
+Spot retains its own one-meta bootstrap. Timer cooldown survives temporarily
+empty queues/startup→playback. Files lib/account/trading/history plushttp.rs;
+tests8–12focused controls and all90existingbehavioralassertions. Test drivers
+may advance earliest live protocol timers with bounded action retention, not
+drop requests or suppress assertions. Independent TS contract audit before
+implementation and independent final native review required; then rebuild/
+record/gates on corrected production. No fixture retiming or deadline changes.
