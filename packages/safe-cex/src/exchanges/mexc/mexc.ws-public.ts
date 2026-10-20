@@ -363,9 +363,10 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
       return;
     }
     const frame = { version, bids, asks };
-    if (state.buffer) {
-      state.buffer.push(frame);
-      if (state.buffer.length > MAX_BUFFERED_DEPTH) this.retryDepth(symbol, state);
+    if (state.version === undefined) {
+      const buffer = state.buffer ??= [];
+      buffer.push(frame);
+      if (buffer.length > MAX_BUFFERED_DEPTH) this.retryDepth(symbol, state);
       return;
     }
     if (this.applyDepth(symbol, state, frame)) this.publishDepth(symbol);
@@ -380,9 +381,12 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     delete this.orderbooks[symbol];
   };
 
-  private retryDepth = (symbol: string, state: DepthState) => {
+  private retryDepth = (symbol: string, state: DepthState, retain = false) => {
+    state.request = undefined;
+    state.version = undefined;
+    if (!retain) state.buffer = undefined;
+    delete this.orderbooks[symbol];
     if (state.retry) return;
-    this.resetDepth(symbol, state);
     state.failures++;
     state.retry = setTimeout(
       () => {
@@ -397,7 +401,7 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     if (this.isDisposed || !this.isConnected || state.request || state.retry) return;
     const request = Symbol();
     state.request = request;
-    state.buffer = [];
+    state.buffer ??= [];
     this.parent
       .fetchOrderBook(symbol, 1000)
       .then((snapshot) => {
@@ -413,6 +417,17 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
           return;
         }
         const buffer = state.buffer!;
+        // A later REST anchor may bridge updates received before this retry.
+        // Validate every version before applying or publishing any candidate.
+        let candidate = version;
+        for (const frame of buffer) {
+          if (frame.version <= candidate) continue;
+          if (frame.version !== candidate + 1n) {
+            this.retryDepth(symbol, state, true);
+            return;
+          }
+          candidate = frame.version;
+        }
         state.request = undefined;
         state.buffer = undefined;
         state.version = version;
@@ -422,14 +437,14 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
         };
         for (const frame of buffer) {
           this.applyDepth(symbol, state, frame);
-          if (state.version === undefined) return;
         }
+        state.failures = 0;
         this.publishDepth(symbol);
       })
       .catch((err: unknown) => {
         if (this.isDisposed || this.depthStates.get(symbol) !== state || state.request !== request) return;
         this.parent.log(`MEXC orderbook snapshot failed for ${symbol}: ${String(err)}`, LogSeverity.Warning);
-        this.retryDepth(symbol, state);
+        this.retryDepth(symbol, state, true);
       });
   };
 
@@ -437,7 +452,8 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     if (state.version === undefined || frame.version <= state.version) return false;
     // Uncompressed futures depth publishes every version; a missing version requires a new REST anchor.
     if (frame.version !== state.version + 1n) {
-      this.retryDepth(symbol, state);
+      state.buffer = [frame];
+      this.retryDepth(symbol, state, true);
       return false;
     }
     const book = this.orderbooks[symbol];

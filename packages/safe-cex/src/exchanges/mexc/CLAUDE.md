@@ -64,6 +64,23 @@ MEXC public/private WebSocket diagnostics go through `BaseWebSocket`'s runtime-g
 
 MEXC `rs.*` channels are one-shot control responses (for example `rs.sub.ticker` / `rs.sub.kline`), not liveness feeds. They may be logged for diagnostics, but do not record them in `messageHandlersStats`; otherwise the generic stale-topic health check treats the naturally quiet ack row as a dead feed and reloads the account around the timeout window.
 
+## Public depth recovery
+
+Uncompressed futures depth requires every version after the REST anchor to be
+exactly the previous version plus one. REST replicas can lag the current socket.
+During a retry on the same socket and subscription, retain up to 2,000 validated
+raw updates, including updates received during backoff and the update that
+exposed a gap. A new REST request owns its own response token or generation;
+starting it must not discard that retained stream. Validate the entire candidate
+sequence before applying any levels or publishing a book. A real missing version
+still blocks publication and retries with the existing exponential backoff.
+
+Socket closure or replacement, the final unsubscribe, disposal, malformed depth
+and buffer overflow discard the retained chain and invalidate pending reads.
+Responses from an earlier request or subscription cannot repopulate the book.
+Additional listeners share the existing subscription and recovery state. Contract
+volume conversion and snapshot depth remain unchanged.
+
 ## Order Semantics
 
 - Side enum: `1` open long, `2` close short, `3` open short, `4` close long.

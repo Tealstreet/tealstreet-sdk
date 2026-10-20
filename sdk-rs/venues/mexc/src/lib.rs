@@ -53,6 +53,7 @@ struct BookState {
     book: Book,
     version: Option<u64>,
     buffering: Option<Vec<Depth>>,
+    fetching: bool,
     retry: Option<TimerId>,
     failures: u32,
 }
@@ -266,7 +267,7 @@ impl MexcFutures {
         let Some(state) = self.books.get_mut(symbol) else {
             return;
         };
-        if state.buffering.is_some() || state.retry.is_some() {
+        if state.fetching || state.retry.is_some() {
             return;
         }
         if cx.now < self.depth_paused_until {
@@ -276,7 +277,8 @@ impl MexcFutures {
         self.next_book_generation = self.next_book_generation.wrapping_add(1);
         state.generation = self.next_book_generation;
         state.version = None;
-        state.buffering = Some(vec![]);
+        state.buffering.get_or_insert_default();
+        state.fetching = true;
         let generation = state.generation;
         self.get(
             cx,
@@ -288,11 +290,17 @@ impl MexcFutures {
         );
     }
     fn resync(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        self.retry_depth(cx, symbol, false);
+    }
+    fn retry_depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, retain: bool) {
         let Some(state) = self.books.get_mut(symbol) else {
             return;
         };
         state.version = None;
-        state.buffering = None;
+        state.fetching = false;
+        if !retain {
+            state.buffering = None;
+        }
         state.generation = state.generation.wrapping_add(1);
         state.failures += 1;
         if let Some(timer) = state.retry.take() {
@@ -328,7 +336,8 @@ impl MexcFutures {
         let Some(state) = self.books.get_mut(symbol) else {
             return;
         };
-        if let Some(buffer) = &mut state.buffering {
+        if state.version.is_none() {
+            let buffer = state.buffering.get_or_insert_default();
             buffer.push(depth);
             if buffer.len() > MAX_BUFFERED {
                 self.resync(cx, symbol);
@@ -342,7 +351,8 @@ impl MexcFutures {
             return;
         }
         if depth.version != version + 1 {
-            self.resync(cx, symbol);
+            state.buffering = Some(vec![depth]);
+            self.retry_depth(cx, symbol, true);
             return;
         }
         Self::apply_depth(&mut state.book, &depth, size);
@@ -472,7 +482,7 @@ impl MexcFutures {
                     .get(&symbol)
                     .is_some_and(|s| s.generation == generation)
                 {
-                    self.resync(cx, &symbol);
+                    self.retry_depth(cx, &symbol, true);
                 }
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
@@ -615,6 +625,7 @@ impl Venue for MexcFutures {
         for state in self.books.values_mut() {
             state.version = None;
             state.buffering = None;
+            state.fetching = false;
             state.generation = state.generation.wrapping_add(1);
         }
     }
@@ -732,13 +743,30 @@ impl Venue for MexcFutures {
                 let Some(state) = self.books.get_mut(&symbol) else {
                     return;
                 };
-                if state.generation != generation {
+                if state.generation != generation || !state.fetching {
                     return;
                 }
                 let Ok(depth) = depth else {
                     self.resync(cx, &symbol);
                     return;
                 };
+                // REST can lag the live stream. Validate the complete retained
+                // chain before touching the candidate book or publishing a prefix.
+                let mut version = depth.version;
+                let contiguous = state.buffering.iter().flatten().all(|update| {
+                    if update.version <= version {
+                        return true;
+                    }
+                    if version.checked_add(1) != Some(update.version) {
+                        return false;
+                    }
+                    version = update.version;
+                    true
+                });
+                if !contiguous {
+                    self.retry_depth(cx, &symbol, true);
+                    return;
+                }
                 let size = cx
                     .store
                     .market(&symbol)
@@ -746,14 +774,18 @@ impl Venue for MexcFutures {
                     .unwrap_or(1.0);
                 state.book.clear();
                 Self::apply_depth(&mut state.book, &depth, size);
-                state.version = Some(depth.version);
+                state.fetching = false;
+                let mut applied = depth.version;
                 let buffer = state.buffering.take().unwrap_or_default();
                 for update in buffer {
-                    self.depth(cx, &symbol, update);
+                    if update.version > applied {
+                        Self::apply_depth(&mut state.book, &update, size);
+                        applied = update.version;
+                    }
                 }
-                if self.book(&symbol).is_some() {
-                    cx.book_changed(&symbol);
-                }
+                state.version = Some(version);
+                state.failures = 0;
+                cx.book_changed(&symbol);
             }
             Pending::Candles { command, limit } => {
                 let result = Envelope::checked(response.body).and_then(|e| {
@@ -865,6 +897,7 @@ impl Venue for MexcFutures {
                         book: Book::default(),
                         version: None,
                         buffering: None,
+                        fetching: false,
                         retry: None,
                         failures: 0,
                     },

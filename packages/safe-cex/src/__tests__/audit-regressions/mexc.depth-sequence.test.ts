@@ -147,7 +147,8 @@ describe('MEXC incremental futures depth', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(books).toHaveLength(1);
     expect(books[0].bids[0].price).toBe(103);
-    depth(14, [[104, 20, 1]]);
+    expect(books[0].bids.find((row) => row.price === 101)?.amount).toBe(99 * 0.0001);
+    depth(15, [[104, 20, 1]]);
     expect(books.at(-1)?.bids[0].price).toBe(104);
   });
 
@@ -231,6 +232,26 @@ describe('MEXC incremental futures depth', () => {
     await settle();
     expect(books).toHaveLength(1);
     expect(books[0].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 13 * 0.0001], [99, 0.002]]);
+  });
+
+  it('retains the live gap-triggering update and resumes after its immediate predecessor anchor', async () => {
+    const { exchange, ws, books, listener, depth } = setup();
+    const retry = deferred<Snapshot>();
+    const fetch = vi.spyOn(exchange, 'fetchOrderBook')
+      .mockResolvedValueOnce(snapshot('10'))
+      .mockReturnValueOnce(retry.promise);
+    ws.listenOrderBook('BTCUSDT', listener);
+    await settle();
+    expect(books).toHaveLength(1);
+    depth(12, [[100, 12]]);
+    depth(13, [[99, 20]]);
+    expect(books).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    retry.resolve(snapshot('11'));
+    await settle();
+    expect(books).toHaveLength(2);
+    expect(books[1].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 12 * 0.0001], [99, 0.002]]);
   });
 
   it('invalidates in-flight snapshots on close and resubscribes before the reconnect snapshot', async () => {

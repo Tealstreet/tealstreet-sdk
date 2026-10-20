@@ -793,7 +793,13 @@ fn lagging_rest_anchor_replays_same_socket_updates_received_during_retry_backoff
     );
     let first = requests(&mut e).remove(0);
     for version in 40..=45 {
-        recovery_depth(&mut e, socket, 160., version, &format!("[[60000,{version}]]"));
+        recovery_depth(
+            &mut e,
+            socket,
+            160.,
+            version,
+            &format!("[[60000,{version}]]"),
+        );
     }
     recovery_snapshot(&mut e, &first, 170., 10, "[[60000,10],[59999,20]]");
     assert!(e.book("BTCUSDT").is_none());
@@ -854,4 +860,55 @@ fn retained_recovery_buffer_never_publishes_a_contiguous_prefix_before_a_gap() {
         [(60000., 13. * 0.0001), (59999., 0.002)]
     );
     assert!(has_depth_frame(&mut e, 1690.));
+}
+
+#[test]
+fn live_gap_update_survives_until_its_immediate_predecessor_rest_anchor() {
+    let (mut e, socket) = started();
+    e.drain_actions().for_each(drop);
+    let _ = e.take_frame(100.);
+    e.handle(
+        150.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let first = requests(&mut e).remove(0);
+    recovery_snapshot(&mut e, &first, 160., 10, "[[60000,10]]");
+    assert!(has_depth_frame(&mut e, 160.));
+    recovery_depth(&mut e, socket, 170., 12, "[[60000,12]]");
+    recovery_depth(&mut e, socket, 180., 13, "[[59999,20]]");
+    assert!(e.book("BTCUSDT").is_none());
+    assert!(!has_depth_frame(&mut e, 180.));
+    let retry = recovery_retry(&mut e, 670.);
+    recovery_snapshot(&mut e, &retry, 680., 11, "[[60000,11]]");
+    assert_eq!(
+        e.book("BTCUSDT").unwrap().bids(),
+        [(60000., 12. * 0.0001), (59999., 0.002)]
+    );
+    assert!(has_depth_frame(&mut e, 680.));
+}
+
+#[test]
+fn recovery_buffer_overflow_invalidates_the_old_request_and_retained_chain() {
+    let (mut e, socket) = started();
+    e.drain_actions().for_each(drop);
+    let _ = e.take_frame(100.);
+    e.handle(
+        150.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let old = requests(&mut e).remove(0);
+    for version in 1..=2001 {
+        recovery_depth(&mut e, socket, 160., version, "[[60000,999]]");
+    }
+    recovery_snapshot(&mut e, &old, 170., 10, "[[60000,10]]");
+    assert!(e.book("BTCUSDT").is_none());
+    assert!(!has_depth_frame(&mut e, 170.));
+    let current = recovery_retry(&mut e, 660.);
+    recovery_snapshot(&mut e, &current, 670., 0, "[[59999,20]]");
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(59999., 0.002)]);
+    assert!(has_depth_frame(&mut e, 670.));
 }
