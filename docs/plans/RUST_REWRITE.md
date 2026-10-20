@@ -330,12 +330,124 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | GRVT, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
-### 9. Delete TypeScript and merge
+### 9. Prove consumer cutover, then delete TypeScript — readiness work
 
-- Each venue that passes both gates and ships has its TS implementation
-  deleted in the same PR.
-- After the last venue: delete `BaseExchange`, the TS Store and the object
-  payload paths, then merge `feat/rust-rewrite` into master once.
+**Do not delete TS venues in the readiness change.** A venue replay gate proves
+its protocol and performance; deletion also requires the SDK's consumers to
+work with its frames. The implementation/checkpoints are in
+[RUST_CUTOVER_READINESS.md](RUST_CUTOVER_READINESS.md). The exhaustive
+[caller inventory and deletion dependencies](RUST_CUTOVER_CALLERS.md) lists
+each direct `BaseExchange`/venue/registry importer across `packages/` and
+`apps/`, including type-only callers, tests and dynamic reference loaders.
+
+The SDK has 49 registered names: 38 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 30 with opt-in Rust adapters but
+TS defaults, and 11 without a Rust registration. `createExchange` now honors
+explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
+registries remains a separate cutover decision.
+
+#### Consumer evidence required for every registered Rust alias
+
+`packages/safe-cex/src/__tests__/cutover/*.wasm.test.ts`, selected by
+`SAFE_CEX_WASM_TESTS=1`, enumerates `RUST_VENUES` directly:
+
+- Real combined-WASM venue startup uses recorded public responses/native
+  documented-schema inputs through `RustEngineExchange` and the actual
+  `ExchangeWorker` frame mode. Main-thread transfer and late-consumer snapshots
+  must preserve nonempty markets and tickers, including spot/inverse identity.
+- An independent binary format-1 corpus tests private/lifecycle edge cases
+  through the real host/worker/adapter shell, against ordinary TS store inputs.
+  This corpus is an explicit frame-boundary oracle, not a private venue emulator.
+  It checks split ticker deltas, orders/positions and empty-section clearing,
+  balance, leverage rails, IDs, books/candles/fills, terminal-order opt-in,
+  update-ID bumps, and `serialize`/stub parity including derived fields.
+- Actual post-processors, CLI monitor/positions/orders reads, chaser fill
+  arithmetic and supervisor notifications, and TWAP limit-price selection must
+  agree with the TS store consumer contract. Preserve native quantity extras:
+  the readiness audit found and repaired OKX's missing native fill bridge.
+  Main-thread orders also reconstruct worker-derived chaser tags through the
+  public order mutation path, preserving update-ID observers in either frame/
+  derived-payload arrival order.
+  Do not infer terminality from a frame's `Closed` enum: some triggered orders
+  are deliberately reopenable unless explicitly marked final.
+
+These tests do not certify private live connectivity, optional account modes,
+or downstream tealstreet-next deployment. Native venue/private replay and
+performance matrices remain required alongside consumer conformance.
+
+#### Per-venue deletion readiness
+
+All rows retain TS/reference code in this change. “Opt-in” means the consumer
+suite covers the named adapter, not that every TS product/account option is
+ported. The linked inventory records exact callers and product constraints.
+
+| Names | Readiness / remaining deletion prerequisites |
+| --- | --- |
+| `coinbase`, `coinbasespot` | Rust defaults; CFM/spot and saved spot-only covered. Retired INTX is fixture compatibility only. Keep frozen TS reference and inert Starbase evidence separate. |
+| `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
+| `binance`, `binancepm` | Opt-in; preserve shared modules for unported spot/COIN-M siblings; prove default account/routing modes before deletion. |
+| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; combined inverse/options toggles and semantic instrument classification remain blockers. Hyro live connectivity unverified. Preserve region/Hyro policy helpers. |
+| `bitget`, `bitgetusdc`, `bitgetinverse` | Opt-in; keep inverse/native sizing, UTA ledger/trailing and account-mode evidence; extract shared transport constants. |
+| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; native chaser bridge repaired. Rust filters linear USDT/USDC markets; TS inverse and EU product coverage need explicit resolution before deletion. Extract broker constants. |
+| `apexomni` | Opt-in; preserve native zkLink/API-key and consumer/protocol evidence. |
+| `asterdex` | Opt-in; retain V1/V3, builder/STP, public wallet/approval exports and secondary-read-key policy. |
+| `backpack` | Opt-in; perpetuals and uint32 decimal IDs, no spot claim. |
+| `bingx` | Opt-in; default/routing/account-option migration and reference retention required. |
+| `blofin` | Opt-in; native units and shared broker constants must survive deletion. |
+| `bitrue` | Opt-in; futures, no implicit spot coverage. |
+| `cryptocom` | Opt-in; preserve account/product option and routing gates. |
+| `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
+| `hyperliquid` | Opt-in perps/HIP-3; spot absent, wallet/builder/agent and caller-ID helpers still imported. |
+| `kraken` | Opt-in futures; spot remains TS. |
+| `lighter` | Opt-in; retain wallet/account-tier exports; broker alias and remote-signing modes unresolved. |
+| `mexc` | Opt-in; preserve native sizing and conditional/trailing evidence. |
+| `paradex` | Opt-in; retain binary feed, native signing and routing evidence. |
+| `phemex` | Opt-in; retain account identity/native protocol and broker helper. |
+| `weex` | Opt-in; preserve host/header/routing evidence. |
+| `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
+| `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `grvt`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `polymarket`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+
+#### Known consumer blockers and replacement order
+
+The source audit found additional gates that must stay visible before default
+cutover or deletion:
+
+- `privateOnly` does not currently suppress Rust public sockets, and Rust does
+  not initialize/use the TS `externalPublicData` provider. Replace these with
+  explicit shared-public-feed policy and test private-worker/provider fan-out.
+- Rust market frames omit native `info`. Bybit's instrument classifier reads
+  `info.symbolType`; missing metadata makes CLI TradFi preflight classify it
+  unknown and lose the existing refusal. Carry typed semantic classification
+  through frames and test the real preflight before changing those defaults.
+- `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
+  exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
+  starts are empty and forced refresh does not refresh native metadata. Define
+  and test explicit startup/refresh semantics before adopting this factory.
+
+Deletion proceeds in separate, reviewable PRs:
+
+1. Close missing products/account modes and the blockers above, then prove
+   saved-account CLI, MCP, public factory, native/mobile loading and hosted/object
+   paths. Switch ready names in **both** registries; keep factory APIs stable.
+2. Extract the neutral exchange interface, callable-method allowlist,
+   capability branding, broker/site/routing constants and exported wallet
+   utilities. `RustEngineExchange` still extends `BaseExchange`; deleting that
+   base now would delete the working Rust adapter's shell too.
+3. Remove independent ready implementations first, after freezing/replacing
+   the replay oracle. Remove Bybit/Hyro, OKX and Bitget subclasses as family
+   units. Keep Binance, KuCoin, Kraken, Hyperliquid and Lighter shared modules
+   while unported siblings still depend on them. The inventory maps every
+   caller to its interface, host, shared-helper or test-reference replacement.
+4. Migrate test/harness imports deliberately. Preserve independent documented
+   protocol fixtures and a reviewed performance baseline; never compare Rust
+   with itself and call it TS parity.
+5. Remove TS-only Axios/signing/socket scaffolding only after its last runtime
+   **and reference** caller is gone. Keep `DefaultStore`, chasers, TWAP,
+   post-processors and object fallback while real consumers need them. Replace
+   each contract before removing its implementation; the store is the current
+   compatibility seam, not dead code.
+6. Merge `feat/rust-rewrite` into master only after phase 6 adoption/build and
+   every cutover gate passes. This readiness PR targets `feat/rust-rewrite`.
 
 ### Blockers that need Sam
 
@@ -359,8 +471,9 @@ packages/                 TypeScript
 TypeScript lives on beside it: `packages/safe-cex` keeps the shell (worker,
 store, chasers, TWAP, CLI, types) and reaches Rust only through
 `@tealstreet/safe-cex-wasm`. Each venue under
-`packages/safe-cex/src/exchanges/` is deleted once its Rust port ships, and
-the shell shrinks as its pieces move into the engine.
+`packages/safe-cex/src/exchanges/` is deleted only after its Rust port and the
+phase-9 consumer/dependency gates pass, and the shell shrinks as its contracts
+receive tested replacements.
 
 ## Branching
 
