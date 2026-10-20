@@ -369,12 +369,17 @@ per-venue canary holding the circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### OKX
-- High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
+- ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
-  blanks as 0 and continues. Parse blanks as 0, retry with backoff.
-- Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
+  blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
+  blank or malformed seed quotes start at 0 (row kept for live updates); a failed
+  or unusable catalog/ticker read retries the whole product chain with backoff.
+- ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
-  read once, so a mode change in the OKX app makes every order reject.
+  read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
+  bad rows are skipped and counted in a warning; `fetchLeverage` reads
+  `leverage-info` (it previously never answered); config is re-read every 30 s
+  and a changed mode/level reconciles positions.
 - Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
   rejected; income limit truncates.
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
@@ -448,11 +453,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   never starts, no retry (`blofin/src/lib.rs:617,651`); ~~`brokerId` never sent,
   losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`)~~
   ([attribution audit](RUST_BROKER_ATTRIBUTION.md));
-  per-symbol margin mode stays stale after a position closes, so orders go out
-  in the wrong margin mode (`trading.rs:271`, `account.rs:614`).
-- Medium: `null` in order/position/ticker fields rejects whole snapshots/frames
-  (`wire.rs`; verify against one live frame); WS login timestamp serialized as
-  float (`account.rs:284`); one odd instrument row aborts startup
+  ~~per-symbol margin mode stays stale after a position closes, so orders go out
+  in the wrong margin mode (`trading.rs:271`, `account.rs:614`).~~
+- Medium: ~~`null` in order/position/ticker fields rejects whole snapshots/frames
+  (`wire.rs`; verify against one live frame)~~ (documented optional protection
+  nulls and row-local WS recovery covered; captured public tape has no nulls;
+  invalid required private REST quantities still preserve the snapshot);
+  ~~WS login timestamp serialized as float (`account.rs:284`)~~;
+  one odd instrument row aborts startup
   (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
   (`trading.rs:671`)~~ (explicit error).
 - Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
@@ -591,13 +599,16 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   stops at first failure.
 
 ### MEXC
-- High: live tickers only for the first 100 markets and `SetTickerSymbols`
+- High: ~~live tickers only for the first 100 markets and `SetTickerSymbols`
   ignored (`mexc/src/lib.rs:416`), so positions outside them keep startup prices
   forever; one open order on an unloaded market blocks the order store for good
-  (`account.rs:618,850`).
-- Medium: full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
-  single order uses the batch path paced 1.5 s (`trading.rs:451`); startup halts
-  on tickers/markets/position-mode/plan-list failures.
+  (`account.rs:618,850`).~~ Sparse all-contract prices plus explicit detailed
+  interest keep selected and non-default symbols live; identifiable unmappable
+  rows are skipped/logged while malformed identities retain prior snapshots.
+- Medium: ~~full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
+  single order uses the batch path paced 1.5 s (`trading.rs:451`)~~;
+  startup halts on tickers/markets/position-mode/plan-list failures
+  (cross-venue startup lane; not changed by the venue-highs lane).
 - Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
   refused by the adapter.
 
@@ -605,31 +616,37 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - One unmappable row discarding a whole snapshot/frame recurs (Bitget, Phemex,
   MEXC, KuCoin, Kraken, Orderly, Bybit): skip and log the row, keep the store's
   copy of that id.
-- Check every venue honours `SetTickerSymbols` (MEXC ignores it).
+- Check every venue honours `SetTickerSymbols` (~~MEXC ignores it~~; repaired).
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
-- High: one bad market/ticker row or failed funding read keeps the private side
+- High: ~~one bad market/ticker row or failed funding read keeps the private side
   from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
-  freezes that list (`account.rs:491,557`). (startup/row-tolerance lane)
-- Medium: `TRIGGER_MARKET` stops (attached brackets) can't be moved
-  (`trading.rs:842`); no one-shot resend on signature error 100001; multi-order
-  cancel sends nothing if any id is unknown (`trading.rs:780`).
+  freezes that list (`account.rs:491,557`).~~ Bad rows skipped (placeholder
+  tickers, stored copies kept); funding retried separately.
+- Medium: ~~`TRIGGER_MARKET` stops (attached brackets) can't be moved
+  (`trading.rs:842`); no one-shot resend on signature error 100001;~~ multi-order
+  cancel sends nothing if any id is unknown (`trading.rs:780`) — intended per
+  [the unknown-cancel audit](RUST_UNKNOWN_CANCEL.md) (error before any write).
 - Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
   per-symbol leverage/margin not read; trigger move requires trigger_type;
   bracket `workingType`; history fails on one bad row; WS message with one bad
   field dropped.
 
 ### WEEX
-- High: one `null` numeric field in a public row stops the venue, private start
+- High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
-  order/position row freezes the list, no `planType` fallback (`account.rs:335`).
-- Medium: failed config read backs off all polling to ~60 s (`account.rs:518`);
+  order/position row freezes the list, no `planType` fallback (`account.rs:335`).~~
+  Bad public and account rows are skipped (stored copies kept, exact hedge ids);
+  ticker failure no longer blocks private start; `planType` fallback added.
+- Medium: ~~failed config read backs off all polling to ~60 s (`account.rs:518`);~~
   balance stops updating during active trading (revision discard,
-  `account.rs:408`); accepted conditional reported failed if the venue echoes
-  `clientAlgoId` (`trading.rs:1303`; verify live); imported limit with TP/SL
-  can't be amended (`trading.rs:343`); missing passphrase looks like a valid
-  empty account (`lib.rs:148`).
+  `account.rs:408`) — resilience lane; ~~accepted conditional reported failed if
+  the venue echoes `clientAlgoId` (`trading.rs:1303`; verify live); imported limit
+  with TP/SL can't be amended (`trading.rs:343`); missing passphrase looks like a
+  valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
+  accepted, imported TP/SL amend keeps row working types, partial credentials
+  deactivate visibly.
 - Low: isolated leverage sets both sides; index triggers rejected; fill without
   `id` dropped; income row without asset fails the page; fetchLeverage returns max.
 
@@ -676,13 +693,15 @@ No confirmed highs; valid data matches TS.
 
 ### AsterDEX
 No confirmed highs.
-- Medium: failed position-mode read silently leaves one-way, never retried, and
+- Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
   (`account.rs:817`); one malformed row halts startup (`lib.rs:849,781`); one bad
   row discards open-orders/positions snapshots (`account.rs:402,415`); hedge
   amend of a closing order may open the opposite side (shared with TS; reuse the
-  row's `positionSide`).
+  row's `positionSide`).~~ Mode read retries and holds placement until known;
+  unmapped order types keep their fills; bad rows are skipped keeping stored
+  copies; hedge amend reuses the recorded `positionSide` (TS bug fixed).
 - Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
   history fails on one row and refuses >7 day windows; listen-key keepalive
   omits `listenKey` and tears down on failure; partial balance rows skipped.
@@ -696,21 +715,25 @@ Mostly matches TS.
   one bad instrument row stops startup.
 
 ### Bitrue
-- High: orders refused on symbols with no account leverage data, and a fresh
+- High: ~~orders refused on symbols with no account leverage data, and a fresh
   account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
   default margin to Cross and take leverage from a successful change, never
   the market max. A cancel batch stops at its first failure and leaves the rest
-  live (`trading.rs:866,884`).
-- Medium: orders marked loaded only after every market's open-orders read
+  live (`trading.rs:866,884`).~~ Confirmed explicit leverage survives flat reads;
+  unknown margin defaults Cross. Cancels continue and report per-ID failures,
+  including child fallback after a missing or failed parent.
+- Medium: ~~orders marked loaded only after every market's open-orders read
   succeeds, one bad symbol blocks forever (`account.rs:382,487`); per-coin
   balances dropped; max leverage stuck at 100 with silent clamping (no
-  leverage bracket read, `lib.rs:758`).
+  leverage bracket read, `lib.rs:758`).~~ Symbol failures retain state and retry
+  without blocking the usable initial sweep; both collateral balances and
+  authenticated native bracket caps are exposed without silent leverage clamps.
 - Low: one bad contract row blocks startup; stream stops misclassified;
   snapshot starvation under load (revision discard, `account.rs:581,1310`);
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit, Crypto.com, Bitrue; check every venue.
+- Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
 
@@ -759,11 +782,13 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 
 ### GRVT
 Signing and integer scaling exact; no highs.
-- Medium: builder check fails once → every order rejected for the session, and
+- Medium: ~~builder check fails once → every order rejected for the session, and
   a matching row without `mfr` treated as unknown (`grvt/src/account.rs:1531,1011`,
   `trading.rs:777`); one unknown-instrument row hides all positions or orders
   (`account.rs:516,422,970`); GRVT's rejection message dropped and misleading
-  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).
+  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).~~
+  Builder check retried (TS budget) with orders held FIFO; rows skipped keeping
+  stored copies; venue code/message surfaced, reconcile advice only when unknown.
 - Low: order history fails on one bad row; signer mismatch blocks trading;
   1008 loses the proxy-whitelist message; amend may cancel without replacing if
   cancels are asynchronous (verify live).

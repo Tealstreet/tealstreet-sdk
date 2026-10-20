@@ -79,11 +79,11 @@ pub enum Pending {
     Clock(request::ClockRequest),
     ExchangeInfo {
         rows: Vec<(Market, MarketRule)>,
-        malformed: bool,
+        skipped: Vec<String>,
     },
     Daily {
         rows: Vec<Ticker>,
-        malformed: bool,
+        skipped: Vec<String>,
     },
     OpenInterest {
         rows: HashMap<String, f64>,
@@ -263,7 +263,7 @@ impl AsterDex {
             ArrayAt::Field("symbols"),
             Pending::ExchangeInfo {
                 rows: Vec::new(),
-                malformed: false,
+                skipped: Vec::new(),
             },
         );
     }
@@ -275,7 +275,7 @@ impl AsterDex {
             ArrayAt::Root,
             Pending::Daily {
                 rows: Vec::new(),
-                malformed: false,
+                skipped: Vec::new(),
             },
         );
     }
@@ -775,8 +775,10 @@ impl Venue for AsterDex {
             Pending::Account(req) => self.on_account_response(cx, req, Ok(response)),
             Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
             Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
-            Pending::ExchangeInfo { rows, malformed } => {
-                if response.status != 200 || (malformed && rows.is_empty()) {
+            Pending::ExchangeInfo { rows, skipped } => {
+                log_skipped_rows(cx, "market", &skipped);
+                if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
+                    cx.log(LogLevel::Error, "Aster market bootstrap failed");
                     self.startup.failed(cx, true);
                     return;
                 }
@@ -800,8 +802,10 @@ impl Venue for AsterDex {
                     self.get_streamed(cx, &path, ArrayAt::Root, pending);
                 }
             }
-            Pending::Daily { rows, malformed } => {
-                if response.status != 200 || (malformed && rows.is_empty()) {
+            Pending::Daily { rows, skipped } => {
+                log_skipped_rows(cx, "ticker", &skipped);
+                if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
+                    cx.log(LogLevel::Error, "Aster ticker bootstrap failed");
                     self.startup.failed(cx, false);
                     return;
                 }
@@ -847,7 +851,7 @@ impl Venue for AsterDex {
             Pending::Account(req) => self.on_account_item(cx, req, item),
             Pending::History(req) => self.on_history_item(cx, req, item),
             Pending::Clock(_) | Pending::Trade(_) => {}
-            Pending::ExchangeInfo { rows, malformed } => {
+            Pending::ExchangeInfo { rows, skipped } => {
                 match serde_json::from_str::<SymbolInfo>(item) {
                     Ok(row) if row.status == "TRADING" => {
                         let (market, rule) = market_from_wire(row);
@@ -861,7 +865,7 @@ impl Venue for AsterDex {
                             || !rule.tick_size.is_finite()
                             || rule.tick_size <= 0.0
                         {
-                            *malformed = true;
+                            skipped.push(row_symbol(item));
                             safe_cex_engine::startup::skipped_row(cx);
                         } else {
                             rows.push((market, rule));
@@ -869,12 +873,12 @@ impl Venue for AsterDex {
                     }
                     Ok(_) => {}
                     Err(_) => {
-                        *malformed = true;
+                        skipped.push(row_symbol(item));
                         safe_cex_engine::startup::skipped_row(cx);
                     }
                 }
             }
-            Pending::Daily { rows, malformed } => match serde_json::from_str::<Daily>(item) {
+            Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily>(item) {
                 Ok(row)
                     if !row.symbol.trim().is_empty()
                         && [
@@ -897,7 +901,7 @@ impl Venue for AsterDex {
                     })
                 }
                 _ => {
-                    *malformed = true;
+                    skipped.push(row_symbol(item));
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             },
@@ -1127,31 +1131,63 @@ impl Venue for AsterDex {
     }
 }
 
+fn row_symbol(item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: std::borrow::Cow<'a, str>,
+    }
+    serde_json::from_str::<Identity>(item)
+        .map_or_else(|_| "<unidentified>".into(), |row| row.symbol.into_owned())
+}
+
+/// A malformed startup row is skipped, not fatal; one summary per read.
+fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
+    if !skipped.is_empty() {
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "Aster skipped {} malformed {kind} row(s): {}",
+                skipped.len(),
+                skipped.join(", ")
+            ),
+        );
+    }
+}
+
 fn reset_pending(pending: &mut Pending) {
     match pending {
         Pending::Account(account::Request::Positions {
             rows,
             settings,
+            skipped,
             invalid,
             ..
         }) => {
             rows.clear();
             settings.clear();
+            skipped.clear();
             *invalid = false;
         }
-        Pending::Account(account::Request::Orders { rows, invalid, .. }) => {
+        Pending::Account(account::Request::Orders {
+            rows,
+            skipped,
+            invalid,
+            ..
+        }) => {
             rows.clear();
+            skipped.clear();
             *invalid = false;
         }
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
-        Pending::ExchangeInfo { rows, malformed } => {
+        Pending::ExchangeInfo { rows, skipped } => {
             rows.clear();
-            *malformed = false;
+            skipped.clear();
         }
-        Pending::Daily { rows, malformed } => {
+        Pending::Daily { rows, skipped } => {
             rows.clear();
-            *malformed = false;
+            skipped.clear();
         }
         Pending::Klines {
             rows, malformed, ..

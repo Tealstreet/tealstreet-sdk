@@ -1368,6 +1368,7 @@ export const VENUES = {
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,
+    compareBalanceCurrencies: true,
     ts: { module: `${root}/bitrue/bitrue.exchange.ts`, className: 'BitrueExchange', name: 'bitrue' },
     privateSocket: '/stream?listenKey=',
     compareFillPrices: true,
@@ -1566,6 +1567,7 @@ export const VENUES = {
       const arg = frame.args?.length === 1 ? frame.args[0] : {};
       const { apiKey, passphrase, timestamp, nonce, sign } = arg ?? {};
       if (
+        !/^\d+$/.test(String(timestamp)) ||
         !validWeexTimestamp(String(timestamp), now) ||
         apiKey !== 'replay-key' ||
         passphrase !== 'replay-passphrase' ||

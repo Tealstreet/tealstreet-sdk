@@ -414,3 +414,36 @@ fn unmapped_working_order_rejects_authoritative_order_scope() {
     assert_eq!(h.e.store().orders(), previous);
     assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
 }
+
+#[test]
+fn websocket_login_timestamp_is_an_integer_matching_signed_bytes() {
+    use base64::Engine as _;
+    use safe_cex_crypto::{Encoding, hmac_sha256};
+    let mut h = Harness::new();
+    h.e.handle(1_700_000_000_123.875, Event::WsOpened { socket: h.private });
+    h.collect();
+    let login = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsSend { text, .. } if text.contains("\"op\":\"login\"") => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    let login: serde_json::Value = serde_json::from_str(login).unwrap();
+    let args = &login["args"][0];
+    let timestamp = args["timestamp"]
+        .as_u64()
+        .expect("timestamp must serialize as a JSON integer");
+    assert_eq!(timestamp, 1_700_000_000_123);
+    let signed = format!(
+        "/users/self/verifyGET{timestamp}{}",
+        args["nonce"].as_str().unwrap()
+    );
+    let expected = base64::engine::general_purpose::STANDARD.encode(hmac_sha256(
+        b"secret",
+        signed.as_bytes(),
+        Encoding::Hex,
+    ));
+    assert_eq!(args["sign"], expected);
+}

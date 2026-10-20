@@ -385,3 +385,40 @@ fn full_top_five_preserves_deeper_prices_and_thin_or_empty_sides_clear_them() {
     e.handle(3.0,Event::WsMessage{socket:s,text:r#"{"arg":{"channel":"books","instId":"BTC-USDT"},"action":"update","data":{"prevSeqId":"9007199254740992","seqId":"9007199254740994","bids":[],"asks":[]}}"#});
     assert!(e.book("BTCUSDT").unwrap().is_empty());
 }
+
+#[test]
+fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_startup() {
+    let mut engine = Engine::new(Blofin::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    }));
+    engine.start(0.0);
+    let id = request(&mut engine);
+    reply(&mut engine, id, INSTRUMENT);
+    // Private startup begins at markets, before the ticker response.
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let id = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("tickers") => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut engine,
+        id,
+        r#"{"code":"0","data":[{"instId":"UNKNOWN-USDT","last":null},{"instId":"BTC-USDT","last":"60000","open24h":"59000"}]}"#,
+    );
+    assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 60000.0);
+    assert!(engine.store().loaded().tickers);
+    actions.extend(engine.drain_actions());
+    assert!(
+        actions.iter().any(
+            |action| matches!(action, Action::WsConnect{url, ..} if url.ends_with("/private"))
+        )
+    );
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log {message, ..}) if message.contains("Malformed BloFin ticker row"))));
+}

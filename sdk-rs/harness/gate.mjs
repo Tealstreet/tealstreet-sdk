@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import {
   fixBlofinAccount,
@@ -456,9 +457,16 @@ const KNOWN_TS_FIXES = {
   // Fresh TS private rows now retain native/cached TIF and default to GTC,
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
-  // Rust refuses zero/non-finite ticker-derived position losses and aggregates
-  // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
-  bitrue() {},
+  bitrue() {
+    // Rust refuses zero/non-finite ticker-derived position losses and aggregates
+    // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
+    // Confirmed leverage survives flat/empty account metadata; TS clears that
+    // rail and blocks fresh-account orders. Native regression tests cover this
+    // correction; no account values or command results are normalized here.
+    // Flat rows may omit leverage until explicitly set; balance still commits.
+    // Cancellation continues after failures, including child fallbacks after a
+    // failed parent, and reports each failed ID. TS stops subsequent chunks.
+  },
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.
@@ -494,7 +502,13 @@ const KNOWN_TS_FIXES = {
     // Native failure tests prove this; no replay liveness output is rewritten.
     if (ts.account) fixBlofinAccount(ts.account);
   },
-  mexc: () => {
+  mexc: (ts) => {
+    // The official sub.tickers sparse all-contract feed prevents stale prices
+    // past the first 100 detailed subscriptions. Add that exact expected TS
+    // subscription; prices and Rust output remain independently compared.
+    ts.subscriptions = withMexcMiniTickerSubscription(ts.subscriptions);
+    // A singleton skips TS placeOrders' market-maker batch probe; its exact
+    // rejected TS-only attempt is declared in the tape, not normalized away.
     // TS only logs rejected rs.login; Rust closes/backoffs and bounds auth
     // independently of rs.ping. Native regressions cover the failure path.
     // Full incremental depth, rather than replacing a 20-level snapshot.

@@ -3,8 +3,8 @@ use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Balance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position, PositionMode,
-    PositionSide, StopTriggerType, TimeInForce,
+    Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
+    PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
@@ -29,6 +29,10 @@ fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
 }
 
 pub enum Request {
+    Brackets {
+        command: CommandId,
+        symbol: String,
+    },
     Listen {
         generation: u64,
     },
@@ -80,6 +84,7 @@ pub struct Account {
     pub(crate) loaded: bool,
     pub(crate) settings_revision: u64,
     pub(crate) orders_revision: u64,
+    pub(crate) bracket_limits: HashMap<String, f64>,
     pub(crate) socket: Option<SocketId>,
     generation: u64,
     listen_key: Option<String>,
@@ -168,6 +173,7 @@ struct PositionRow<'a> {
     side: Cow<'a, str>,
     volume: Number,
     open_price: Number,
+    #[serde(default)]
     leverage_level: Number,
     position_type: Number,
     #[serde(default)]
@@ -483,9 +489,10 @@ impl Bitrue {
     }
     fn order_finished(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, success: bool) {
         self.account.order_active = None;
-        if success {
-            self.account.initial_orders.remove(&symbol);
-        } else if !self.account.order_queue.contains(&symbol) {
+        // Loaded means the initial sweep finished, including visibly failed reads.
+        // A failed symbol retains its snapshot and continues retrying independently.
+        self.account.initial_orders.remove(&symbol);
+        if !success && !self.account.order_queue.contains(&symbol) {
             self.account.order_queue.push_back(symbol);
         }
         if self.account.initial_orders.is_empty() {
@@ -946,11 +953,19 @@ impl Bitrue {
                     2.0 => safe_cex_engine::model::MarginType::Isolated,
                     _ => return Err(()),
                 };
-                if row.volume.0 < 0.0 || row.open_price.0 < 0.0 || row.leverage_level.0 <= 0.0 {
+                if row.volume.0 < 0.0 || row.open_price.0 < 0.0 || row.leverage_level.0 < 0.0 {
+                    return Err(());
+                }
+                let leverage = if row.leverage_level.0 > 0.0 {
+                    row.leverage_level.0
+                } else {
+                    cx.store.setting(&market.symbol).map_or(0.0, |s| s.leverage)
+                };
+                if row.volume.0 > 0.0 && leverage <= 0.0 {
                     return Err(());
                 }
                 let setting = MarketSetting {
-                    leverage: row.leverage_level.0,
+                    leverage,
                     margin_type: Some(margin_type),
                     ..MarketSetting::default()
                 };
@@ -1006,7 +1021,7 @@ impl Bitrue {
                     side,
                     entry_price: row.open_price.0,
                     notional: row.position_balance.0,
-                    leverage: row.leverage_level.0,
+                    leverage,
                     margin_type: Some(margin_type),
                     position_mode: Some(PositionMode::Oneway),
                     unrealized_pnl,
@@ -1151,6 +1166,32 @@ impl Bitrue {
         Ok(rows)
     }
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
+        if let Command::FetchMaxLeverage { command, symbol } = command {
+            let Some(symbol) = self.resolve_symbol(cx, symbol) else {
+                cx.done(*command, Err("Unknown Bitrue market".into()));
+                return true;
+            };
+            if !self.authenticated() {
+                cx.done(*command, Err("Bitrue private credentials required".into()));
+                return true;
+            }
+            let contract = &cx.store.market(&symbol).expect("resolved market").id;
+            self.send(
+                cx,
+                Method::Get,
+                &format!(
+                    "/fapi/v2/leverageBracket?contractName={}",
+                    crate::history::query_component(contract)
+                ),
+                None,
+                None,
+                Job::Account(Request::Brackets {
+                    command: *command,
+                    symbol,
+                }),
+            );
+            return true;
+        }
         let Command::FetchLeverage { command, symbol } = command else {
             return false;
         };
@@ -1183,8 +1224,14 @@ impl Bitrue {
         }
         for (command, symbol) in std::mem::take(&mut self.account.leverage_queries) {
             let result = settings
-                .and_then(|rows| rows.iter().find(|(s, _)| *s == symbol))
-                .and_then(|(_, s)| {
+                .and_then(|rows| {
+                    rows.iter()
+                        .find(|(s, _)| *s == symbol)
+                        .map(|(_, s)| *s)
+                        .or_else(|| cx.store.setting(&symbol))
+                })
+                .filter(|s| s.leverage > 0.0)
+                .and_then(|s| {
                     s.margin_type.map(|margin_type| Leverage {
                         buy_leverage: s.leverage,
                         sell_leverage: s.leverage,
@@ -1276,6 +1323,64 @@ impl Bitrue {
             return;
         }
         match request {
+            Request::Brackets { command, symbol } => {
+                #[derive(Deserialize)]
+                struct Reply {
+                    data: BracketData,
+                }
+                #[derive(Deserialize)]
+                #[serde(untagged)]
+                enum BracketData {
+                    One(Bracket),
+                    Many(Vec<Bracket>),
+                }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Bracket {
+                    contract_name: String,
+                    brackets: Vec<Tier>,
+                }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Tier {
+                    initial_leverage: Number,
+                }
+                let parsed = serde_json::from_str::<Reply>(response.body)
+                    .ok()
+                    .and_then(|reply| {
+                        let rows = match reply.data {
+                            BracketData::One(row) => vec![row],
+                            BracketData::Many(rows) => rows,
+                        };
+                        let contract = &cx.store.market(&symbol)?.id;
+                        let mut matching = rows
+                            .into_iter()
+                            .filter(|row| row.contract_name == *contract);
+                        let row = matching.next()?;
+                        if matching.next().is_some() || row.brackets.is_empty() {
+                            return None;
+                        }
+                        row.brackets.into_iter().try_fold(0.0_f64, |max, tier| {
+                            let value = tier.initial_leverage.0;
+                            (value > 0.0 && value <= 125.0 && value.fract() == 0.0)
+                                .then_some(max.max(value))
+                        })
+                    });
+                if let Some(max) = parsed {
+                    self.account.bracket_limits.insert(symbol.clone(), max);
+                    cx.store.update_markets(|market| {
+                        if market.symbol == symbol {
+                            market.limits.leverage.max = max;
+                        }
+                    });
+                    cx.done(command, Ok(safe_cex_engine::num::format(max)));
+                } else {
+                    cx.done(
+                        command,
+                        Err("Malformed Bitrue leverage brackets; retaining known limit".into()),
+                    );
+                }
+            }
             Request::Listen { generation } => {
                 if generation != self.account.generation {
                     return;
@@ -1359,7 +1464,14 @@ impl Bitrue {
                         .or_else(|| data.balances.get("USDC"))
                         .cloned()
                         .unwrap();
+                    let mut currencies = data
+                        .balances
+                        .into_iter()
+                        .map(|(currency, balance)| CurrencyBalance { currency, balance })
+                        .collect::<Vec<_>>();
+                    currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
                     cx.store.set_balance(balance);
+                    cx.store.set_currency_balances(currencies);
                     cx.store.set_positions(data.positions);
                     cx.store.set_hedged(false);
                     self.account.loaded = true;
@@ -1476,6 +1588,7 @@ impl Bitrue {
         error: &str,
     ) {
         match request {
+            Request::Brackets { command, .. } => cx.done(command, Err(error.into())),
             Request::Listen { generation } if generation == self.account.generation => {
                 self.listen_failed(cx, error)
             }

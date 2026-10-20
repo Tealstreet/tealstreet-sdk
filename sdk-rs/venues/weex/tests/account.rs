@@ -1,7 +1,9 @@
 //! Contract V3 official Account_API and private channel payloads; numeric IDs
 //! deliberately exceed JavaScript's exact integer range.
-use safe_cex_engine::model::OrderStatus;
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, RequestId, Response, SocketId, TimerId};
+use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::{
+    Action, Engine, Event, HttpRequest, LogLevel, Notice, RequestId, Response, SocketId, TimerId,
+};
 use safe_cex_venue_weex::{Options, WeexFutures};
 const NOW: f64 = 1_773_295_700_000.0;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
@@ -163,7 +165,10 @@ fn failed_or_malformed_half_never_replaces_order_snapshot() {
         200,
         r#"[{"algoId":1,"symbol":"BTCUSDT","side":"SELL","orderType":"STOP","algoStatus":"NEW"}]"#,
     );
-    assert!(!e.store().loaded().orders);
+    // The malformed row is skipped; the rest of the snapshot commits.
+    assert!(e.store().loaded().orders);
+    assert!(e.store().order("1").is_none());
+    assert_eq!(e.store().orders().len(), 1);
 }
 #[test]
 fn complete_paging_required_before_order_commit() {
@@ -792,4 +797,232 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
             );
         }
     }
+}
+
+fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { level: l, message }) if *l == level => {
+                Some(message.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+#[test]
+fn malformed_order_rows_are_skipped_and_their_known_copies_retained() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert_eq!(e.store().orders().len(), 4);
+    let actions = next_cycle(&mut e);
+    let normal = r#"[{"orderId":702345678901234601,"symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"NEW","origQty":"0.01","executedQty":"0","price":"71000","updateTime":1773295700000},{"orderId":702345678901234600,"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","status":"NEW","origQty":null,"price":"69500","updateTime":1773295700000}]"#;
+    let algo = r#"[{"algoId":812345678901234500,"symbol":"BTCUSDT","side":"SELL","orderType":"STOP","algoStatus":"UNTRIGGERED","quantity":null}]"#;
+    complete(&mut e, &actions, normal, algo);
+    let ids: Vec<_> = e.store().orders().iter().map(|o| o.id.as_str()).collect();
+    for id in [
+        "702345678901234601",
+        "702345678901234600",
+        "812345678901234500",
+        "812345678901234500__tp",
+        "812345678901234500__sl",
+    ] {
+        assert!(ids.contains(&id), "{id} missing from {ids:?}");
+    }
+    assert_eq!(ids.len(), 5);
+    let warnings = logs(&e.drain_actions().collect::<Vec<_>>(), LogLevel::Warning);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("malformed order") && w.contains("702345678901234600")),
+        "{warnings:?}"
+    );
+}
+#[test]
+fn malformed_row_without_identity_preserves_the_whole_order_snapshot() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let expected = e.store().orders().to_vec();
+    let actions = next_cycle(&mut e);
+    complete(
+        &mut e,
+        &actions,
+        r#"[{"symbol":"BTCUSDT","side":"BUY"}]"#,
+        "[]",
+    );
+    assert_eq!(e.store().orders(), expected);
+}
+#[test]
+fn algo_row_with_only_plan_type_is_imported() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234501,"symbol":"BTCUSDT","side":"SELL","planType":"STOP_LOSS","reduceOnly":true,"algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"68000","updateTime":1773295700000}]"#,
+    );
+    let order = e.store().order("812345678901234501").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(order.price, 68000.0);
+}
+#[test]
+fn malformed_position_row_keeps_the_known_position() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let before = e.store().position("BTCUSDT").cloned().unwrap();
+    let actions = next_cycle(&mut e);
+    let positions = POSITIONS.replace(r#""size":"0.02""#, r#""size":null"#);
+    response(&mut e, request(&actions, "allPosition"), 200, &positions);
+    complete_except_positions(&mut e, &actions);
+    assert_eq!(e.store().position("BTCUSDT"), Some(&before));
+    assert_eq!(e.store().balance().free, 5413.06);
+}
+fn complete_except_positions(e: &mut Engine<WeexFutures>, actions: &[Action]) {
+    response(
+        e,
+        request(actions, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    response(
+        e,
+        request(actions, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"20","isolatedLongLeverage":"10","isolatedShortLeverage":"15"}]"#,
+    );
+    response(
+        e,
+        request(actions, "/balance"),
+        200,
+        r#"[{"asset":"USDT","balance":"5696.49","availableBalance":"5413.06","frozen":"81.28","unrealizePnl":"-34.553"}]"#,
+    );
+    response(e, request(actions, "/openOrders"), 200, NORMAL);
+    response(e, request(actions, "/openAlgoOrders"), 200, ALGO);
+}
+#[test]
+fn failed_settings_read_backs_off_only_settings() {
+    let (mut e, actions) = started(false);
+    response(
+        &mut e,
+        request(&actions, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    response(
+        &mut e,
+        request(&actions, "symbolConfig"),
+        503,
+        "unavailable",
+    );
+    response(
+        &mut e,
+        request(&actions, "/balance"),
+        200,
+        r#"[{"asset":"USDT","balance":"5696.49","availableBalance":"5413.06","frozen":"81.28","unrealizePnl":"-34.553"}]"#,
+    );
+    response(&mut e, request(&actions, "allPosition"), 200, POSITIONS);
+    response(&mut e, request(&actions, "/openOrders"), 200, NORMAL);
+    response(&mut e, request(&actions, "/openAlgoOrders"), 200, ALGO);
+    // Account reads keep the healthy 2 s cadence; settings sit this cycle out.
+    let urls: Vec<_> = requests(&next_cycle(&mut e))
+        .into_iter()
+        .map(|r| r.url)
+        .collect();
+    assert_eq!(urls.len(), 4, "{urls:?}");
+    assert!(!urls.iter().any(|u| u.contains("Config")));
+}
+#[test]
+fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
+    let mut e = Engine::new(WeexFutures::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    }));
+    e.start(NOW);
+    let actions: Vec<_> = e.drain_actions().collect();
+    response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
+    // Private startup begins at markets, so its failure may surface before tickers.
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    response(
+        &mut e,
+        request(&actions, "24hr"),
+        200,
+        r#"[{"symbol":"BTCUSDT","lastPrice":"90000"}]"#,
+    );
+    response(
+        &mut e,
+        request(&actions, "bookTicker"),
+        200,
+        r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
+    );
+    actions.extend(e.drain_actions());
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(logs(&actions, LogLevel::Error)[0].contains("passphrase"));
+    let loaded = e.store().loaded();
+    assert!(!loaded.balance && !loaded.orders && !loaded.positions);
+}
+#[test]
+fn ticker_seed_failure_does_not_block_private_start() {
+    let mut e = Engine::new(WeexFutures::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        ..Options::default()
+    }));
+    e.start(NOW);
+    let actions: Vec<_> = e.drain_actions().collect();
+    response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
+    // Private reads start at markets, before the ticker seed resolves.
+    let actions: Vec<_> = e.drain_actions().collect();
+    response(&mut e, request(&actions, "24hr"), 503, "unavailable");
+    let private: Vec<_> = requests(&actions)
+        .into_iter()
+        .filter(|r| !r.url.contains("24hr") && !r.url.contains("bookTicker"))
+        .collect();
+    assert_eq!(private.len(), 6, "{private:?}");
+    e.drain_actions().for_each(drop);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    assert!(e.store().loaded().orders && e.store().loaded().balance);
+}
+#[test]
+fn malformed_hedged_position_row_keeps_only_its_own_side() {
+    let (mut e, actions) = started(false);
+    let hedged = r#"[{"symbol":"BTCUSDT","side":"LONG","separatedMode":"SEPARATED","size":"0.02","openValue":"1800","updatedTime":1773295700000},{"symbol":"BTCUSDT","side":"SHORT","separatedMode":"SEPARATED","size":"0.01","openValue":"900","updatedTime":1773295700000}]"#;
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let actions = next_cycle(&mut e);
+    response(&mut e, request(&actions, "allPosition"), 200, hedged);
+    complete_except_positions(&mut e, &actions);
+    assert!(e.store().position("BTCUSDT:long").is_some());
+    assert!(e.store().position("BTCUSDT:short").is_some());
+    let actions = next_cycle(&mut e);
+    // The short closed; the long row is malformed.
+    response(
+        &mut e,
+        request(&actions, "allPosition"),
+        200,
+        r#"[{"symbol":"BTCUSDT","side":"LONG","separatedMode":"SEPARATED","size":null}]"#,
+    );
+    complete_except_positions(&mut e, &actions);
+    assert!(e.store().position("BTCUSDT:long").is_some());
+    assert!(e.store().position("BTCUSDT:short").is_none());
+}
+#[test]
+fn malformed_row_cannot_resurrect_a_terminal_order() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    e.store_mut()
+        .update_order("702345678901234600", |o| o.status = OrderStatus::Canceled);
+    let actions = next_cycle(&mut e);
+    complete(
+        &mut e,
+        &actions,
+        r#"[{"orderId":702345678901234600,"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","status":"NEW","origQty":null}]"#,
+        ALGO,
+    );
+    assert!(e.store().order("702345678901234600").is_none());
+    assert_eq!(e.store().orders().len(), 3);
 }

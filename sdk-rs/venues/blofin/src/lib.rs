@@ -252,6 +252,17 @@ impl Blofin {
             return;
         };
         let symbol = m.symbol.clone();
+        if cx.store.loaded().tickers && cx.store.ticker(&symbol).is_none() {
+            // A malformed initial row must be able to recover on its next
+            // valid event; update_ticker alone cannot add a missing symbol.
+            let mut tickers = cx.store.tickers().to_vec();
+            tickers.push(Ticker {
+                id: m.id.clone(),
+                symbol: symbol.clone(),
+                ..Ticker::default()
+            });
+            cx.store.set_tickers(tickers);
+        }
         cx.store.update_ticker(&symbol, |t| {
             if funding {
                 t.funding_rate = row.funding_rate.0;
@@ -453,9 +464,17 @@ impl Venue for Blofin {
         }
         match m.arg.channel.as_ref() {
             "tickers" | "funding-rate" => {
-                if let Ok(rows) = serde_json::from_str::<Data<Vec<Tick<'_>>>>(text) {
-                    for row in rows.data {
-                        self.ticker(cx, &row, m.arg.channel == "funding-rate");
+                if let Ok(rows) =
+                    serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
+                {
+                    for raw in rows.data {
+                        match serde_json::from_str::<Tick<'_>>(raw.get()) {
+                            Ok(row) => self.ticker(cx, &row, m.arg.channel == "funding-rate"),
+                            Err(_) => cx.log(
+                                LogLevel::Error,
+                                "Malformed BloFin ticker row; retaining known ticker",
+                            ),
+                        }
                     }
                 }
             }
@@ -614,6 +633,10 @@ impl Venue for Blofin {
                 Err(_) => {
                     *failed = true;
                     safe_cex_engine::startup::skipped_row(cx);
+                    cx.log(
+                        LogLevel::Error,
+                        "Malformed BloFin ticker row; omitted from initial tickers",
+                    );
                 }
             },
             Pending::Candles { rows, failed, .. } => {

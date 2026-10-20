@@ -10,7 +10,7 @@ use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use wire::*;
 
 const REST: &str = "https://api.mexc.com";
@@ -65,6 +65,8 @@ pub struct MexcFutures {
     public: Connection,
     books: HashMap<String, BookState>,
     volume_units: HashMap<String, f64>,
+    ticker_symbols: Vec<String>,
+    ticker_subscriptions: BTreeSet<String>,
     candles: HashMap<(String, String), u32>,
     next_book_generation: u32,
     discovery: safe_cex_engine::startup::Backoff<bool>,
@@ -90,6 +92,8 @@ impl MexcFutures {
             public: Connection::default(),
             books: HashMap::new(),
             volume_units: HashMap::new(),
+            ticker_symbols: vec![],
+            ticker_subscriptions: BTreeSet::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
             discovery: Default::default(),
@@ -134,6 +138,107 @@ impl MexcFutures {
             socket,
             serde_json::to_string(&Subscription { method, param }).unwrap(),
         );
+    }
+    fn reconcile_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.public.open {
+            return;
+        }
+        let ids: Vec<_> = if self.ticker_symbols.is_empty() {
+            cx.store
+                .markets()
+                .iter()
+                .take(100)
+                .map(|m| m.id.clone())
+                .collect()
+        } else {
+            self.ticker_symbols
+                .iter()
+                .filter_map(|symbol| cx.store.market(symbol).map(|m| m.id.clone()))
+                .collect()
+        };
+        let desired: BTreeSet<_> = ids.iter().cloned().collect();
+        for id in self.ticker_subscriptions.difference(&desired) {
+            self.send(cx, "unsub.ticker", id, None);
+        }
+        // Keep market/request order on the wire while deduplicating ids.
+        self.ticker_subscriptions.retain(|id| desired.contains(id));
+        for id in ids {
+            if self.ticker_subscriptions.insert(id.clone()) {
+                self.send(cx, "sub.ticker", &id, None);
+            }
+        }
+    }
+    fn mini_ticker(&self, cx: &mut Cx<'_, Pending>, item: &str) {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow)]
+            symbol: Str<'a>,
+        }
+        let Ok(identity) = serde_json::from_str::<Identity<'_>>(item) else {
+            cx.log(
+                LogLevel::Warning,
+                "Skipping malformed MEXC all-market ticker identity",
+            );
+            return;
+        };
+        let symbol = compact(&identity.symbol);
+        let Some(market) = cx.store.market(&symbol) else {
+            return;
+        };
+        let size = market.contract_size.unwrap_or(1.0);
+        let Ok(raw) = serde_json::from_str::<MiniTick>(item) else {
+            cx.log(
+                LogLevel::Warning,
+                "Skipping malformed MEXC all-market ticker row",
+            );
+            return;
+        };
+        if [raw.last_price, raw.fair_price, raw.index_price]
+            .into_iter()
+            .flatten()
+            .any(|n| n < 0.0)
+            || [raw.volume24, raw.amount24]
+                .into_iter()
+                .flatten()
+                .any(|n| n < 0.0)
+        {
+            cx.log(
+                LogLevel::Warning,
+                "Skipping invalid MEXC all-market ticker row",
+            );
+            return;
+        }
+        cx.store.update_ticker(&symbol, |t| {
+            // A zero price is an unavailable quote (seen in the public feed),
+            // not a reason to discard valid mark/index/volume fields.
+            if let Some(last) = raw.last_price.filter(|n| *n > 0.0) {
+                t.last = last;
+            }
+            if let Some(mark) = raw.fair_price.filter(|n| *n > 0.0) {
+                // The all-market feed omits holdVol: retain the known quantity,
+                // but value its quote notional at the new mark.
+                if t.mark > 0.0 {
+                    t.open_interest *= mark / t.mark;
+                }
+                t.mark = mark;
+            }
+            if let Some(index) = raw.index_price.filter(|n| *n > 0.0) {
+                t.index = index;
+            }
+            if let Some(rate) = raw.rise_fall_rate {
+                t.percentage = if rate.abs() <= 1.0 {
+                    rate * 100.0
+                } else {
+                    rate
+                };
+            }
+            if let Some(volume) = raw.volume24 {
+                t.volume = volume * size;
+            }
+            if let Some(volume) = raw.amount24 {
+                t.quote_volume = volume;
+            }
+        });
     }
     fn subscribe_depth(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let (Some(socket), Some(market)) = (self.public.socket, cx.store.market(symbol))
@@ -419,9 +524,13 @@ impl Venue for MexcFutures {
         self.public.last_received = cx.now;
         cx.send(socket, r#"{"method":"ping"}"#);
         self.public.heartbeat = Some(cx.set_timer(HEARTBEAT_MS));
-        for market in cx.store.markets().to_vec().iter().take(100) {
-            self.send(cx, "sub.ticker", &market.id, None);
-        }
+        // Sparse once-per-second prices cover every listed market. Detailed
+        // subscriptions provide funding, index and open-interest quantities.
+        cx.send(
+            socket,
+            r#"{"method":"sub.tickers","param":{},"gzip":false}"#,
+        );
+        self.reconcile_tickers(cx);
         let symbols: Vec<_> = self.books.keys().cloned().collect();
         for symbol in symbols {
             self.subscribe_depth(cx, &symbol);
@@ -455,6 +564,12 @@ impl Venue for MexcFutures {
         }
         let symbol = compact(&message.symbol);
         match message.channel.as_ref() {
+            "push.tickers" => {
+                let _ = safe_cex_engine::json::each::<&serde_json::value::RawValue>(
+                    data.get(),
+                    |row| self.mini_ticker(cx, row.get()),
+                );
+            }
             "push.ticker" => {
                 if let (Ok(raw), Some(market)) = (
                     serde_json::from_str::<Tick<'_>>(data.get()),
@@ -495,6 +610,7 @@ impl Venue for MexcFutures {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.ticker_subscriptions.clear();
         if let Some(timer) = self.public.heartbeat.take() {
             cx.clear_timer(timer);
         }
@@ -721,6 +837,10 @@ impl Venue for MexcFutures {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::SetTickerSymbols { symbols } => {
+                self.ticker_symbols = symbols;
+                self.reconcile_tickers(cx);
+            }
             Command::Query { command, query } => self.start_query(cx, command, query),
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             Command::SubscribeOrderBook { symbol } => {

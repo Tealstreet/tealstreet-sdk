@@ -1176,8 +1176,27 @@ or stale later-product reads retain the proven whole-account snapshot. Public
 index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
 Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
 unavailable REST seeds start at finite zero. An explicitly empty live last/open
-quote retains the last proven trade/change. Blank bid/ask/volume fields remain
-finite zero; malformed nonempty quotes stay visible to the reference oracle.
+quote retains the last proven trade/change. Blank bid/ask/volume/last seed
+values are zero; malformed nonempty ones also start at zero with one counted
+warning, so the market keeps a ticker row that live updates can patch (they
+never create one). A ticker row that does not parse at all, or names an unknown
+instrument, is skipped with "Skipped malformed public discovery row".
+
+Rust startup is fail-open per row and retried per read through the shared
+engine `startup::Backoff` (1, 2, 4 … 30 s, separately for the catalogue and the
+ticker seed). A malformed instrument row is skipped with a warning and its
+instId remembered, so a position or working order on it logs an error and keeps
+the previous account snapshot instead of disappearing. A failed or malformed
+read restarts its whole product chain without publishing a partial union; when
+a product scope yields no usable rows, valid rows from the other product merge
+into the existing catalogue and that read is retried. Private startup begins
+once the catalogue loads, independent of the ticker seed. `fetchLeverage` reads
+cross `leverage-info` for one symbol (flat symbols have no position row to
+carry it). Account config is guarded by an in-flight flag: a failed startup
+read clears it and the account retry timer reads again; once configured it is
+re-read every 30 s (a failed poll waits for the next interval), and a posMode
+or acctLv changed in the OKX app updates the hedged flag and reconciles
+positions instead of rejecting orders.
 
 Rust account startup preserves native currency balances when collateral FX is
 unavailable; it retains the previous USD aggregate or waits to publish the first

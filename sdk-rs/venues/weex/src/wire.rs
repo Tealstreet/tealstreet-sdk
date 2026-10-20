@@ -58,6 +58,7 @@ fn public_optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>
         _ => Err(serde::de::Error::custom("invalid public number")),
     }
 }
+/// Public statistics may publish `null` or blank for an unknown figure; it reads as 0.
 fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     Ok(public_optional_number(d)?.unwrap_or(0.0))
 }
@@ -148,8 +149,8 @@ impl Symbol<'_> {
 pub struct Daily<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(alias = "c", deserialize_with = "public_number")]
-    pub last_price: f64,
+    #[serde(alias = "c", deserialize_with = "public_optional_number")]
+    pub last_price: Option<f64>,
     #[serde(alias = "o", deserialize_with = "public_number")]
     pub open_price: f64,
     #[serde(alias = "m", deserialize_with = "public_optional_number")]
@@ -174,24 +175,26 @@ pub struct Daily<'a> {
     pub ask_price: Option<f64>,
 }
 impl Daily<'_> {
-    pub fn ticker(&self, symbol: &str) -> Ticker {
-        let mark = self.mark_price.unwrap_or(self.last_price);
+    /// A row without a last price cannot seed a usable ticker.
+    pub fn ticker(&self, symbol: &str) -> Option<Ticker> {
+        let last_price = self.last_price?;
+        let mark = self.mark_price.unwrap_or(last_price);
         let percentage = self
             .price_change_percent
             .map(percentage)
             .unwrap_or_else(|| {
                 if self.open_price != 0.0 {
-                    (self.last_price - self.open_price) / self.open_price * 100.0
+                    (last_price - self.open_price) / self.open_price * 100.0
                 } else {
                     0.0
                 }
             });
-        Ticker {
+        Some(Ticker {
             id: symbol.into(),
             symbol: symbol.into(),
-            bid: self.bid_price.unwrap_or(self.last_price),
-            ask: self.ask_price.unwrap_or(self.last_price),
-            last: self.last_price,
+            bid: self.bid_price.unwrap_or(last_price),
+            ask: self.ask_price.unwrap_or(last_price),
+            last: last_price,
             mark,
             index: self.index_price.unwrap_or(mark),
             percentage,
@@ -201,7 +204,7 @@ impl Daily<'_> {
             volume: self.volume,
             quote_volume: self.quote_volume,
             mid_price: None,
-        }
+        })
     }
 }
 pub fn percentage(p: f64) -> f64 {

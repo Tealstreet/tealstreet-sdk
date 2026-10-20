@@ -30,6 +30,8 @@ pub struct Options {
 pub struct Pending {
     task: Task,
     invalid: bool,
+    /// Symbols of malformed public rows skipped by this read.
+    skipped: Vec<String>,
     seed_generation: u32,
 }
 enum Task {
@@ -127,6 +129,8 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
+    /// Some but not all of key, secret and passphrase were supplied.
+    incomplete_credentials: bool,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
@@ -139,6 +143,10 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let supplied = [&options.key, &options.secret, &options.passphrase]
+            .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
+        let incomplete_credentials =
+            !options.public_data_only && supplied.contains(&true) && supplied.contains(&false);
         let read_credentials = options.read_credentials.map(|mut read| {
             if read.passphrase.is_none() {
                 read.passphrase = options.passphrase.clone();
@@ -168,6 +176,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            incomplete_credentials,
             read_credentials,
             private_ws_headers: options.private_ws_headers,
             books: HashMap::new(),
@@ -211,6 +220,7 @@ impl WeexFutures {
         let pending = Pending {
             task,
             invalid: false,
+            skipped: Vec::new(),
             seed_generation: self.seed_generation,
         };
         if let Some(at) = stream {
@@ -263,6 +273,7 @@ impl WeexFutures {
         let pending = Pending {
             task,
             invalid: false,
+            skipped: Vec::new(),
             seed_generation: self.seed_generation,
         };
         if let Some(at) = stream {
@@ -474,6 +485,15 @@ fn apply(b: &mut BookState, delta: &Delta) -> bool {
     b.last = Some(delta.last);
     true
 }
+fn row_symbol(item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: Str<'a>,
+    }
+    serde_json::from_str::<Row<'_>>(item)
+        .map_or_else(|_| "unknown".into(), |r| r.symbol.into_owned())
+}
 fn interval(i: &str, stream: bool) -> bool {
     matches!(
         i,
@@ -625,61 +645,74 @@ impl Venue for WeexFutures {
         let ok = match &mut p.task {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
-            Task::Markets(rows) => serde_json::from_str::<Symbol<'_>>(item)
-                .map(|r| {
-                    if let Some(m) = r.market() {
-                        rows.push(m);
+            Task::Markets(rows) => {
+                match serde_json::from_str::<Symbol<'_>>(item) {
+                    Ok(r) => rows.extend(r.market()),
+                    Err(_) => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
-                })
-                .is_ok(),
-            Task::Daily => serde_json::from_str::<Daily<'_>>(item)
-                .map(|r| {
-                    if let Some(i) = cx.store.market_index(&r.symbol) {
-                        let i = i as usize;
-                        let old = &self.seed.rows[i];
-                        let mut t = r.ticker(&r.symbol);
-                        if self.seed.reported[i] & 4 != 0 {
-                            t.bid = old.bid;
+                }
+                true
+            }
+            Task::Daily => {
+                let row = serde_json::from_str::<Daily<'_>>(item).ok();
+                match row.as_ref().and_then(|r| Some((r, r.ticker(&r.symbol)?))) {
+                    Some((r, mut t)) => {
+                        if let Some(i) = cx.store.market_index(&r.symbol) {
+                            let i = i as usize;
+                            let old = &self.seed.rows[i];
+                            if self.seed.reported[i] & 4 != 0 {
+                                t.bid = old.bid;
+                            }
+                            if self.seed.reported[i] & 8 != 0 {
+                                t.ask = old.ask;
+                            }
+                            self.seed.rows[i] = t;
+                            self.seed.reported[i] |= 1;
                         }
-                        if self.seed.reported[i] & 8 != 0 {
-                            t.ask = old.ask;
-                        }
-                        self.seed.rows[i] = t;
-                        self.seed.reported[i] |= 1;
                     }
-                })
-                .is_ok(),
-            Task::BookTickers => serde_json::from_str::<BookTicker<'_>>(item)
-                .map(|r| {
-                    if let Some(i) = cx.store.market_index(&r.symbol) {
-                        let i = i as usize;
-                        if let Some(bid) = r.bid_price {
-                            self.seed.rows[i].bid = bid;
-                            self.seed.reported[i] |= 4;
-                        } else if self.seed.reported[i] & 1 != 0 {
-                            self.seed.rows[i].bid = self.seed.rows[i].last;
-                        }
-                        if let Some(ask) = r.ask_price {
-                            self.seed.rows[i].ask = ask;
-                            self.seed.reported[i] |= 8;
-                        } else if self.seed.reported[i] & 1 != 0 {
-                            self.seed.rows[i].ask = self.seed.rows[i].last;
-                        }
-                        self.seed.reported[i] |= 2;
+                    None => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
-                })
-                .is_ok(),
+                }
+                true
+            }
+            Task::BookTickers => {
+                match serde_json::from_str::<BookTicker<'_>>(item) {
+                    Ok(r) => {
+                        if let Some(i) = cx.store.market_index(&r.symbol) {
+                            let i = i as usize;
+                            if let Some(bid) = r.bid_price {
+                                self.seed.rows[i].bid = bid;
+                                self.seed.reported[i] |= 4;
+                            } else if self.seed.reported[i] & 1 != 0 {
+                                self.seed.rows[i].bid = self.seed.rows[i].last;
+                            }
+                            if let Some(ask) = r.ask_price {
+                                self.seed.rows[i].ask = ask;
+                                self.seed.reported[i] |= 8;
+                            } else if self.seed.reported[i] & 1 != 0 {
+                                self.seed.rows[i].ask = self.seed.rows[i].last;
+                            }
+                            self.seed.reported[i] |= 2;
+                        }
+                    }
+                    Err(_) => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
+                }
+                true
+            }
             Task::Candles { rows, .. } => serde_json::from_str::<CandleRow>(item)
                 .map(|r| rows.push(r.candle()))
                 .is_ok(),
             _ => true,
         };
         if !ok {
-            if matches!(p.task, Task::Markets(_) | Task::Daily | Task::BookTickers) {
-                safe_cex_engine::startup::skipped_row(cx);
-            } else {
-                p.invalid = true;
-            }
+            p.invalid = true;
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
@@ -705,13 +738,33 @@ impl Venue for WeexFutures {
             self.fail(cx, p.task, "malformed REST row");
             return;
         }
+        if !p.skipped.is_empty() {
+            let kind = match p.task {
+                Task::Markets(_) => "market",
+                Task::Daily => "24h ticker",
+                _ => "book ticker",
+            };
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "WEEX skipped {} malformed {kind} row(s): {}",
+                    p.skipped.len(),
+                    p.skipped.join(", ")
+                ),
+            );
+        }
         match p.task {
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
                 if markets.is_empty() {
-                    self.discovery.failed(cx, false);
+                    let error = if p.skipped.is_empty() {
+                        "empty market catalogue"
+                    } else {
+                        "no well-formed market rows"
+                    };
+                    self.fail(cx, Task::Markets(markets), error);
                     return;
                 }
                 self.discovery.succeeded(cx, &false);
@@ -743,14 +796,15 @@ impl Venue for WeexFutures {
             task @ (Task::Daily | Task::BookTickers) => {
                 self.seed.finished |= if matches!(task, Task::Daily) { 1 } else { 2 };
                 if self.seed.finished == 3 && !self.seed.failed {
-                    if !self.seed.reported.iter().any(|mask| *mask != 0) {
+                    if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
                         self.discovery.failed(cx, true);
                         return;
                     }
                     let rows = std::mem::take(&mut self.seed.rows)
                         .into_iter()
                         .zip(&self.seed.reported)
-                        .filter_map(|(t, &mask)| (mask != 0).then_some(t))
+                        // Book-only rows lack last/mark/index and cannot seed a ticker.
+                        .filter_map(|(t, &mask)| (mask & 1 != 0).then_some(t))
                         .collect();
                     cx.store.set_tickers(rows);
                     self.discovery.succeeded(cx, &true);

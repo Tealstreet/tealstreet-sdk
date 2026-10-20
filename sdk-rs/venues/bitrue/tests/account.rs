@@ -17,6 +17,9 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
+        Self::with_market(MARKET)
+    }
+    fn with_market(market: &str) -> Self {
         let mut e = Engine::new(Bitrue::new(Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
@@ -31,7 +34,7 @@ impl Harness {
             now: 0.0,
         };
         h.collect();
-        h.reply("/contracts", MARKET);
+        h.reply("/contracts", market);
         h.reply(
             "listenKey",
             r#"{"code":200,"data":{"listenKey":"futures-key"}}"#,
@@ -418,6 +421,213 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":2334151155877155281,"type":"LIMIT","side":"BUY","status":"PART_FILLED","action":"OPEN","price":100,"origQty":100,"executedQty":30,"avgPrice":110}]}"#);
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
+}
+
+#[test]
+fn currency_balances_keep_both_coins_and_failed_snapshots_preserve_them() {
+    let mut h = Harness::new();
+    h.reply("/account", r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"sumOpenRealizedAmount":2,"positionVos":[]},{"marginCoin":"USDC","totalEquity":30,"accountNormal":20,"accountLock":3,"sumOpenRealizedAmount":4,"positionVos":[]}]}}"#);
+    let coins = h.e.store().currency_balances().unwrap().to_vec();
+    assert_eq!(coins.len(), 2);
+    assert_eq!(coins[0].currency, "USDC");
+    assert_eq!(coins[0].balance.total, 30.0);
+    assert_eq!(coins[0].balance.used, 10.0);
+    // sumOpenRealizedAmount is realized money; no positions means no UPnL.
+    assert_eq!(coins[0].balance.upnl, 0.0);
+    assert_eq!(coins[1].currency, "USDT");
+    assert_eq!(h.e.store().balance().total, 100.0);
+    h.fire_at(2_000.0);
+    h.reply("/account", r#"{"code":"0","data":{"account":[{"marginCoin":"USDC","totalEquity":0,"accountNormal":0,"positionVos":null}]}}"#);
+    assert_eq!(h.e.store().currency_balances().unwrap(), coins.as_slice());
+    assert_eq!(h.e.store().balance().total, 100.0);
+    h.fire_at(4_000.0);
+    h.reply("/account", EMPTY);
+    assert_eq!(h.e.store().currency_balances().unwrap().len(), 1);
+    assert_eq!(h.e.store().currency_balances().unwrap()[0].currency, "USDT");
+}
+
+#[test]
+fn leverage_less_flat_symbol_keeps_margin_and_can_accept_explicit_leverage() {
+    let mut h = Harness::new();
+    h.reply("/account", r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"positionVos":[{"contractName":"E-BTC-USDT","positions":[{"side":"BUY","volume":0,"openPrice":0,"positionType":2}]}]}]}}"#);
+    assert!(h.e.store().loaded().balance);
+    let setting = h.e.store().setting("E-BTC-USDT").unwrap();
+    assert_eq!(setting.leverage, 0.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    h.e.handle(
+        h.now,
+        Event::Command(Command::SetLeverage {
+            command: 55,
+            symbol: "E-BTC-USDT".into(),
+            leverage: 8.0,
+            side: None,
+        }),
+    );
+    h.collect();
+    h.reply("/level_edit", r#"{"code":"0","data":{}}"#);
+    let setting = h.e.store().setting("E-BTC-USDT").unwrap();
+    assert_eq!(setting.leverage, 8.0);
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    h.reply("/account", r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"positionVos":[{"contractName":"E-BTC-USDT","positions":[{"side":"BUY","volume":0,"openPrice":0,"leverageLevel":0,"positionType":2}]}]}]}}"#);
+    assert_eq!(h.e.store().setting("E-BTC-USDT").unwrap().leverage, 8.0);
+}
+
+#[test]
+fn failed_symbol_finishes_initial_order_sweep_and_retries_without_clearing_known_orders() {
+    let markets = MARKET.trim_end_matches(']').to_owned()
+        + r#",{"symbol":"E-ETH-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
+    let mut h = Harness::with_market(&markets);
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders?contractName=E-BTC-USDT", ORDER);
+    assert!(!h.e.store().loaded().orders);
+    h.fire_at(200.0);
+    h.reply(
+        "/openOrders?contractName=E-ETH-USDT",
+        r#"{"code":"-1","msg":"symbol unavailable"}"#,
+    );
+    assert!(h.e.store().loaded().orders);
+    assert_eq!(h.e.store().orders().len(), 1);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            ..
+        })
+    )));
+    h.fire_at(700.0);
+    assert!(
+        h.pending
+            .iter()
+            .any(|r| r.url.contains("/openOrders?contractName=E-ETH-USDT"))
+    );
+    assert!(h.e.store().loaded().orders);
+}
+
+#[test]
+fn documented_symbol_brackets_update_limits_without_guessing_account_leverage() {
+    let mut h = Harness::new();
+    h.reply("/account", EMPTY);
+    for (data, expected) in [
+        (
+            r#"{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":"125"},{"initialLeverage":50}]}"#,
+            125.0,
+        ),
+        (
+            r#"[{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":100}]},{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":75}]}]"#,
+            75.0,
+        ),
+    ] {
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 51,
+                symbol: "E-BTC-USDT".into(),
+            }),
+        );
+        h.collect();
+        h.reply(
+            "/leverageBracket?contractName=E-BTC-USDT",
+            &format!(r#"{{"code":"0","data":{data}}}"#),
+        );
+        assert_eq!(
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max,
+            expected
+        );
+        assert!(h.e.store().setting("E-BTC-USDT").is_none());
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 51, result: Ok(v) }) if v.parse::<f64>().ok() == Some(expected))));
+    }
+    for malformed in [
+        r#"{"code":"0","data":{"contractName":"E-ETH-USDT","brackets":[{"initialLeverage":125}]}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":0}]}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":50},{}]}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":null}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":[]}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":126}]}}"#,
+        r#"{"code":"0","data":{"contractName":"E-BTC-USDT","brackets":[{"initialLeverage":5.5}]}}"#,
+        r#"{"code":"-1","msg":"denied"}"#,
+    ] {
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 52,
+                symbol: "E-BTC-USDT".into(),
+            }),
+        );
+        h.collect();
+        h.reply("/leverageBracket?contractName=E-BTC-USDT", malformed);
+        assert_eq!(
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max,
+            75.0
+        );
+        assert!(h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 52,
+                result: Err(_)
+            })
+        )));
+    }
+    h.e.handle(
+        h.now,
+        Event::Command(Command::SetLeverage {
+            command: 53,
+            symbol: "E-BTC-USDT".into(),
+            leverage: 76.0,
+            side: None,
+        }),
+    );
+    h.collect();
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/level_edit")));
+}
+
+#[test]
+fn failed_bracket_transport_reports_error_and_retains_market_bound() {
+    let mut h = Harness::new();
+    h.e.handle(
+        h.now,
+        Event::Command(Command::FetchMaxLeverage {
+            command: 61,
+            symbol: "E-BTC-USDT".into(),
+        }),
+    );
+    h.collect();
+    for _ in 0..4 {
+        let request = h.take("/leverageBracket");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "connection lost",
+            },
+        );
+        h.collect();
+    }
+    assert_eq!(
+        h.e.store()
+            .market("E-BTC-USDT")
+            .unwrap()
+            .limits
+            .leverage
+            .max,
+        100.0
+    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 61,
+            result: Err(_)
+        })
+    )));
 }
 
 #[test]

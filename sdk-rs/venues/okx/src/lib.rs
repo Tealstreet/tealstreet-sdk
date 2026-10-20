@@ -85,6 +85,7 @@ pub enum Pending {
         scope_start: usize,
         incomplete: bool,
         invalid: bool,
+        seeded: u32,
     },
     Candles {
         command: CommandId,
@@ -119,11 +120,11 @@ pub struct Okx {
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
     startup: safe_cex_engine::startup::Backoff<bool>,
-    account_started: bool,
     catalogue_incomplete: bool,
     ticker_reading: bool,
     ticker_refresh_pending: bool,
     live_tickers: safe_cex_engine::startup::LiveTickers,
+    skipped_instruments: HashSet<String>,
 }
 
 impl Okx {
@@ -158,11 +159,11 @@ impl Okx {
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
             startup: Default::default(),
-            account_started: false,
             catalogue_incomplete: false,
             ticker_reading: false,
             ticker_refresh_pending: false,
             live_tickers: Default::default(),
+            skipped_instruments: HashSet::new(),
         }
     }
 
@@ -185,18 +186,7 @@ impl Okx {
         }
         self.ticker_reading = true;
         self.live_tickers.begin();
-        self.list(
-            cx,
-            "/api/v5/market/tickers?instType=SWAP",
-            false,
-            Pending::Tickers {
-                kind: InstrumentType::Swap,
-                scope_start: 0,
-                incomplete: false,
-                rows: Vec::new(),
-                invalid: false,
-            },
-        );
+        self.load_tickers(cx, InstrumentType::Swap, Vec::new(), false, 0);
     }
 
     fn next_instrument_type(&self, kind: InstrumentType) -> Option<InstrumentType> {
@@ -313,6 +303,53 @@ impl Okx {
             headers.push(("Content-Type", "application/json".into()));
         }
         headers
+    }
+
+    /// Product chains carry earlier products' rows so a later failure republishes nothing.
+    fn load_markets(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        kind: InstrumentType,
+        rows: Vec<Market>,
+        incomplete: bool,
+    ) {
+        let private = self.options.eea && self.credentials.is_some();
+        let scope = if private { "account" } else { "public" };
+        self.list(
+            cx,
+            &format!("/api/v5/{scope}/instruments?instType={}", kind.as_str()),
+            private,
+            Pending::Markets {
+                kind,
+                scope_start: rows.len(),
+                incomplete,
+                rows,
+                invalid: false,
+            },
+        );
+    }
+
+    fn load_tickers(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        kind: InstrumentType,
+        rows: Vec<Ticker>,
+        incomplete: bool,
+        seeded: u32,
+    ) {
+        self.list(
+            cx,
+            &format!("/api/v5/market/tickers?instType={}", kind.as_str()),
+            false,
+            Pending::Tickers {
+                kind,
+                scope_start: rows.len(),
+                incomplete,
+                rows,
+                invalid: false,
+                seeded,
+            },
+        );
     }
 
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
@@ -648,24 +685,7 @@ impl Venue for Okx {
             cx.log(LogLevel::Error, error);
             return;
         }
-        let private = self.options.eea && self.credentials.is_some();
-        let path = if private {
-            "/api/v5/account/instruments?instType=SWAP"
-        } else {
-            "/api/v5/public/instruments?instType=SWAP"
-        };
-        self.list(
-            cx,
-            path,
-            private,
-            Pending::Markets {
-                kind: InstrumentType::Swap,
-                scope_start: 0,
-                incomplete: false,
-                rows: Vec::new(),
-                invalid: false,
-            },
-        );
+        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -777,6 +797,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -832,6 +853,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -854,6 +876,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -866,6 +889,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(
@@ -925,6 +949,7 @@ impl Venue for Okx {
                 kind,
                 rows,
                 invalid,
+                seeded,
                 ..
             } => match serde_json::from_str::<wire::Prices<'_>>(item) {
                 Ok(p) => {
@@ -932,18 +957,22 @@ impl Venue for Okx {
                         if self.instrument_type(&m.id) != kind.as_str() {
                             return;
                         }
-                        if [p.last, p.open24h].iter().any(|value| {
+                        // Untraded rows carry blank quotes; seed unusable values as zero
+                        // so the market keeps a row for live updates to patch.
+                        if [
+                            p.last,
+                            p.open24h,
+                            p.bid_px,
+                            p.ask_px,
+                            p.vol_ccy24h,
+                            p.vol24h,
+                        ]
+                        .iter()
+                        .any(|value| {
                             !value.is_empty()
                                 && safe_cex_engine::startup::number_or_zero(value).is_none()
-                        }) || [p.bid_px, p.ask_px, p.vol_ccy24h, p.vol24h]
-                            .iter()
-                            .any(|value| safe_cex_engine::startup::number_or_zero(value).is_none())
-                        {
-                            {
-                                *invalid = true;
-                                safe_cex_engine::startup::skipped_row(cx);
-                            };
-                            return;
+                        }) {
+                            *seeded += 1;
                         }
                         let last = num::parse(p.last);
                         rows.push(Ticker {
@@ -1013,20 +1042,7 @@ impl Venue for Okx {
             } => {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 if let Some(next) = self.next_instrument_type(kind) {
-                    let private = self.options.eea && self.credentials.is_some();
-                    let scope = if private { "account" } else { "public" };
-                    self.list(
-                        cx,
-                        &format!("/api/v5/{scope}/instruments?instType={}", next.as_str()),
-                        private,
-                        Pending::Markets {
-                            kind: next,
-                            scope_start: rows.len(),
-                            incomplete,
-                            rows,
-                            invalid: false,
-                        },
-                    );
+                    self.load_markets(cx, next, rows, incomplete);
                     return;
                 }
                 self.catalogue_incomplete = incomplete;
@@ -1078,22 +1094,18 @@ impl Venue for Okx {
                 invalid,
                 scope_start,
                 incomplete,
+                seeded,
             } => {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 if let Some(next) = self.next_instrument_type(kind) {
-                    self.list(
-                        cx,
-                        &format!("/api/v5/market/tickers?instType={}", next.as_str()),
-                        false,
-                        Pending::Tickers {
-                            kind: next,
-                            scope_start: rows.len(),
-                            incomplete,
-                            rows,
-                            invalid: false,
-                        },
-                    );
+                    self.load_tickers(cx, next, rows, incomplete, seeded);
                     return;
+                }
+                if seeded > 0 {
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("OKX seeded {seeded} malformed ticker rows as zero"),
+                    );
                 }
                 self.ticker_reading = false;
                 let refresh = std::mem::take(&mut self.ticker_refresh_pending);
@@ -1438,10 +1450,9 @@ fn interval_for_bar(value: &str) -> String {
 }
 fn percentage(last: &str, open: &str) -> f64 {
     let open = num::parse(open);
-    if open == 0.0 {
-        0.0
-    } else {
-        usd((num::parse(last) - open) / open * 100.0)
+    match last.parse::<f64>() {
+        Ok(last) if last.is_finite() && open != 0.0 => usd((last - open) / open * 100.0),
+        _ => 0.0,
     }
 }
 fn usd(value: f64) -> f64 {

@@ -290,12 +290,12 @@ impl Blofin {
                 return;
             }
         };
-        let timestamp = cx.now.floor();
+        let timestamp = cx.now.floor() as u64;
         let sign = sign::signature(
             self.options.secret.as_deref().unwrap_or(""),
             "/users/self/verify",
             "GET",
-            &num::format(timestamp),
+            &timestamp.to_string(),
             &nonce,
             "",
         );
@@ -304,7 +304,7 @@ impl Blofin {
         struct Login<'a> {
             api_key: &'a str,
             passphrase: &'a str,
-            timestamp: f64,
+            timestamp: u64,
             sign: String,
             nonce: String,
         }
@@ -644,6 +644,32 @@ impl Blofin {
                 s.leverage = s.buy_leverage.or(s.sell_leverage).unwrap_or(p.leverage);
                 s.margin_type = p.margin_type;
             });
+        }
+        // Position margin overrides apply only while that symbol is open. A
+        // close (including omission from a full snapshot) restores the account
+        // default without losing the symbol's last confirmed leverage.
+        if let Some(margin) = self.account.margin {
+            let open: HashSet<_> = positions
+                .iter()
+                .filter(|position| position.contracts > 0.0)
+                .map(|position| position.symbol.as_str())
+                .collect();
+            let closed: Vec<_> = cx
+                .store
+                .markets()
+                .iter()
+                .filter(|market| !open.contains(market.symbol.as_str()))
+                .filter(|market| {
+                    cx.store
+                        .setting(&market.symbol)
+                        .is_some_and(|setting| setting.margin_type != Some(margin))
+                })
+                .map(|market| market.symbol.clone())
+                .collect();
+            for symbol in closed {
+                cx.store
+                    .update_setting(&symbol, |setting| setting.margin_type = Some(margin));
+            }
         }
         cx.store.set_positions(
             positions
@@ -1183,10 +1209,17 @@ impl Blofin {
         match message.arg.channel.as_ref() {
             "orders" | "orders-algo" => {
                 if let Ok(Data { data: rows }) =
-                    serde_json::from_str::<Data<Vec<OrderRow<'_>>>>(text)
+                    serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
                     self.account.orders_revision += 1;
-                    for row in rows {
+                    for raw in rows {
+                        let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
+                            cx.log(
+                                LogLevel::Error,
+                                "Malformed BloFin order row; retaining known order",
+                            );
+                            continue;
+                        };
                         let orders = self.map_orders(cx, &row);
                         if matches!(row.state.as_ref(), "partially_filled" | "filled")
                             && row.average_price.0 > 0.0
@@ -1235,21 +1268,62 @@ impl Blofin {
             }
             "positions" => {
                 if let Ok(Data { data: rows }) =
-                    serde_json::from_str::<Data<Vec<PositionRow<'_>>>>(text)
+                    serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
-                    let positions: Vec<_> = rows
-                        .iter()
-                        .filter_map(|p| self.map_position(cx, p))
-                        .collect();
+                    let mut positions = Vec::new();
+                    let mut malformed = HashSet::new();
+                    let mut used = 0.0;
+                    let mut upnl = 0.0;
+                    for raw in rows {
+                        match serde_json::from_str::<PositionRow<'_>>(raw.get()) {
+                            Ok(row) => {
+                                // Account totals cover every native position, including
+                                // instruments outside the tradable market catalog. Sum
+                                // raw PnL before any per-market display rounding.
+                                used += row.maintenance_margin.0;
+                                upnl += row.unrealized_pnl.0;
+                                if let Some(position) = self.map_position(cx, &row) {
+                                    positions.push(position);
+                                }
+                            }
+                            Err(_) => {
+                                cx.log(LogLevel::Error, "Malformed BloFin position row; retaining known position and balance totals");
+                                #[derive(serde::Deserialize)]
+                                struct Identity<'a> {
+                                    #[serde(borrow, rename = "instId")]
+                                    inst_id: Str<'a>,
+                                }
+                                let Ok(identity) = serde_json::from_str::<Identity<'_>>(raw.get())
+                                else {
+                                    // With no identity, any missing known position might be
+                                    // the malformed row. Preserve this authoritative snapshot.
+                                    return;
+                                };
+                                let Some(market) = cx.store.market_by_id(&identity.inst_id) else {
+                                    return;
+                                };
+                                malformed.insert(market.symbol.clone());
+                            }
+                        }
+                    }
+                    // Preserve the complete affected symbol, including both hedge legs.
+                    positions.retain(|position| !malformed.contains(&position.symbol));
+                    positions.extend(
+                        cx.store
+                            .positions()
+                            .iter()
+                            .filter(|position| malformed.contains(&position.symbol))
+                            .cloned(),
+                    );
                     self.account.positions_revision += 1;
                     self.account.balance_revision += 1;
-                    let used = round_usd(rows.iter().map(|p| p.maintenance_margin.0).sum());
-                    let upnl = round_usd(rows.iter().map(|p| p.unrealized_pnl.0).sum());
                     self.commit_positions(cx, positions);
-                    let mut balance = cx.store.balance().clone();
-                    balance.used = used;
-                    balance.upnl = upnl;
-                    cx.store.set_balance(balance);
+                    if malformed.is_empty() {
+                        let mut balance = cx.store.balance().clone();
+                        balance.used = round_usd(used);
+                        balance.upnl = round_usd(upnl);
+                        cx.store.set_balance(balance);
+                    }
                 }
             }
             "account" => {

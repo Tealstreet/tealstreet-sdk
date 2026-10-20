@@ -33,20 +33,106 @@ pub enum Pending {
     History(history::Request),
     Markets {
         rows: Vec<Market>,
-        valid: bool,
+        skipped: Vec<String>,
     },
     Daily {
         rows: Vec<Ticker>,
-        valid: bool,
+        skipped: Vec<String>,
     },
     Premium {
-        valid: bool,
+        skipped: Vec<String>,
     },
     Candles {
         command: CommandId,
         rows: Vec<Candle>,
         valid: bool,
     },
+    Signed(Box<Signed>),
+}
+
+/// A signed request kept re-signable, so a signature rejection is resent once.
+pub struct Signed {
+    inner: Pending,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    at: Option<ArrayAt>,
+    resent: bool,
+}
+
+/// Signs and sends a request; signed requests can be re-signed after a 100001.
+pub(crate) fn issue(
+    cx: &mut Cx<'_, Pending>,
+    credentials: Option<&Credentials>,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    at: Option<ArrayAt>,
+    pending: Pending,
+) {
+    let (url, headers, body) = params
+        .clone()
+        .into_request(method, path, credentials, cx.now);
+    let pending = if credentials.is_some() && sign::signs(path) {
+        Pending::Signed(Box::new(Signed {
+            inner: pending,
+            method,
+            path,
+            params,
+            at,
+            resent: false,
+        }))
+    } else {
+        pending
+    };
+    match at {
+        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
+        None => cx.request(method, url, headers, body, pending),
+    };
+}
+
+fn signature_rejected(body: &str) -> bool {
+    serde_json::from_str::<Rejection<'_>>(body).is_ok_and(|r| {
+        r.code == Some(100_001)
+            || r.msg
+                .to_ascii_lowercase()
+                .contains("signature verification failed")
+    })
+}
+
+/// Logs a read's skipped rows once, by identity only.
+pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) {
+    log_skipped_at(cx, LogLevel::Warning, kind, ids, "");
+}
+pub(crate) fn log_skipped_at(
+    cx: &mut Cx<'_, Pending>,
+    level: LogLevel,
+    kind: &str,
+    ids: &[String],
+    note: &str,
+) {
+    if ids.is_empty() {
+        return;
+    }
+    let shown = ids
+        .iter()
+        .take(10)
+        .map(|id| if id.is_empty() { "unidentified" } else { id })
+        .collect::<Vec<_>>();
+    let more = ids.len().saturating_sub(shown.len());
+    cx.log(
+        level,
+        format!(
+            "BingX skipped {} malformed {kind} row(s): {}{}{note}",
+            ids.len(),
+            shown.join(", "),
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
+        ),
+    );
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -99,6 +185,10 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: safe_cex_engine::startup::Backoff<List>,
+    // A failed or empty funding read commits tickers without it and retries.
+    tickers_committed: bool,
+    // Markets the live stream has priced; a late funding retry never overwrites them.
+    live_priced: Vec<bool>,
 }
 
 impl Bingx {
@@ -136,6 +226,8 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: 0,
             retries: Default::default(),
+            tickers_committed: false,
+            live_priced: Vec::new(),
         }
     }
 
@@ -154,19 +246,92 @@ impl Bingx {
         self.retries.failed(cx, kind);
     }
 
-    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        if matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. }) {
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &'static str, pending: Pending) {
+        if !self.tickers_committed
+            && matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. })
+        {
             self.live_tickers.begin();
         }
-        let (url, headers, _) =
-            Params::new().into_request(Method::Get, path, self.credentials.as_ref(), cx.now);
-        cx.request_streamed(
+        issue(
+            cx,
+            self.credentials.as_ref(),
             Method::Get,
-            url,
-            headers,
-            ArrayAt::EnvelopeField("data"),
+            path,
+            Params::new(),
+            Some(ArrayAt::EnvelopeField("data")),
             pending,
         );
+    }
+
+    fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
+        cx.log(
+            LogLevel::Warning,
+            "BingX rejected a request signature; re-signing it once",
+        );
+        let Signed {
+            inner,
+            method,
+            path,
+            params,
+            at,
+            ..
+        } = signed;
+        let (url, headers, body) =
+            params
+                .clone()
+                .into_request(method, path, self.credentials.as_ref(), cx.now);
+        let pending = Pending::Signed(Box::new(Signed {
+            inner,
+            method,
+            path,
+            params,
+            at,
+            resent: true,
+        }));
+        match at {
+            Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
+            None => cx.request(method, url, headers, body, pending),
+        };
+    }
+
+    /// The seed's ticker slot for a native symbol; after commit, the store's.
+    fn ticker_slot(&self, cx: &Cx<'_, Pending>, id: &str) -> Option<usize> {
+        let market = cx
+            .store
+            .market_by_id(id)
+            .and_then(|m| cx.store.market_index(&m.symbol))? as usize;
+        let slots = if self.tickers_committed {
+            &self.seed_index
+        } else {
+            &self.seed_rows_index
+        };
+        slots.get(market).copied().flatten()
+    }
+
+    /// Publishes the seeded tickers over any live fields received meanwhile.
+    /// Without a funding read every daily ticker is kept; with one, only
+    /// reported ones. The private side already started at markets.
+    fn commit_tickers(&mut self, cx: &mut Cx<'_, Pending>, keep_unreported: bool) {
+        let reported = std::mem::take(&mut self.seed_reported);
+        if !keep_unreported {
+            let mut index = 0;
+            self.seed.retain(|_| {
+                let keep = reported[index];
+                index += 1;
+                keep
+            });
+        }
+        let mut rows = std::mem::take(&mut self.seed);
+        self.live_tickers.finish(cx.store, &mut rows);
+        self.seed_index.resize(cx.store.markets().len(), None);
+        self.seed_index.fill(None);
+        for (i, ticker) in rows.iter().enumerate() {
+            if let Some(market) = cx.store.market_index(&ticker.symbol) {
+                self.seed_index[market as usize] = Some(i);
+            }
+        }
+        cx.store.set_tickers(rows);
+        self.tickers_committed = true;
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -298,6 +463,10 @@ impl Bingx {
                     });
                     let symbol = &cx.store.markets()[market as usize].symbol;
                     self.live_tickers.record(cx.store, symbol, mask);
+                    if self.live_priced.len() <= market as usize {
+                        self.live_priced.resize(cx.store.markets().len(), false);
+                    }
+                    self.live_priced[market as usize] = true;
                 },
             );
             if result.is_err() {
@@ -447,7 +616,7 @@ impl Venue for Bingx {
             paths::MARKETS,
             Pending::Markets {
                 rows: Vec::with_capacity(1536),
-                valid: true,
+                skipped: Vec::new(),
             },
         );
         if self.credentials.is_none() {
@@ -505,10 +674,11 @@ impl Venue for Bingx {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
-            Pending::Markets { rows, valid: _ } => {
+            Pending::Markets { rows, skipped } => {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
@@ -548,10 +718,13 @@ impl Venue for Bingx {
                         taker_fee: None,
                         maker_fee: None,
                     }),
-                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        skipped.push(row_symbol(item).unwrap_or_default().into_owned())
+                    }
                 }
             }
-            Pending::Daily { rows, valid: _ } => match serde_json::from_str::<Daily<'_>>(item) {
+            Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily<'_>>(item) {
                 Ok(d) => {
                     if let Some(m) = cx.store.market_by_id(&d.symbol) {
                         let (bid, ask) = touch(d.last_price, m.precision.price);
@@ -568,24 +741,47 @@ impl Venue for Bingx {
                         })
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    skipped.push(row_symbol(item).unwrap_or_default().into_owned())
+                }
             },
-            Pending::Premium { valid: _ } => match serde_json::from_str::<Premium<'_>>(item) {
+            Pending::Premium { skipped } => match serde_json::from_str::<Premium<'_>>(item) {
                 Ok(p) => {
-                    let index = cx
-                        .store
-                        .market_by_id(&p.symbol)
-                        .and_then(|m| cx.store.market_index(&m.symbol));
-                    if let Some(i) = index.and_then(|index| self.seed_rows_index[index as usize]) {
-                        let t = &mut self.seed[i];
+                    let Some(i) = self.ticker_slot(cx, &p.symbol) else {
+                        return;
+                    };
+                    let apply = |t: &mut Ticker| {
                         t.mark = p.mark_price;
                         t.index = p.index_price;
                         t.funding_rate = p.last_funding_rate / 100.;
                         t.funding_time = p.next_funding_time;
+                    };
+                    if self.tickers_committed {
+                        let live = cx
+                            .store
+                            .market_index_by_id(&p.symbol)
+                            .and_then(|m| self.live_priced.get(m as usize).copied())
+                            .unwrap_or(false);
+                        if !live {
+                            cx.store.update_ticker_at(i as u32, apply);
+                        }
+                    } else {
+                        apply(&mut self.seed[i]);
                         self.seed_reported[i] = true
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    let symbol = row_symbol(item);
+                    // A malformed funding row keeps its daily ticker, without funding.
+                    if !self.tickers_committed
+                        && let Some(i) = symbol.as_deref().and_then(|s| self.ticker_slot(cx, s))
+                    {
+                        self.seed_reported[i] = true
+                    }
+                    skipped.push(symbol.unwrap_or_default().into_owned())
+                }
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<Kline>(item) {
                 Ok(k) => rows.push(k.into()),
@@ -595,6 +791,14 @@ impl Venue for Bingx {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::Signed(signed) => {
+                if !signed.resent && signature_rejected(response.body) {
+                    self.resend(cx, *signed);
+                } else {
+                    self.on_response(cx, signed.inner, response);
+                }
+                return;
+            }
             Pending::History(request) => {
                 self.history
                     .on_response(cx, self.credentials.as_ref(), request, response);
@@ -631,14 +835,14 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets {
-                mut rows,
-                valid: true,
-            } => {
+            Pending::Markets { mut rows, skipped } => {
+                log_skipped(cx, "market", &skipped);
                 if rows.is_empty() {
-                    self.retries.failed(cx, List::Markets);
+                    self.retry_list(cx, List::Markets);
                     return;
                 }
+                self.account
+                    .set_skipped_markets(skipped.iter().map(|id| id.replace('-', "")));
                 rows.shrink_to_fit();
                 self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
@@ -651,11 +855,27 @@ impl Venue for Bingx {
                     paths::DAILY,
                     Pending::Daily {
                         rows: Vec::with_capacity(cx.store.markets().len()),
-                        valid: true,
+                        skipped: Vec::new(),
                     },
                 )
             }
-            Pending::Daily { rows, valid: true } => {
+            Pending::Daily { mut rows, skipped } => {
+                log_skipped(cx, "ticker", &skipped);
+                // A market whose daily row was malformed still gets a slot, filled
+                // later by funding and the ticker stream.
+                let reported = rows.len();
+                for id in &skipped {
+                    if let Some(m) = cx.store.market_by_id(id)
+                        && !rows.iter().any(|t| t.id == m.id)
+                    {
+                        rows.push(Ticker {
+                            id: m.id.clone(),
+                            symbol: m.symbol.clone(),
+                            ..Ticker::default()
+                        });
+                    }
+                }
+                // Neither a valid row nor an identifiable placeholder: never publish empty.
                 if rows.is_empty() {
                     self.retry_list(cx, List::Daily);
                     return;
@@ -667,33 +887,32 @@ impl Venue for Bingx {
                         self.seed_rows_index[index as usize] = Some(i)
                     }
                 }
-                self.seed_reported = vec![false; rows.len()];
+                self.seed_reported = (0..rows.len()).map(|i| i >= reported).collect();
                 self.seed = rows;
-                self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
+                self.read(
+                    cx,
+                    paths::PREMIUM,
+                    Pending::Premium {
+                        skipped: Vec::new(),
+                    },
+                )
             }
-            Pending::Premium { valid: true } => {
-                if !self.seed_reported.iter().any(|reported| *reported) {
-                    self.retry_list(cx, List::Premium);
-                    return;
+            Pending::Premium { skipped } => {
+                log_skipped(cx, "funding", &skipped);
+                if self.tickers_committed {
+                    self.retries.succeeded(cx, &List::Premium);
+                } else if self.seed_reported.iter().any(|reported| *reported) {
+                    self.retries.succeeded(cx, &List::Premium);
+                    self.commit_tickers(cx, false);
+                } else {
+                    // No funding row named any seeded market: keep the daily tickers
+                    // rather than publishing an empty set, and retry funding.
+                    self.on_request_failed(
+                        cx,
+                        Pending::Premium { skipped },
+                        "BingX funding read named no seeded market",
+                    );
                 }
-                self.retries.succeeded(cx, &List::Premium);
-                let reported = std::mem::take(&mut self.seed_reported);
-                let mut index = 0;
-                self.seed.retain(|_| {
-                    let keep = reported[index];
-                    index += 1;
-                    keep
-                });
-                let mut rows = std::mem::take(&mut self.seed);
-                self.live_tickers.finish(cx.store, &mut rows);
-                self.seed_index.resize(cx.store.markets().len(), None);
-                self.seed_index.fill(None);
-                for (i, ticker) in rows.iter().enumerate() {
-                    if let Some(market) = cx.store.market_index(&ticker.symbol) {
-                        self.seed_index[market as usize] = Some(i);
-                    }
-                }
-                cx.store.set_tickers(rows);
             }
             Pending::Candles {
                 command,
@@ -709,12 +928,37 @@ impl Venue for Bingx {
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
+                self.resend(cx, *signed)
+            }
+            Pending::Signed(signed) => self.on_stream_error(cx, signed.inner, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let discovery = matches!(
             &pending,
             Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
         );
         match pending {
+            Pending::Signed(signed) => {
+                self.on_request_failed(cx, signed.inner, error);
+                return;
+            }
             Pending::History(request) => {
                 self.history.on_failed(cx, request, error);
                 return;
@@ -733,7 +977,16 @@ impl Venue for Bingx {
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
-            Pending::Premium { .. } => self.retry_list(cx, List::Premium),
+            Pending::Premium { .. } => {
+                if !self.tickers_committed {
+                    cx.log(
+                        LogLevel::Warning,
+                        "BingX funding read failed; starting without funding rates",
+                    );
+                    self.commit_tickers(cx, true);
+                }
+                self.retry_list(cx, List::Premium)
+            }
         }
         cx.log(
             if discovery {
@@ -758,17 +1011,22 @@ impl Venue for Bingx {
                     paths::MARKETS,
                     Pending::Markets {
                         rows: Vec::new(),
-                        valid: true,
+                        skipped: Vec::new(),
                     },
                 ),
                 List::Daily => (
                     paths::DAILY,
                     Pending::Daily {
                         rows: Vec::with_capacity(cx.store.markets().len()),
-                        valid: true,
+                        skipped: Vec::new(),
                     },
                 ),
-                List::Premium => (paths::PREMIUM, Pending::Premium { valid: true }),
+                List::Premium => (
+                    paths::PREMIUM,
+                    Pending::Premium {
+                        skipped: Vec::new(),
+                    },
+                ),
             };
             self.read(cx, path, pending);
             return;
@@ -871,17 +1129,13 @@ impl Venue for Bingx {
                     .str("interval", &interval)
                     .num("startTime", start)
                     .num("endTime", end);
-                let (url, headers, _) = params.into_request(
+                issue(
+                    cx,
+                    self.credentials.as_ref(),
                     Method::Get,
                     paths::KLINES,
-                    self.credentials.as_ref(),
-                    cx.now,
-                );
-                cx.request_streamed(
-                    Method::Get,
-                    url,
-                    headers,
-                    ArrayAt::EnvelopeField("data"),
+                    params,
+                    Some(ArrayAt::EnvelopeField("data")),
                     Pending::Candles {
                         command,
                         rows: Vec::new(),
