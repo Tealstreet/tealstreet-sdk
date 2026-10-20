@@ -650,3 +650,184 @@ fn documented_auth_node_id_and_idle_binary_heartbeats_need_no_text_ping() {
             .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
     );
 }
+
+fn order_update(h: &mut Harness, socket: SocketId, row: &str) {
+    message(
+        h,
+        socket,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"orders.ALL","data":{row}}}}}"#
+        ),
+    );
+}
+
+#[test]
+fn a_new_order_repair_cannot_rewind_a_newer_or_more_filled_order() {
+    for stale_stamp in [1_700_000_000_000_u64, 1_700_000_006_000] {
+        let (mut h, socket) = loaded();
+        authenticate(&mut h, socket);
+        h.now += 5_000.;
+        let fresh = ORDER
+            .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+            .replace(
+                "\"last_updated_at\":1700000000000",
+                "\"last_updated_at\":1700000005000",
+            );
+        order_update(&mut h, socket, &fresh);
+        assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+        h.timer(h.now + 1_000.);
+        let repair = h.take("/orders");
+        let stale = ORDER.replace(
+            "\"last_updated_at\":1700000000000",
+            &format!("\"last_updated_at\":{stale_stamp}"),
+        );
+        let other = ORDER.replace("\"id\":\"123\"", "\"id\":\"456\"");
+        h.respond(repair, 200, &format!(r#"{{"results":[{stale},{other}]}}"#));
+        assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+        assert_eq!(h.e.store().order("123").unwrap().remaining, 1.);
+        assert!(h.e.store().order("456").is_some());
+    }
+}
+
+#[test]
+fn stream_orders_cannot_lose_fills_at_equal_newer_or_missing_server_timestamps() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    let fresh = ORDER
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000005000",
+        );
+    order_update(&mut h, socket, &fresh);
+    for stamp in ["1700000005000", "1700000006000", "0"] {
+        h.now += 1.;
+        let stale = ORDER.replace(
+            "1700000000000,\"client_id\"",
+            &format!("{stamp},\"client_id\""),
+        );
+        order_update(&mut h, socket, &stale);
+        assert_eq!(
+            h.e.store().order("123").unwrap().filled,
+            1.,
+            "stamp {stamp}"
+        );
+    }
+    // A newer timestamp alone cannot turn back the server's execution count.
+    let valid = fresh
+        .replace("1700000005000", "1700000005500")
+        .replace("\"price\":\"99\"", "\"price\":\"100\"");
+    order_update(&mut h, socket, &valid);
+    assert_eq!(h.e.store().order("123").unwrap().price, 100.);
+}
+
+#[test]
+fn transient_order_omission_keeps_fill_floor_but_allows_same_version_readback() {
+    let (mut h, socket) = loaded();
+    let poll = h.now + 10_000.;
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    let fresh = ORDER
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000005000",
+        );
+    order_update(&mut h, socket, &fresh);
+    h.timer(h.now + 1_000.);
+    h.reply("/orders", r#"{"results":[]}"#);
+    assert!(h.e.store().orders().is_empty());
+    order_update(&mut h, socket, ORDER);
+    assert!(h.e.store().orders().is_empty());
+    // A lagging empty replica is not proof of a permanent terminal status.
+    // Later HTTP presence at the same valid server version restores the order.
+    h.timer(poll);
+    h.reply("/positions", &format!(r#"{{"results":[{POSITION}]}}"#));
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+    );
+    h.reply("/orders", &format!(r#"{{"results":[{fresh}]}}"#));
+    assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+}
+
+#[test]
+fn duplicate_order_ids_reject_a_snapshot_before_any_store_or_watermark_mutation() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    let fresh = ORDER
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000005000",
+        );
+    order_update(&mut h, socket, &fresh);
+    h.timer(h.now + 1_000.);
+    let updated = fresh
+        .replace("1700000005000", "1700000010000")
+        .replace("\"price\":\"99\"", "\"price\":\"100\"");
+    h.reply("/orders", &format!(r#"{{"results":[{updated},{ORDER}]}}"#));
+    assert_eq!(h.e.store().orders().len(), 1);
+    assert_eq!(h.e.store().order("123").unwrap().price, 99.);
+    assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+    let valid = fresh
+        .replace("1700000005000", "1700000005500")
+        .replace("\"price\":\"99\"", "\"price\":\"101\"");
+    order_update(&mut h, socket, &valid);
+    assert_eq!(h.e.store().order("123").unwrap().price, 101.);
+}
+
+#[test]
+fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remain_valid() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    let fresh = ORDER
+        .replace("\"size\":\"2\"", "\"size\":\"0.2\"")
+        .replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"0.1\"")
+        .replace(
+            "\"instruction\":\"GTC\"",
+            "\"instruction\":\"GTC\",\"flags\":[]",
+        )
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000005000",
+        );
+    order_update(&mut h, socket, &fresh);
+    h.command(Command::AmendOrder {
+        command: 91,
+        id: "123".into(),
+        price: Some(100.),
+        amount: Some(0.3),
+    });
+    let amend = h.take("/orders/123");
+    h.respond(amend, 200, r#"{"id":"123"}"#);
+    order_update(&mut h, socket, ORDER);
+    assert_eq!(h.e.store().order("123").unwrap().amount, 0.2);
+    let changed = fresh
+        .replace("\"size\":\"0.2\"", "\"size\":\"0.3\"")
+        .replace("\"remaining_size\":\"0.1\"", "\"remaining_size\":\"0.2\"")
+        .replace("\"price\":\"99\"", "\"price\":\"100\"")
+        .replace("1700000005000", "1700000006000");
+    order_update(&mut h, socket, &changed);
+    let order = h.e.store().order("123").unwrap();
+    assert_eq!(order.amount, 0.3);
+    assert_eq!(order.price, 100.);
+    assert!((order.filled - 0.1).abs() < 1e-12);
+    h.command(Command::AmendOrder {
+        command: 92,
+        id: "123".into(),
+        price: None,
+        amount: Some(0.4),
+    });
+    let request = h.take("/orders/123");
+    assert!(
+        request
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("\"price\":\"100\"")
+    );
+}

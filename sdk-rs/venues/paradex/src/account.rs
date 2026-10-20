@@ -4,6 +4,7 @@ use crate::{
     sign::{Credentials, SystemConfig},
     wire::Number,
 };
+use alloy_primitives::U256;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, TimeInForce,
@@ -44,9 +45,34 @@ pub enum Request {
     Orders {
         revision: u64,
         rows: Vec<NativeOrder>,
+        seen: HashSet<String>,
         invalid: bool,
         cycle: bool,
     },
+}
+
+#[derive(Clone, Copy)]
+struct OrderVersion {
+    updated: f64,
+    filled: U256,
+}
+
+impl OrderVersion {
+    fn new(row: &NativeOrder) -> Result<Self, String> {
+        let quantum = |value: &str| {
+            U256::from_str_radix(&crate::sign::quantum(value)?, 10)
+                .map_err(|_| "Invalid Paradex cumulative fill".to_owned())
+        };
+        // Compare exact venue quanta: binary subtraction can make an unchanged
+        // fill look smaller after a valid size amendment (0.3-0.2 vs 0.2-0.1).
+        let filled = quantum(&row.size)?
+            .checked_sub(quantum(&row.remaining_size)?)
+            .ok_or("Invalid Paradex cumulative fill")?;
+        Ok(Self {
+            updated: row.updated(),
+            filled,
+        })
+    }
 }
 
 struct Queued {
@@ -92,6 +118,8 @@ pub struct Account {
     balance_busy: bool,
     margins_busy: bool,
     native: HashMap<String, NativeOrder>,
+    order_versions: HashMap<String, OrderVersion>,
+    order_version_ids: VecDeque<String>,
     terminals: HashSet<String>,
     terminal_ids: VecDeque<String>,
     executions: HashSet<String>,
@@ -135,6 +163,8 @@ impl Account {
             balance_busy: false,
             margins_busy: false,
             native: HashMap::new(),
+            order_versions: HashMap::new(),
+            order_version_ids: VecDeque::new(),
             terminals: HashSet::new(),
             terminal_ids: VecDeque::new(),
             executions: HashSet::new(),
@@ -159,7 +189,11 @@ impl Account {
         self.credentials.as_ref()
     }
     pub fn invalidate_order(&mut self, id: &str) {
-        self.native.remove(id);
+        if let Some(row) = self.native.remove(id)
+            && let Ok(version) = OrderVersion::new(&row)
+        {
+            self.remember_order(id, version);
+        }
     }
     pub fn native_order(&self, id: &str) -> Option<&NativeOrder> {
         self.native.get(id)
@@ -846,6 +880,7 @@ impl Account {
             Pending::Account(Request::Orders {
                 revision: self.orders_revision,
                 rows: vec![],
+                seen: HashSet::new(),
                 invalid: false,
                 cycle,
             }),
@@ -898,12 +933,21 @@ impl Account {
                     Err(_) => *invalid = true,
                 }
             }
-            Request::Orders { rows, invalid, .. } => {
-                match serde_json::from_str::<NativeOrder>(item) {
-                    Ok(row) if map_order(&row).is_ok() => rows.push(row),
-                    _ => *invalid = true,
+            Request::Orders {
+                rows,
+                seen,
+                invalid,
+                ..
+            } => match serde_json::from_str::<NativeOrder>(item) {
+                Ok(row)
+                    if map_order(&row).is_ok()
+                        && OrderVersion::new(&row).is_ok()
+                        && seen.insert(row.id.clone()) =>
+                {
+                    rows.push(row)
                 }
-            }
+                _ => *invalid = true,
+            },
             _ => {}
         }
     }
@@ -1063,6 +1107,7 @@ impl Account {
                 rows,
                 invalid,
                 cycle,
+                ..
             } => {
                 self.orders_busy = false;
                 if !invalid && revision == self.orders_revision {
@@ -1072,11 +1117,30 @@ impl Account {
                         if self.terminals.contains(&row.id) {
                             continue;
                         }
-                        if let Ok(order) = map_order(&row)
-                            && order.status == OrderStatus::Open
-                        {
+                        let (Ok(order), Ok(version)) = (map_order(&row), OrderVersion::new(&row))
+                        else {
+                            continue;
+                        };
+                        if self.stale_order(&row.id, version) {
+                            // A read started after a live event can still hit an
+                            // older replica. Preserve both store and signing
+                            // evidence, without reviving invalidated amend data.
+                            if let Some(current) = cx.store.order(&row.id)
+                                && current.status == OrderStatus::Open
+                            {
+                                mapped.push(current.clone());
+                                if let Some(current) = self.native.get(&row.id) {
+                                    native.insert(row.id.clone(), current.clone());
+                                }
+                            }
+                            continue;
+                        }
+                        self.remember_order(&row.id, version);
+                        if order.status == OrderStatus::Open {
                             mapped.push(order);
                             native.insert(row.id.clone(), row);
+                        } else {
+                            self.terminal_order(&row.id);
                         }
                     }
                     self.native = native;
@@ -1142,34 +1206,53 @@ impl Account {
         }
         valid
     }
+    fn stale_order(&self, id: &str, version: OrderVersion) -> bool {
+        let old = self.order_versions.get(id).copied().or_else(|| {
+            self.native
+                .get(id)
+                .and_then(|row| OrderVersion::new(row).ok())
+        });
+        old.is_some_and(|old| version.updated < old.updated || version.filled < old.filled)
+    }
+    fn remember_order(&mut self, id: &str, version: OrderVersion) {
+        if self.order_versions.insert(id.into(), version).is_none() {
+            self.order_version_ids.push_back(id.into());
+        }
+        while self.order_version_ids.len() > RETAINED {
+            if let Some(id) = self.order_version_ids.pop_front() {
+                self.order_versions.remove(&id);
+            }
+        }
+    }
+    fn terminal_order(&mut self, id: &str) {
+        if self.terminals.insert(id.into()) {
+            self.terminal_ids.push_back(id.into());
+        }
+        while self.terminal_ids.len() > RETAINED {
+            if let Some(id) = self.terminal_ids.pop_front() {
+                self.terminals.remove(&id);
+            }
+        }
+    }
     fn apply_order(&mut self, cx: &mut Cx<'_, Pending>, row: NativeOrder) -> bool {
         if cx.store.market(&row.market).is_none() {
             return false;
         }
-        let Ok(mut order) = map_order(&row) else {
+        let (Ok(mut order), Ok(version)) = (map_order(&row), OrderVersion::new(&row)) else {
             return false;
         };
         if self.terminals.contains(&row.id) && order.status == OrderStatus::Open {
             return false;
         }
-        if let Some(old) = self.native.get(&row.id)
-            && row.updated() > 0.
-            && old.updated() > row.updated()
-        {
+        if self.stale_order(&row.id, version) {
             return false;
         }
+        self.remember_order(&row.id, version);
         self.bump_orders();
         order.last_update = cx.now;
         if order.status != OrderStatus::Open {
             self.native.remove(&row.id);
-            if self.terminals.insert(row.id.clone()) {
-                self.terminal_ids.push_back(row.id.clone());
-            }
-            while self.terminal_ids.len() > RETAINED {
-                if let Some(id) = self.terminal_ids.pop_front() {
-                    self.terminals.remove(&id);
-                }
-            }
+            self.terminal_order(&row.id);
         } else {
             self.native.insert(row.id.clone(), row.clone());
         }
@@ -1390,7 +1473,11 @@ pub struct NativeOrder {
 }
 impl NativeOrder {
     fn updated(&self) -> f64 {
-        self.last_updated_at.parse().unwrap_or(0.)
+        self.last_updated_at
+            .parse::<f64>()
+            .ok()
+            .filter(|stamp| stamp.is_finite() && *stamp > 0.)
+            .unwrap_or(0.)
     }
 }
 fn scalar<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {

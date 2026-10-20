@@ -130,6 +130,8 @@ const KNOWN_TS_FIXES = {
   // from positions; support idempotent cross-margin/one-way mode settings;
   // validate public-trade query windows and deduplicate native fill IDs/quantity.
   // Walk empty history cursor pages and keep polled candle buckets/volume monotonic.
+  // Rust also fences lagging order-repair rows with native timestamps/exact fill
+  // quanta; adversarial native tests cover this without rewriting TS replay output.
   paradex() {},
   lighter: {
     fills: fixLighterFills,
