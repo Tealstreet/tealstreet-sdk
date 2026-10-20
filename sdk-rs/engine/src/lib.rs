@@ -14,6 +14,8 @@ pub mod paging;
 pub mod public_feed;
 pub mod socket;
 pub mod store;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod time;
 pub mod url;
 pub mod wire;
