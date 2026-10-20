@@ -583,6 +583,7 @@ impl Venue for Cryptocom {
                 } else {
                     Err("Crypto.com HTTP write failed")
                 },
+                Some(response.status),
             );
             return;
         }
@@ -666,7 +667,7 @@ impl Venue for Cryptocom {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
+            Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
