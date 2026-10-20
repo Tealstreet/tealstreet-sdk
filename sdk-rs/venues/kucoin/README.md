@@ -11,3 +11,12 @@ welcome and mandatory-pong deadlines remain independent of general data traffic:
 an early pong cannot replace welcome, and ordinary data cannot satisfy an
 outstanding ping. The Supervisor supplies the negotiated ping cadence; only
 welcome marks a session authenticated and starts subscriptions/reconciliation.
+
+KuCoin Spot HF uses the same supervision policy for its public and private
+feeds. Each retry POSTs a fresh role-specific bullet token under a single-flight
+acquisition with a generation fence. Token acquisition and transport opening
+have separate ten-second deadlines; only a native welcome after opening marks
+readiness. The bullet server's validated heartbeat timings drive the welcome
+and mandatory-pong deadlines. Ordinary data and early pongs cannot satisfy
+those deadlines. Late retired token responses/failures and socket frames are
+inert, and welcome restores current ticker/book/candle or private account topics.

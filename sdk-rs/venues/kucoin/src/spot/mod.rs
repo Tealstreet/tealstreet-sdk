@@ -6,6 +6,7 @@ use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, LogLevel, Method, Query, Response, SocketChannel, SocketId,
@@ -26,7 +27,10 @@ pub enum Pending {
         rows: Vec<Ticker>,
         invalid: bool,
     },
-    Bullet(usize),
+    Bullet {
+        channel: usize,
+        generation: u64,
+    },
     Balance(u64),
     Symbols {
         revision: u64,
@@ -49,15 +53,35 @@ pub struct ReadOrders {
     rows: Vec<Order>,
     lookup: Option<(CommandId, String)>,
 }
-#[derive(Default)]
 struct Socket {
     socket: Option<SocketId>,
+    open: bool,
     ready: bool,
+    generation: u64,
+    token_pending: bool,
+    supervisor: Supervisor,
     ping_interval: f64,
     ping_timeout: f64,
-    ping: Option<TimerId>,
     pong: Option<TimerId>,
-    reconnect: Option<TimerId>,
+}
+impl Default for Socket {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            ready: false,
+            generation: 0,
+            token_pending: false,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 90_000.0,
+                ..Config::default()
+            }),
+            ping_interval: 18_000.0,
+            ping_timeout: 10_000.0,
+            pong: None,
+        }
+    }
 }
 #[derive(Default)]
 struct SpotBook {
@@ -171,6 +195,15 @@ impl KucoinSpot {
         cx.request_streamed(Method::Get, format!("{REST}{path}"), vec![], at, pending);
     }
     fn bullet(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        let c = &mut self.sockets[channel];
+        if c.token_pending || c.socket.is_some() || c.supervisor.is_waiting() {
+            return;
+        }
+        c.token_pending = true;
+        c.generation = c.generation.wrapping_add(1);
+        c.supervisor.set_ping_interval(cx, None);
+        c.supervisor.connecting(cx);
+        let generation = c.generation;
         self.request(
             cx,
             Method::Post,
@@ -181,7 +214,10 @@ impl KucoinSpot {
             },
             None,
             channel == 1,
-            Pending::Bullet(channel),
+            Pending::Bullet {
+                channel,
+                generation,
+            },
         );
     }
     fn topic(&mut self, cx: &mut Cx<'_, Pending>, channel: usize, topic: &str, subscribe: bool) {
@@ -242,11 +278,8 @@ impl KucoinSpot {
     }
     fn ping(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.sockets[channel];
-        if !c.ready {
+        if !c.ready || c.pong.is_some() {
             return;
-        }
-        if let Some(t) = c.ping.take() {
-            cx.clear_timer(t);
         }
         if let Some(socket) = c.socket {
             cx.send(
@@ -263,17 +296,18 @@ impl KucoinSpot {
         }
         let c = &mut self.sockets[channel];
         c.ready = false;
-        for t in [c.ping.take(), c.pong.take(), c.reconnect.take()]
-            .into_iter()
-            .flatten()
-        {
-            cx.clear_timer(t);
+        c.open = false;
+        c.token_pending = false;
+        c.generation = c.generation.wrapping_add(1);
+        if let Some(timer) = c.pong.take() {
+            cx.clear_timer(timer);
         }
         if let Some(socket) = c.socket.take() {
             cx.close(socket);
         }
-        c.reconnect = Some(cx.set_timer(1000.0));
+        c.supervisor.retry(cx);
     }
+
     fn fixed_settings(&self, cx: &mut Cx<'_, Pending>) {
         let settings = cx
             .store
@@ -670,13 +704,19 @@ impl Venue for KucoinSpot {
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(channel) = self.sockets.iter().position(|c| c.socket == Some(socket)) {
-            self.sockets[channel].pong = Some(cx.set_timer(10000.0));
+            self.sockets[channel].open = true;
+            self.sockets[channel].supervisor.opened(cx);
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        let Some(channel) = self.sockets.iter().position(|c| c.socket == Some(socket)) else {
+        let Some(channel) = self
+            .sockets
+            .iter()
+            .position(|c| c.socket == Some(socket) && c.open)
+        else {
             return;
         };
+        self.sockets[channel].supervisor.received(cx.now);
         // Decode high-volume ticker envelopes and prices together, without a raw-data rescan.
         if channel == 0
             && self.sockets[channel].ready
@@ -695,10 +735,10 @@ impl Venue for KucoinSpot {
                 if self.sockets[channel].ready {
                     return;
                 }
-                self.sockets[channel].ready = true;
-                if let Some(t) = self.sockets[channel].pong.take() {
-                    cx.clear_timer(t);
-                }
+                let c = &mut self.sockets[channel];
+                c.ready = true;
+                c.supervisor.authenticated(cx);
+                c.supervisor.set_ping_interval(cx, Some(c.ping_interval));
                 self.subscribe(cx, channel);
                 self.ping(cx, channel);
                 if channel == 1 {
@@ -715,10 +755,7 @@ impl Venue for KucoinSpot {
                 if let Some(t) = c.pong.take() {
                     cx.clear_timer(t);
                 }
-                if let Some(t) = c.ping.take() {
-                    cx.clear_timer(t);
-                }
-                c.ping = Some(cx.set_timer(c.ping_interval.max(1000.0)));
+                c.supervisor.set_ping_interval(cx, Some(c.ping_interval));
             }
             "message" if self.sockets[channel].ready => {
                 if channel == 1 {
@@ -754,6 +791,15 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Bullet {
+            channel,
+            generation,
+        } = &pending
+            && (!self.sockets[*channel].token_pending
+                || self.sockets[*channel].generation != *generation)
+        {
+            return;
+        }
         let result = success(response.status, response.body)
             .and_then(|e| e.data.ok_or_else(|| "KuCoin Spot missing data".into()));
         let data = match result {
@@ -799,42 +845,55 @@ impl Venue for KucoinSpot {
                     cx.store.set_balance(Balance::default());
                 }
             }
-            Pending::Bullet(channel) => match serde_json::from_str::<Bullet>(data.get()) {
-                Ok(t)
-                    if !t.token.is_empty()
-                        && t.instance_servers
-                            .first()
-                            .is_some_and(|s| s.endpoint.starts_with("wss://")) =>
-                {
-                    let server = &t.instance_servers[0];
-                    let c = &mut self.sockets[channel];
-                    c.ping_interval = server.ping_interval;
-                    c.ping_timeout = server.ping_timeout;
-                    let url = format!(
-                        "{}{}token={}&connectId={}",
-                        server.endpoint,
-                        if server.endpoint.contains('?') {
-                            "&"
-                        } else {
-                            "?"
-                        },
-                        crate::encode(t.token),
-                        cx.now as u64
-                    );
-                    c.socket = Some(cx.connect_channel(
-                        url,
-                        if channel == 1 {
-                            SocketChannel::Private
-                        } else {
-                            SocketChannel::Public
-                        },
-                    ));
+            Pending::Bullet {
+                channel,
+                generation,
+            } => {
+                self.sockets[channel].token_pending = false;
+                match serde_json::from_str::<Bullet>(data.get()) {
+                    Ok(t)
+                        if !t.token.is_empty()
+                            && t.instance_servers.first().is_some_and(|s| {
+                                s.endpoint.starts_with("wss://")
+                                    && s.ping_interval.is_finite()
+                                    && s.ping_interval >= 1000.0
+                                    && s.ping_timeout.is_finite()
+                                    && s.ping_timeout >= 1000.0
+                            }) =>
+                    {
+                        let server = &t.instance_servers[0];
+                        let c = &mut self.sockets[channel];
+                        c.ping_interval = server.ping_interval;
+                        c.ping_timeout = server.ping_timeout;
+                        c.supervisor.set_auth_timeout(cx, Some(server.ping_timeout));
+                        c.supervisor.connecting(cx);
+                        let url = format!(
+                            "{}{}token={}&connectId={}-{}-{generation}",
+                            server.endpoint,
+                            if server.endpoint.contains('?') {
+                                "&"
+                            } else {
+                                "?"
+                            },
+                            crate::encode(t.token),
+                            cx.now as u64,
+                            channel,
+                        );
+                        c.socket = Some(cx.connect_channel(
+                            url,
+                            if channel == 1 {
+                                SocketChannel::Private
+                            } else {
+                                SocketChannel::Public
+                            },
+                        ));
+                    }
+                    _ => {
+                        cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
+                        self.reconnect(cx, channel);
+                    }
                 }
-                _ => {
-                    cx.log(LogLevel::Error, "invalid KuCoin Spot bullet server");
-                    self.reconnect(cx, channel);
-                }
-            },
+            }
             Pending::Balance(revision) => {
                 self.balance_loading = false;
                 if revision == self.balance_revision {
@@ -1052,7 +1111,17 @@ impl Venue for KucoinSpot {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Bullet(c) => self.reconnect(cx, c),
+            Pending::Bullet {
+                channel,
+                generation,
+            } => {
+                if !self.sockets[channel].token_pending
+                    || self.sockets[channel].generation != generation
+                {
+                    return;
+                }
+                self.reconnect(cx, channel);
+            }
             Pending::Balance(_) => self.balance_loading = false,
             Pending::Symbols { .. } => self.orders_loading = false,
             Pending::Orders(r) => {
@@ -1073,19 +1142,24 @@ impl Venue for KucoinSpot {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         for channel in 0..2 {
-            let c = &mut self.sockets[channel];
-            if c.reconnect == Some(timer) {
-                c.reconnect = None;
-                self.bullet(cx, channel);
-                return;
+            match self.sockets[channel].supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => {
+                    self.bullet(cx, channel);
+                    return;
+                }
+                Tick::TimedOut(_) => {
+                    self.reconnect(cx, channel);
+                    return;
+                }
+                Tick::Ping => {
+                    self.ping(cx, channel);
+                    return;
+                }
+                Tick::Handled => return,
+                Tick::Unhandled => (),
             }
-            if c.ping == Some(timer) {
-                c.ping = None;
-                self.ping(cx, channel);
-                return;
-            }
-            if c.pong == Some(timer) {
-                c.pong = None;
+            if self.sockets[channel].pong == Some(timer) {
+                self.sockets[channel].pong = None;
                 self.reconnect(cx, channel);
                 return;
             }
