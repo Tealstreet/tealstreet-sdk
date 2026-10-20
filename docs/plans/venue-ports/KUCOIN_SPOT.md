@@ -18,6 +18,10 @@ The oracle is the current TS HF adapter in
   the same stablecoin/ticker precedence as TS. The fixed
   isolated/one-way metadata of TS zero-size positions lives in SETTINGS; the
   open-position table remains empty and leverage remains one.
+- Optional secondary credentials sign private GETs; unsigned public GETs use the
+  secondary client's route too. Token requests, order writes, and sockets retain
+  primary identity/routing. Complete secondary credentials and passphrase are
+  validated before startup I/O; an omitted read passphrase inherits the primary.
 - Open-order reconciliation discovers active symbols first and walks numbered
   pages of fifty. Failed or malformed pages preserve the good snapshot.
   Revision fences prevent an older response from overwriting socket updates;
@@ -74,17 +78,17 @@ checks signing and bullet/subscription protocol; it performs no financial
 output rewriting.
 
 Both public gates pass three runs with standard egress on fresh twenty-second
-captures at `ee4a319061`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
+captures at `f920bcf5e5`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
 tape hashes, audit results, and median measurements:
 
 | Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
 | --- | --- | --- | --- | --- |
-| Spot | 540.381 / 488.503 | 340.056 / 322.642 | 18,482,537 / 4,241,092 | 682,723 |
-| Futures | 401.933 / 201.076 | 253.549 / 109.002 | 21,377,425 / 4,042,492 | 776,846 |
+| Spot | 472.816 / 420.256 | 302.067 / 270.743 | 18,509,121 / 4,249,156 | 687,701 |
+| Futures | 381.541 / 193.144 | 231.219 / 108.682 | 21,400,489 / 4,043,004 | 782,377 |
 
 Spot private correctness passes twenty-two frames and thirteen commands; futures
 passes thirty-two frames and seventeen commands. Every request, write,
-signature and protocol audit is clean. The actual Spot SDK/WASM boundary test
-passes, and the native suite passes 143 tests, including 42 Spot tests,
+signature and protocol audit is clean. Both actual Spot SDK/WASM boundary cases
+pass, and the native suite passes 149 tests, including 46 Spot tests,
 with Clippy warnings denied at the same frozen source as the artifact gates.
 The fixed 1,258,291-byte budget is unchanged.

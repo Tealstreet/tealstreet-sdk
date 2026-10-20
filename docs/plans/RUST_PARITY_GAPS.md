@@ -775,3 +775,86 @@ including **46 Spot**, plus scoped Clippy. Host routing **306** tests, the
 `signer_headers: []` on two incoming synthetic requests; production requests
 and the delegated-signing bridge remain unchanged. Full integration and all
 22 replay gates follow on the next frozen runtime commit.
+
+### Four-artifact verification on f920bcf5e5
+
+Fresh standard builds at `f920bcf5e5ab51a163525df5b0b1cb170aa06b0a`, including
+the parity-sweep landing and Spot secondary-key phase, pass these **eight replay
+gates** on their first attempt (four public three-run and four private one-run
+gates, **32 raw TS/Rust runs**). All four public comparisons win strict median
+main-thread CPU, steady CPU and retained memory. Normal egress, financial and
+protocol audits, and the fixed **1,258,291-byte** budget remain unchanged.
+
+| Venue | WASM bytes | TS/Rust main CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands/writes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,250,863 | 408.845 / 400.800 | 187.394 / 140.023 | 18,968,289 / 2,245,492 | 33 / 15 / 9 |
+| binance | 935,485 | 177.954 / 85.400 | 97.251 / 34.240 | 18,075,665 / 4,034,540 | 14 / 3 / 4 |
+| bitrue | 817,358 | 116.985 / 88.717 | 66.433 / 44.504 | 17,048,041 / 3,302,020 | 23 / 8 / 5 |
+| polymarket | 859,221 | 26.024 / 20.588 | 8.154 / 3.842 | 23,677,617 / 4,969,620 | 20 / 8 / 5 |
+
+Actual standalone SDK tests pass: Paradex **2**, Bitrue **1**. Process CPU stays
+informational; Bitrue TS/Rust process medians are **231.570/236.008 ms**. The
+standard Paradex build retains host and engine opt-level 2; Bitrue retains its
+standalone venue opt-level 3. No compiler profile was changed during this refresh.
+Each web/Node pair is byte-identical, with immutable saved copies and exact
+source, command, log/output, artifact, tape and raw-result hash bindings in
+[PARITY_GATES.json](venue-ports/PARITY_GATES.json). That file preserves the
+full earlier `ee4a319061` four-artifact checkpoint, including its initial Paradex
+failure and single unchanged passing repeat, with their original source
+attribution. Other owners' remaining gates and final integration checks are
+recorded separately.
+
+## Final parity-sweep merged-source verification
+
+All **22 replay gates PASS** at exact runtime source
+`f920bcf5e5ab51a163525df5b0b1cb170aa06b0a`, including landing `df2d6a4a03`
+and Spot secondary GET identity support. Every gate passed on its first attempt:
+eleven public three-run comparisons and eleven private one-run correctness
+comparisons, **88 raw TS/Rust runs**, normal egress, unchanged strict public
+CPU/memory criteria and the fixed **1,258,291-byte** standalone budget.
+
+| Venue | WASM bytes | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,250,863 | 408.845 / 400.800 | 187.394 / 140.023 | 18,968,289 / 2,245,492 | 33 / 15 |
+| bitrue | 817,358 | 116.985 / 88.717 | 66.433 / 44.504 | 17,048,041 / 3,302,020 | 23 / 8 |
+| kucoinspot | 687,701 | 472.816 / 420.256 | 302.067 / 270.743 | 18,509,121 / 4,249,156 | 22 / 13 |
+| kucoin | 782,377 | 381.541 / 193.144 | 231.219 / 108.682 | 21,400,489 / 4,043,004 | 32 / 17 |
+| binance | 935,485 | 177.954 / 85.400 | 97.251 / 34.240 | 18,075,665 / 4,034,540 | 14 / 3 |
+| polymarket | 859,221 | 26.024 / 20.588 | 8.154 / 3.842 | 23,677,617 / 4,969,620 | 20 / 8 |
+| bybit | 1,118,611 | 185.189 / 138.330 | 82.477 / 45.469 | 22,223,033 / 5,021,956 | 18 / 4 |
+| bybitinverse | 1,118,611 | 116.153 / 33.217 | 74.514 / 12.216 | 14,288,449 / 1,623,268 | 14 / 3 |
+| bybitspot | 1,118,611 | 149.283 / 106.753 | 80.909 / 45.838 | 16,338,425 / 3,129,612 | 11 / 2 |
+| bybitdemo | 1,118,611 | 196.226 / 145.059 | 101.717 / 55.073 | 21,902,873 / 5,051,596 | 14 / 3 |
+| hyrotrader | 1,118,611 | 21.147 / 19.349 | 4.309 / 3.181 | 13,441,489 / 845,932 | 13 / 3 |
+
+The Bybit family shares one standard artifact. Independent audits pass for all
+three proof files, all 22 logs and 88 raw runs, seven saved standard artifacts,
+strict public medians, unclamped retained-memory arithmetic and source/tape/log
+hashes. Request, write, signature and protocol audits are clean. Private CPU
+and memory remain informational. Every earlier failed size/timing checkpoint
+and the ee4a passing repeat retain historical source attribution; no retry or
+semantic fix is claimed for this F920 refresh.
+
+Fresh source verification passes **2,765 native workspace tests**, scoped KuCoin
+**149**, including **46 Spot**, engine feature matrix **83/83/85/85** and
+standalone Paradex host **8**. Fmt, workspace/all-target and wasm32 Clippy, bans
+and PR-range secret scanning pass. Repository checks pass **44 typecheck tasks**,
+**28 lint tasks**, **27 test tasks** with safe-cex **7,747 tests per CI/unit
+invocation**, and **586 harness tests**.
+
+The tested combined web/Node artifact is **11,948,887 bytes**, SHA256
+`546ccdcc3939fe5f22efb42420dfcb437aa0eea2fc083d7bba8a2aa2f381b9c4`.
+Its **431 SDK/WASM tests in 14 files**, **74 JS host**, **16 product-semantics**,
+**9 scripted live-smoke**, native frame **1** and server adapter **1** tests pass.
+Standalone SDK tests pass: Paradex **2**, Bitrue **1**, Spot **2**, with both Spot
+read-identity modes independently checking every signed request. The default
+combined package was restored after standalone gates and both binaries match
+the saved tested artifacts exactly. The host routing oracle has **69** cases.
+
+All phase, merge and evidence reviews pass. Final published-head adversarial
+review and exact-head green CI remain required before landing; the old a423
+40/40 green checkpoint does not satisfy those requirements for this source.
+TS capability skips remain documented above. The credentialed Spot lifecycle
+profile remains unreviewed and fails before credential access; scripted lifecycle
+coverage passes. Current complete measurements and historical checkpoints are
+in the three adjacent proof files.
