@@ -11,6 +11,7 @@ import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
+import { finalizeReplay } from './replay-finalize.mjs';
 import { deterministicReplay, replayTransportReady } from './polling.mjs';
 
 const { values } = parseArgs({
@@ -192,7 +193,7 @@ async function runRust() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -323,82 +324,80 @@ async function runRust() {
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
-  const protocolErrors = tape.audit?.errors() ?? [];
+  const result = await finalizeReplay(() => {
+    const marketRows = [];
+    for (let i = 0; i < (markets?.count ?? 0); i++) {
+      marketRows.push({
+        id: markets.id(i),
+        symbol: markets.symbol(i),
+        base: markets.base(i),
+        quote: markets.quote(i),
+        active: (markets.flags[i] & 1) !== 0,
+        isInverse: (markets.flags[i] & 2) !== 0,
+        isSpot: (markets.flags[i] & 4) !== 0,
+        isExpiring: (markets.flags[i] & 16) !== 0,
+        contractSize: markets.contractSize[i] || undefined,
+        precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
+        limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
+      });
+    }
+    for (let i = 0; i < (classifications?.count ?? 0); i++) {
+      const row = marketRows[classifications.market[i]];
+      if (!row) throw new Error('Classification has no native market');
+      row.info = { symbolType: classifications.symbolType(i), marketRegion: classifications.marketRegion(i), underlyingTicker: classifications.underlyingTicker(i) };
+    }
+    for (let i = 0; i < (derivativeProducts?.count ?? 0); i++) {
+      if (derivativeProducts.kind[i] === 1) continue;
+      const row = marketRows[derivativeProducts.market[i]];
+      if (!row) throw new Error('Derivative terms have no native market');
+      const expiry = derivativeProducts.expiry[i];
+      const strike = derivativeProducts.strike[i];
+      const style = derivativeProducts.style(i);
+      const settlement = derivativeProducts.settlement(i);
+      const premiumAsset = derivativeProducts.premiumAsset(i);
+      const settleAsset = derivativeProducts.settleAsset(i);
+      if (Number.isFinite(expiry) && Number.isFinite(strike) && style === 'european' && settlement === 'cash' && premiumAsset && settleAsset) {
+        row.option = { underlying: derivativeProducts.underlying(i), expiry, strike, right: derivativeProducts.kind[i] === 2 ? 'call' : 'put', style, settlement, premiumAsset, settleAsset };
+      }
+    }
+    const tickerRows = [];
+    for (let i = 0; i < tickers.count; i++) {
+      const row = {
+        symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]),
+      };
+      for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
+      tickerRows.push(row);
+    }
+    const bookRows = {};
+    for (const [market, book] of books) {
+      const levels = (rows) => {
+        const out = [];
+        for (let i = 0; i < rows.length; i += 3) out.push({ price: rows[i], amount: rows[i + 1] });
+        return out;
+      };
+      bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
+    }
+    const account = isPrivate ? rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) : undefined;
+    return {
+      frames,
+      unserved: tape.unserved,
+      missingWrites: tape.missingWrites,
+      invalidSignatures: tape.invalidSignatures,
+      requests: [...tape.requests].sort(),
+      writes: tape.writes,
+      subscriptions: [...tape.subscriptions].sort(),
+      unusedWrites: tape.unusedWrites(),
+      protocolErrors: tape.audit?.errors() ?? [],
+      wsRequests: [...tape.sentRequests].sort(),
+      store: { markets: marketRows, tickers: tickerRows },
+      books: bookRows,
+      account,
+      commands: tape.results,
+    };
+  }, () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark));
   host.dispose();
   clock?.restore();
-
-  // Rebuild comparable records outside the measured window.
-  const marketRows = [];
-  for (let i = 0; i < (markets?.count ?? 0); i++) {
-    marketRows.push({
-      id: markets.id(i),
-      symbol: markets.symbol(i),
-      base: markets.base(i),
-      quote: markets.quote(i),
-      active: (markets.flags[i] & 1) !== 0,
-      isInverse: (markets.flags[i] & 2) !== 0,
-      isSpot: (markets.flags[i] & 4) !== 0,
-      isExpiring: (markets.flags[i] & 16) !== 0,
-      contractSize: markets.contractSize[i] || undefined,
-      precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
-      limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
-    });
-  }
-  for (let i = 0; i < (classifications?.count ?? 0); i++) {
-    const row = marketRows[classifications.market[i]];
-    if (!row) throw new Error('Classification has no native market');
-    row.info = { symbolType: classifications.symbolType(i), marketRegion: classifications.marketRegion(i), underlyingTicker: classifications.underlyingTicker(i) };
-  }
-  for (let i = 0; i < (derivativeProducts?.count ?? 0); i++) {
-    if (derivativeProducts.kind[i] === 1) continue;
-    const row = marketRows[derivativeProducts.market[i]];
-    if (!row) throw new Error('Derivative terms have no native market');
-    const expiry = derivativeProducts.expiry[i];
-    const strike = derivativeProducts.strike[i];
-    const style = derivativeProducts.style(i);
-    const settlement = derivativeProducts.settlement(i);
-    const premiumAsset = derivativeProducts.premiumAsset(i);
-    const settleAsset = derivativeProducts.settleAsset(i);
-    if (Number.isFinite(expiry) && Number.isFinite(strike) && style === 'european' && settlement === 'cash' && premiumAsset && settleAsset) {
-      row.option = { underlying: derivativeProducts.underlying(i), expiry, strike, right: derivativeProducts.kind[i] === 2 ? 'call' : 'put', style, settlement, premiumAsset, settleAsset };
-    }
-  }
-  const tickerRows = [];
-  for (let i = 0; i < tickers.count; i++) {
-    const row = {
-      symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]),
-    };
-    for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
-    tickerRows.push(row);
-  }
-  const bookRows = {};
-  for (const [market, book] of books) {
-    const levels = (rows) => {
-      const out = [];
-      for (let i = 0; i < rows.length; i += 3) out.push({ price: rows[i], amount: rows[i + 1] });
-      return out;
-    };
-    bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
-  }
-  const account = isPrivate ? rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) : undefined;
-  return {
-    frames,
-    metrics,
-    unserved: tape.unserved,
-    missingWrites: tape.missingWrites,
-    invalidSignatures: tape.invalidSignatures,
-    requests: [...tape.requests].sort(),
-    writes: tape.writes,
-    subscriptions: [...tape.subscriptions].sort(),
-    unusedWrites: tape.unusedWrites(),
-    protocolErrors,
-    wsRequests: [...tape.sentRequests].sort(),
-    store: { markets: marketRows, tickers: tickerRows },
-    books: bookRows,
-    account,
-    commands: tape.results,
-  };
+  return result;
 }
 
 const commandArgs = ({ t, type, expected, ...args }) => args;
@@ -654,7 +653,7 @@ async function runTs() {
   await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
 
   const store = new DefaultStore();
@@ -732,72 +731,72 @@ async function runTs() {
   postStore();
   if (!values['no-egress'])
     for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
-  const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
-  const snapshot = {
-    markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
-    tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
-  };
-  const bookCopies = Object.fromEntries(
-    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [
-      symbol,
-      JSON.parse(JSON.stringify(book)),
-    ]),
-  );
-  const account = isPrivate
-    ? {
-        hedged: Boolean(store.options.isHedged),
-        balance: {
-          used: store.balance.used,
-          free: store.balance.free,
-          total: store.balance.total,
-          upnl: store.balance.upnl,
-          ...(venue.currencyBalances && store.balance.currencies !== undefined
-            ? { currencies: store.balance.currencies }
-            : {}),
-          ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
-          ...(venue.compareBalanceCurrencies ? {
-            currencies: venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies ?? {},
-          } : {}),
-        },
-        orders: store.orders.map((o) => ({ ...o })),
-        // Zero-size placeholders carry each market's leverage and margin type.
-        positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: venue.tsSettings?.(exchange, store) ?? [
-          ...new Map(
-            store.positions
-              .filter((p) => p.leverage > 0)
-              .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-          ).values(),
-        ],
-        fills: executions.map((f) => ({
-          id: f.orderId ?? f.id,
-          symbol: f.symbol,
-          side: f.side,
-          amount: f.amount,
-          ...(venue.compareFillPrices ? { price: f.price } : {}),
-        })),
-      }
-    : undefined;
-  const protocolErrors = tape.audit?.errors() ?? [];
+  const result = await finalizeReplay(() => {
+    const snapshot = {
+      markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
+      tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
+    };
+    const bookCopies = Object.fromEntries(
+      Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [
+        symbol,
+        JSON.parse(JSON.stringify(book)),
+      ]),
+    );
+    const account = isPrivate
+      ? {
+          hedged: Boolean(store.options.isHedged),
+          balance: {
+            used: store.balance.used,
+            free: store.balance.free,
+            total: store.balance.total,
+            upnl: store.balance.upnl,
+            ...(venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins ? { coins: store.balance.coins ?? {} } : {}),
+            ...(venue.currencyBalances && store.balance.currencies !== undefined
+              ? { currencies: store.balance.currencies }
+              : {}),
+            ...(venue.compareBalanceCurrencies ? {
+              currencies: venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies ?? {},
+            } : {}),
+          },
+          orders: store.orders.map((o) => ({ ...o })),
+          // Zero-size placeholders carry each market's leverage and margin type.
+          positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
+          settings: venue.tsSettings?.(exchange, store) ?? [
+            ...new Map(
+              store.positions
+                .filter((p) => p.leverage > 0)
+                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
+            ).values(),
+          ],
+          fills: executions.map((f) => ({
+            id: f.orderId ?? f.id,
+            symbol: f.symbol,
+            side: f.side,
+            amount: f.amount,
+            ...(venue.compareFillPrices ? { price: f.price } : {}),
+          })),
+        }
+      : undefined;
+    return {
+      frames,
+      unserved: tape.unserved,
+      missingWrites: tape.missingWrites,
+      invalidSignatures: tape.invalidSignatures,
+      requests: [...tape.requests].sort(),
+      writes: tape.writes,
+      subscriptions: [...tape.subscriptions].sort(),
+      unusedWrites: tape.unusedWrites(),
+      protocolErrors: tape.audit?.errors() ?? [],
+      wsRequests: [...tape.sentRequests].sort(),
+      store: snapshot,
+      books: bookCopies,
+      account,
+      commands: tape.results,
+    };
+  }, () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark));
   exchange.dispose();
   clock?.restore();
-  return {
-    frames,
-    metrics,
-    unserved: tape.unserved,
-    missingWrites: tape.missingWrites,
-    invalidSignatures: tape.invalidSignatures,
-    requests: [...tape.requests].sort(),
-    writes: tape.writes,
-    subscriptions: [...tape.subscriptions].sort(),
-    unusedWrites: tape.unusedWrites(),
-    protocolErrors,
-    wsRequests: [...tape.sentRequests].sort(),
-    store: snapshot,
-    books: bookCopies,
-    account,
-    commands: tape.results,
-  };
+  return result;
 }
 
 /** The fields both implementations carry, in one shape. */
