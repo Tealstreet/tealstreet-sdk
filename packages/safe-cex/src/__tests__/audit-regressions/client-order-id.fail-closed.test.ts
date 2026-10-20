@@ -37,6 +37,7 @@ import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { WeexExchange } from '../../exchanges/weex/weex.exchange';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -139,6 +140,8 @@ const setup = (name: string, Ctor: ExchangeCtor) => {
     { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false },
     store,
   );
+  // A Rust venue answers from its engine's record, as it would once started.
+  if (exchange instanceof RustEngineExchange) adoptEngineCapabilities(exchange);
   const transportCalls = vi.fn();
   for (const key of Object.keys(exchange)) {
     if (!isTransport((exchange as any)[key])) continue;
@@ -164,6 +167,7 @@ describe('clientOrderId fails closed before any write', () => {
       { key: 'key', secret: 'secret', passphrase: 'passphrase' },
       store,
     );
+    adoptEngineCapabilities(exchange);
     const opts = order({ clientOrderId: 'caller.id:/A_-' });
     const place = vi.spyOn(exchange, 'placeOrders').mockResolvedValue(['order-1']);
     await expect(

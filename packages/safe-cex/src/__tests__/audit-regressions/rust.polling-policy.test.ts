@@ -9,6 +9,7 @@ import { RUST_VENUES, RustEngineExchange, setWasmEngineLoader } from '../../exch
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/bybit/bybit.types', async (original) => ({
   ...(await original<typeof import('../../exchanges/bybit/bybit.types')>()),
@@ -61,6 +62,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
       }),
     );
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: vi.fn(() => {
       events.push('start');
       return '[]';

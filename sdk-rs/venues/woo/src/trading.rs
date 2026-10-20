@@ -4,7 +4,9 @@ use crate::{
     wire::{Envelope, id, number},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -60,6 +62,10 @@ struct Job {
     ids: Vec<String>,
     touches: HashMap<(String, OrderSide), f64>,
     errors: Vec<String>,
+    /// A failed cancel family's outcome is not known.
+    errors_unknown: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -948,7 +954,10 @@ impl Woo {
             || self.options.key.is_none()
             || self.options.secret.is_none()
         {
-            cx.done(command, Err("WOO trading requires credentials".into()));
+            cx.fail(
+                command,
+                not_sent("WOO trading requires credentials").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         match planned {
@@ -959,10 +968,12 @@ impl Woo {
                     ids: Vec::new(),
                     touches: HashMap::new(),
                     errors: Vec::new(),
+                    errors_unknown: false,
+                    effective: false,
                 });
                 self.trade_pump(cx);
             }
-            Err(error) => cx.done(command, Err(error)),
+            Err(error) => cx.fail(command, not_sent(error)),
         }
     }
     fn trade_pump(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -978,12 +989,18 @@ impl Woo {
             };
             let Some(step) = job.steps.pop_front() else {
                 let job = self.trading.active.take().unwrap();
-                let result = if job.errors.is_empty() {
-                    Ok(json(&job.ids).unwrap())
+                if job.errors.is_empty() {
+                    cx.done(job.command, Ok(json(&job.ids).unwrap()));
                 } else {
-                    Err(job.errors.join("; "))
-                };
-                cx.done(job.command, result);
+                    // The cancel families are independent; only an unknown one is worth stating.
+                    let error = VenueError::new(job.errors.join("; "));
+                    let error = if job.errors_unknown {
+                        error.outcome(Outcome::Unknown)
+                    } else {
+                        error
+                    };
+                    cx.fail(job.command, error);
+                }
                 continue;
             };
             let command = job.command;
@@ -994,14 +1011,14 @@ impl Woo {
                     match self.build_places(cx, orders, &touches) {
                         Ok(steps) => self.trading.active.as_mut().unwrap().steps.extend(steps),
                         Err(error) => {
-                            self.trade_abort(cx, &error);
+                            self.trade_abort(cx, not_sent(error));
                         }
                     }
                     continue;
                 }
                 Step::Touch { ref symbol, .. } => {
                     let Some(m) = cx.store.market(symbol) else {
-                        self.trade_abort(cx, "WOO market disappeared");
+                        self.trade_abort(cx, not_sent("WOO market disappeared"));
                         continue;
                     };
                     cx.request(
@@ -1061,7 +1078,7 @@ impl Woo {
                         }),
                     );
                     if let Err(error) = result {
-                        self.trade_write_failed(cx, &outbound, &error);
+                        self.trade_write_failed(cx, &outbound, not_sent(error));
                         continue;
                     }
                     self.trading.next_write =
@@ -1072,7 +1089,7 @@ impl Woo {
                 }
                 Step::Leverage { ref symbol, .. } => {
                     let Some(m) = cx.store.market(symbol) else {
-                        self.trade_abort(cx, "WOO market disappeared");
+                        self.trade_abort(cx, not_sent("WOO market disappeared"));
                         continue;
                     };
                     let result = self.signed(
@@ -1091,7 +1108,7 @@ impl Woo {
                         }),
                     );
                     if let Err(error) = result {
-                        self.trade_abort(cx, &error);
+                        self.trade_abort(cx, not_sent(error));
                         continue;
                     }
                 }
@@ -1108,7 +1125,7 @@ impl Woo {
                         }),
                     );
                     if let Err(error) = result {
-                        self.trade_abort(cx, &error);
+                        self.trade_abort(cx, not_sent(error));
                         continue;
                     }
                 }
@@ -1117,18 +1134,25 @@ impl Woo {
             return;
         }
     }
-    fn trade_abort(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    fn trade_abort(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         if let Some(job) = self.trading.active.take() {
-            let suffix = if job.ids.is_empty() {
-                String::new()
-            } else {
-                format!("; accepted native IDs: {}", json(&job.ids).unwrap())
-            };
-            cx.done(job.command, Err(format!("{error}{suffix}")));
+            if !job.ids.is_empty() {
+                error.message = format!(
+                    "{}; accepted native IDs: {}",
+                    error.message,
+                    json(&job.ids).unwrap()
+                );
+            }
+            if (job.effective || !job.ids.is_empty())
+                && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
+                error.outcome = None;
+            }
+            cx.fail(job.command, error);
         }
         self.trading.waiting = false;
     }
-    fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, error: &str) {
+    fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, error: VenueError) {
         if let Step::Write {
             accepted: Accepted::CancelAll,
             path,
@@ -1136,17 +1160,15 @@ impl Woo {
         } = step
         {
             // The two cancel families are independent; neither ambiguous write is retried.
-            self.trading
-                .active
-                .as_mut()
-                .unwrap()
-                .errors
-                .push(format!("{path}: {error}"));
+            let job = self.trading.active.as_mut().unwrap();
+            job.errors_unknown |= error.outcome == Some(Outcome::Unknown);
+            job.errors.push(format!("{path}: {}", error.message));
         } else {
             self.trade_config_finished(step);
             self.trade_abort(cx, error);
         }
     }
+    /// Retries a config read; a read that keeps failing precedes nothing that was sent.
     fn trade_retry_read(&mut self, cx: &mut Cx<'_, Pending>, step: Step, error: &str) {
         let original = step.clone();
         let retry = match step {
@@ -1177,7 +1199,7 @@ impl Woo {
             self.trading.timer = Some(cx.set_timer(250.0));
         } else {
             self.trade_config_finished(&original);
-            self.trade_abort(cx, error);
+            self.trade_abort(cx, not_sent(error));
             self.trade_pump(cx);
         }
     }
@@ -1282,7 +1304,8 @@ impl Woo {
                 if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
                     self.trade_retry_read(cx, request.step, &error);
                 } else {
-                    self.trade_write_failed(cx, &request.step, &error);
+                    let error = answer_failure(&response, error);
+                    self.trade_write_failed(cx, &request.step, error);
                     self.trade_pump(cx);
                 }
                 return;
@@ -1450,12 +1473,27 @@ impl Woo {
             }
             Ok(())
         })();
-        if let Err(error) = outcome {
-            if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
-                self.trade_retry_read(cx, request.step, &error);
-                return;
+        match outcome {
+            Ok(()) => {
+                if matches!(request.step, Step::Write { .. })
+                    && let Some(job) = self.trading.active.as_mut()
+                {
+                    job.effective = true;
+                }
             }
-            self.trade_write_failed(cx, &request.step, &error);
+            Err(error) => {
+                if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
+                    self.trade_retry_read(cx, request.step, &error);
+                    return;
+                }
+                // An explicit `success: false` ack is a refusal without a code table.
+                let error = if error == "WOO mutation was not accepted" {
+                    VenueError::new(error)
+                } else {
+                    VenueError::new(error).outcome(Outcome::Unknown)
+                };
+                self.trade_write_failed(cx, &request.step, error);
+            }
         }
         self.trade_pump(cx);
     }
@@ -1475,6 +1513,9 @@ impl Woo {
                 self.trade_retry_read(cx, request.step, error)
             }
             _ => {
+                let error = VenueError::new(error)
+                    .kind(ErrorKind::Network)
+                    .outcome(Outcome::Unknown);
                 self.trade_write_failed(cx, &request.step, error);
                 self.trade_pump(cx);
             }
@@ -1488,5 +1529,44 @@ impl Woo {
         } else {
             false
         }
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A refused write answer, classified by HTTP status and WOO's documented
+/// error codes. 408/5xx and malformed answers do not prove a refusal.
+fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
+    #[derive(Deserialize)]
+    struct Code {
+        code: Option<i64>,
+        success: Option<bool>,
+    }
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let parsed = serde_json::from_str::<Code>(response.body).ok();
+    let code = parsed.as_ref().and_then(|c| c.code);
+    let error = match code {
+        Some(code) => error.venue_code(code.to_string()),
+        None => error,
+    };
+    match (response.status, code) {
+        (408 | 500.., _) => error.outcome(Outcome::Unknown),
+        (_, Some(-1001 | -1002)) | (401, _) => rejected(error, ErrorKind::AuthInvalid),
+        (_, Some(-1003)) | (429, _) => rejected(error, ErrorKind::RateLimited),
+        (403, _) => rejected(error, ErrorKind::AuthPermission),
+        (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
+        (_, Some(-1004 | -1005 | -1006 | -1008 | -1101 | -1102 | -1103)) => {
+            rejected(error, ErrorKind::Rejected)
+        }
+        // A 2xx that is not an explicit `success: false` refusal proves nothing.
+        _ if response.status < 400 && parsed.is_none_or(|c| c.success != Some(false)) => {
+            error.outcome(Outcome::Unknown)
+        }
+        (400..=499, None) => rejected(error, ErrorKind::Rejected),
+        _ => error,
     }
 }

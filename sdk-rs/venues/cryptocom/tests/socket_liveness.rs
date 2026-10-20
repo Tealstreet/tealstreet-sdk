@@ -1,5 +1,6 @@
 mod support;
-use safe_cex_engine::{Action, Event, SocketId, TimerId};
+use safe_cex_engine::{Action, Event, PublicFeedPolicy, SocketId, TimerId};
+use safe_cex_venue_cryptocom::Options;
 use support::Harness;
 
 fn timer_at(actions: &[Action], at: f64) -> TimerId {
@@ -255,4 +256,75 @@ fn missing_or_malformed_auth_codes_cannot_subscribe_or_cancel_the_login_deadline
         );
         assert!(h.actions.iter().any(|a| matches!(a, Action::SetTimer { at_ms, .. } if (750.0..=1000.0).contains(&(*at_ms-h.now)))));
     }
+}
+
+/// Fires every timer due before `until`, returning the fire count and every socket action seen.
+fn fire_until(h: &mut Harness, until: f64) -> (usize, Vec<Action>) {
+    let (mut timers, mut sockets, mut fired) = (Vec::new(), Vec::new(), 0);
+    loop {
+        for action in std::mem::take(&mut h.actions) {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } | Action::WsClose { .. } => sockets.push(action),
+                _ => {}
+            }
+        }
+        let Some(&(timer, at)) = timers
+            .iter()
+            .filter(|(_, at)| *at <= until)
+            .min_by(|a: &&(TimerId, f64), b| a.1.total_cmp(&b.1))
+        else {
+            h.now = until;
+            return (fired, sockets);
+        };
+        timers.retain(|(t, _)| *t != timer);
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        fired += 1;
+    }
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::with_policy(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    assert_eq!(
+        h.engine.store().markets().len(),
+        1,
+        "public startup completed"
+    );
+    let until = h.now + 600_000.0;
+    let (fired, sockets) = fire_until(&mut h, until);
+    assert!(
+        sockets.is_empty(),
+        "no public connects or closes: {sockets:?}"
+    );
+    assert_eq!(fired, 0, "no supervision timers fire");
+}
+
+#[test]
+fn private_socket_stays_supervised_under_shared_public_feed() {
+    let mut h = Harness::with_policy(
+        Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Default::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    let private = h.socket(true);
+    let until = h.now + 10_000.0;
+    let (_, sockets) = fire_until(&mut h, until);
+    assert!(
+        sockets
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == private)),
+        "unopened private socket hits its connect deadline: {sockets:?}"
+    );
 }

@@ -994,8 +994,23 @@ impl ApexOmni {
                     );
                     return;
                 };
+                // Live last price values positions as in TS (native PnL lags); only a
+                // missing, zero or non-finite quote falls back to reported position PnL.
                 let upnl = cx.store.positions().iter().try_fold(0.0, |sum, p| {
-                    let value = sum + p.unrealized_pnl;
+                    let pnl = cx
+                        .store
+                        .ticker(&p.symbol)
+                        .map(|t| t.last)
+                        .filter(|last| last.is_finite() && *last > 0.0)
+                        .map_or(p.unrealized_pnl, |last| {
+                            let direction = if p.side == PositionSide::Long {
+                                1.0
+                            } else {
+                                -1.0
+                            };
+                            (last - p.entry_price) * p.contracts * direction
+                        });
+                    let value = sum + pnl;
                     value.is_finite().then_some(value)
                 });
                 let Some(upnl) = upnl else {

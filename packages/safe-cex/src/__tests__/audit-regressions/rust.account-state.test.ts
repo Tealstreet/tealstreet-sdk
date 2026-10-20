@@ -13,6 +13,7 @@ import { MarginType, OrderSide, OrderStatus, OrderType, PositionSide } from '../
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
 import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 
 const accounts: BaseExchange[] = [];
 const loaded = { markets: true, tickers: true, orders: true, positions: true, balance: true };
@@ -51,13 +52,13 @@ const position = (symbol = 'BTCUSDT'): Position => ({
   liquidationPrice: 50,
 });
 
-// Independent format-1 ACCOUNT_READ marker (section 19, empty payload).
+// Independent format-1 ACCOUNT_READ marker (section 20, empty payload).
 function accountReadFrame(frame: ArrayBuffer): ArrayBuffer {
   const buffer = new ArrayBuffer(frame.byteLength + 8);
   new Uint8Array(buffer).set(new Uint8Array(frame));
   const view = new DataView(buffer);
   view.setUint16(6, view.getUint16(6, true) + 1, true);
-  view.setUint16(frame.byteLength, 19, true);
+  view.setUint16(frame.byteLength, 20, true);
   return buffer;
 }
 
@@ -111,8 +112,10 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
       undefined,
       eventsPending,
       state.markets!.map((m) => m.symbol),
+      quantityUnitsCode(name),
     );
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
     wsOpen: idle,
     wsMessage: idle,
@@ -157,6 +160,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
             undefined,
             false,
             state.markets!.map((m) => m.symbol),
+            quantityUnitsCode(name),
           ),
         ),
       );

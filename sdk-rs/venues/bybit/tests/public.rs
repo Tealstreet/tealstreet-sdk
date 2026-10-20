@@ -138,7 +138,7 @@ fn klines_stream_into_candle_frames() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     h.flush_subscriptions();
     assert!(
@@ -166,7 +166,7 @@ fn fetched_candles_come_back_oldest_first() {
     h.command(Command::FetchCandles {
         command: 3,
         symbol: "BTCUSD".into(),
-        interval: "1h".into(),
+        interval: safe_cex_engine::model::Interval::H1,
         limit: None,
         from_ms: Some(1670601600000.0),
         to_ms: Some(1670608800000.0),
@@ -329,11 +329,11 @@ fn a_quiet_socket_is_pinged_and_a_silent_one_reconnected() {
         "/v5/public/linear",
         r#"{"success":true,"ret_msg":"pong","conn_id":"465772b1-7630-4fdc-a492-e003e6f0f260","req_id":"","op":"ping"}"#,
     );
-    h.advance(20_000.0);
+    h.advance(19_999.0);
     assert!(!h.closed.contains(&socket), "the pong kept it alive");
-    h.advance(5_000.0);
+    h.advance(1.0);
     assert!(h.closed.contains(&socket));
-    h.advance(1_000.0);
+    h.advance(500.0);
     assert_ne!(h.socket("/v5/public/linear"), Some(socket));
 }
 
@@ -378,7 +378,7 @@ fn trades_extend_the_native_kline_and_roll_new_bars_in_order() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.flush_subscriptions();
     let sent = h.sent_on("/v5/public/linear").join("");
@@ -422,11 +422,11 @@ fn trades_extend_the_native_kline_and_roll_new_bars_in_order() {
     // Only the last subscriber unsubscribes the shared trade topic.
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     h.command(Command::UnsubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.flush_subscriptions();
     assert!(
@@ -442,7 +442,7 @@ fn seconds_candles_are_built_from_trades_alone() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: "BTCUSDT".into(),
-        interval: "5s".into(),
+        interval: safe_cex_engine::model::Interval::S5,
     });
     h.flush_subscriptions();
     let sent = h.sent_on("/v5/public/linear").join("");

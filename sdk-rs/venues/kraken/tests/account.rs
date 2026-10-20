@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId};
+use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_kraken::Kraken;
 use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -290,7 +290,33 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
         assert!(!msg.contains("account_balances"));
     }
 }
-fn fresh_private(e: &mut Engine<Kraken>, old: SocketId) -> (SocketId, safe_cex_engine::TimerId) {
+type Timers = Vec<(TimerId, f64)>;
+fn track(timers: &mut Timers, actions: &[Action]) {
+    for action in actions {
+        match action {
+            Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+            Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+            _ => (),
+        }
+    }
+}
+fn advance(e: &mut Engine<Kraken>, timers: &mut Timers, until: f64) -> Vec<Action> {
+    let mut out = vec![];
+    while let Some((timer, at)) = timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= until)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        track(timers, &actions);
+        out.extend(actions);
+    }
+    out
+}
+fn fresh_private(e: &mut Engine<Kraken>, old: SocketId) -> (SocketId, Timers) {
     e.drain_actions().for_each(drop);
     e.handle(
         NOW,
@@ -326,24 +352,14 @@ fn fresh_private(e: &mut Engine<Kraken>, old: SocketId) -> (SocketId, safe_cex_e
         })
         .unwrap();
     e.handle(NOW + 1000.0, Event::WsOpened { socket });
-    let watchdog = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a
-                && at_ms == NOW + 11000.0
-            {
-                Some(timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    (socket, watchdog)
+    let mut timers = vec![];
+    track(&mut timers, &e.drain_actions().collect::<Vec<_>>());
+    (socket, timers)
 }
 #[test]
 fn private_auth_requires_every_feed_ack_with_a_deadline() {
     let (mut e, s) = ready();
-    let (s, t) = fresh_private(&mut e, s);
+    let (s, mut timers) = fresh_private(&mut e, s);
     message(
         &mut e,
         s,
@@ -358,17 +374,25 @@ fn private_auth_requires_every_feed_ack_with_a_deadline() {
             &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
         );
     }
-    e.drain_actions().for_each(drop);
-    e.handle(NOW + 21000.0, Event::TimerFired { timer: t });
+    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    track(&mut timers, &actions);
+    actions = advance(&mut e, &mut timers, NOW + 16000.0);
     assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::WsClose{socket}if socket==s))
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::WsClose{socket}if *socket==s))
+    );
+    actions = advance(&mut e, &mut timers, NOW + 21000.0);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::WsClose{socket}if *socket==s))
     );
 }
 #[test]
 fn heartbeat_and_busy_fills_cannot_hide_absent_position_payloads() {
     let (mut e, s) = ready();
-    let (s, mut timer) = fresh_private(&mut e, s);
+    let (s, mut timers) = fresh_private(&mut e, s);
     message(
         &mut e,
         s,
@@ -383,13 +407,10 @@ fn heartbeat_and_busy_fills_cannot_hide_absent_position_payloads() {
             &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
         );
     }
-    e.drain_actions().for_each(drop);
+    track(&mut timers, &e.drain_actions().collect::<Vec<_>>());
     for step in 1..=18 {
         let now = NOW + 1000.0 + 10000.0 * f64::from(step);
-        message(&mut e, s, now, r#"{"event":"pong"}"#);
-        message(&mut e, s, now, r#"{"feed":"fills","fills":[]}"#);
-        e.handle(now, Event::TimerFired { timer });
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = advance(&mut e, &mut timers, now);
         let closed = actions
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==s));
@@ -400,19 +421,10 @@ fn heartbeat_and_busy_fills_cannot_hide_absent_position_payloads() {
             );
         } else {
             assert!(!closed);
-            timer = actions
-                .into_iter()
-                .find_map(|a| {
-                    if let Action::SetTimer { timer, at_ms } = a
-                        && at_ms == now + 10000.0
-                    {
-                        Some(timer)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap();
         }
+        message(&mut e, s, now, r#"{"event":"pong"}"#);
+        message(&mut e, s, now, r#"{"feed":"fills","fills":[]}"#);
+        track(&mut timers, &e.drain_actions().collect::<Vec<_>>());
     }
 }
 #[test]
@@ -588,7 +600,7 @@ fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_c
 #[test]
 fn quiet_authenticated_private_feeds_stay_open_after_initial_empty_snapshots() {
     let (mut e, s) = ready();
-    let (s, mut timer) = fresh_private(&mut e, s);
+    let (s, mut timers) = fresh_private(&mut e, s);
     message(
         &mut e,
         s,
@@ -610,31 +622,20 @@ fn quiet_authenticated_private_feeds_stay_open_after_initial_empty_snapshots() {
     ] {
         message(&mut e, s, NOW + 1002.0, snapshot);
     }
-    e.drain_actions().for_each(drop);
+    track(&mut timers, &e.drain_actions().collect::<Vec<_>>());
     // Event-driven fills/orders legitimately stay quiet for hours after snapshots.
     for step in 1..=180 {
         let now = NOW + 1000.0 + 10000.0 * f64::from(step);
-        message(&mut e, s, now, r#"{"event":"pong"}"#);
-        e.handle(now, Event::TimerFired { timer });
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = advance(&mut e, &mut timers, now);
         assert!(
             !actions
                 .iter()
                 .any(|a| matches!(a,Action::WsClose{socket}if *socket==s)),
             "quiet authenticated account reconnected at step {step}"
         );
-        timer = actions
-            .into_iter()
-            .find_map(|a| {
-                if let Action::SetTimer { timer, at_ms } = a
-                    && at_ms == now + 10000.0
-                {
-                    Some(timer)
-                } else {
-                    None
-                }
-            })
-            .expect("private watchdog remains armed");
+        message(&mut e, s, now, r#"{"event":"pong"}"#);
+        track(&mut timers, &e.drain_actions().collect::<Vec<_>>());
+        assert!(!timers.is_empty(), "private watchdog remains armed");
     }
 }
 fn delayed_placement(e: &mut Engine<Kraken>, id: &str) {

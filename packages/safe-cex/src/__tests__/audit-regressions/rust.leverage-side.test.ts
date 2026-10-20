@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { PositionSide } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
@@ -34,6 +35,7 @@ describe('Rust leverage command side boundary', () => {
     store.update({ markets: [market], fetchedLeverage: { BTCUSDT: { buyLeverage: 5, sellLeverage: 7 } } });
     const exchange = new RustEngineExchange(name, { key: '', secret: '' }, store);
     exchanges.push(exchange);
+    adoptEngineCapabilities(exchange);
     await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
       buyLeverage: 5,
       sellLeverage: 7,

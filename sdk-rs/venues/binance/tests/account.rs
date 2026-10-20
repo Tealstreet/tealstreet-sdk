@@ -552,12 +552,12 @@ fn near_the_weight_limit_background_reads_pause() {
 fn a_silent_socket_is_closed_and_reconnected() {
     let mut h = ready();
     let public = h.socket("/public/ws").unwrap();
-    h.advance(20_000.0);
+    h.advance(19_999.0);
     assert!(
         !h.closed.contains(&public),
-        "twenty seconds of silence is tolerated"
+        "under twenty seconds of silence is tolerated"
     );
-    h.advance(5_000.0);
+    h.advance(1.0);
     assert!(h.closed.contains(&public));
     h.advance(1_000.0);
     assert_ne!(h.socket("/public/ws"), Some(public), "a new public socket");
@@ -884,6 +884,160 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     }
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
+}
+
+/// Closes the user stream, waits out its retry and answers the listen-key POST.
+fn reconnect_private(h: &mut Harness) -> f64 {
+    let socket = h.socket("/private/ws").unwrap();
+    let before = h.timers.clone();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let delay = h
+        .timers
+        .iter()
+        .filter(|t| !before.contains(t))
+        .map(|(_, at)| at - h.now)
+        .fold(f64::NAN, f64::min);
+    h.advance(delay);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"fresh"}"#);
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    delay
+}
+
+#[test]
+fn a_flapping_user_stream_backs_off_although_each_attempt_opens() {
+    let mut h = ready();
+    for attempt in 0..6 {
+        let nominal = 500.0 * 2f64.powi(attempt);
+        let delay = reconnect_private(&mut h);
+        assert!(
+            (nominal * 0.75..=nominal).contains(&delay),
+            "attempt {attempt}: {delay}"
+        );
+    }
+}
+
+#[test]
+fn the_user_stream_is_probed_every_five_seconds() {
+    let mut h = ready();
+    let private = h.socket("/private/ws").unwrap();
+    let probes = |h: &Harness| {
+        h.sent
+            .iter()
+            .filter(|(s, t)| *s == private && t == r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)
+            .count()
+    };
+    h.advance(4_999.0);
+    assert_eq!(probes(&h), 0);
+    h.advance(1.0);
+    assert_eq!(probes(&h), 1);
+    h.message("/private/ws", r#"{"result":[],"id":42}"#);
+    h.advance(10_000.0);
+    assert_eq!(probes(&h), 3);
+}
+
+#[test]
+fn a_slow_listen_key_post_is_not_a_connect_timeout() {
+    let mut h = ready();
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.advance(500.0);
+    assert!(h.has_request("/fapi/v1/listenKey"));
+    h.advance(30_000.0);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"slow"}"#);
+    let pending = h.socket("/private/ws").unwrap();
+    assert_ne!(pending, socket);
+    h.advance(9_999.0);
+    assert!(!h.closed.contains(&pending));
+    h.advance(1.0);
+    assert!(h.closed.contains(&pending), "an unopened stream expires");
+    h.advance(1_000.0);
+    assert!(h.has_request("/fapi/v1/listenKey"), "and fetches a new key");
+}
+
+fn fills_over(h: &mut Harness, command: u32, days: f64) {
+    h.event(Event::Command(Command::Query {
+        command,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(days * 86_400_000.0),
+            limit: Some(10),
+        },
+    }));
+}
+
+const TRADE: &str = r#"[{"symbol":"BTCUSDT","id":7,"orderId":8,"side":"BUY","price":"100","qty":"1","realizedPnl":"0","commission":"0.1","commissionAsset":"USDT","time":1000,"positionSide":"BOTH","maker":false}]"#;
+
+/// Pins the exact request sequence of windowed fills: one request per
+/// 7-day window, oldest first. Paging refactors keep it.
+#[test]
+fn windowed_fills_request_sequence_is_pinned() {
+    let mut h = ready();
+    fills_over(&mut h, 22, 10.0);
+    let mut sent = Vec::new();
+    for _ in 0..2 {
+        let r = h.take("/fapi/v1/userTrades");
+        sent.push(
+            r.url
+                .split_once('?')
+                .unwrap()
+                .1
+                .split('&')
+                .filter(|p| {
+                    !p.starts_with("timestamp=")
+                        && !p.starts_with("signature=")
+                        && !p.starts_with("recvWindow=")
+                })
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
+        h.reply(r.id, 200, "", TRADE);
+    }
+    assert!(h.result(22).unwrap().is_ok());
+    assert_eq!(
+        sent,
+        [
+            "symbol=BTCUSDT&limit=10&startTime=0&endTime=604800000",
+            "symbol=BTCUSDT&limit=10&startTime=604800001&endTime=864000000",
+        ]
+    );
+}
+
+#[test]
+fn fills_windows_cover_the_last_millisecond_of_the_range() {
+    // [0, 7d] then the single millisecond 7d + 1, which the old split dropped.
+    let mut h = ready();
+    h.event(Event::Command(Command::Query {
+        command: 24,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(604_800_001.0),
+            limit: Some(10),
+        },
+    }));
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 200, "", "[]");
+    let r = h.take("/fapi/v1/userTrades");
+    assert_eq!(param(&r.url, "startTime").as_deref(), Some("604800001"));
+    assert_eq!(param(&r.url, "endTime").as_deref(), Some("604800001"));
+}
+
+/// Keeps landing's bridge contract for a failed later fills window: a command
+/// error, then an empty success that does not return earlier windows' rows.
+#[test]
+fn a_failed_later_fills_window_reports_a_command_error_before_an_empty_success() {
+    let mut h = ready();
+    fills_over(&mut h, 25, 10.0);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 200, "", TRADE);
+    let r = h.take("/fapi/v1/userTrades");
+    h.reply(r.id, 503, "", "unavailable");
+    assert_eq!(h.result(25), Some(&Ok("[]".into())));
+    assert!(h.command_errors.iter().any(|(command, _)| *command == 25));
 }
 
 #[test]

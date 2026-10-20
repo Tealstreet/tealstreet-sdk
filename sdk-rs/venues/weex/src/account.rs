@@ -6,6 +6,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
+use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
 use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
@@ -139,16 +140,19 @@ pub struct State {
     order_floor: Option<f64>,
     position_updates: HashMap<String, f64>,
     socket: Option<SocketId>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    last_received: f64,
-    attempts: u32,
+    supervisor: Supervisor,
     next_id: u32,
     unreconciled_fills: bool,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
 }
 impl State {
+    pub fn new() -> Self {
+        Self {
+            supervisor: crate::socket_supervisor(),
+            ..Self::default()
+        }
+    }
     pub(crate) fn has_unreconciled_fills(&self) -> bool {
         self.unreconciled_fills
     }
@@ -288,8 +292,7 @@ impl WeexFutures {
                 credentials.ws_headers(cx.now),
                 safe_cex_engine::SocketChannel::Private,
             ));
-            self.account.last_received = cx.now;
-            self.account.watchdog = Some(cx.set_timer(5_000.0));
+            self.account.supervisor.connecting(cx);
         }
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -508,7 +511,9 @@ impl WeexFutures {
             return;
         }
         match request.kind {
-            Kind::Balance if request.revision == self.account.revision => {
+            // The next cycle corrects a read that raced an account event; fencing it
+            // starved the balance whenever events kept arriving.
+            Kind::Balance => {
                 // Missing USDT on a nonempty response is not a zero balance.
                 if let Some(balance) = request.balance {
                     cx.store.set_balance(balance);
@@ -679,8 +684,7 @@ impl WeexFutures {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.attempts = 0;
-        self.account.last_received = cx.now;
+        self.account.supervisor.opened(cx);
         self.account.next_id += 1;
         cx.send(socket,format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id));
         self.refresh_account(cx);
@@ -695,7 +699,7 @@ impl WeexFutures {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Event<'a> {
             #[serde(borrow, default)]
@@ -729,9 +733,6 @@ impl WeexFutures {
             return true;
         };
         match event.e {
-            "account" => {
-                self.account.revision += 1;
-            }
             "positions" => {
                 self.account.revision += 1;
                 if let Ok(rows) = serde_json::from_str::<Vec<PositionRow<'_>>>(data.get()) {
@@ -847,13 +848,7 @@ impl WeexFutures {
             return false;
         }
         self.account.socket = None;
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.attempts += 1;
-        self.account.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.account.supervisor.retry(cx);
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -889,19 +884,10 @@ impl WeexFutures {
             self.account_cycle(cx);
             return true;
         }
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.connect_account(cx);
-            return true;
-        }
-        if self.account.watchdog == Some(timer) {
-            self.account.watchdog = None;
-            if cx.now - self.account.last_received >= 30_000.0 {
-                if let Some(socket) = self.account.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket, 1006);
-                }
-            } else {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => self.connect_account(cx),
+            Tick::Ping => {
                 if let Some(socket) = self.account.socket {
                     self.account.next_id += 1;
                     cx.send(
@@ -909,11 +895,16 @@ impl WeexFutures {
                         format!(r#"{{"method":"PING","id":{}}}"#, self.account.next_id),
                     );
                 }
-                self.account.watchdog = Some(cx.set_timer(5_000.0));
             }
-            return true;
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.account.socket {
+                    cx.close(socket);
+                    self.account_close(cx, socket, 1006);
+                }
+            }
+            Tick::Handled => (),
         }
-        false
+        true
     }
 }
 
@@ -978,7 +969,7 @@ mod tests {
     use super::*;
     #[test]
     fn bounded_terminal_memory_keeps_ws_floor_but_accepts_old_authoritative_active_rows() {
-        let mut state = State::default();
+        let mut state = State::new();
         for i in 0..=TERMINAL_LIMIT {
             state.terminal((i + 1).to_string(), 1_773_295_700_000.0 + i as f64);
         }

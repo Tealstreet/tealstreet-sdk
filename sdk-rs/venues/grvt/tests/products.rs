@@ -157,14 +157,16 @@ impl Harness {
         let index = self
             .actions
             .iter()
-            .position(
-                |a| matches!(a,Action::Notice(Notice::CommandDone{command:c,..}) if *c==command),
-            )
+            .position(|a| {
+                matches!(a, Action::Notice(Notice::CommandDone { command: c, .. }
+                    | Notice::CommandFailed { command: c, .. }) if *c == command)
+            })
             .expect("command completion");
-        let Action::Notice(Notice::CommandDone { result, .. }) = self.actions.remove(index) else {
-            unreachable!()
-        };
-        result
+        match self.actions.remove(index) {
+            Action::Notice(Notice::CommandDone { result, .. }) => result,
+            Action::Notice(Notice::CommandFailed { error, .. }) => Err(error.legacy_text()),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -221,7 +223,7 @@ fn every_perpetual_has_independent_tickers_books_and_candles() {
         h.command(Command::FetchCandles {
             command: 50 + n as u32,
             symbol: id.to_ascii_uppercase(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(1),
             from_ms: None,
             to_ms: None,

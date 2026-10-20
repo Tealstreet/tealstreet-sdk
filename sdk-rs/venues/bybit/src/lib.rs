@@ -14,24 +14,30 @@ pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Candle, DerivativeProduct, InstrumentClassification, Limits, Market, MinMax, Precision,
-    ProductKind, Ticker,
+    Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
+    Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
-const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
-/// Every socket is checked this often. One quiet for `PING_AFTER_MS` is
-/// pinged (Bybit answers on public and private sockets alike); one silent for
-/// `SILENCE_LIMIT_MS` is treated as dead, since a half-open socket never closes.
-const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
-const PING_AFTER_MS: f64 = 10_000.0;
-const SILENCE_LIMIT_MS: f64 = 20_000.0;
+/// Bybit answers pings on public and private sockets alike; a socket silent
+/// for the idle timeout is treated as dead, since a half-open socket never closes.
+const SOCKET: Config = Config {
+    connect_timeout_ms: 10_000.0,
+    auth_timeout_ms: None,
+    idle_timeout_ms: 20_000.0,
+    ping_interval_ms: Some(10_000.0),
+    backoff_base_ms: 500.0,
+    backoff_cap_ms: 30_000.0,
+    stable_ms: 30_000.0,
+};
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
@@ -143,11 +149,7 @@ enum Channel {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    attempts: u32,
-    reconnect: Option<TimerId>,
-    watchdog: Option<TimerId>,
-    last_received: f64,
-    last_ping: f64,
+    supervisor: Supervisor,
     /// Subscribe messages paced out one per `SUBSCRIBE_PACE_MS`.
     outbox: VecDeque<String>,
     outbox_timer: Option<TimerId>,
@@ -158,11 +160,7 @@ impl Connection {
         Self {
             socket: None,
             open: false,
-            attempts: 0,
-            reconnect: None,
-            watchdog: None,
-            last_received: 0.0,
-            last_ping: 0.0,
+            supervisor: Supervisor::new(SOCKET),
             outbox: VecDeque::new(),
             outbox_timer: None,
         }
@@ -245,9 +243,9 @@ pub struct BybitLinear {
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     /// Live bar per subscription, extended by trades between native klines.
-    live_candles: HashMap<(String, String), Candle>,
+    live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
@@ -258,73 +256,47 @@ pub struct BybitLinear {
 }
 
 /// Bybit kline interval codes.
-fn interval_code(interval: &str) -> Option<&'static str> {
+fn interval_code(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match interval {
-        "1m" => "1",
-        "3m" => "3",
-        "5m" => "5",
-        "15m" => "15",
-        "30m" => "30",
-        "1h" => "60",
-        "2h" => "120",
-        "4h" => "240",
-        "6h" => "360",
-        "12h" => "720",
-        "1d" => "D",
-        "1w" => "W",
-        "1M" => "M",
+        M1 => "1",
+        M3 => "3",
+        M5 => "5",
+        M15 => "15",
+        M30 => "30",
+        H1 => "60",
+        H2 => "120",
+        H4 => "240",
+        H6 => "360",
+        H12 => "720",
+        D1 => "D",
+        W1 => "W",
+        Mo1 => "M",
         _ => return None,
     })
 }
 
 /// Seconds intervals have no native kline; they are built from trades alone.
-fn seconds_interval(interval: &str) -> Option<f64> {
-    let seconds = interval.strip_suffix('s')?.parse::<f64>().ok()?;
-    (seconds > 0.0 && 60.0 % seconds == 0.0).then_some(seconds)
+fn seconds_interval(interval: Interval) -> Option<f64> {
+    use Interval::*;
+    matches!(interval, S1 | S5 | S15 | S30).then(|| interval.ms() / 1000.0)
 }
 
 /// The bar start (seconds) holding `time`: Monday weeks and UTC calendar months
 /// for `1w`/`1M`, matching the native `W`/`M` klines; epoch floors otherwise.
-fn candle_start(interval: &str, time: f64) -> Option<f64> {
+fn candle_start(interval: Interval, time: f64) -> f64 {
     const DAY: f64 = 86_400.0;
-    let step = match interval {
-        "1w" => return Some(((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY),
-        "1M" => {
-            // Civil date from days since the epoch (Hinnant's algorithm).
-            let days = (time / DAY).floor() as i64 + 719_468;
-            let era = days.div_euclid(146_097);
-            let doe = days.rem_euclid(146_097);
-            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-            let mp = (5 * doy + 2) / 153;
-            let month = if mp < 10 { mp + 3 } else { mp - 9 };
-            let year = yoe + era * 400 + i64::from(month <= 2);
-            // Days back to the first of that month.
-            let (y, m) = if month <= 2 {
-                (year - 1, month + 9)
-            } else {
-                (year, month - 3)
-            };
-            let era = y.div_euclid(400);
-            let yoe = y - era * 400;
-            let doy = (153 * m + 2) / 5;
-            let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-            return Some((era * 146_097 + doe - 719_468) as f64 * DAY);
+    match interval {
+        Interval::W1 => ((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY,
+        Interval::Mo1 => {
+            let (year, month, _) = time::civil_from_days((time / DAY).floor() as i64);
+            time::days_from_civil(year, month, 1) as f64 * DAY
         }
-        _ => seconds_interval(interval).or_else(|| {
-            let (n, unit) = interval.split_at(interval.len().checked_sub(1)?);
-            let n = n.parse::<f64>().ok()?;
-            Some(
-                n * match unit {
-                    "m" => 60.0,
-                    "h" => 3_600.0,
-                    "d" => DAY,
-                    _ => return None,
-                },
-            )
-        })?,
-    };
-    Some((time / step).floor() * step)
+        _ => {
+            let step = interval.ms() / 1000.0;
+            (time / step).floor() * step
+        }
+    }
 }
 
 /// Definitive key rejections: invalid key, bad signature after the re-signed
@@ -636,52 +608,46 @@ impl BybitLinear {
                 Channel::Private => safe_cex_engine::SocketChannel::Private,
             },
         );
+        let supervise =
+            channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;
         let connection = self.connection(channel);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if supervise {
+            connection.supervisor.connecting(cx);
+        }
         connection.socket = Some(socket);
         connection.open = false;
     }
 
-    fn watch(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let timer = cx.set_timer(WATCHDOG_INTERVAL_MS);
-        if let Some(previous) = self.connection(channel).watchdog.replace(timer) {
-            cx.clear_timer(previous);
-        }
-    }
-
-    /// Ping a quiet socket; close and reconnect a silent one.
-    fn on_watchdog(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let now = cx.now;
+    fn on_socket_timer(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, timer: TimerId) {
         let connection = self.connection(channel);
-        connection.watchdog = None;
-        let (Some(socket), true) = (connection.socket, connection.open) else {
-            return;
-        };
-        let quiet = now - connection.last_received;
-        if quiet > SILENCE_LIMIT_MS {
-            cx.close(socket);
-            self.on_socket_closed(cx, channel, 4000);
-            return;
+        let socket = connection.socket;
+        match connection.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => {
+                if let Some(socket) = socket {
+                    cx.send(socket, r#"{"op":"ping"}"#);
+                }
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = socket {
+                    cx.close(socket);
+                }
+                self.on_socket_closed(cx, channel, 4000);
+            }
+            Tick::Handled | Tick::Unhandled => {}
         }
-        if quiet >= PING_AFTER_MS && now - connection.last_ping >= PING_AFTER_MS {
-            connection.last_ping = now;
-            cx.send(socket, r#"{"op":"ping"}"#);
-        }
-        self.watch(cx, channel);
     }
 
     fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
         let connection = self.connection(channel);
         connection.socket = None;
         connection.open = false;
-        connection.attempts += 1;
         connection.outbox.clear();
-        let timers = [connection.watchdog.take(), connection.outbox_timer.take()];
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
-        for timer in timers.into_iter().flatten() {
+        if let Some(timer) = connection.outbox_timer.take() {
             cx.clear_timer(timer);
         }
-        let timer = cx.set_timer(delay);
-        self.connection(channel).reconnect = Some(timer);
+        connection.supervisor.retry(cx);
         if channel == Channel::Private {
             let category = self.category;
             for other in self.categories() {
@@ -692,7 +658,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Bybit socket closed ({code}); reconnecting"),
         );
     }
 
@@ -730,7 +696,7 @@ impl BybitLinear {
         format!("orderbook.{depth}.{symbol}")
     }
 
-    fn kline_topic(symbol: &str, interval: &str) -> Option<String> {
+    fn kline_topic(symbol: &str, interval: Interval) -> Option<String> {
         Some(format!("kline.{}.{symbol}", interval_code(interval)?))
     }
 
@@ -1272,8 +1238,8 @@ impl BybitLinear {
         let Some(interval) = self
             .candles
             .keys()
-            .find(|(s, i)| s == symbol && interval_code(i) == Some(code))
-            .map(|(_, interval)| interval.clone())
+            .find(|(s, i)| s == symbol && interval_code(*i) == Some(code))
+            .map(|(_, interval)| *interval)
         else {
             return;
         };
@@ -1299,7 +1265,7 @@ impl BybitLinear {
                 _ => native,
             };
             self.live_candles.insert(key.clone(), candle);
-            cx.candle(symbol, &key.1, candle);
+            cx.candle(symbol, key.1, candle);
         }
     }
 
@@ -1318,21 +1284,19 @@ impl BybitLinear {
         }) {
             return;
         }
-        let intervals: Vec<String> = self
+        let intervals: Vec<Interval> = self
             .candles
             .keys()
             .filter(|(s, _)| s == symbol)
-            .map(|(_, interval)| interval.clone())
+            .map(|(_, interval)| *interval)
             .collect();
         for interval in intervals {
             let key = (symbol.to_owned(), interval);
-            let seconds = seconds_interval(&key.1).is_some();
+            let seconds = seconds_interval(key.1).is_some();
             let mut live = self.live_candles.get(&key).copied();
             let before = live;
             for &(time, price, size) in &trades {
-                let Some(start) = candle_start(&key.1, time) else {
-                    break;
-                };
+                let start = candle_start(key.1, time);
                 let bar = match live {
                     // Minute and longer bars start from a native kline.
                     None if !seconds => continue,
@@ -1365,7 +1329,7 @@ impl BybitLinear {
             }
             if let Some(candle) = live.filter(|c| Some(*c) != before) {
                 self.live_candles.insert(key.clone(), candle);
-                cx.candle(symbol, &key.1, candle);
+                cx.candle(symbol, key.1, candle);
             }
         }
     }
@@ -1414,7 +1378,7 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         add: bool,
     ) {
         if self.category_for(&symbol) == Category::Option
@@ -1424,13 +1388,10 @@ impl BybitLinear {
             return;
         }
         let trades = !self.variant.is_hyro();
-        let kline = Self::kline_topic(&symbol, &interval);
+        let kline = Self::kline_topic(&symbol, interval);
         // Hyro has no trade feed, so its seconds intervals stay unsupported.
-        if kline.is_none() && !(trades && seconds_interval(&interval).is_some()) {
-            cx.log(
-                LogLevel::Warning,
-                format!("Bybit has no {interval} candles"),
-            );
+        if kline.is_none() && !(trades && seconds_interval(interval).is_some()) {
+            cx.log(LogLevel::Error, interval.unsupported("Bybit"));
             return;
         }
         let key = (symbol.clone(), interval);
@@ -1471,7 +1432,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
         if self.category_for(symbol) == Category::Option {
@@ -1483,7 +1444,7 @@ impl BybitLinear {
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(command, Err(format!("Bybit has no {interval} candles")));
+            cx.done(command, Err(interval.unsupported("Bybit")));
             return;
         };
         let query = Query::new()
@@ -1896,13 +1857,7 @@ impl BybitLinear {
             if channel == Channel::Private && self.category != self.primary_category {
                 continue;
             }
-            if self.connection(channel).reconnect == Some(timer) {
-                self.connection(channel).reconnect = None;
-                self.connect(cx, channel);
-            }
-            if self.connection(channel).watchdog == Some(timer) {
-                self.on_watchdog(cx, channel);
-            }
+            self.on_socket_timer(cx, channel, timer);
         }
         self.on_account_timer(cx, timer);
         if self.category == self.primary_category {
@@ -1912,13 +1867,19 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
-    fn supports_account_identity(&self) -> bool {
-        true
-    }
     type Pending = Pending;
 
-    fn supports_options(&self) -> bool {
-        self.category_enabled(Category::Option)
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            options: self.category_enabled(Category::Option),
+            // HyroTrader exposes no identity endpoint; `fetch_identity` refuses it.
+            account: if self.variant.is_hyro() {
+                safe_cex_engine::AccountLookup::Unsupported
+            } else {
+                safe_cex_engine::AccountLookup::Query
+            },
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1951,13 +1912,9 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        let now = cx.now;
         let connection = self.connection(channel);
         connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = now;
-        connection.last_ping = now;
-        self.watch(cx, channel);
+        connection.supervisor.opened(cx);
         match channel {
             Channel::Public => {
                 let mut topics: Vec<String> = cx
@@ -1984,7 +1941,7 @@ impl Venue for BybitLinear {
                     self.candles
                         .keys()
                         .filter(|(symbol, _)| self.owns_symbol(symbol))
-                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
+                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, *interval)),
                 );
                 topics.extend(
                     self.trade_subscribers
@@ -2003,7 +1960,7 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        self.connection(channel).last_received = cx.now;
+        self.connection(channel).supervisor.received(cx.now);
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {
@@ -2178,7 +2135,7 @@ impl Venue for BybitLinear {
                 limit,
                 from_ms,
                 to_ms,
-            } => self.fetch_candles(cx, command, &symbol, &interval, (limit, from_ms, to_ms)),
+            } => self.fetch_candles(cx, command, &symbol, interval, (limit, from_ms, to_ms)),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }
@@ -2358,18 +2315,24 @@ mod secondary_tests;
 #[cfg(test)]
 mod candle_start_tests {
     use super::candle_start;
+    use safe_cex_engine::model::Interval;
 
     #[test]
     fn calendar_bars_match_native_week_and_month_boundaries() {
         // 2026-10-20 12:34:56 UTC is a Tuesday.
         let t = 1_792_499_696.0;
-        assert_eq!(candle_start("1w", t), Some(1_792_368_000.0)); // Monday 2026-10-19
-        assert_eq!(candle_start("1M", t), Some(1_790_812_800.0)); // 2026-10-01
-        assert_eq!(candle_start("1M", 1_709_251_199.0), Some(1_706_745_600.0)); // 2024-02-29 -> 02-01
-        assert_eq!(candle_start("1M", 1_704_067_200.0), Some(1_704_067_200.0)); // 2024-01-01
-        assert_eq!(candle_start("1d", t), Some(1_792_454_400.0));
-        assert_eq!(candle_start("4h", t), Some(1_792_497_600.0));
-        assert_eq!(candle_start("15s", t), Some(1_792_499_685.0));
-        assert_eq!(candle_start("7s", t), None);
+        assert_eq!(candle_start(Interval::W1, t), 1_792_368_000.0); // Monday 2026-10-19
+        assert_eq!(candle_start(Interval::Mo1, t), 1_790_812_800.0); // 2026-10-01
+        assert_eq!(
+            candle_start(Interval::Mo1, 1_709_251_199.0),
+            1_706_745_600.0
+        ); // 2024-02-29 -> 02-01
+        assert_eq!(
+            candle_start(Interval::Mo1, 1_704_067_200.0),
+            1_704_067_200.0
+        ); // 2024-01-01
+        assert_eq!(candle_start(Interval::D1, t), 1_792_454_400.0);
+        assert_eq!(candle_start(Interval::H4, t), 1_792_497_600.0);
+        assert_eq!(candle_start(Interval::S15, t), 1_792_499_685.0);
     }
 }

@@ -38,8 +38,11 @@ impl Feeds {
 }
 impl Venue for Feeds {
     // Stands in for any private command the venue answers itself.
-    fn supports_account_identity(&self) -> bool {
-        true
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
@@ -494,11 +497,11 @@ fn non_direct_subscriptions_bypass_venue_public_requests_but_keep_private_comman
             Command::UnsubscribeOrderBook { symbol: "A".into() },
             Command::SubscribeCandles {
                 symbol: "A".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
             Command::UnsubscribeCandles {
                 symbol: "A".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             engine.handle(0., Event::Command(command));

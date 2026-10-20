@@ -2,6 +2,7 @@
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
@@ -26,6 +27,7 @@ const RETAINED_EXECUTIONS: usize = 20_000;
 const PING_MS: f64 = 15_000.0;
 const SILENCE_MS: f64 = 45_000.0;
 const REPAIR_MS: f64 = 750.0;
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     ListenKey {
@@ -82,6 +84,8 @@ pub struct Account {
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
     balance_in_flight: Option<u64>,
+    mode_guard: StaleGuard,
+    balance_guard: StaleGuard,
     poll_count: u8,
     last_positions: f64,
     cumulative_fills: HashMap<String, f64>,
@@ -755,7 +759,15 @@ impl Account {
             }
             Request::PositionMode { revision } => {
                 self.mode_in_flight = false;
-                if revision != self.positions_revision {
+                let current = revision == self.positions_revision;
+                // Only discovery may commit a stale read; a known mode, possibly
+                // just set by a command, waits for a current one.
+                let admit = if self.mode_known {
+                    current
+                } else {
+                    self.mode_guard.admit(current, STALE_SNAPSHOT_LIMIT)
+                };
+                if !admit {
                     self.fetch_mode(cx, credentials);
                     return;
                 }
@@ -770,6 +782,9 @@ impl Account {
                     }
                     Err(_) => cx.log(LogLevel::Error, "BingX malformed position mode response"),
                 }
+                if !current {
+                    self.fetch_mode(cx, credentials);
+                }
             }
             Request::Balance {
                 revision,
@@ -782,7 +797,8 @@ impl Account {
                     cx.log(LogLevel::Error, "BingX malformed balance snapshot");
                     return;
                 }
-                if revision == self.balance_revision {
+                let current = revision == self.balance_revision;
+                if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT) {
                     if let Some(balance) = usdt.or(first) {
                         cx.store.set_balance(balance);
                     } else {
@@ -791,7 +807,8 @@ impl Account {
                             "BingX balance snapshot contained no settlement asset",
                         );
                     }
-                } else {
+                }
+                if !current {
                     self.fetch_balance(cx, credentials);
                 }
             }

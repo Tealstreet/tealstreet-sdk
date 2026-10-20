@@ -157,13 +157,11 @@ fn batch_caller_id_preflight_rejects_before_any_first_write() {
         let mut e = ready();
         let actions = place(&mut e, vec![order(serde_json::json!({})), order(bad)]);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone {
-                command: 42,
-                result: Err(_)
-            })
-        )));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 42, .. })))
+        );
     }
     let mut e = ready();
     let actions = place(
@@ -198,8 +196,8 @@ fn bybit_only_controls_reject_single_and_whole_batch_without_io_or_state_changes
                     .any(|action| matches!(action, Action::Http(_) | Action::WsSend { .. }))
             );
             assert!(actions.iter().any(|action| matches!(action,
-                Action::Notice(Notice::CommandDone { command: 42, result: Err(message) })
-                    if message.contains("Bybit BBO and TickSize controls are not supported by ApeX Omni")
+                Action::Notice(Notice::CommandFailed { command: 42, error })
+                    if error.message.contains("Bybit BBO and TickSize controls are not supported by ApeX Omni")
             )));
             assert!(e.store().orders().is_empty());
             // A rejected preflight must leave the sequenced trading queue usable.
@@ -300,10 +298,11 @@ fn network_failure_does_not_retry_an_order_and_releases_fifo() {
         },
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
-    )));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
     let second = http(actions).remove(0);
     assert_eq!(form(&second)["clientOrderId"], "second");
 }
@@ -581,10 +580,7 @@ fn fully_filled_parent_while_amend_is_queued_never_sends_cancellation() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(|action| matches!(
         action,
-        Action::Notice(Notice::CommandDone {
-            command: 99,
-            result: Err(_)
-        })
+        Action::Notice(Notice::CommandFailed { command: 99, .. })
     )));
     assert!(http(actions).is_empty());
 }
@@ -607,10 +603,7 @@ fn unchanged_or_invalid_amendment_rejects_before_cancellation() {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|action| matches!(
             action,
-            Action::Notice(Notice::CommandDone {
-                command: 99,
-                result: Err(_)
-            })
+            Action::Notice(Notice::CommandFailed { command: 99, .. })
         )));
         assert!(http(actions).is_empty());
         assert_eq!(e.store().order("parent").unwrap().remaining, 4.0);
@@ -666,8 +659,8 @@ fn unsupported_stp_rejects_single_and_mixed_batches_before_io_and_keeps_queue_us
                     .all(|action| matches!(action, Action::Notice(_)))
             );
             assert!(actions.iter().any(|action| matches!(action,
-                Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
-                if error.contains("self-trade prevention"))));
+                Action::Notice(Notice::CommandFailed { command: 42, error })
+                if error.message.contains("self-trade prevention"))));
             assert!(engine.store().orders().is_empty());
             assert!(engine.store().positions().is_empty());
             assert_eq!(engine.store().balance(), &before_balance);
@@ -785,5 +778,87 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
             p["tpClientOrderId"].as_str(),
             p["slClientOrderId"].as_str()
         ]
+    );
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, outcome, code) in [
+        (
+            500,
+            r#"{"msg":"server error"}"#,
+            None,
+            Some(Outcome::Unknown),
+            None,
+        ),
+        (
+            200,
+            r#"{"code":10003,"msg":"insufficient funds"}"#,
+            None,
+            None,
+            Some("10003"),
+        ),
+        (
+            429,
+            r#"{"code":429,"msg":"too many requests"}"#,
+            Some(ErrorKind::RateLimited),
+            Some(Outcome::Rejected),
+            Some("429"),
+        ),
+        (
+            200,
+            r#"{"code":0,"data":{}}"#,
+            None,
+            Some(Outcome::Unknown),
+            None,
+        ),
+    ] {
+        let mut e = ready();
+        let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+        e.handle(
+            NOW + 11.0,
+            Event::HttpResponse {
+                request: first.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let error = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{status} {body}"));
+        assert_eq!(
+            (error.kind, error.outcome, error.venue_code.as_deref()),
+            (kind, outcome, code),
+            "{status} {body}: {}",
+            error.message
+        );
+    }
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    e.handle(
+        NOW + 11.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "connection reset",
+        },
+    );
+    let error = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command");
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
 }

@@ -7,7 +7,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -66,7 +66,7 @@ pub struct MexcFutures {
     volume_units: HashMap<String, f64>,
     ticker_symbols: Vec<String>,
     ticker_subscriptions: BTreeSet<String>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     next_book_generation: u32,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     depth_paused_until: f64,
@@ -514,9 +514,6 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
-    fn supports_account_identity(&self) -> bool {
-        true
-    }
     fn account_auth_outcome(
         &self,
         pending: &Self::Pending,
@@ -531,6 +528,14 @@ impl Venue for MexcFutures {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
+            leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
@@ -564,7 +569,7 @@ impl Venue for MexcFutures {
             self.snapshot(cx, &symbol);
         }
         for (symbol, interval) in self.candles.keys() {
-            if let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(interval)) {
+            if let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(*interval)) {
                 let id = m.id.clone();
                 self.send(cx, "sub.kline", &id, Some(("interval", i)));
             }
@@ -616,11 +621,11 @@ impl Venue for MexcFutures {
                         .candles
                         .keys()
                         .find(|(s, i)| {
-                            s == &symbol && wire::interval(i) == Some(raw.interval.as_ref())
+                            s == &symbol && wire::interval(*i) == Some(raw.interval.as_ref())
                         })
-                        .map(|(_, i)| i.clone());
+                        .map(|(_, i)| *i);
                     if let Some(interval) = interval {
-                        cx.candle(&symbol, &interval, Self::candle(raw));
+                        cx.candle(&symbol, interval, Self::candle(raw));
                     }
                 }
             }
@@ -906,13 +911,13 @@ impl Venue for MexcFutures {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&key);
                         if let (Some(m), Some(i)) =
-                            (cx.store.market(&symbol), wire::interval(&interval))
+                            (cx.store.market(&symbol), wire::interval(interval))
                         {
                             let id = m.id.clone();
                             self.send(cx, "unsub.kline", &id, Some(("interval", i)));
@@ -921,8 +926,8 @@ impl Venue for MexcFutures {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(i) = wire::interval(&interval) else {
-                    cx.log(LogLevel::Error, "Unsupported MEXC candle interval");
+                let Some(i) = wire::interval(interval) else {
+                    cx.log(LogLevel::Error, interval.unsupported("MEXC"));
                     return;
                 };
                 let key = (symbol.clone(), interval);
@@ -943,12 +948,12 @@ impl Venue for MexcFutures {
                 from_ms,
                 to_ms,
             } => {
-                let (Some(m), Some(i)) = (cx.store.market(&symbol), wire::interval(&interval))
-                else {
-                    cx.done(
-                        command,
-                        Err("Unknown MEXC market or candle interval".into()),
-                    );
+                let Some(i) = wire::interval(interval) else {
+                    cx.done(command, Err(interval.unsupported("MEXC")));
+                    return;
+                };
+                let Some(m) = cx.store.market(&symbol) else {
+                    cx.done(command, Err("Unknown MEXC market".into()));
                     return;
                 };
                 let mut path = format!("/api/v1/contract/kline/{}?interval={i}", m.id);
