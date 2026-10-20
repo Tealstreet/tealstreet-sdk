@@ -516,6 +516,7 @@ const okx = (name) => ({
     name,
   },
   options: { testnet: name.endsWith('demo') },
+  compareBalanceCurrencies: true,
   validateRequest({ method, url, body, headers }) {
     // Independent V5 HTTP proof before matching can erase clocks/aliases.
     const parsed = new URL(url), h = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
@@ -631,7 +632,10 @@ const okx = (name) => ({
       const accountTopic = exchange.privateWebsocket.handleAccountTopic.bind(exchange.privateWebsocket);
       exchange.privateWebsocket.handleAccountTopic = (message) => {
         validatePositions(exchange.store.positions);
+        const revision = exchange.accountEquityRevision;
         accountTopic(message);
+        // A rejected production account message cannot acquire authority in the reference.
+        if (revision !== undefined && revision === exchange.accountEquityRevision) return;
         const values = (message.data ?? []).map((row) => Number.parseFloat(String(row.totalEq ?? ''))).filter(Number.isFinite);
         if (!values.length) return;
         authoritativeEquity = round(values.reduce((sum, value) => sum + value, 0));
@@ -641,7 +645,10 @@ const okx = (name) => ({
       const formatter = exchange.formatBalanceUsedAvail.bind(exchange);
       exchange.formatBalanceUsedAvail = async (...args) => {
         validatePositions(args[1]);
+        const revision = exchange.accountEquityRevision;
         const balance = await formatter(...args);
+        // Preserve the production fence when an account push wins during the await.
+        if (revision !== exchange.accountEquityRevision) return balance;
         if (authoritativeEquity === undefined) return balance;
         // Only the cached raw snapshot superseded by that push is stale. A new
         // REST object has independent provenance; never freeze its fresh equity.
@@ -851,7 +858,6 @@ export const VENUES = {
       tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
       replayCredentials: { key: 'grvt-replay-key', secret },
-      marketFilter: (row) => row.symbol.endsWith('_PERP'),
       requestBodies: true,
       generatedId: () => false,
       compareClientIds: true,
@@ -1129,7 +1135,7 @@ export const VENUES = {
       const parsed = new URL(url);
       const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
       const expiry = get('x-phemex-request-expiry');
-      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
+      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/')) return;
       const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
       const expected = createHmac('sha256', 'replay-secret')
         .update(parsed.pathname + query + expiry + (body || ''))

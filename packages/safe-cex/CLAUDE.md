@@ -571,10 +571,18 @@ public/private/business roles; new venues with shared URLs must supply the role.
 Reuse `WsDirectFallback` and the feature-gated package relay. Native launchers
 serialize `resolveEngineRoutingPlan(exchange, options, realRestBaseURL)` and pass
 it to `NetworkTransport::with_routing` with a fresh context token provider; never
-serialize a JWT. AsterDEX supports a secondary read agent: authenticated GETs
-select its signer and declared read HTTP route, while writes/listen keys keep
-the primary agent. Other engines reject secondary signing keys before startup.
-Optional HTTP `direct` / `publicCors` route hints support venue clock fallback;
+serialize a JWT. API venue engines mirror the TS secondary client's GET-only
+identity and egress when `secondary_key` and `secondary_secret` are supplied;
+`secondary_passphrase` overrides the primary passphrase only when present.
+Writes, posted reads and private socket authentication retain the primary key.
+Definitive client-ID reads and Kraken's separate history client explicitly use
+primary routing; Bitget degraded-stream balance repair retains its fast primary
+client. Public GETs remain unsigned where the venue omits authentication; those
+using the TS dynamic client still select its secondary egress. Binance's public
+client and Aster's public API keep their existing routes. Incomplete secondary
+credentials reject before I/O. Aster's separate read-agent auth contract remains
+unchanged. HTTP `primary` hints fence primary-account reads from the secondary
+route. Optional HTTP `direct` / `publicCors` route hints support venue clock fallback;
 hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.

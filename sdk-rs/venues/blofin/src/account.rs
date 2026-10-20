@@ -160,17 +160,31 @@ impl Blofin {
         if !self.signed() {
             return Err("BloFin requires API credentials".into());
         }
+        let read = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get);
         let pass = self
             .options
             .passphrase
             .as_deref()
+            .map(|primary| {
+                read.and_then(|r| r.passphrase.as_deref())
+                    .unwrap_or(primary)
+            })
             .filter(|s| !s.is_empty())
             .ok_or("BloFin requires a passphrase")?;
-        let secret = self.options.secret.as_deref().unwrap();
+        let secret = read.map_or(self.options.secret.as_deref().unwrap(), |r| {
+            r.secret.as_str()
+        });
         let nonce = safe_cex_crypto::uuid::uuid()?;
         let timestamp = num::format(now.floor());
         Ok(vec![
-            ("ACCESS-KEY", self.options.key.clone().unwrap()),
+            (
+                "ACCESS-KEY",
+                read.map_or_else(|| self.options.key.clone().unwrap(), |r| r.key.clone()),
+            ),
             (
                 "ACCESS-SIGN",
                 sign::signature(secret, path, method.as_str(), &timestamp, &nonce, body),

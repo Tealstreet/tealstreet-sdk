@@ -41,12 +41,15 @@ impl Method {
 /// A public request can select a host-owned egress without naming a proxy URL.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestRoute {
+    /// A primary-account read must not use the secondary read identity/egress.
+    Primary,
     Direct,
     PublicCors,
 }
 impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Primary => "primary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }

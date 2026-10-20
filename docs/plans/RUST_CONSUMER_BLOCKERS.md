@@ -413,6 +413,18 @@ publish an empty snapshot or dispose the previous good engine.
   Delete the temporary helper/profile/upload steps after the measured fix and
   require fresh uninstrumented exact-head CI before merging.
 
+- Landing PR #1340 (`df2d6a4a03`) advanced during profiling setup and made
+  the PR unmergeable, preventing automatic PR workflows. Dispatch the recorded
+  failing `a92116597d` tree separately (run 39403226573) for matched Linux
+  evidence, while merging landing locally. Conflict reviews preserve native
+  secondary credentials/primary routing, typed public ingress in both dispatch
+  branches, primary lookup APIs, dedicated OKX native sizing and the Binance
+  frame profile. Lighter docs retain both deployment and remote-only scopes.
+  Engine/Cx, frame/transport and GRVT hook audits find no integration gaps;
+  GRVT discovery still explicitly filters perpetuals, so its scope decision
+  remains unchanged. Rebuild and reverify the merged source before acceptance;
+  earlier artifact measurements below retain their pinned historical scope.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,

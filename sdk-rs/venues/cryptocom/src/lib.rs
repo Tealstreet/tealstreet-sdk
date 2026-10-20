@@ -16,6 +16,7 @@ use wire::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -336,6 +337,12 @@ impl Cryptocom {
 impl Venue for Cryptocom {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.get(
             cx,
             "/public/get-instruments",
@@ -697,3 +704,6 @@ impl Venue for Cryptocom {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

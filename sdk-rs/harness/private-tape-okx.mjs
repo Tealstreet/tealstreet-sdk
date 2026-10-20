@@ -25,7 +25,7 @@ const GENERATED = `${BROKER}0000000000000000`;
 const BTC = 'BTC-USDT-SWAP';
 const ETH = 'ETH-USDC-SWAP';
 const INVERSE = 'BTC-USD-SWAP';
-const XPERP = 'BTC-USD-UM';
+const XPERP = 'BTC-USD_UM_XPERP-310404';
 const records = [];
 let clock = 0;
 let commandCount = 0;
@@ -77,22 +77,22 @@ const instrument = (instId, base, quote, ctVal, tickSz) => ({
   state: 'live', lotSz: '0.01', minSz: '0.01', tickSz, lever: '100',
   maxIcebergSz: '1000', maxLmtSz: '1000', maxMktSz: '1000', maxStopSz: '1000', maxTriggerSz: '1000', maxTwapSz: '1000',
 });
-const inverseInstrument = { ...instrument(INVERSE, 'BTC', 'USD', '100', '0.1'), ctType: 'inverse', ctValCcy: 'USD', settleCcy: 'BTC', lotSz: '1', minSz: '1' };
-const xperpInstrument = { ...instrument(XPERP, 'BTC', 'USD', '0.001', '0.1'), instType: 'FUTURES', ruleType: 'xperp', lotSz: '1', minSz: '1' };
+const inverseInstrument = { ...instrument(INVERSE, 'BTC', 'USD', '100', '0.1'), ctType: 'inverse', ctValCcy: 'USD', settleCcy: 'BTC' };
+const xperpInstrument = { ...instrument(XPERP, 'BTC', 'USD', '0.0001', '0.1'), instType: 'FUTURES', ruleType: 'xperp' };
 const instruments = [instrument(BTC, 'BTC', 'USDT', '0.01', '0.1'), instrument(ETH, 'ETH', 'USDC', '0.1', '0.01'), inverseInstrument];
 http('GET', `/api/v5/${eea ? 'account' : 'public'}/instruments?instType=SWAP`, instruments);
 if (eea) http('GET', '/api/v5/account/instruments?instType=FUTURES', [xperpInstrument,
   { ...xperpInstrument, instId: 'BTC-USD-261225', ruleType: 'normal' }]);
 http('GET', '/api/v5/market/tickers?instType=SWAP', [
+  { instId: INVERSE, last: '40000', open24h: '40000', bidPx: '39999.9', askPx: '40000.1', volCcy24h: '100', vol24h: '10000' },
   { instId: BTC, last: '40000', open24h: '40000', bidPx: '39999.9', askPx: '40000.1', volCcy24h: '100', vol24h: '10000' },
-  { instId: INVERSE, last: '40000', open24h: '40000', bidPx: '39999.9', askPx: '40000.1', volCcy24h: '100', vol24h: '40000' },
   { instId: ETH, last: '3000', open24h: '3000', bidPx: '2999.99', askPx: '3000.01', volCcy24h: '1000', vol24h: '10000' },
 ]);
-if (eea) http('GET', '/api/v5/market/tickers?instType=FUTURES', [{ instId: XPERP, last: '40000', open24h: '40000', bidPx: '39999.9', askPx: '40000.1', volCcy24h: '100', vol24h: '100000' }]);
+if (eea) http('GET', '/api/v5/market/tickers?instType=FUTURES', [{ instId: XPERP, last: '40000', open24h: '40000', bidPx: '39999.9', askPx: '40000.1', volCcy24h: '100', vol24h: '10000' }]);
 http('GET', '/api/v5/account/config', [{ posMode: 'net_mode', acctLv: '2', uid: '123456', autoLoan: false }]);
 http('GET', '/api/v5/account/account-position-risk?instType=SWAP', [{
   ts: '1760880000000',
-  balData: [{ ccy: 'USDT', eq: '4000', cashBal: '3950', disEq: '4000' }, { ccy: 'USDC', eq: '1000', cashBal: '970', disEq: '1000' }, { ccy: 'BTC', eq: '0.1', cashBal: '0.1', disEq: '4000' }],
+  balData: [{ ccy: 'USDT', eq: '4000', cashBal: '3950', disEq: '4000' }, { ccy: 'USDC', eq: '1000', cashBal: '970', disEq: '1000' }, { ccy: 'BTC', eq: '1', cashBal: '1', disEq: '40000' }, ...(eea ? [{ ccy: 'USD', eq: '100', cashBal: '100', disEq: '100' }] : [])],
   posData: [],
 }]);
 const position = (instId, pos, avgPx, lever, upl, imr, mmr, ccy) => ({
@@ -100,8 +100,9 @@ const position = (instId, pos, avgPx, lever, upl, imr, mmr, ccy) => ({
   markPx: instId === ETH ? '3000' : '40000', liqPx: instId === ETH ? '2000' : '30000',
   mgnMode: 'cross', margin: '', notionalUsd: instId === BTC ? '2000' : '3000', uTime: '1760880000000',
 });
-const productPositions = [position(INVERSE, '5', '39000', '10', '0.001', '0.01', '0.001', 'BTC'),
-  ...(eea ? [{ ...position(XPERP, '7', '39000', '10', '7', '28', '2.8', 'USD'), instType: 'FUTURES' }] : [])];
+const inversePosition = { ...position(INVERSE, '5', '39000', '10', '0.0003205128205128205', '0.00125', '0.000125', 'BTC'), markPx: '40000', liqPx: '30000', notionalUsd: '500' };
+const xperpPosition = { ...position(XPERP, '10', '39000', '10', '1', '4', '0.4', 'USD'), instType: 'FUTURES', markPx: '40000', liqPx: '30000', notionalUsd: '40' };
+const productPositions = [inversePosition, ...(eea ? [xperpPosition] : [])];
 const positions = [position(BTC, '5', '39000', '10', '50', '200', '20', 'USDT'), position(ETH, '10', '2900', '20', '100', '150', '15', 'USDC'), ...productPositions];
 http('GET', '/api/v5/account/positions?instType=SWAP', positions);
 const order = (fields) => ({
@@ -121,8 +122,9 @@ const oco = algo({ algoId: '201', ordType: 'oco', tpTriggerPx: '3200', slTrigger
 const stop = algo({ algoId: '202', slTriggerPx: '2850' });
 const trigger = algo({ algoId: '203', ordType: 'trigger', side: 'buy', reduceOnly: 'false', triggerPx: '3100', triggerPxType: 'last', ordPx: '-1' });
 const trailing = algo({ algoId: '204', ordType: 'move_order_stop', callbackSpread: '100', moveTriggerPx: '100' });
-const productOrders = [order({ instId: INVERSE, ordId: '151', clOrdId: 'inverse151', sz: '5', accFillSz: '1', px: '50000', avgPx: '50000', ccy: 'BTC' }),
-  ...(eea ? [order({ instId: XPERP, instType: 'FUTURES', ordId: '152', clOrdId: 'xperp152', sz: '7', accFillSz: '1', px: '40000', avgPx: '40000', ccy: 'USD' })] : [])];
+const inverseOrder = order({ instId: INVERSE, ordId: 'inverse-101', clOrdId: 'inverse101', sz: '4', accFillSz: '1', px: '40000', avgPx: '40000', ccy: 'BTC' });
+const xperpOrder = order({ instType: 'FUTURES', instId: XPERP, ordId: 'xperp-101', clOrdId: 'xperp101', sz: '10', accFillSz: '2', px: '40000', avgPx: '40000', ccy: 'USD' });
+const productOrders = [inverseOrder, ...(eea ? [xperpOrder] : [])];
 http('GET', '/api/v5/trade/orders-pending?instType=SWAP', [order({}), ...productOrders]);
 for (const [kind, rows] of [['oco', [oco]], ['conditional', [stop]], ['trigger', [trigger]], ['move_order_stop', [trailing]]]) {
   http('GET', `/api/v5/trade/orders-algo-pending?instType=SWAP&ordType=${kind}`, rows);
@@ -180,6 +182,26 @@ http('POST', '/api/v5/account/set-leverage', [{ instId: BTC, lever: '12', mgnMod
 http('GET', '/api/v5/account/positions?instType=SWAP', [
   { ...positions[0], lever: '12', imr: '166.66666666666666', uTime: '1760880007000' }, positions[1], ...productPositions,
 ], undefined, { afterCommand: leverageCommand });
+
+// Native contract-count writes and per-execution base conversion on products
+// formerly filtered from the Rust lane. Caller IDs remain exact on the wire.
+const productLifecycle = (instId, symbol, id, clientOrderId, ccy, instType) => {
+  command({ op: 'placeOrders', orders: [{ symbol, type: 'limit', side: 'buy', amount: 2, price: 40000, clientOrderId }] });
+  http('POST', '/api/v5/trade/batch-orders', [{ ordId: id, clOrdId: clientOrderId, sCode: '0', sMsg: '' }], [
+    { instId, tag: BROKER, tdMode: 'cross', side: 'buy', ordType: 'limit', px: '40000', clOrdId: clientOrderId, sz: '2' },
+  ]);
+  const row = order({ instId, instType, ordId: id, clOrdId: clientOrderId, sz: '2', accFillSz: '0', px: '40000', avgPx: '40000', ccy, uTime: '1760880011000' });
+  push('private', 'orders', [row]);
+  command({ op: 'amendOrder', id, price: 40100, amount: 3 });
+  http('POST', '/api/v5/trade/amend-order', [{ ordId: id, sCode: '0', sMsg: '' }], { instId, ordId: id, newPx: '40100', newSz: '3' });
+  const partial = { ...row, sz: '3', px: '40100', avgPx: '40000', state: 'partially_filled', accFillSz: '1', fillSz: '1', fillPx: '40000', fillTime: '1760880012000', tradeId: `${id}1`, uTime: '1760880012000' };
+  push('private', 'orders', [partial]);
+  command({ op: 'cancelOrders', ids: [id] });
+  http('POST', '/api/v5/trade/cancel-batch-orders', [{ ordId: id, sCode: '0', sMsg: '' }], [{ instId, ordId: id }]);
+  push('private', 'orders', [{ ...partial, state: 'canceled', fillSz: '0', uTime: '1760880013000' }]);
+};
+productLifecycle(INVERSE, 'BTCUSD', '1301', 'OKXInverse123', 'BTC', 'SWAP');
+if (eea) productLifecycle(XPERP, 'BTCUSD_UM_XPERP310404', '2301', 'OKXXperp123', 'USD', 'FUTURES');
 
 // Fills exercise the recent/history overlap, distinct executions of one order,
 // seconds input bounds, contract-to-base conversion and optional fee/PnL fields.
@@ -254,8 +276,8 @@ push('private', 'positions', [
   { ...position(ETH, '8', '2910', '20', '72', '120', '12', 'USDC'), notionalUsd: '2400', uTime: '1760880010000' },
   ...productPositions,
 ]);
-push('private', 'account', [{ totalEq: '5300', details: [{ ccy: 'USDT', eq: '4100' }, { ccy: 'USDC', eq: '1200' }] }]);
+push('private', 'account', [{ totalEq: eea ? '45400' : '45300', details: [{ ccy: 'USDT', eq: '4100' }, { ccy: 'USDC', eq: '1200' }, { ccy: 'BTC', eq: '1' }, ...(eea ? [{ ccy: 'USD', eq: '100' }] : [])] }]);
 mkdirSync(dirname(out), { recursive: true });
 records.sort((a, b) => a.t - b.t);
 writeFileSync(out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-console.log(JSON.stringify({ out, venue: values.venue, records: records.length, executions: 2, fillBaseAmounts: [0.01, 0.02] }));
+console.log(JSON.stringify({ out, venue: values.venue, records: records.length, executions: eea ? 4 : 3, fillBaseAmounts: [0.01, 0.02, 0.0025, ...(eea ? [0.0001] : [])] }));

@@ -23,6 +23,7 @@ const SNAPSHOT_SHARD: usize = 380;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -233,9 +234,27 @@ impl Kucoin {
         body: Option<String>,
         pending: Pending,
     ) {
-        let headers = self.credentials.as_ref().map_or_else(Vec::new, |c| {
-            sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-        });
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.options.passphrase.clone())
+                    .unwrap_or_default(),
+                broker: self.options.broker.clone(),
+            });
+        let headers = read_credentials
+            .as_ref()
+            .or(self.credentials.as_ref())
+            .map_or_else(Vec::new, |c| {
+                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
+            });
         cx.request(
             method,
             format!("{REST}{}", encoded_path(path)),
@@ -253,9 +272,27 @@ impl Kucoin {
         at: ArrayAt,
         pending: Pending,
     ) {
-        let headers = self.credentials.as_ref().map_or_else(Vec::new, |c| {
-            sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-        });
+        let read_credentials = self
+            .options
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.options.passphrase.clone())
+                    .unwrap_or_default(),
+                broker: self.options.broker.clone(),
+            });
+        let headers = read_credentials
+            .as_ref()
+            .or(self.credentials.as_ref())
+            .map_or_else(Vec::new, |c| {
+                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
+            });
         let request = cx.request(
             method,
             format!("{REST}{}", encoded_path(path)),
@@ -664,6 +701,14 @@ impl Kucoin {
 impl Venue for Kucoin {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read
+                .validate()
+                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if self.options.testnet {
             cx.log(LogLevel::Error, "KuCoin Futures testnet is unsupported");
             return;
@@ -1156,3 +1201,6 @@ impl Venue for Kucoin {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

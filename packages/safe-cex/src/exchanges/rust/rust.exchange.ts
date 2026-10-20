@@ -304,7 +304,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['hyperliquid', 'grvt', 'paradex'].includes(exchangeName)) {
+    if (['hyperliquid', 'grvt', 'paradex', 'phemex', 'binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(exchangeName)) {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
@@ -322,10 +322,9 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(
       store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(
-        this.name,
-      ),
+      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
       this.name === 'bitgetinverse',
+      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
       this.name === 'binanceinverse',
     );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
@@ -545,6 +544,13 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
+        ...(this.name !== 'asterdex' && this.options.secondary_key
+          ? { readCredentials: {
+              key: this.options.secondary_key,
+              secret: this.options.secondary_secret,
+              passphrase: this.options.secondary_passphrase ?? passphrase,
+            } }
+          : {}),
         ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),

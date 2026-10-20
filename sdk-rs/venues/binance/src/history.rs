@@ -4,12 +4,13 @@ use crate::account::{order_side, order_type, venue_error};
 use crate::sign::Query;
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
-use safe_cex_engine::model::OrderStatus;
+use safe_cex_engine::model::{Order, OrderStatus};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
 use safe_cex_engine::{
     CommandId, Cx, LogLevel, Method, Query as Read, Response, TimerId, json, num,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
 
 const PAGE_LIMIT: u32 = 1000;
@@ -24,6 +25,10 @@ pub struct Request {
 }
 
 enum InFlight {
+    Lookup {
+        symbol: String,
+        client_order_id: String,
+    },
     Fills {
         symbol: String,
         order_id: Option<String>,
@@ -49,6 +54,39 @@ enum InFlight {
 pub struct HistoryState {
     reads: HashMap<CommandId, InFlight>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LookupRow<'a> {
+    #[serde(flatten, borrow)]
+    order: HistoricalOrderRow<'a>,
+    #[serde(borrow)]
+    client_order_id: std::borrow::Cow<'a, str>,
+    #[serde(default)]
+    time_in_force: &'a str,
+}
+
+#[derive(Serialize)]
+struct Found<'a> {
+    found: bool,
+    order: LookupOrder<'a>,
+}
+#[derive(Serialize)]
+struct LookupOrder<'a> {
+    #[serde(flatten)]
+    order: Order,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    info: Option<&'a RawValue>,
+}
+fn found(order: Order, info: Option<&RawValue>) -> Result<String, String> {
+    serde_json::to_string(&Found {
+        found: true,
+        order: LookupOrder { order, info },
+    })
+    .map_err(|e| e.to_string())
+}
+const UNKNOWN: &str = r#"{"found":false,"definitive":false}"#;
+const ABSENT: &str = r#"{"found":false,"definitive":true}"#;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,13 +197,7 @@ fn nonzero(text: &str) -> Option<f64> {
 
 impl BinanceFutures {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        if self.is_spot()
-            || (self.is_inverse()
-                && !matches!(
-                    read,
-                    Read::PublicTrades { .. } | Read::OrderByClientId { .. }
-                ))
-        {
+        if self.is_spot() || (self.is_inverse() && !matches!(read, Read::PublicTrades { .. })) {
             if matches!(
                 read,
                 Read::OrderByClientId { .. } | Read::PublicTrades { .. }
@@ -176,15 +208,20 @@ impl BinanceFutures {
             }
             return;
         }
+        if let Read::OrderByClientId {
+            symbol,
+            client_order_id,
+        } = read
+        {
+            self.lookup(cx, command, symbol, client_order_id);
+            return;
+        }
         if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
             cx.done(command, Ok("[]".into()));
             return;
         }
         match read {
-            Read::OrderByClientId { .. } => cx.done(
-                command,
-                Err("Client ID query is not supported by this venue".into()),
-            ),
+            Read::OrderByClientId { .. } => unreachable!(),
             Read::Fills {
                 symbol,
                 order_id,
@@ -284,6 +321,178 @@ impl BinanceFutures {
                 );
             }
         }
+    }
+
+    fn lookup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+        client_order_id: String,
+    ) {
+        let max = if self.options.portfolio_margin {
+            32
+        } else {
+            36
+        };
+        if client_order_id.is_empty()
+            || client_order_id.len() > max
+            || !client_order_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._:/-".contains(&b))
+        {
+            cx.done(command, Err("Invalid Binance client order ID".into()));
+            return;
+        }
+        if cx.store.market(&symbol).is_none() {
+            cx.done(command, Ok(UNKNOWN.into()));
+            return;
+        }
+        // Secondary GET snapshots may belong to another account. Their cached
+        // client IDs cannot establish primary placement identity.
+        if self.options.read_credentials.is_none()
+            && let Some(order) = cx.store.orders().iter().find(|order| {
+                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+            })
+        {
+            cx.done(command, found(order.clone(), None));
+            return;
+        }
+        if self.credentials.is_none() || self.options.public_data_only {
+            cx.done(
+                command,
+                Err("Binance client order lookup requires credentials".into()),
+            );
+            return;
+        }
+        let query = Query::new()
+            .str("symbol", &symbol)
+            .str("origClientOrderId", &client_order_id);
+        self.history.reads.insert(
+            command,
+            InFlight::Lookup {
+                symbol,
+                client_order_id,
+            },
+        );
+        // Placement identity belongs to the primary account, even when reads use a secondary key.
+        let credentials = self
+            .credentials
+            .as_ref()
+            .expect("lookup credentials checked");
+        let query = query.signed(credentials, cx.now);
+        let request = cx.request(
+            Method::Get,
+            format!("{}{}?{query}", self.urls.account_rest, self.paths.order),
+            vec![("X-MBX-APIKEY", credentials.key.clone())],
+            None,
+            Pending::History(Request {
+                command,
+                window: (0.0, 0.0),
+            }),
+        );
+        cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
+    }
+
+    fn lookup_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        response: Result<Response<'_>, &str>,
+    ) {
+        let Some(InFlight::Lookup {
+            symbol,
+            client_order_id,
+        }) = self.history.reads.remove(&command)
+        else {
+            return;
+        };
+        let result = (|| {
+            let response = response.map_err(str::to_owned)?;
+            if let Ok(error) = serde_json::from_str::<crate::wire::ErrorBody<'_>>(response.body) {
+                if error.code == -2013
+                    && ((200..300).contains(&response.status) || response.status == 400)
+                {
+                    return Ok(ABSENT.into());
+                }
+                if error.code != 0 {
+                    return Err(format!("Binance {}: {}", error.code, error.msg));
+                }
+            }
+            if !(200..300).contains(&response.status) {
+                return Err(format!("Binance HTTP {}", response.status));
+            }
+            let native: LookupRow<'_> = serde_json::from_str(response.body)
+                .map_err(|e| format!("Malformed Binance lookup: {e}"))?;
+            let row = native.order;
+            if row.symbol != symbol || native.client_order_id.as_ref() != client_order_id {
+                return Err("Binance lookup identity mismatch".into());
+            }
+            let status = match row.status.as_ref() {
+                "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
+                "FILLED" => OrderStatus::Closed,
+                "CANCELED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED" => OrderStatus::Canceled,
+                _ => return Err("Invalid Binance lookup status".into()),
+            };
+            let parse = |text: &str| {
+                text.parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .ok_or_else(|| "Invalid Binance lookup number".to_owned())
+            };
+            let amount = parse(&row.orig_qty)?;
+            let filled = parse(&row.executed_qty)?;
+            if row.order_id == 0
+                || !matches!(row.side.as_ref(), "BUY" | "SELL")
+                || amount <= 0.0
+                || filled > amount
+                || !row.time.is_finite()
+                || row.time <= 0.0
+                || !row.update_time.is_finite()
+                || row.update_time < 0.0
+            {
+                return Err("Invalid Binance lookup order".into());
+            }
+            let kind = row
+                .orig_type
+                .as_deref()
+                .and_then(order_type)
+                .or_else(|| order_type(&row.kind))
+                .ok_or_else(|| "Invalid Binance lookup type".to_owned())?;
+            let order = Order {
+                id: if self.options.portfolio_margin {
+                    client_order_id.clone()
+                } else {
+                    row.order_id.to_string()
+                },
+                parent_id: None,
+                status,
+                symbol,
+                kind,
+                side: order_side(&row.side),
+                price: parse(&row.price)?,
+                amount,
+                filled,
+                remaining: (amount - filled).max(0.0),
+                reduce_only: row.reduce_only,
+                close: None,
+                client_order_id: Some(client_order_id),
+                time_in_force: crate::account::time_in_force(native.time_in_force),
+                last_update: if row.update_time > 0.0 {
+                    row.update_time
+                } else {
+                    row.time
+                },
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: None,
+            };
+            let info =
+                serde_json::from_str::<&RawValue>(response.body).map_err(|e| e.to_string())?;
+            found(order, Some(info))
+        })();
+        cx.done(command, result);
     }
 
     fn history_request(
@@ -411,6 +620,13 @@ impl BinanceFutures {
         response: Result<Response<'_>, &str>,
     ) {
         let Request { command, window } = request;
+        if matches!(
+            self.history.reads.get(&command),
+            Some(InFlight::Lookup { .. })
+        ) {
+            self.lookup_response(cx, command, response);
+            return;
+        }
         let body = match response {
             Ok(response) => match venue_error(&response) {
                 None => Ok(response.body),
@@ -422,6 +638,7 @@ impl BinanceFutures {
             return;
         };
         match read {
+            InFlight::Lookup { .. } => unreachable!(),
             InFlight::Fills { rows, .. } => match body {
                 Ok(body) => {
                     let _ = json::each::<UserTrade>(body, |t| {

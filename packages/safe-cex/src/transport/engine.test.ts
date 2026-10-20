@@ -4,16 +4,19 @@ import type { BaseExchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions } from '../types';
 
 import { Blob as NodeBlob } from 'node:buffer';
+import { createHash, createHmac } from 'node:crypto';
 import { deflateSync, gzipSync } from 'node:zlib';
 
 import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { exchangeMetadata } from '../exchangeMetadata';
 import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
 import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
+import { createAPI as createKrakenSpotAPI } from '../exchanges/kraken/krakenspot.api';
 import { createAPI as createParadexAPI } from '../exchanges/paradex/paradex.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
@@ -701,8 +704,8 @@ describe('engine socket routing at the raw transport boundary', () => {
 });
 
 describe('native host policy uses the same resolved routes', () => {
-  it('rejects secondary-key egress before producing a native plan or a routed transport', () => {
-    const opts = options({ secondary_key: 'read-key', secondary_secret: 'read-secret' });
+  it('rejects incomplete secondary credentials before producing a native plan or a routed transport', () => {
+    const opts = options({ secondary_key: 'read-key' });
     expect(() => resolveEngineRoutingPlan('binance', opts, 'https://fapi.binance.com')).toThrow(
       'secondary signing keys',
     );
@@ -1061,9 +1064,13 @@ describe('Paradex matches the production API factory adapter gate', () => {
     const factoryUsesHow = client.defaults.adapter === mocks.adapter;
     const raw = makeRaw();
     const host = createEngineTransport('paradex', opts, raw);
-    await host.request({ ...request('https://api.prod.paradex.trade/v1/orders'), headers: {
-      Authorization: 'Bearer venue-jwt', 'Content-Type': 'application/json',
-    } });
+    await host.request({
+      ...request('https://api.prod.paradex.trade/v1/orders'),
+      headers: {
+        Authorization: 'Bearer venue-jwt',
+        'Content-Type': 'application/json',
+      },
+    });
     expect(mocks.adapter).toHaveBeenCalledTimes(factoryUsesHow ? 1 : 0);
     expect(raw.request).toHaveBeenCalledTimes(factoryUsesHow ? 0 : 1);
     expect(resolveEngineRoutingPlan('paradex', opts, 'https://api.prod.paradex.trade/v1').http.mode).toBe(
@@ -1082,11 +1089,17 @@ it('keeps the Paradex venue bearer separate from proxy authorization on both hos
   const account = options({ publicDataOnly: false, tealstreetProxy: true, tealstreetTunnel: false });
   const raw = makeRaw();
   const routed = createEngineTransport('paradex', account, raw);
-  await routed.request({ method: 'GET', url: 'https://api.prod.paradex.trade/v1/account', headers: { Authorization: 'Bearer venue-jwt' } });
+  await routed.request({
+    method: 'GET',
+    url: 'https://api.prod.paradex.trade/v1/account',
+    headers: { Authorization: 'Bearer venue-jwt' },
+  });
   const config = mocks.adapter.mock.lastCall![0] as InternalAxiosRequestConfig;
   expect(config.headers.get('Authorization')).toBe('Bearer venue-jwt');
   expect(config.headers.get('Tealstreet-Authorization')).toBe('Bearer proxy-jwt');
-  expect(resolveEngineRoutingPlan('paradex', account, 'https://api.prod.paradex.trade/v1').http.authorizationHeader).toBe('Tealstreet-Authorization');
+  expect(
+    resolveEngineRoutingPlan('paradex', account, 'https://api.prod.paradex.trade/v1').http.authorizationHeader,
+  ).toBe('Tealstreet-Authorization');
   routed.dispose!();
 });
 
@@ -1375,5 +1388,209 @@ describe('typed HTTP operation deadlines', () => {
     expect(config.timeout).toBeLessThanOrEqual(5_000);
     expect(config).not.toHaveProperty('timeoutMs');
     routed.dispose!();
+  });
+});
+
+describe('secondary GET identity egress', () => {
+  it('Kraken Spot matches the actual secondary public GET client while private POSTs retain primary signatures and egress', async () => {
+    const primarySecret = Buffer.from('primary-spot-secret').toString('base64');
+    const opts = options({
+      key: 'primary-spot-key',
+      secret: primarySecret,
+      secondary_key: 'secondary-spot-key',
+      secondary_secret: Buffer.from('secondary-spot-secret').toString('base64'),
+      secondaryProxyUrl: 'https://secondary.example/spot',
+      tealstreetProxy: true,
+      tealstreetTunnel: false,
+    });
+    const parent = {
+      name: 'krakenspot', grafanaEndpointsEvery: [], grafanaEndpointsPeriodic: [], emitter: { emit: vi.fn() },
+    } as unknown as BaseExchange;
+    const captured: Request[] = [];
+    const [client] = createApiWithSecondaryKey(opts, parent, (selected, exchange) => {
+      const api = createKrakenSpotAPI(selected, exchange);
+      api.defaults.adapter = async (config) => {
+        captured.push({
+          method: config.method!.toUpperCase(),
+          url: `${config.baseURL}${config.url}`,
+          headers: config.headers.toJSON() as Record<string, string>,
+          ...(config.data !== undefined ? { body: config.data as string } : {}),
+        });
+        return { status: 200, statusText: 'OK', config, headers: {}, data: { error: [], result: {} } };
+      };
+      return api;
+    });
+    await client.get('/0/public/AssetPairs');
+    await client.get('/0/public/Ticker');
+    await client.post('/0/private/Balance', {});
+    await client.post('/0/private/GetWebSocketsToken', {});
+    expect(captured.map(({ url }) => url)).toEqual([
+      'https://secondary.example/spot/https://api.kraken.com/0/public/AssetPairs',
+      'https://secondary.example/spot/https://api.kraken.com/0/public/Ticker',
+      `${PRIVATE_PROXY_ASIA}/https://api.kraken.com/0/private/Balance`,
+      `${PRIVATE_PROXY_ASIA}/https://api.kraken.com/0/private/GetWebSocketsToken`,
+    ]);
+    for (const input of captured.slice(0, 2)) {
+      expect(input.headers['API-Key']).toBeUndefined();
+      expect(input.headers['API-Sign']).toBeUndefined();
+    }
+    const raw = makeRaw();
+    const routed = createEngineTransport('krakenspot', opts, raw);
+    try {
+      for (const input of captured) {
+        const venueUrl = `https://api.kraken.com${input.url.split('https://api.kraken.com')[1]}`;
+        if (input.method === 'POST') {
+          expect(input.headers['API-Key']).toBe('primary-spot-key');
+          const nonce = new URLSearchParams(input.body).get('nonce');
+          const digest = createHash('sha256').update(nonce + input.body!).digest();
+          const signature = createHmac('sha512', Buffer.from(primarySecret, 'base64'))
+            .update(new URL(venueUrl).pathname).update(digest).digest('base64');
+          expect(input.headers['API-Sign']).toBe(signature);
+        }
+        await routed.request({ ...input, url: venueUrl });
+        const delivered = raw.request.mock.lastCall![0];
+        expect(delivered.url).toBe(input.url);
+        expect(delivered.body).toBe(input.body);
+        expect(delivered.headers['API-Key']).toBe(input.headers['API-Key']);
+        expect(delivered.headers['API-Sign']).toBe(input.headers['API-Sign']);
+      }
+      const plan = resolveEngineRoutingPlan('krakenspot', opts, 'https://api.kraken.com');
+      expect(plan.readHeader).toBe('API-Key');
+      expect(plan.readPublic).toBe(true);
+      expect(plan.readHttp?.prefix).toBe('https://secondary.example/spot');
+      expect(plan.http.prefix).toBe(PRIVATE_PROXY_ASIA);
+      for (const secret of [opts.key, opts.secondary_key, opts.secret, opts.secondary_secret]) {
+        expect(JSON.stringify(plan)).not.toContain(secret);
+      }
+    } finally {
+      routed.dispose!();
+    }
+  });
+  const venues: Array<[ExchangeName, string]> = [
+    ['binance', 'X-MBX-APIKEY'],
+    ['binancepm', 'X-MBX-APIKEY'],
+    ['binancespot', 'X-MBX-APIKEY'],
+    ['binanceinverse', 'X-MBX-APIKEY'],
+    ['bybit', 'X-BAPI-API-KEY'],
+    ['bybitinverse', 'X-BAPI-API-KEY'],
+    ['bybitspot', 'X-BAPI-API-KEY'],
+    ['bybitdemo', 'X-BAPI-API-KEY'],
+    ['okx', 'OK-ACCESS-KEY'],
+    ['okxeu', 'OK-ACCESS-KEY'],
+    ['okxdemo', 'OK-ACCESS-KEY'],
+    ['okxeudemo', 'OK-ACCESS-KEY'],
+    ['phemex', 'X-PHEMEX-ACCESS-TOKEN'],
+    ['backpack', 'X-API-Key'],
+    ['kraken', 'APIKey'],
+    ['krakenspot', 'API-Key'],
+    ['bitget', 'ACCESS-KEY'],
+    ['bitgetusdc', 'ACCESS-KEY'],
+    ['bitgetinverse', 'ACCESS-KEY'],
+    ['kucoin', 'KC-API-KEY'],
+    ['mexc', 'ApiKey'],
+    ['bingx', 'X-BX-APIKEY'],
+    ['bitrue', 'X-CH-APIKEY'],
+    ['weex', 'ACCESS-KEY'],
+    ['blofin', 'ACCESS-KEY'],
+    ['woo', 'x-api-key'],
+  ];
+  it.each(venues)(
+    '%s routes GET through the secondary client while primary exceptions and mutations keep account egress',
+    async (venue, header) => {
+      const opts = options({
+        passphrase: 'primary-pass',
+        tealstreetProxy: true,
+        tealstreetTunnel: false,
+        secondary_key: 'venue-key',
+        secondary_secret: 'read-secret',
+        secondary_passphrase: 'read-pass',
+        secondaryProxyUrl: 'https://secondary.example/egress',
+      });
+      const raw = makeRaw();
+      const routed = createEngineTransport(venue, opts, raw);
+      const input: Request = {
+        method: 'GET',
+        url: 'https://venue.example/private?signature=exact',
+        headers: { [header.toLowerCase()]: 'venue-key' },
+      };
+      await routed.request(input);
+      expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
+      expect(raw.request.mock.lastCall![0].headers[header.toLowerCase()]).toBe('venue-key');
+      await routed.request({ ...input, route: 'primary' });
+      const primaryUrl = raw.request.mock.lastCall![0].url;
+      expect(primaryUrl).not.toContain('secondary.example');
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+        await routed.request({ ...input, method });
+        expect(raw.request.mock.lastCall![0].url).toBe(primaryUrl);
+      }
+      await routed.request({ ...input, headers: {} });
+      if (['binance', 'binancepm', 'binanceinverse'].includes(venue))
+        expect(raw.request.mock.lastCall![0].url).not.toContain('secondary.example');
+      else expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
+      expect(raw.request.mock.lastCall![0].headers[header.toLowerCase()]).toBeUndefined();
+      const plan = resolveEngineRoutingPlan(venue, opts, 'https://venue.example');
+      expect(plan.readHeader).toBe(header);
+      expect(plan.readPublic).toBe(!['binance', 'binancepm', 'binanceinverse'].includes(venue));
+      expect(plan.readHttp?.prefix).toBe('https://secondary.example/egress');
+      expect(JSON.stringify({ readHeader: plan.readHeader, readHttp: plan.readHttp })).not.toMatch(
+        /read-secret|read-pass|venue-key/,
+      );
+      routed.dispose!();
+    },
+  );
+  it.each(['phemex', 'weex', 'kucoin', 'okx', 'backpack', 'krakenspot'] as ExchangeName[])(
+    '%s rejects partial read identities before any transport effect',
+    (venue) => {
+      for (const extra of [
+        { secondary_key: '' },
+        { secondary_key: 'read' },
+        { secondary_secret: 'read' },
+        { secondary_passphrase: 'read' },
+      ]) {
+        const raw = makeRaw();
+        expect(() => createEngineTransport(venue, options(extra), raw)).toThrow('secondary signing keys');
+        expect(raw.request).not.toHaveBeenCalled();
+        expect(raw.connect).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it.each(['bybit', 'phemex', 'kucoin', 'woo'] as ExchangeName[])(
+    '%s secondary GET retains HOW encapsulation and primary-only request bytes',
+    async (venue) => {
+      const headers: Partial<Record<ExchangeName, string>> = {
+        bybit: 'X-BAPI-API-KEY',
+        phemex: 'X-PHEMEX-ACCESS-TOKEN',
+        kucoin: 'KC-API-KEY',
+        woo: 'x-api-key',
+      };
+      const opts = options({
+        passphrase: 'primary-pass',
+        tealstreetTunnel: true,
+        secondary_key: 'read-key',
+        secondary_secret: 'read-secret',
+        secondaryProxyUrl: 'https://secondary.example/egress',
+      });
+      const raw = makeRaw();
+      const routed = createEngineTransport(venue, opts, raw);
+      const input: Request = {
+        method: 'GET',
+        url: 'https://venue.example/account?signature=exact',
+        headers: { [headers[venue]!]: 'read-key' },
+      };
+      await routed.request(input);
+      expect(mocks.adapter.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
+      await routed.request({ ...input, route: 'primary' });
+      expect(mocks.adapter.mock.lastCall![0].url).not.toContain('secondary.example');
+      expect(raw.request).not.toHaveBeenCalled();
+      const plan = resolveEngineRoutingPlan(venue, opts, 'https://venue.example');
+      expect(plan.readHttp?.mode).toBe('how');
+      expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
+      routed.dispose!();
+    },
+  );
+  it('does not adopt secondary credentials for an unsupported venue', () => {
+    expect(() =>
+      createEngineTransport('hyperliquid', options({ secondary_key: 'read', secondary_secret: 'secret' }), makeRaw()),
+    ).toThrow('unsupported');
   });
 });

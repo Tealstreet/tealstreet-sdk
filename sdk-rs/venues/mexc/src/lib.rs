@@ -21,6 +21,7 @@ const MAX_BUFFERED: usize = 2_000;
 
 #[derive(Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
@@ -384,6 +385,12 @@ impl MexcFutures {
 impl Venue for MexcFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.stream(
             cx,
             "/api/v1/contract/detail",
@@ -842,3 +849,6 @@ impl Venue for MexcFutures {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

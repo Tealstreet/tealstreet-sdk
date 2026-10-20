@@ -797,11 +797,12 @@ This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeO
 `lighter-robinhood` perpetuals, with deployment-local hosts, quote currency and
 signing chain. The Rust host forwards Application ID, API key index, integrator
 index (as exact decimal text), `remoteSigner`, `extra.lighterSignerProvider`,
-and `extra.lighterStopSlippagePct`. Missing local signing credentials starts
-public-only data unless remote-only account reads were explicitly selected.
-Remote-only mode does not invoke a JavaScript signer; native writes fail when
-the signer is unavailable. Caller client order IDs are refused on every shape and across
-the entire batch before any engine command/write.
+and `extra.lighterStopSlippagePct`. Missing API key index, or neither a local
+secret nor `remoteSigner`, starts public-only data. A remote signer without a
+local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Remote-only native writes fail
+when the signer is unavailable. Caller client order IDs are refused on every
+shape and across the entire batch before any engine command/write.
 
 Both sockets use engine timers for handshake, idle and reconnect watchdogs.
 Private fills come exclusively from execution records, deduplicated by native

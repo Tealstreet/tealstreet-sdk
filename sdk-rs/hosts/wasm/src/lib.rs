@@ -207,6 +207,8 @@ struct EngineOptions {
     private_only: bool,
     #[serde(default)]
     public_feed: Option<PublicFeedOptions>,
+    #[serde(default)]
+    read_credentials: Option<safe_cex_engine::ReadCredentials>,
     #[cfg(feature = "bybit")]
     #[serde(default)]
     enable_inverse_markets: bool,
@@ -600,6 +602,9 @@ impl WasmEngine {
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
+        if let Some(read) = &options.read_credentials {
+            read.validate().map_err(JsError::new)?;
+        }
         #[cfg(feature = "weex")]
         if venue == "weex"
             && !options.public_data_only
@@ -705,6 +710,7 @@ impl WasmEngine {
             }
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
+                read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -712,6 +718,8 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "kraken")]
             "krakenspot" => Box::new(Engine::new(KrakenSpot::new(KrakenOptions {
+                // Spot private reads are POSTs and retain primary credentials.
+                read_credentials: None,
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -771,6 +779,7 @@ impl WasmEngine {
             }
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
+                read_credentials: options.read_credentials.clone(),
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
@@ -778,6 +787,7 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "backpack")]
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
+                read_credentials: options.read_credentials.clone(),
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
@@ -785,6 +795,7 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "blofin")]
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
+                read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -793,12 +804,14 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "mexc")]
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                read_credentials: options.read_credentials.clone(),
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
             #[cfg(feature = "phemex")]
             "phemex" => Box::new(Engine::new(PhemexPerpetuals::new(PhemexOptions {
+                read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -807,6 +820,7 @@ impl WasmEngine {
             #[cfg(feature = "binance")]
             "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
                 Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                    read_credentials: options.read_credentials.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     key: options.key,
@@ -822,6 +836,7 @@ impl WasmEngine {
             }
             #[cfg(feature = "kucoin")]
             "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
+                read_credentials: options.read_credentials.clone(),
                 broker: options.extra.and_then(|e| e.kucoin_broker),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -831,12 +846,14 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                read_credentials: options.read_credentials.clone(),
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
             #[cfg(feature = "weex")]
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
+                read_credentials: options.read_credentials.clone(),
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
@@ -845,6 +862,7 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "woo")]
             "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -854,6 +872,7 @@ impl WasmEngine {
             #[cfg(feature = "bybit")]
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
                 let options = BybitOptions {
+                    read_credentials: options.read_credentials.clone(),
                     enable_inverse_markets: options.enable_inverse_markets,
                     enable_option_markets: options.enable_option_markets,
                     variant: match venue {
@@ -886,6 +905,7 @@ impl WasmEngine {
                     return Err(JsError::new("Bitget requires a passphrase"));
                 }
                 Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
+                    read_credentials: options.read_credentials.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     key: options.key,
@@ -902,6 +922,7 @@ impl WasmEngine {
             }
             #[cfg(feature = "cryptocom")]
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
+                read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -942,6 +963,7 @@ impl WasmEngine {
                     return Err(JsError::new("OKX requires a passphrase"));
                 }
                 Box::new(Engine::new(Okx::new(OkxOptions {
+                    read_credentials: options.read_credentials.clone(),
                     testnet: options.testnet || venue.ends_with("demo"),
                     eea: venue.starts_with("okxeu"),
                     public_data_only: options.public_data_only,
@@ -1249,11 +1271,25 @@ mod tests {
     }
 
     #[test]
+    fn secondary_read_options_decode_without_changing_primary_identity() {
+        let options: EngineOptions = serde_json::from_str(r#"{"key":"primary","secret":"primary-secret","readCredentials":{"key":"read","secret":"read-secret","passphrase":"read-pass"}}"#).unwrap();
+        assert_eq!(options.key.as_deref(), Some("primary"));
+        let read = options.read_credentials.unwrap();
+        assert_eq!(read.key, "read");
+        assert_eq!(read.secret, "read-secret");
+        assert_eq!(read.passphrase.as_deref(), Some("read-pass"));
+        assert!(
+            serde_json::from_str::<EngineOptions>(r#"{"readCredentials":{"key":"read"}}"#).is_err()
+        );
+    }
+
+    #[test]
     fn http_route_metadata_is_optional_and_has_stable_host_names() {
         let actions = [
             None,
             Some(safe_cex_engine::RequestRoute::Direct),
             Some(safe_cex_engine::RequestRoute::PublicCors),
+            Some(safe_cex_engine::RequestRoute::Primary),
         ]
         .into_iter()
         .map(|route| {
@@ -1273,6 +1309,7 @@ mod tests {
         assert!(rows[0].get("route").is_none());
         assert_eq!(rows[1]["route"], "direct");
         assert_eq!(rows[2]["route"], "publicCors");
+        assert_eq!(rows[3]["route"], "primary");
         assert!(rows[0].get("timeoutMs").is_none());
         assert_eq!(rows[1]["timeoutMs"], 5_000);
         assert_eq!(rows[2]["timeoutMs"], 5_000);
