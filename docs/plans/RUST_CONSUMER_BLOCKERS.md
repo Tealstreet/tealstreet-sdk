@@ -182,9 +182,17 @@ publish an empty snapshot or dispose the previous good engine.
 - Final full SDK rerun after the fixture correction PASS: 391/391 in 14 files
   (29.19s). Final native workspace 2,464 tests / 202 result suites, current
   wasm32 strict Clippy, seven consumer tests and eleven factory WASM cases
-  PASS on `afeee9aa…6d710`. The final-artifact replay batch is running with
+  PASS on `afeee9aa…6d710`. The final-artifact replay batch passed all 12 public and 19 private controls, with
   three-run public medians sequentially and one-run private correctness in
   pairs; no builds or other owned checks run during public measurements.
+
+- Integrated landing `02e9db0e8b` (GRVT replay indexing/product decision and
+  Lighter Robinhood variants) as `5b51d8875b` after committing the completed
+  gate evidence. Readiness now tracks 49 names / 45 Rust aliases / 9 defaults /
+  36 opt-in names / 4 unavailable names. Preserve the explicit GRVT retirement
+  decision; this lane changes no product/default selection. Shared Lighter
+  policy integration and fresh combined-artifact affected gates follow.
+
 
 ## Final public replay metrics
 
