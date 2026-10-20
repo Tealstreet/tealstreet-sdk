@@ -218,10 +218,12 @@ export class Tape {
       )
       .map((record) => this.keyFor(record.method, record.url, record.requestBody));
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
+    this.requestAudit = this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate });
     this.audit = this.venue.createSocketAudit?.(impl, {
       isPrivate: this.isPrivate,
       books: this.bookSymbols,
       tickers: this.publicTickers,
+      requestAudit: this.requestAudit,
       records: this.records,
     });
     this.responses = new Responses(
@@ -368,6 +370,7 @@ export class Tape {
   respond(method, url, body, headers) {
     try {
       this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds });
+      this.requestAudit?.validate({ method, url, body, headers });
     } catch (error) {
       this.invalidSignatures++;
       throw error;
@@ -396,6 +399,12 @@ export class Tape {
       }, elapsed, headers)
       : this.responses.respond(method, url, body, this.commandIndex, elapsed, headers);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
+    try {
+      this.requestAudit?.response({ method, url, body, headers, response });
+    } catch (error) {
+      this.invalidSignatures++;
+      throw error;
+    }
     return response;
   }
 

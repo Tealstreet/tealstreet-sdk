@@ -6,6 +6,8 @@ import type { ExchangeName, ExchangeOptions } from '../types';
 import { Blob as NodeBlob } from 'node:buffer';
 import { deflateSync, gzipSync } from 'node:zlib';
 
+import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
@@ -984,6 +986,42 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
     expect(mocks.adapter).toHaveBeenCalledTimes(1);
     expect(raw.request).not.toHaveBeenCalled();
     expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
+});
+
+
+describe('Workers derives GRVT protocol options from its account transport', () => {
+  it.each([true, false])('uses the actual private route when proxied=%s even if the caller flag conflicts', async (proxied) => {
+    let captured: Record<string, unknown> | undefined;
+    let metadata: Transport['engineOptions'];
+    const EngineObject = createEngineObject({
+      loadEngine: async () => ({
+        WasmEngine: class {
+          constructor(_venue: string, json: string) { captured = JSON.parse(json); }
+          start() { return ''; }
+        } as unknown as new (venue: string, json: string) => import('@tealstreet/safe-cex-wasm/host').WasmEngineLike,
+      }),
+      createTransport: (venue: string, accountOptions: Record<string, unknown>, raw: Transport) => {
+        const routed = createEngineTransport(venue as ExchangeName, {
+          ...accountOptions, transport: proxied ? tealstreetTransport : directTransport,
+        } as ExchangeOptions, raw);
+        metadata = routed.engineOptions;
+        return routed;
+      },
+    });
+    const object = new EngineObject({ storage: { setAlarm() {} } });
+    const client = { send() {} };
+    try {
+      await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
+        key: 'venue-key', secret: 'venue-secret', grvtTradingAccountId: '777', grvtSessionProxy: !proxied,
+      } }));
+      expect(captured?.grvtSessionProxy).toBe(proxied);
+      expect(captured?.privateWsHeaders).toBe(true);
+      expect(captured?.key).toBe('venue-key');
+      expect(metadata).toEqual({ grvtSessionProxy: proxied });
+    } finally {
+      object.leave(client);
+    }
   });
 });
 

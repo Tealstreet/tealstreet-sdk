@@ -24,6 +24,7 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
   // subscription map is replayed by resubscribe(), so creating a replacement
   // here would send duplicate upstream topics on every reconnect.
   private tickerSubscriptions = new Map<string, number>();
+  private tickerFields = new Map<string, { buy: number; sell: number; open: number }>();
   // The staggered batch callbacks outlive their originating socket unless we
   // retain them. Track both handles and a generation so a reconnect, manual
   // unsubscribe, or disposal cannot let stale work mutate subscription state.
@@ -409,6 +410,10 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       const market = this.parent.store.marketsById[instrument];
       if (!market) return;
 
+      const currentTicker = this.parent.store.tickersById[market.id];
+      const fields = this.tickerFields.get(market.id) ?? { buy: 0, sell: 0, open: 0 };
+      this.tickerFields.set(market.id, fields);
+      const number = (value: string | number) => (value === '' ? 0 : Number(value));
       // Build changes object - only include fields that are present in the feed
       // This is important for delta streams (v1.ticker.d) which only send changed fields
       const changes: Record<string, any> = {
@@ -420,68 +425,59 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       // Only add fields that are actually present in the message
       const markPriceRaw = feed.mp ?? feed.mark_price;
       if (markPriceRaw !== undefined) {
-        changes.mark = parseFloat(markPriceRaw);
+        changes.mark = number(markPriceRaw);
       }
 
       const indexPriceRaw = feed.ip ?? feed.index_price;
       if (indexPriceRaw !== undefined) {
-        changes.index = parseFloat(indexPriceRaw);
+        changes.index = number(indexPriceRaw);
       }
 
       const lastPriceRaw = feed.lp ?? feed.last_price;
       if (lastPriceRaw !== undefined) {
-        changes.last = parseFloat(lastPriceRaw);
+        changes.last = number(lastPriceRaw);
       }
 
       const bestBidPriceRaw = feed.bb ?? feed.best_bid_price;
       if (bestBidPriceRaw !== undefined) {
-        changes.bid = parseFloat(bestBidPriceRaw);
+        changes.bid = number(bestBidPriceRaw);
       }
 
       const bestAskPriceRaw = feed.ba ?? feed.best_ask_price;
       if (bestAskPriceRaw !== undefined) {
-        changes.ask = parseFloat(bestAskPriceRaw);
+        changes.ask = number(bestAskPriceRaw);
       }
 
       const fundingRateRaw = feed.fr2 ?? feed.funding_rate;
       if (fundingRateRaw !== undefined) {
         // GRVT sends funding rate as a percentage (e.g. 0.01 = 0.01%).
         // Tealstreet stores it as a decimal fraction (0.0001 = 0.01%).
-        changes.fundingRate = parseFloat(fundingRateRaw) / 100;
+        changes.fundingRate = number(fundingRateRaw) / 100;
       }
 
       const openInterestRaw = feed.oi ?? feed.open_interest;
       if (openInterestRaw !== undefined) {
-        changes.openInterest = parseFloat(openInterestRaw);
+        changes.openInterest = number(openInterestRaw);
       }
 
       // Volume fields: bv/buy_volume_24h_b, sv/sell_volume_24h_b
       const buyVolumeRaw = feed.bv ?? feed.buy_volume_24h_b;
       const sellVolumeRaw = feed.sv ?? feed.sell_volume_24h_b;
-      if (buyVolumeRaw !== undefined || sellVolumeRaw !== undefined) {
-        const buyVolume = buyVolumeRaw !== undefined ? parseFloat(buyVolumeRaw) : 0;
-        const sellVolume = sellVolumeRaw !== undefined ? parseFloat(sellVolumeRaw) : 0;
-        changes.volume = buyVolume + sellVolume;
-        // Update quoteVolume only if we have volume and last price
-        if (changes.last !== undefined) {
-          changes.quoteVolume = changes.volume * changes.last;
-        }
-      }
+      if (buyVolumeRaw !== undefined) fields.buy = number(buyVolumeRaw);
+      if (sellVolumeRaw !== undefined) fields.sell = number(sellVolumeRaw);
+      changes.volume = fields.buy + fields.sell;
+      const last = changes.last ?? currentTicker?.last ?? 0;
+      changes.quoteVolume = changes.volume * last;
 
-      // Price fields for 24h change: op/open_price
       const openPriceRaw = feed.op ?? feed.open_price;
-      if (openPriceRaw !== undefined && changes.last !== undefined) {
-        const openPrice = parseFloat(openPriceRaw);
-        if (openPrice > 0) {
-          changes.percentage = ((changes.last - openPrice) / openPrice) * 100;
-        }
-      }
+      if (openPriceRaw !== undefined) fields.open = number(openPriceRaw);
+      if (fields.open > 0) changes.percentage = ((last - fields.open) / fields.open) * 100;
 
       // Parse next funding time (nanoseconds to milliseconds)
       const nextFundingTimeRaw = feed.nf ?? feed.next_funding_time;
       if (nextFundingTimeRaw !== undefined) {
         const fundingTimeMs =
-          typeof nextFundingTimeRaw === 'string' ? parseInt(nextFundingTimeRaw) / 1000000 : nextFundingTimeRaw;
+          number(nextFundingTimeRaw) / 1000000;
         changes.fundingTime = fundingTimeMs / 1000; // Convert to seconds
       }
 
@@ -490,10 +486,14 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       if (changes.last === undefined && changes.mark !== undefined && changes.mark > 0) {
         // Check if current ticker's last is 0 or missing
         // Use O(1) hashmap lookup instead of O(n) find
-        const currentTicker = this.parent.store.tickersById[market.id];
         if (!currentTicker?.last || currentTicker.last === 0) {
           changes.last = changes.mark;
         }
+      }
+
+      if (changes.last !== undefined) {
+        changes.quoteVolume = changes.volume * changes.last;
+        if (fields.open > 0) changes.percentage = ((changes.last - fields.open) / fields.open) * 100;
       }
 
       // Update ticker in store

@@ -10,7 +10,7 @@ import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from
 import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { retainedMemory, settledMemory } from './memory.mjs';
+import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 
 const { values } = parseArgs({
@@ -91,8 +91,10 @@ const options = {
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
-await venue.prepareReplay?.({ isPrivate, options });
-await venue.initializeReplay?.(values.impl, options);
+const initializeReplay = async () => {
+  await venue.prepareReplay?.({ isPrivate, options });
+  await venue.initializeReplay?.(values.impl, options);
+};
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 
@@ -171,7 +173,10 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const heapBefore = await baseline();
+  const heapBefore = await baselineBeforeSetup({
+    baseline,
+    initialize: initializeReplay,
+  });
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
@@ -486,7 +491,10 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const heapBefore = await baseline();
+  const heapBefore = await baselineBeforeSetup({
+    baseline,
+    initialize: initializeReplay,
+  });
   const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols, options);
   class TapeWebSocket {
     static CONNECTING = 0;

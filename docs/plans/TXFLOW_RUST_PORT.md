@@ -469,3 +469,13 @@ work is exact-head CI, merge into `feat/rust-rewrite`, and a fresh branch.
 Native order-history ID/status options explicitly reject before dispatch;
 the previously documented measurement-gated and unavailable endpoint limits
 remain unchanged.
+
+### GRVT landing integration
+
+Merged landing `5d7589f296`, retaining both ports' registrations, replay profiles,
+CI rows and gate annotations. Incoming `baselineBeforeSetup` applies before
+verifier setup in both runners; the reviewed detached comparison snapshot still
+runs before async memory settling in both paths. Independent integration review
+found no conflicting state or transport behavior. Harness 405/405 passes. The
+new measurement lifecycle requires fresh public/private and Binance regression
+measurements; prior measurements above predate this integration.
