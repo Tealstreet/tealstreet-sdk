@@ -200,6 +200,7 @@ impl ApexOmni {
                 || raw.l2_pair_id < 0.0
                 || raw.l2_pair_id > u16::MAX as f64
                 || raw.l2_pair_id.fract() != 0.0
+                || raw.default_initial_margin_rate <= 0.0
             {
                 safe_cex_engine::startup::skipped_row(cx);
                 return;

@@ -66,3 +66,50 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
 }
+
+// A contract without a positive default margin rate has no leverage fallback.
+#[test]
+fn contract_without_positive_default_margin_rate_is_malformed() {
+    let mut engine = Engine::new(ApexOmni::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.start(0.0);
+    let request = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let row = |name: &str, rate: &str| {
+        format!(
+            r#"{{"symbol":"{name}-USDT","crossSymbolName":"{name}USDT","baseTokenId":"{name}","settleAssetId":"USDT","enableTrade":true,"stepSize":"0.001","tickSize":"0.1","minOrderSize":"0.001","maxOrderSize":"1000","displayMinLeverage":"1","displayMaxLeverage":"100","l2PairId":"50000","initialMarginRate":"0.01"{rate},"maxMarketPriceRange":"0.045"}}"#
+        )
+    };
+    let body = format!(
+        r#"{{"code":0,"data":{{"contractConfig":{{"perpetualContract":[{},{},{},{}]}}}}}}"#,
+        row("BTC", r#","defaultInitialMarginRate":"0.05""#),
+        row("ETH", r#","defaultInitialMarginRate":"""#),
+        row("SOL", r#","defaultInitialMarginRate":"0""#),
+        row("XRP", ""),
+    );
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    let symbols = engine
+        .store()
+        .markets()
+        .iter()
+        .map(|m| m.symbol.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(symbols, ["BTCUSDT"]);
+}
