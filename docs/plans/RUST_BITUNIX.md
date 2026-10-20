@@ -1781,3 +1781,42 @@ duplicate-discovery and early-subscriber snapshots/rejection retry/disposal
 controls, run package typecheck/lint/targeted+complete deterministic tests,
 independent source audit, then repeat only failed Breakout gate+parity and
 remaining Bitunix/Binance batch on rebuilt artifacts.
+
+Next landing integration plan reviewed at pinned86ed5e3d2e: TxFlow1329,
+server adapter1334, GRVT replay1335, Lighter variants1336. Expected union
+27venuecrates/31workspacecrates/46SDKaliases/28replayrows,35public and
+62private gate invocations,38CIcontexts. Incoming does not change engine,
+crypto, Bitunix or native host production. Preserve our Lighter stable
+duplicate-price aggregation/regression when layering15new Lighter tests
+(expected103 total), plus73TxFlow tests (expectedworkspace2569).
+
+WASM/SDK/server merge keeps all Bitunix secret/factory/transport/BCM1 guards
+and adds TxFlow typed testnet/key/secret/applicationId/vault plus Lighter
+Robinhood/remote-signer/provider options. Serveradapter additive real-WS
+fixture requires focused native+TS checks. Root artifacts only; rebuild27
+feature combined bundle and feature isolates after owners release source.
+
+Shared harness keeps our strict backbone, fullGC+immediate sample, absolute
+startup chronology/ownedI/O, constructor-inclusive cost, all book/candle/hash/
+outbound fields and sticky recorder failure. Layer accepted bounded GRVT
+per-socket hostname/prefix lookup caching while retaining actual-object state
+keys/closed/session-delivery guards. New TxFlow typed projection must be
+route-scoped after rawauth with duplicate headers/query/origin guards, caller
+IDs/unknown fields retained and peractualsocket business-subscription proof.
+Private virtual clock is explicit TxFlow-only; other private signing unchanged.
+
+Incoming finalizer correctly seeks logical-end output before asyncGC but
+charges structuredClone serialization and retained comparison tables inside
+measurement, unlike our existing boundary. Independent plan review approves
+output-artifact spooling: capture CPU/thread/steady/wall/WASM/peak FIRST at
+the existing end boundary; synchronously v8.serialize full comparison output
+to a temporary file in an unwound helper; retain entire live worker/engine/
+store through unchanged GC; deserialize aftermeasurement and then existing
+normalization; finallycleanup on every path. No comparison objects/buffers
+held across sampling, subtraction/clamps, product disposal, warmup or deadline
+changes. Freshly recheck sticky transport/auth/signature/socket/unserved and
+unused-write failures after GC; never accept incoming late-error masking.
+Tests must prove live mutation freeze, typedarray/Infinity/undefined fidelity,
+usage-before-projection, cleanup errors and late integrity failures. Prior
+gate results remain historical after shared source integration; final rebuilt
+controls and exact38-check CI still required before merge.
