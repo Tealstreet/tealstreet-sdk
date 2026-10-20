@@ -2473,3 +2473,10 @@ follow-up: preserve unsupported HTTP fields, recognize only source-proven
 generated IDs, bind audit state to actual sockets, add fail-before controls,
 and independently review before actual replay. No economic projection or gate
 threshold changes are authorized.
+
+
+Merged Clippy catches a stale test-only helper name: incoming feature isolation
+renames prediction_store to market_position_store, while the retained semantic
+frame-capacity regression still references the old name. Update that single
+call, preserving every fixture and assertion. Production workspace check passed
+because this branch is test-only; all-target checks correctly reject it.

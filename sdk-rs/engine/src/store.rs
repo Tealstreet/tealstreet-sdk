@@ -1814,7 +1814,7 @@ mod tests {
     fn semantic_tables_reserve_with_legacy_tails_and_refresh_ticker_indices() {
         use crate::model::{OptionGreeks, OrderExtra, OrderSide, OrderType};
         for count in [1usize, 2, 63, 64] {
-            let mut store = prediction_store();
+            let mut store = market_position_store();
             let template = store.positions[0].clone();
             store.set_tickers(vec![ticker("M0")]);
             store.set_markets(
