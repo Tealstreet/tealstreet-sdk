@@ -2,6 +2,7 @@
 use crate::{MexcFutures, Pending, REST, sign, wire::*};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -250,16 +251,12 @@ impl MexcFutures {
         let mut windows = VecDeque::new();
         if matches!(kind, Kind::Funding | Kind::Trades) || order_id.is_some() {
             windows.push_back((None, None));
-        } else if let (Some(mut a), Some(b)) = (window_from, window_to) {
-            while a <= b {
-                if windows.len() >= 1000 {
-                    cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
-                    return;
-                }
-                let end = (a + WINDOW).min(b);
-                windows.push_back((Some(a), Some(end)));
-                a = end + 1.0;
-            }
+        } else if let (Some(a), Some(b)) = (window_from, window_to) {
+            let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::OldestFirst, 1000) else {
+                cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
+                return;
+            };
+            windows.extend(tiles.into_iter().map(|(a, b)| (Some(a), Some(b))));
         } else {
             windows.push_back((window_from, window_to));
         }

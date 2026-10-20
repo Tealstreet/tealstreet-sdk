@@ -261,3 +261,33 @@ fn wide_ranges_are_split_into_disjoint_ninety_day_windows() {
     response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
     assert_eq!(result(&mut e).unwrap(), "[]");
 }
+
+/// Pins the exact request sequence of a windowed, page-numbered read. Paging
+/// refactors keep it; a deliberate change updates it with its regression.
+#[test]
+fn windowed_order_history_request_sequence_is_pinned() {
+    let mut e = ready();
+    let day = 86_400_000.0;
+    let r = query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: Some(1.0),
+            to_ms: Some(100.0 * day),
+            limit: Some(1000),
+        },
+    );
+    let mut sent = vec![r.url.split_once("/api/").unwrap().1.to_owned()];
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    let r = requests(&mut e).remove(0);
+    sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    assert_eq!(result(&mut e).unwrap(), "[]");
+    assert_eq!(
+        sent,
+        [
+            "v1/private/order/list/history_orders?end_time=7776000000&page_num=1&page_size=100&start_time=1&states=3%2C4%2C5",
+            "v1/private/order/list/history_orders?end_time=8640000000&page_num=1&page_size=100&start_time=7776000001&states=3%2C4%2C5",
+        ]
+    );
+}
