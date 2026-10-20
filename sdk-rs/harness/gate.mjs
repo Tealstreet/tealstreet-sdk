@@ -19,7 +19,7 @@ import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
 import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
-import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
+import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount, smallWindowRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -110,7 +110,7 @@ const isPrivate =
   tapeRecords.find((record) => record.type === 'meta')?.private ??
   tapeRecords.some((record) => venue.isPrivateRecord ? venue.isPrivateRecord(record)
     : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)));
-const runs = replayRunCount(values.runs, isPrivate);
+let runs = replayRunCount(values.runs, isPrivate);
 const correctnessRuns = isPrivate ? runs : 1;
 const checkpointPlans = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
 const results = { ts: [], rust: [] };
@@ -119,8 +119,14 @@ try {
 for (let run = 0; run < correctnessRuns; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
-if (!isPrivate) for (let run = 0; run < runs; run++) {
-  for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+if (!isPrivate) {
+  for (let run = 0; run < runs; run++)
+    for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+  // Small windows get more pairs (performance-policy.mjs).
+  const total = smallWindowRunCount(runs, performanceResults.ts.map((output) => output.metrics));
+  for (let run = runs; run < total; run++)
+    for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+  runs = total;
 }
 } catch (error) {
   if (!(error instanceof CommandReplayTimeout)) throw error;

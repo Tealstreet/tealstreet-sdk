@@ -314,15 +314,51 @@ Fresh combined gates and exact-head CI are required before merging PR #1345.
 
 ## Security
 
-- Workers Durable Object has no client auth and serves the first client's account
-  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).
-- Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).
-- Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).
-- live-smoke: no notional cap, no post-only, testnet reads mainnet env names.
-- Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.
-- Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
+Addressed by `feat/rust-security-fixes`; regression and gate receipts are in
+[`RUST_SECURITY_FIXES.md`](RUST_SECURITY_FIXES.md). These findings were reverified
+against current code before fixing. Lifecycle differences alone are not defects.
+
+- ~~Workers Durable Object has no client auth and serves the first client's account
+  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).~~
+  **M1/M2:** deployment-owned per-account token checked before upgrade;
+  conflicting starts rejected, one startup in flight, membership/generation
+  rechecked after loading, malformed JSON handled. Options/start failures are
+  generic; actionable venue command failures remain visible. Network clients
+  cannot inject trusted-provider public feed updates into account valuation.
+- ~~Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).~~
+  **M3:** strip URLs on connection/send errors. Current reqwest body-stream
+  errors already have no URL; that path has a non-disclosure regression rather
+  than a claimed defect fix. New delegated signer callback errors
+  are generic instead of echoing arbitrary credential-bearing exception text.
+  Unstructured custom JS HTTP/body/socket exceptions are sanitized at origin;
+  structured venue responses retain actionable errors. Native direct-proxy and
+  HOW HTTP authorization-provider failures also use fixed diagnostics.
+- ~~Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).~~
+  **M4:** redirects disabled in native HTTP, host fetch and Workers HTTP/upgrade.
+- ~~live-smoke: no notional cap, no post-only, testnet reads mainnet env names.~~
+  **M5:** fixed $100 quote-notional cap before any write, post-only on supported
+  adapters, mode-specific credential variables without fallback. Paired TS USD-M
+  fix preserves GTX through REST/NEW mapping and cancel-replace; no relaxed oracle.
+- ~~Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.~~
+  **M6:** atomic per-signer monotonic reservation across native engine objects or
+  one Wasm module memory, surviving engine recreation and clock regression.
+  Hyperliquid and TxFlow share their underlying signer domain. Separate
+  processes/independent Wasm memories still require deployment coordination.
+- ~~Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
   partial zeroization; Paradex 24 h auth signature; Lighter non-hedged Schnorr
-  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.
+  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.~~
+  Polling is bounded to 1000–120000 ms with explicit pause; decompression is
+  capped at 16 MiB. Credential options/signing diagnostics redact Debug;
+  Polymarket credentials cannot Serialize. Internal owned options and stored
+  credentials scrub on drop, including Kraken Spot, KuCoin/Spot and Orderly. Paradex auth
+  expires in 300 seconds; shorter supported caller receive windows are honored
+  while existing TS-compatible defaults remain. Lighter production Schnorr
+  nonces hedge key/message/entropy; independent explicit-nonce vectors remain.
+  Tape fields/headers are allowlisted, unknown nested payloads scrubbed,
+  Set-Cookie removed from persisted fixtures/recordings, and scanner exemptions
+  require exact reviewed public bytes AND exact paths.
+  Owned-carrier erasure does not claim to erase caller-owned/borrowed JS strings,
+  partially failed serde allocations or upstream cryptography/allocator copies.
 - Clean: no committed secrets; native frame server auth and isolation; TLS; RNG.
 
 ## Architecture
@@ -912,7 +948,7 @@ Mostly matches TS.
     frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
     reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
     admitted with a warning instead of reconnecting, in initial recovery too, and the
-    next tick reconciles again.
+    next tick reconciles again. Admission uses `engine::fence::StaleGuard`.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
