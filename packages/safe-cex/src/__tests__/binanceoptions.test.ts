@@ -558,15 +558,38 @@ describe('BinanceOptionsExchange requests', () => {
     ]);
   });
 
-  it('amends a partly filled order for what is left', async () => {
+  it('amends by cancelling, then placing what is left with the same side, reduce-only and time in force', async () => {
     const { exchange, store, calls } = create();
-    const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
+    const order = mapBinanceOptionOrder({ ...OPEN_ORDER, reduceOnly: true, timeInForce: 'IOC' }, 1);
     store.update({ orders: [order] });
     await exchange.updateOrder({ order, update: { price: 110 } });
-    expect(calls.at(-1)).toEqual([
-      'post',
-      ENDPOINTS.ORDER,
-      expect.objectContaining({ quantity: '0.75', price: '110' }),
+    expect(calls).toEqual([
+      ['delete', ENDPOINTS.ORDER, { symbol: BTC, orderId: '4611875134427365000' }],
+      [
+        'post',
+        ENDPOINTS.ORDER,
+        {
+          symbol: BTC,
+          side: 'BUY',
+          type: 'LIMIT',
+          quantity: '0.75',
+          price: '110',
+          timeInForce: 'IOC',
+          reduceOnly: true,
+          clientOrderId: expect.any(String),
+        },
+      ],
+    ]);
+  });
+
+  it('asks for 500 candles back from the requested time when no limit is given', async () => {
+    const { exchange } = create();
+    const to = 1762779600000;
+    (exchange.xhr.get as any).mockResolvedValueOnce({ data: [KLINE] });
+    await exchange.fetchOHLCV({ symbol: BTC, interval: '1m', to } as any);
+    expect((exchange.xhr.get as any).mock.calls.at(-1)).toEqual([
+      ENDPOINTS.KLINE,
+      { params: { symbol: BTC, interval: '1m', startTime: to - 500 * 60_000, endTime: to } },
     ]);
   });
 
