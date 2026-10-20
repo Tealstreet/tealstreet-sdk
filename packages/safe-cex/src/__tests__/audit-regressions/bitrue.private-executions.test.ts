@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { Market, OrderSide, OrderStatus, OrderType } from '../../types';
+import { Market, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 
 const market: Market = {
   id: 'E-BTC-USDT',
@@ -45,6 +45,38 @@ const row = (z: number, status = 'PART_FILLED', extra: Record<string, unknown> =
 });
 afterEach(() => vi.useRealTimers());
 describe('Bitrue futures private execution contract', () => {
+  it.each([
+    ['LIMIT', OrderTimeInForce.GoodTillCancel],
+    ['IOC', OrderTimeInForce.ImmediateOrCancel],
+    ['FOK', OrderTimeInForce.FillOrKill],
+    ['POST_ONLY', OrderTimeInForce.PostOnly],
+  ] as const)(
+    'exposes the native %s time in force when lookup finds a fresh private row',
+    async (type, timeInForce) => {
+      const { exchange, socket, store, fills } = make();
+      const fetchOrders = vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+      socket.handleOrderTradeUpdate(row(0, 'NEW', { o: type, x: 'NEW', c: 'caller-bitrue-1' }) as any);
+      expect(store.orders[0]).toMatchObject({ type: OrderType.Limit, timeInForce });
+      expect(await exchange.findOrderByClientOrderId(market.symbol, 'caller-bitrue-1')).toMatchObject({
+        found: true,
+        order: { id: '2334151155877155281', timeInForce },
+      });
+      store.update({ orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.GoodTillCancel }] });
+      socket.handleOrderTradeUpdate(row(0, 'NEW', { o: type, x: 'NEW', c: 'caller-bitrue-1' }) as any);
+      expect(store.orders[0].timeInForce).toBe(timeInForce);
+      expect(fetchOrders).not.toHaveBeenCalled();
+      expect(fills).not.toHaveBeenCalled();
+      exchange.dispose();
+    },
+  );
+  it('preserves a known time in force when a private delta omits that metadata', () => {
+    const { exchange, socket, store } = make();
+    socket.handleOrderTradeUpdate(row(0, 'NEW', { o: 'LIMIT', x: 'NEW' }) as any);
+    store.update({ orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.PostOnly }] });
+    socket.handleOrderTradeUpdate(row(0, 'NEW', { o: 'LIMIT', x: 'NEW' }) as any);
+    expect(store.orders[0].timeInForce).toBe(OrderTimeInForce.PostOnly);
+    exchange.dispose();
+  });
   it('scales native cumulative fills once, uses the execution price and derives remaining from totals', () => {
     const { socket, store, fills } = make();
     socket.handleOrderTradeUpdate(row(2) as any);

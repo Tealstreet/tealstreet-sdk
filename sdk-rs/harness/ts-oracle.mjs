@@ -275,6 +275,8 @@ const KNOWN_TS_FIXES = {
   // Fill history no longer borrows counterparty IDs or invents an order ID;
   // filtered full pages fail INCOMPLETE and rejected reads propagate errors.
   // Conditional REST children retain exact IDs/parents and trigger references.
+  // Fresh TS private rows now retain native/cached TIF and default to GTC,
+  // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
   bitrue() {},
   bitget: {
@@ -329,8 +331,10 @@ const KNOWN_TS_FIXES = {
     'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
     'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
     'Bybit-only BBO and tick-slippage controls are rejected on KuCoin before batch I/O',
-    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
     'open orders walk every numbered page; TS reads only its default first page',
+    // TS cancelNormalOrders throws on a rejected ID before attempting later IDs.
+    // Native mixed-batch regressions prove continuation and a visible final error.
+    'one rejected cancellation does not prevent later IDs from being attempted',
     'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
     'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
     'stop-to-normal migration remains visible across independent REST books',

@@ -249,7 +249,13 @@ not authoritative for the children.
 
 ### Time In Force
 
-Not explicitly sent in order requests. All orders default to GTC. REST API order responses always map to `OrderTimeInForce.GoodTillCancel`.
+Not explicitly sent in order requests. SDK placements default to GTC. REST API
+order responses map to `OrderTimeInForce.GoodTillCancel`. Private updates map
+explicit native `IOC` / `FOK` / `POST_ONLY` types first, then preserve an existing
+order's known time in force, otherwise default to GTC. Client-ID lookup can
+return a fresh private row before any REST order snapshot, so the private mapper
+must include this metadata too. The Rust replay reference records this paired TS
+metadata fix; generic lookup comparison and tape expectations remain strict.
 
 ### Market Order Quote-Denomination (`bitrue.exchange.ts:871-883`)
 

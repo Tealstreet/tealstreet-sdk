@@ -485,9 +485,9 @@ impl Okx {
         let mut seen = HashSet::new();
         let mut optimistic = Vec::new();
         for id in &ids {
-            let Some(o) = cx.store.order(id) else {
-                continue;
-            };
+            let o = cx.store.order(id).ok_or_else(|| {
+                format!("Order {id} not found; cancellation requires a reconciled order")
+            })?;
             let m = cx
                 .store
                 .market(&o.symbol)
