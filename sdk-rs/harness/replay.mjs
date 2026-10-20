@@ -340,7 +340,7 @@ async function runRust() {
   };
 }
 
-const commandArgs = ({ t, type, ...args }) => args;
+const commandArgs = ({ t, type, expected, ...args }) => args;
 
 async function tsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
@@ -626,6 +626,7 @@ async function runTs() {
     },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
+  await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
   tape.assertWritesConsumed();
   postStore();
