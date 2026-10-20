@@ -1197,6 +1197,52 @@ fn flat_isolated_only_hip3_leverage_write_is_isolated_like_ts() {
     assert_eq!(b["action"]["isCross"], false);
     assert_eq!(b["action"]["leverage"], 3);
 }
+const CROSS_HIP3_META: &str = r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#;
+#[test]
+fn flat_cross_capable_hip3_is_seeded_and_written_isolated_like_ts() {
+    use safe_cex_engine::model::MarginType;
+    let (mut e, _) = ready_with_hip3_meta(CROSS_HIP3_META);
+    let seed = e.store().setting("XYZ|FOO-PERP").unwrap();
+    assert_eq!(seed.margin_type, Some(MarginType::Isolated));
+    assert_eq!(seed.leverage, 10.0);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "XYZ|FOO-PERP".into(),
+            leverage: 3.0,
+            side: None,
+        }),
+    );
+    let b = body(&write(&mut e));
+    assert_eq!(b["action"]["type"], "updateLeverage");
+    assert_eq!(b["action"]["isCross"], false);
+    assert_eq!(b["action"]["leverage"], 3);
+}
+#[test]
+fn venue_cross_hip3_position_settings_win_over_the_isolated_seed() {
+    use safe_cex_engine::model::MarginType;
+    let (mut e, s) = ready_with_hip3_meta(CROSS_HIP3_META);
+    message(
+        &mut e,
+        s,
+        1500.0,
+        r#"{"channel":"clearinghouseState","data":{"dex":"xyz","clearinghouseState":{"assetPositions":[{"position":{"coin":"xyz:FOO","szi":"2","entryPx":"50","positionValue":"100","unrealizedPnl":"0","leverage":{"type":"cross","value":7}}}],"time":1500}}}"#,
+    );
+    let setting = e.store().setting("XYZ|FOO-PERP").unwrap();
+    assert_eq!(setting.margin_type, Some(MarginType::Cross));
+    assert_eq!(setting.leverage, 7.0);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "XYZ|FOO-PERP".into(),
+            leverage: 3.0,
+            side: None,
+        }),
+    );
+    assert_eq!(body(&write(&mut e))["action"]["isCross"], true);
+}
 #[test]
 fn flat_hip3_margin_change_uses_a_leverage_within_the_market_maximum() {
     let (mut e, _) = ready_with_dex("disabled", true);

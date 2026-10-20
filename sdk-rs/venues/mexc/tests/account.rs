@@ -1,5 +1,7 @@
 mod support;
-use safe_cex_engine::{Action, Command, Event};
+use safe_cex_engine::error::ErrorKind;
+use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::*;
 
 const POSITION: &str = r#"{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1,"positionMode":2,"unrealized":6,"liquidatePrice":50000,"im":36,"updateTime":1700000000000}"#;
@@ -890,5 +892,138 @@ fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_loa
         }
         assert!(e.drain_actions().any(|action| matches!(action,
             Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("Malformed MEXC snapshot row"))));
+    }
+}
+
+fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
+    let mut e = Engine::new(MexcFutures::new(Options {
+        read_credentials: None,
+        public_data_only: false,
+        recv_window: None,
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+    }));
+    e.start(0.0);
+    let r = support::requests(&mut e).remove(0);
+    support::response(&mut e, &r, support::MARKETS);
+    let r = support::requests(&mut e).remove(0);
+    support::response(&mut e, &r, support::TICKERS);
+    let mode = support::requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("position_mode"))
+        .unwrap();
+    e.handle(
+        100.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: safe_cex_engine::Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+    let actions = e.drain_actions().collect();
+    (e, actions)
+}
+
+fn startup_failure(actions: &[Action]) -> Option<&safe_cex_engine::error::VenueError> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::StartupFailed { error }) => Some(error),
+        _ => None,
+    })
+}
+
+/// Fires every timer due by `until`, returning whether any fired timer issued a mode read.
+fn mode_retried(e: &mut support::TestEngine, mut actions: Vec<Action>, until: f64) -> bool {
+    let mut retried = false;
+    while let Some((timer, at)) = actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if *at_ms <= until => Some((*timer, *at_ms)),
+        _ => None,
+    }) {
+        actions.retain(|a| !matches!(a, Action::SetTimer { timer: t, .. } if *t == timer));
+        e.handle(at, Event::TimerFired { timer });
+        let next: Vec<_> = e.drain_actions().collect();
+        retried |= next
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("position_mode")));
+        actions.extend(next);
+    }
+    retried
+}
+
+#[test]
+fn refused_key_fails_startup_instead_of_retrying_the_mode_read_forever() {
+    let (mut e, actions) = mode_read(
+        r#"{"success":false,"code":602,"message":"Signature verification failed!"}"#,
+        200,
+    );
+    let error = startup_failure(&actions).expect("startup fails");
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.venue_code.as_deref(), Some("602"));
+    // The SDK's health classifier matches this wording as a rejected key.
+    assert!(error.message.to_lowercase().contains("api key rejected"));
+    assert!(error.message.contains("Signature verification failed!"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(!mode_retried(&mut e, actions, 30_000.0));
+    let (_, actions) = mode_read(
+        r#"{"success":false,"code":402,"message":"Api_key expired"}"#,
+        401,
+    );
+    assert_eq!(
+        startup_failure(&actions).and_then(|e| e.kind),
+        Some(ErrorKind::AuthExpired)
+    );
+}
+
+#[test]
+fn refusal_after_a_transient_failure_stops_the_scheduled_retries() {
+    let (mut e, actions) = mode_read(r#"{"success":false,"code":510,"message":"busy"}"#, 200);
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let mode = support::requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("position_mode"))
+        .unwrap();
+    e.handle(
+        at + 1.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":false,"code":602,"message":"Signature verification failed!"}"#,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(startup_failure(&actions).is_some());
+    assert!(!mode_retried(&mut e, actions, 60_000.0));
+}
+
+#[test]
+fn transient_mode_failures_keep_retrying_without_failing_startup() {
+    for (body, status) in [
+        (
+            r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
+            200,
+        ),
+        ("", 502),
+        ("<html>403 Forbidden</html>", 403),
+        ("", 401),
+    ] {
+        let (mut e, actions) = mode_read(body, status);
+        assert!(startup_failure(&actions).is_none(), "{status} {body}");
+        assert!(mode_retried(&mut e, actions, 30_000.0), "{status} {body}");
     }
 }

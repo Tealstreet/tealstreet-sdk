@@ -22,6 +22,8 @@ command-kucoinspot = []
 # Public Command variants and unsupported-IV guards remain available everywhere.
 command-options = []
 product-semantics = []
+# Venue crates' tests drive private request helpers through ProbeVenue.
+test-support = []
 
 [dependencies]
 serde.workspace = true

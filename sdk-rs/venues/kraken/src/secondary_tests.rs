@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, Engine, ReadCredentials};
 fn options() -> Options {
     Options {
@@ -14,12 +15,10 @@ fn options() -> Options {
     }
 }
 
-struct Probe(Kraken);
-impl Venue for Probe {
-    type Pending = Pending;
-    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+fn probe(venue: Kraken) -> ProbeVenue<Kraken, impl FnMut(&mut Kraken, &mut Cx<'_, Pending>)> {
+    ProbeVenue::new(venue, |venue, cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            self.0
+            venue
                 .signed_request(
                     cx,
                     method,
@@ -32,7 +31,7 @@ impl Venue for Probe {
                 )
                 .unwrap();
         }
-        self.0
+        venue
             .signed_streamed(
                 cx,
                 Method::Get,
@@ -45,21 +44,7 @@ impl Venue for Probe {
                 },
             )
             .unwrap();
-    }
-
-    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
-    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
-    fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
-    fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
-    fn book(&self, _: &str) -> Option<&Book> {
-        None
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(std::iter::empty())
-    }
+    })
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
@@ -74,17 +59,10 @@ fn secondary_get_keeps_primary_mutations() {
         .parse()
         .unwrap();
     let read_bound: u64 = read_signer.nonce(1700000000000.0).unwrap().parse().unwrap();
-    let mut engine = Engine::new(Probe(Kraken::new(options)));
+    let mut engine = Engine::new(probe(Kraken::new(options)));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
+    let requests: Vec<_> = http_requests(&mut engine)
+        .into_iter()
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);
@@ -153,18 +131,9 @@ fn invalid_secondary_identity_stops_startup_before_io() {
 fn equal_api_keys_share_nonce_clock_but_keep_selected_signing_secrets() {
     let mut opts = options();
     opts.read_credentials.as_mut().unwrap().key = "primary-key".into();
-    let mut engine = Engine::new(Probe(Kraken::new(opts)));
+    let mut engine = Engine::new(probe(Kraken::new(opts)));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect();
+    let requests: Vec<_> = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
     let mut previous = 0;
     for request in requests {
@@ -211,17 +180,10 @@ fn equal_api_keys_share_nonce_clock_but_keep_selected_signing_secrets() {
 
 #[test]
 fn history_client_keeps_primary_credentials_and_explicit_primary_route() {
-    let mut engine = Engine::new(Probe(Kraken::new(options())));
+    let mut engine = Engine::new(probe(Kraken::new(options())));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
+    let requests: Vec<_> = http_requests(&mut engine)
+        .into_iter()
         .filter(|r| r.url.contains("/api/history/"))
         .collect();
     assert_eq!(requests.len(), 1);
