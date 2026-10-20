@@ -233,3 +233,13 @@ book levels, native lot IDs, SDK string-array placement ACKs and the standard
 If-Match cancellation precondition. Additional deliberately safer Rust behavior
 is documented in `KNOWN_TS_FIXES.breakoutprop` and native regressions. No
 provably unused crypto helpers were found by the independent caller audit.
+
+## Landing progress
+
+- Sam authorized the documented public fixture for gate 5. Pushed the reviewed
+  branch and opened [PR #1328](https://github.com/Tealstreet/tealstreet-sdk/pull/1328)
+  into `feat/rust-rewrite`; live connectivity remains explicitly pending Sam's
+  legacy DXtrade credentials in both the PR body and roster.
+- Fresh independent code-correctness reviews cover auth/account reconciliation,
+  trading/query safety, and shared host/routing/polling/recording boundaries.
+  Findings will be posted on the PR and fixed before a green-CI merge.
