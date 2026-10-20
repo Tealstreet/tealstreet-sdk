@@ -4,6 +4,12 @@ Read-only Opus audits of `feat/rust-rewrite` at `df2d6a4a03` (after #1340).
 Findings land as fixes through lanes; strike an item when its PR merges. Line
 numbers are as of that commit.
 
+**Judging rule.** Rust need not match TS 1:1. Lifecycle (startup order, dispose,
+cleanup, retries, internal state) may differ freely. A divergence matters only
+by its production impact: wrong orders, positions, balances or fills; money or
+attribution lost; data silently missing or stale; a failure the user cannot see;
+or a downstream caller that breaks. Fix to that bar, not to TS's shape.
+
 ## Owner decisions (gate the cutover)
 
 1. **Engine delivery to tealstreet-next.** The Copybara glob has no `sdk-rs/**`,
@@ -276,3 +282,25 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - Confirm (TS bugs Rust fixed): Classic limit move dropping attached TP/SL; UTA
   attached TP/SL edit cancelling the parent; hedge plan side flip; close orders
   side inversion (verify live); USDC commission asset.
+
+### Engine and TS bridge
+Verdict: reads and streaming match; writes and lifecycle do not yet. Blocks
+further cutover and warrants re-checking coinbase, Orderly, txflow.
+- High: cancel sends ids only and venues drop ids not yet in their store, so a
+  chaser stop during placement leaves the order live (`rust.exchange.ts:789`,
+  `bybit/src/trading.rs:422`); `setLeverage` drops side (see Bitget); a wasm
+  panic freezes the account silently — no containment in `host.mjs:131,175`;
+  `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
+  `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
+  subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
+- Medium: `fetchLeverageForSymbol` returns market max for mexc, bingx, weex
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`; command
+  rejections don't emit the error toast (one-error rule); `privateOnly`/
+  `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
+  mid-command reports a placed order as failed (`host.mjs:83`); base
+  `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
+  realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
+  engine (needs a resync command); `validateAccount` leaves a started engine.
+- Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
+  `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
+  on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
