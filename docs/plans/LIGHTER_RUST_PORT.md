@@ -73,3 +73,16 @@ runtime integrator approval check does not validate fee caps required by docs.
   continue alongside private phase.
 - No Lighter/Poseidon/Goldilocks helper is unused: create/grouped/builder signing
   consumes every hash primitive. No speculative deletion of other lanes' crypto.
+
+### Resume checkpoint
+
+- Quota interruption left private/account and trading source, native regressions,
+  wrapper/wasm registration and initial independent-signature harness work on disk.
+  Commit these as work in progress before merging the landing branch; no stash.
+- Private/trading cross-review identified settings write/read fences, late fills
+  between cancel ACK and replacement, terminal ACK resurrection, and strict
+  snapshot business-status/account validation. Fixes are in progress; not gated.
+- Remaining: finish native verification and phase review; implement queries;
+  finish strict harness/private tape; remove unused grouped/approval signer
+  surface and any crypto helper that only that unused surface kept alive;
+  public recording, all gates, PR reviews and green-CI merge.

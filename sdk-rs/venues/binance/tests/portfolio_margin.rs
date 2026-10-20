@@ -70,6 +70,7 @@ fn limit(amount: f64, price: f64) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: None,
         close: None,
+        max_slippage_pct: None,
     }
 }
 

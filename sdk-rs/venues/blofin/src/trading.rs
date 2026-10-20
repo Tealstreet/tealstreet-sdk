@@ -854,6 +854,7 @@ impl Blofin {
             sl_trigger_type: None,
             client_order_id: None,
             close: None,
+            max_slippage_pct: None,
         };
         self.placement(cx, &raw, source)
     }

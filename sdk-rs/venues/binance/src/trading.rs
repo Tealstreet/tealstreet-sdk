@@ -642,6 +642,7 @@ impl BinanceFutures {
                 .flatten(),
             client_order_id: None,
             close: Some(order.close.unwrap_or(false)),
+            max_slippage_pct: None,
         };
         let mut job = self.plan_cancel(std::slice::from_ref(&order));
         let place = self.plan_place(cx, std::slice::from_ref(&replacement))?;

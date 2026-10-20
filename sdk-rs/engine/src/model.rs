@@ -308,6 +308,8 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+    #[serde(default)]
+    pub max_slippage_pct: Option<f64>,
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(

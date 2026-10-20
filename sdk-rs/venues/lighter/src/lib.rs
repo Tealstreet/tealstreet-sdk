@@ -1,9 +1,11 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
+mod account;
 pub mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Balance, Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -36,6 +38,8 @@ impl Default for Options {
     }
 }
 pub enum Pending {
+    Account(account::Request),
+    Trade(trading::Request),
     Markets {
         fallback: bool,
         rows: Vec<Market>,
@@ -97,6 +101,8 @@ struct CandleState {
 }
 pub struct Lighter {
     options: Options,
+    account: account::Account,
+    trading: trading::Trading,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
     public: Connection,
@@ -127,6 +133,8 @@ impl Lighter {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            account: account::Account::default(),
+            trading: trading::Trading::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
             public: Connection::default(),
@@ -145,6 +153,9 @@ impl Lighter {
         } else {
             "https://mainnet.zklighter.elliot.ai"
         }
+    }
+    fn chain_id(&self) -> u32 {
+        if self.options.testnet { 300 } else { 304 }
     }
     fn ws_url(&self) -> &'static str {
         if self.options.testnet {
@@ -487,6 +498,8 @@ impl Lighter {
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Markets {
                 fallback: false, ..
             } => self.markets(cx, true),
@@ -522,6 +535,9 @@ impl Venue for Lighter {
         self.markets(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account_open(cx, socket) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -551,6 +567,9 @@ impl Venue for Lighter {
         self.ticker_seed(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account_message(cx, socket, text) {
+            return;
+        }
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
@@ -664,6 +683,9 @@ impl Venue for Lighter {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account_close(cx, socket, _code) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -683,6 +705,8 @@ impl Venue for Lighter {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Trade(_) => {}
             Pending::Markets {
                 rows,
                 metadata,
@@ -838,6 +862,17 @@ impl Venue for Lighter {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let pending = match pending {
+            Pending::Account(request) => {
+                self.account_response(cx, request, response);
+                return;
+            }
+            Pending::Trade(request) => {
+                self.trade_response(cx, request, response);
+                return;
+            }
+            other => other,
+        };
         let status = serde_json::from_str::<Status<'_>>(response.body);
         if !(200..300).contains(&response.status) || status.as_ref().is_ok_and(|s| s.code != 200) {
             let error = status.ok().map_or_else(
@@ -848,6 +883,7 @@ impl Venue for Lighter {
             return;
         }
         match pending {
+            Pending::Account(_) | Pending::Trade(_) => unreachable!(),
             Pending::Markets {
                 fallback,
                 rows,
@@ -882,9 +918,7 @@ impl Venue for Lighter {
                         .collect(),
                 );
                 cx.store.set_markets(rows);
-                cx.store.set_orders(vec![]);
-                cx.store.set_positions(vec![]);
-                cx.store.set_balance(Balance::default());
+                self.account_start(cx);
                 self.connect(cx);
                 self.poll = Some(cx.set_timer(2_000.0));
             }
@@ -972,6 +1006,10 @@ impl Venue for Lighter {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Account(request) = pending {
+            self.account_stream_error(cx, request, response);
+            return;
+        }
         self.public_failed(
             cx,
             pending,
@@ -982,6 +1020,9 @@ impl Venue for Lighter {
         self.public_failed(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
+            return;
+        }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
             self.connect(cx);
@@ -1123,21 +1164,7 @@ impl Venue for Lighter {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
-            other => {
-                let id = match other {
-                    Command::PlaceOrders { command, .. }
-                    | Command::CancelOrders { command, .. }
-                    | Command::AmendOrder { command, .. }
-                    | Command::CancelSymbolOrders { command, .. }
-                    | Command::SetLeverage { command, .. }
-                    | Command::SetMarginType { command, .. }
-                    | Command::SetPositionMode { command, .. }
-                    | Command::FetchLeverage { command, .. }
-                    | Command::Query { command, .. } => command,
-                    _ => unreachable!(),
-                };
-                cx.done(id, Err("Lighter private phase pending".into()));
-            }
+            other => self.trade_command(cx, other),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

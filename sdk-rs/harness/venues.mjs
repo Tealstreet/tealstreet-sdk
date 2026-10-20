@@ -3,6 +3,9 @@
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
+import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
+
+let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -143,6 +146,32 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  lighter: {
+    rust: 'lighter',
+    ts: { module: `${root}/lighter/lighter.exchange.ts`, className: 'LighterExchange', name: 'lighter' },
+    replayCredentials: { applicationId: '42', apiKeyIndex: '3', secret: '01' + '00'.repeat(39), key: '' },
+    recordOptions: { publicDataOnly: true, key: '' },
+    async initializeReplay(impl, options) {
+      if (options.publicDataOnly) return;
+      const oracle = await initializeLighterCrypto(impl);
+      lighterVerifier = createLighterVerifier(options, oracle);
+    },
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
+      .filter((key) => key.startsWith('order_book:')).length >= count,
+    isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
+    isWrite: (method) => method !== 'GET',
+    requestBody: lighterRequestBody,
+    requestUrl(url) { const parsed = new URL(url); parsed.searchParams.delete('auth'); return parsed.href; },
+    subscriptionMessage(message) {
+      return message.auth === undefined ? message : {...message,auth:'<verified-auth>'};
+    },
+    verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
+    verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
+    validateMatchedRequest: (record, request) => lighterVerifier?.matched(record, request),
+    commandResult: (result, command) => lighterVerifier?.commandResult(result, command) ?? result,
+    compareFillPrices: true,
+    compareWriteOrder: true,
+  },
   bitget: {
     rust: 'bitget',
     ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
@@ -546,4 +575,5 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange))].filter((value) => value?.defaults && value?.interceptors);
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
+    .filter((value) => value?.defaults && value?.interceptors);

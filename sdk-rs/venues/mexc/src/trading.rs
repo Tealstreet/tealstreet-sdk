@@ -661,6 +661,7 @@ impl MexcFutures {
                         take_profit: o.take_profit,
                         client_order_id: None,
                         close: o.close,
+                        max_slippage_pct: None,
                     };
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {

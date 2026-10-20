@@ -47,6 +47,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
+  lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -143,6 +144,9 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'lighter') {
+      return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
+    }
     if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
     return (
       this.options.publicDataOnly === true ||
@@ -157,7 +161,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
-    if (this.name !== 'hyperliquid' && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+    if (!['hyperliquid', 'lighter'].includes(this.name) && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
@@ -177,6 +181,12 @@ export class RustEngineExchange extends BaseExchange {
         publicDataOnly: Boolean(publicDataOnly),
         ...(this.name === 'backpack' ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
+        ...(this.name === 'lighter' ? {
+          apiKeyIndex: this.options.apiKeyIndex,
+          lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex === undefined
+            ? undefined : Number(this.options.extra.lighterIntegratorAccountIndex),
+          lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+        } : {}),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
@@ -358,7 +368,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'hyperliquid', 'lighter'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });

@@ -3767,6 +3767,7 @@ dependencies = [
  "safe-cex-venue-bybit",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-hyperliquid",
+ "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-weex",
