@@ -528,7 +528,9 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert!(!h.has("/api/v1/stopOrders"));
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/stopOrders"))
+    ));
     assert_eq!(h.done(1), &Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -947,7 +949,9 @@ fn uncached_cancel_ids_send_directly_and_do_not_block_known_ids_after_rejection(
         );
         h.pace();
         assert_eq!(h.done(1).is_err(), reject_unknown);
-        assert!(!h.has("/api/v1/orders/unknown"));
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/orders/unknown"))
+        ));
     }
 }
 
@@ -959,7 +963,9 @@ fn an_empty_native_cancel_id_never_becomes_a_bulk_delete() {
             command: 1,
             ids: vec![id.into()],
         });
-        assert!(!h.has("/api/v1/orders"));
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.url.contains("/api/v1/orders"))
+        ));
         assert!(h.done(1).is_err());
     }
 }

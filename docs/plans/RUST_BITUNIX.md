@@ -3034,3 +3034,17 @@ OKX public and Paradex/Bitrue gates; add refreshed KuCoin futures/Spot and base
 Binance private/public because the required landing changed their production
 cancel/broker behavior. Already-passed opt3OKXEU/private results are retained,
 not repeated to select samples. Exact-head CI refreshes all31rows before merge.
+
+The first refreshed native Clippy run catches3new incoming KuCoin test calls to
+removed Harness.has; no native-test result claimed from that stopped batch.
+Adapt only those assertions to inspect actual emitted HTTP with the original
+all-method URL predicate; retain quota timers, exact response sequence, methods,
+continuation and CommandDone checks. No helper stub or assertion weakening.
+The corrected full native batch uses /tmp/bitunix-702-native-fixed-* logs.
+
+Refreshed852helpers and root44typecheck/28lint/27testtasks PASS. SDK source
+suite now7,803cases/528files in each runner. Compiled consumers/native checks
+remain running, and all replay jobs remain stopped until they finish. Static
+review deduped37finding drafts against45currentPRcomments/zero reviews/threads;
+clarify historical receipts and diagnostic claims before posting, retain
+separate metadata/terminal/REST causes without repeating the same finding.
