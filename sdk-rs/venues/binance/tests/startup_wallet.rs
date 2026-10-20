@@ -567,3 +567,28 @@ fn newer_private_wallet_event_fences_pending_cached_and_inflight_wallet_valuatio
         }
     }
 }
+
+#[test]
+fn priced_wallet_read_in_flight_during_private_event_applies_without_extra_refetch() {
+    for inverse in [false, true] {
+        let mut h = pending(inverse);
+        let account_path = if inverse {
+            "/dapi/v1/account"
+        } else {
+            "/fapi/v3/account"
+        };
+        seed(&mut h, inverse);
+        let read = h.take(account_path);
+        h.respond("listenKey", 200, r#"{"listenKey":"scripted-listen-key"}"#);
+        let socket = h.socket("scripted-listen-key").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "scripted-listen-key",
+            r#"{"e":"ACCOUNT_UPDATE","a":{"B":[{"a":"BTC","wb":"2","cw":"2","bc":"1"}],"P":[]}}"#,
+        );
+        h.reply(read.id, 200, "", wallet(inverse));
+        assert_eq!(*h.engine.store().balance(), expected(inverse));
+        h.advance(3000.);
+        assert!(!h.has_request(account_path), "inverse={inverse}");
+    }
+}

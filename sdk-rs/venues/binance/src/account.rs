@@ -98,6 +98,7 @@ pub struct AccountState {
     tick_timer: Option<TimerId>,
     last_account_at: f64,
     account_in_flight: bool,
+    account_read_predates_event: bool,
     account_version: u32,
     spot_balances: HashMap<String, (f64, f64)>,
     native_executed: HashMap<(String, u64), (f64, bool)>,
@@ -338,6 +339,7 @@ impl BinanceFutures {
         if std::mem::replace(&mut self.account.account_in_flight, true) {
             return;
         }
+        self.account.account_read_predates_event = false;
         self.signed(
             cx,
             Method::Get,
@@ -596,6 +598,10 @@ impl BinanceFutures {
                     && num::parse(&p.position_amt) != 0.0
                     && _cx.store.market(&p.symbol).is_none()
                 {
+                    // A clean catalogue excludes delivery/non-trading contracts by design.
+                    if !self.catalogue_partial {
+                        return;
+                    }
                     if let Some(join) = &mut self.account.positions
                         && join.generation == *generation
                     {
@@ -845,6 +851,14 @@ impl BinanceFutures {
                         self.account.valuation_pending = true;
                         self.account.valuation_warned = false;
                         self.revalue_pending_wallet(cx);
+                        if std::mem::take(&mut self.account.account_read_predates_event)
+                            && self.account.valuation_pending
+                        {
+                            self.account.wallet_assets = None;
+                            self.account.valuation_pending = false;
+                            self.account.valuation_refresh_required = true;
+                            cx.log(LogLevel::Warning, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
+                        }
                     }
                     Err(error) => cx.log(LogLevel::Error, format!("Binance account: {error}")),
                 }
@@ -1679,7 +1693,10 @@ impl BinanceFutures {
             || update
                 .balances
                 .is_some_and(|rows| !matches!(rows.get().trim(), "[]" | "null"));
-        if changed && (self.account.valuation_pending || self.account.account_in_flight) {
+        if changed && self.account.account_in_flight && !self.account.valuation_pending {
+            // Applied at once like any settled read; only a pending cache is fenced.
+            self.account.account_read_predates_event = true;
+        } else if changed && self.account.valuation_pending {
             self.account.account_version += 1;
             self.account.wallet_assets = None;
             self.account.valuation_pending = false;
@@ -1690,6 +1707,7 @@ impl BinanceFutures {
             return;
         }
         if self.is_inverse()
+            && self.catalogue_partial
             && update.positions.iter().any(|position| {
                 num::parse(&position.pa) != 0.0 && cx.store.market(&position.s).is_none()
             })
@@ -1703,6 +1721,9 @@ impl BinanceFutures {
         self.account.position_version += 1;
         self.account.pending_position_events = true;
         for p in &update.positions {
+            if self.is_inverse() && cx.store.market(&p.s).is_none() {
+                continue;
+            }
             let signed = num::parse(&p.pa);
             let mode = if p.ps == "BOTH" {
                 PositionMode::Oneway

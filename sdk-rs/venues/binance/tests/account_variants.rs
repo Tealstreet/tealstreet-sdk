@@ -250,17 +250,18 @@ fn spot_reconnect_ignores_old_auth_and_subscription_and_repairs_after_ack() {
     assert!(h.has_request("/api/v3/openOrders"));
 }
 
+const INVERSE_POSITION_RISK: &str = r#"[{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"2","entryPrice":"9000","markPrice":"10000","unRealizedProfit":"0.001","liquidationPrice":"7000","leverage":"20","marginType":"isolated","isolatedMargin":"0.003"}]"#;
 fn inverse() -> Harness {
-    inverse_with_position_symbol("BTCUSD_PERP")
+    inverse_with("", INVERSE_POSITION_RISK)
 }
-fn inverse_with_position_symbol(position_symbol: &str) -> Harness {
+fn inverse_with(extra_catalogue_rows: &str, position_risk: &str) -> Harness {
     let mut h = Harness::started(Options {
         variant: Variant::CoinM,
         key: Some("api-key".into()),
         secret: Some("secret".into()),
         ..Options::default()
     });
-    h.respond("/dapi/v1/exchangeInfo",200,r#"{"symbols":[{"symbol":"BTCUSD_PERP","contractStatus":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"120"}]}]}"#);
+    h.respond("/dapi/v1/exchangeInfo",200,&r#"{"symbols":[{"symbol":"BTCUSD_PERP","contractStatus":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"120"}]}__EXTRA__]}"#.replace("__EXTRA__", extra_catalogue_rows));
     h.respond(
         "/dapi/v2/leverageBracket",
         200,
@@ -279,7 +280,7 @@ fn inverse_with_position_symbol(position_symbol: &str) -> Harness {
         200,
         r#"{"dualSidePosition":false}"#,
     );
-    h.respond("/dapi/v1/positionRisk",200,&r#"[{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"2","entryPrice":"9000","markPrice":"10000","unRealizedProfit":"0.001","liquidationPrice":"7000","leverage":"20","marginType":"isolated","isolatedMargin":"0.003"}]"#.replace("BTCUSD_PERP", position_symbol));
+    h.respond("/dapi/v1/positionRisk", 200, position_risk);
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
     let private = h.socket("/ws/coin-key").unwrap();
@@ -627,7 +628,10 @@ fn inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd() {
 
 #[test]
 fn inverse_owned_position_outside_partial_catalogue_never_guesses_contract_size() {
-    let mut h = inverse_with_position_symbol("MISSINGUSD_PERP");
+    let mut h = inverse_with(
+        r#",{"symbol":7}"#,
+        &INVERSE_POSITION_RISK.replace("BTCUSD_PERP", "MISSINGUSD_PERP"),
+    );
     assert!(!h.engine.store().loaded().positions);
     h.message("/ws/coin-key", r#"{"e":"ACCOUNT_UPDATE","E":1564745798939,"T":1564745798938,"a":{"m":"ORDER","B":[],"P":[{"s":"MISSINGUSD_PERP","pa":"2","ep":"9000","cr":"0","up":"0.001","mt":"cross","iw":"0","ps":"BOTH"}]}}"#);
     assert!(h.engine.store().positions().is_empty());
@@ -636,4 +640,26 @@ fn inverse_owned_position_outside_partial_catalogue_never_guesses_contract_size(
             .iter()
             .any(|log| log.contains("owned position market unavailable"))
     );
+}
+
+#[test]
+fn inverse_delivery_position_excluded_from_complete_catalogue_does_not_block_perpetuals() {
+    let delivery = r#"{"symbol":"BTCUSD_260925","positionSide":"BOTH","positionAmt":"3","entryPrice":"9500","markPrice":"10000","unRealizedProfit":"0.002","liquidationPrice":"0","leverage":"10","marginType":"cross","isolatedMargin":"0"}"#;
+    let mut h = inverse_with(
+        "",
+        &INVERSE_POSITION_RISK.replace("}]", &format!("}},{delivery}]")),
+    );
+    assert!(h.engine.store().loaded().positions);
+    let symbols: Vec<&str> = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .map(|position| position.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["BTCUSD_PERP"]);
+    h.message("/ws/coin-key", r#"{"e":"ACCOUNT_UPDATE","E":1564745798939,"T":1564745798938,"a":{"m":"ORDER","B":[],"P":[{"s":"BTCUSD_PERP","pa":"4","ep":"9000","cr":"0","up":"0.001","mt":"isolated","iw":"0.003","ps":"BOTH"},{"s":"BTCUSD_260925","pa":"5","ep":"9500","cr":"0","up":"0.002","mt":"cross","iw":"0","ps":"BOTH"}]}}"#);
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].notional, 400.0);
 }
