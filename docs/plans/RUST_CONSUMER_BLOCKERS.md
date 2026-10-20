@@ -401,6 +401,18 @@ publish an empty snapshot or dispose the previous good engine.
   and replay measurements remain scoped to their checkpoints, with fresh
   full-venue exact-head CI required for this initialization repair.
 
+- Codec-head CI `3d24e81ea6` still misses Hyro steady CPU (TS/Rust
+  7.1/7.5 ms; main 40.8/32.4, correctness and memory pass). The valid
+  initialization repair does not establish the remaining timing cause.
+  Collect actual Linux solo profiles before choosing another fix: a temporary
+  preload helper records CPU samples and exact warm/final CPU markers for one
+  unchanged fixture replay per engine. Named WASM comes from the same raw
+  release artifact, and a shell EXIT trap restores production bindings.
+  Instrumented metrics are diagnostic only; the normal gate remains intact.
+  Local helper verification and independent helper/workflow review PASS.
+  Delete the temporary helper/profile/upload steps after the measured fix and
+  require fresh uninstrumented exact-head CI before merging.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,

@@ -338,6 +338,37 @@ jobs:
       - name: Hyro documented public contract (live endpoints not configured)
         if: matrix.venue == 'bybit'
         run: yarn rust:gate --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Profile the exact Hyro fixture for the consumer-blockers investigation
+        if: always() && matrix.venue == 'bybit'
+        run: |
+          profile_dir="$RUNNER_TEMP/hyro-profile"
+          mkdir -p "$profile_dir"
+          cp -R sdk-rs/hosts/wasm/pkg/node "$profile_dir/production-node"
+          sha256sum sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm > "$profile_dir/production.sha256"
+          trap 'cp -R "$profile_dir/production-node/." sdk-rs/hosts/wasm/pkg/node/' EXIT
+          wasm-bindgen --target nodejs --out-name safe_cex_wasm --remove-producers-section \
+            --out-dir "$profile_dir/named" sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+          cp -R "$profile_dir/named/." sdk-rs/hosts/wasm/pkg/node/
+          sha256sum sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm > "$profile_dir/named.sha256"
+          for impl in ts rust; do
+            RUST_REPLAY_PROFILE_DIR="$profile_dir" \
+              NODE_OPTIONS="--require=$GITHUB_WORKSPACE/sdk-rs/harness/profile-replay.cjs" \
+              corepack yarn -s rust:replay --impl "$impl" --venue hyrotrader \
+                --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz \
+                --books BTCUSDT,ETHUSDT --out "$profile_dir/replay-$impl.json"
+          done
+      - name: Upload temporary Hyro CPU profiles
+        if: always() && matrix.venue == 'bybit'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hyro-cpu-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/hyro-profile/*.cpuprofile
+            ${{ runner.temp }}/hyro-profile/*.timings.json
+            ${{ runner.temp }}/hyro-profile/replay-*.json
+            ${{ runner.temp }}/hyro-profile/*.sha256
+          if-no-files-found: error
+          retention-days: 3
       - name: Bybit variants account and trading (documented correctness)
         if: matrix.venue == 'bybit'
         run: |
