@@ -499,6 +499,7 @@ export class RustEngineExchange extends BaseExchange {
         'coinbase',
         'coinbasespot',
         'polymarket',
+        'breakoutprop',
       ].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
