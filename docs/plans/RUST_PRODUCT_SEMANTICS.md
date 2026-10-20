@@ -274,3 +274,39 @@ Clippy and format PASS. Unchanged public/private gates PASS locally: public
 main 19.8 vs TS 63.1 ms, steady 7.7 vs 8.7 ms, retained 0.8 vs 12.5 MB.
 TS startup timing varied substantially, so these figures establish the local
 gate result rather than a stable speedup; final-head green CI remains required.
+
+The request-formatting repair `37e9f9f276` left a CI total-CPU miss of
+18.0 vs TS 17.9 ms, with steady CPU passing 5.6 vs 6.7. A scoped profile of
+that artifact found about 2 ms in the first subscription command; its full
+command deserializer was 75,942 bytes. Isolating that cold path targets the
+large trading/query parser used unnecessarily at startup. The separate typed subscription decoder
+preserves the same internally tagged serde schema, including ignored-field
+overflow validation, duplicate fields, escaped operations and exact errors.
+It uses the existing header validation; trading/query and polling controls
+retain the original complete parser.
+
+Outlining the shared parser itself was rejected: large command-enum return
+copies inflated Paradex to 1,298,760/1,298,721 bytes. Moving the boundary to
+WASM dispatch reduced that to 1,276,383, still over budget. The final explicit
+`cold-subscriptions` WASM feature is enabled by Breakout: it trades code size
+for lower startup CPU, with the complete decode/dispatch/flush kept together
+in the cold method. Native hosts and builds without the feature retain their
+original command path. No runtime venue/environment/fixture condition exists.
+Combined builds apply the same feature consistently to every venue instance.
+
+Final independent source review PASS; engine feature-off/on 77 tests each,
+focused WASM host feature-off/on and full native host tests, strict native/WASM
+Clippy, format and differential decoder checks PASS. Paradex is exactly back
+to 1,253,328 bytes, with public/private gates PASS (main Rust 368.7 vs TS
+388.6 ms, steady 114.8 vs 174.3). Breakout is 671,135 bytes, within the
+unchanged 1,258,291 budget: public main 14.2 vs TS 18.5 ms, steady 4.9 vs
+6.4, retained 0.8 vs 11.8 MB; private correctness and compiled parity 4/4 PASS.
+The final combined artifact passes semantic integrations 16/16, SDK 406/406,
+JS host 68, native WASM host 8 and frame-wire integration.
+
+All 24 requested replay controls were then repeated on this final combined
+artifact and PASS: Bybit family 10, Binance family 8, OKX family 6. Fresh
+combined OKX global main CPU is 1,049.8 vs TS 1,169.5 ms (steady 790.1 vs
+881.3, retained 6.1 vs 19.2 MB); EU main 2,081.7 vs 2,298.8 ms (steady
+1,596.1 vs 1,755.3, retained 7.5 vs 21.7 MB). Final-head green CI is still
+required before merge.
