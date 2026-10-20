@@ -1413,12 +1413,7 @@ impl<V: Venue> Engine<V> {
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => {
-                cx.event(
-                    Level::Debug,
-                    log_code::WS_CLOSED,
-                    "WebSocket closed",
-                    vec![("socket", socket.0.into()), ("code", code.into())],
-                );
+                cx.io.health.count(log_code::WS_CLOSED);
                 self.venue.on_close(&mut cx, socket, code)
             }
             Event::HttpResponse { request, response } => {
@@ -1479,13 +1474,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
-                    // Transport errors can quote signed URLs, so only the fact is recorded.
-                    cx.event(
-                        Level::Debug,
-                        log_code::HTTP_FAILED,
-                        "HTTP request failed",
-                        Vec::new(),
-                    );
+                    cx.io.health.count(log_code::HTTP_FAILED);
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
             }
@@ -1653,19 +1642,9 @@ impl<V: Venue> Engine<V> {
         };
         let status = incoming.status;
         if status == 429 {
-            cx.event(
-                Level::Debug,
-                log_code::RATE_LIMITED,
-                "HTTP rate limited",
-                Vec::new(),
-            );
+            cx.io.health.count(log_code::RATE_LIMITED);
         } else if status >= 500 {
-            cx.event(
-                Level::Debug,
-                log_code::HTTP_FAILED,
-                "HTTP server error",
-                vec![("status", status.into())],
-            );
+            cx.io.health.count(log_code::HTTP_FAILED);
         }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.

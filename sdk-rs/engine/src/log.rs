@@ -120,7 +120,8 @@ pub struct LogEvent {
     pub fields: Vec<(&'static str, Value)>,
 }
 
-/// Codes the engine counts in [`Health`]; venues emit them through `Cx::event`.
+/// Codes counted in [`Health`]. The engine counts socket closes and HTTP
+/// failures itself; venues emit the rest through `Cx::event`.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";

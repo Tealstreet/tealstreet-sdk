@@ -164,12 +164,8 @@ fn socket_and_http_failures_are_counted_without_quoting_transport_errors() {
             code: 1006,
         },
     );
-    let closed: Vec<_> = engine.drain_actions().collect();
-    assert!(matches!(
-        closed.as_slice(),
-        [Action::Notice(Notice::Event(LogEvent { code: "ws.closed", fields, .. }))]
-            if fields == &[("socket", Value::Num(1.)), ("code", Value::Num(1006.))]
-    ));
+    // Counted only: transport-level notices would cost every venue's wasm budget.
+    assert_eq!(engine.drain_actions().count(), 0);
 
     let failed = request(&mut engine);
     engine.handle(
