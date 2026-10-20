@@ -434,6 +434,8 @@ export interface PolymarketL2Headers {
  * Exchange-specific options for Polymarket
  */
 export interface PolymarketExchangeOptions {
+  /** Optional explicit discovery scope; each market still exposes every outcome. */
+  marketSlugs?: string[];
   /** Derived API key */
   apiKey?: string;
   /** API secret */

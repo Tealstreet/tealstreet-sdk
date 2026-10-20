@@ -231,6 +231,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
+  message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (typeof message.topic === 'string') {

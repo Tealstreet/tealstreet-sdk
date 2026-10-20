@@ -10,7 +10,7 @@ import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
 import { canonicalUrl } from './requests.mjs';
-import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { Frame, LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -102,6 +102,15 @@ if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;
+let recordingTimer;
+let startupTimer;
+let startedWindow = false;
+const beginWindow = () => {
+  if (startedWindow) return;
+  startedWindow = true;
+  clearTimeout(startupTimer);
+  recordingTimer = setTimeout(finish, Number(values.seconds) * 1000);
+};
 const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
@@ -112,7 +121,10 @@ const host = new EngineHost(
   {
     onFrame: (buffer) => {
       updates++;
-      for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+      const frame=new Frame(buffer);
+      for (const book of frame.books()) seenBooks.add(book.market);
+      const loaded=frame.status()?.loaded??0;
+      if (venue.recordAfterReady && (loaded & (LOADED_FLAG.MARKETS|LOADED_FLAG.TICKERS)) === (LOADED_FLAG.MARKETS|LOADED_FLAG.TICKERS)) beginWindow();
     },
     onLog: (level, message) => console.error(`[${level}] ${message}`),
   },
@@ -122,17 +134,16 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(
-  () => {
-    clearInterval(flush);
-    host.flush();
-    host.dispose();
-    tape.end(() => {
-      console.log(
-        JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }),
-      );
-      process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
-    });
-  },
-  Number(values.seconds) * 1000,
-);
+function finish() {
+  clearTimeout(recordingTimer);
+  clearTimeout(startupTimer);
+  clearInterval(flush);
+  host.flush();
+  host.dispose();
+  tape.end(() => {
+    console.log(JSON.stringify({out,seconds:Number(values.seconds),storeUpdates:updates,frames,books:seenBooks.size}));
+    process.exit(frames>0&&seenBooks.size>=values.books.split(',').filter(Boolean).length?0:1);
+  });
+}
+if (venue.recordAfterReady) startupTimer=setTimeout(finish,120_000);
+else beginWindow();

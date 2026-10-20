@@ -60,6 +60,9 @@ impl H {
         self.collect();
     }
     fn response(&mut self, path: &str, status: u16, body: &str) {
+        let wrapped = (path.contains("/markets") && body.trim_start().starts_with('['))
+            .then(|| format!(r#"{{"markets":{body}}}"#));
+        let body = wrapped.as_deref().unwrap_or(body);
         let i = self
             .http
             .iter()
@@ -284,4 +287,105 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
     assert!(result.contains("101000"));
     assert!(result.contains("102000"));
     assert!(!result.contains("103000"));
+}
+
+#[test]
+fn keyset_discovery_walks_opaque_cursors_atomically_and_rejects_cycles() {
+    let mut h = H::new();
+    let first = format!(r#"{{"markets":{MARKETS},"next_cursor":"a/b+=opaque"}}"#);
+    h.response("/markets/keyset", 200, &first);
+    assert!(!h.e.store().loaded().markets);
+    assert_eq!(h.http.len(), 1);
+    assert!(h.http[0].url.ends_with("after_cursor=a%2Fb%2B%3Dopaque"));
+    assert!(!h.http[0].url.contains("offset="));
+    let second = MARKETS
+        .replace("election", "sports")
+        .replace(TOKEN, "3")
+        .replace("\\\"2\\\"", "\\\"4\\\"");
+    h.response(
+        "/markets/keyset",
+        200,
+        &format!(r#"{{"markets":{second}}}"#),
+    );
+    assert_eq!(h.e.store().markets().len(), 4);
+    assert!(h.e.store().market("sports-Yes").is_some());
+    let mut h = H::new();
+    h.response("/markets/keyset", 200, &first);
+    h.response("/markets/keyset", 200, &first);
+    assert!(!h.e.store().loaded().markets);
+    assert!(h.e.store().markets().is_empty());
+    assert!(h.http.is_empty());
+}
+#[test]
+fn keyset_missing_cursor_on_full_page_and_failed_later_page_do_not_commit_prefix() {
+    let mut h = H::new();
+    let row = &MARKETS[1..MARKETS.len() - 1];
+    let full = format!(r#"{{"markets":[{}]}}"#, vec![row; 100].join(","));
+    h.response("/markets/keyset", 200, &full);
+    assert!(!h.e.store().loaded().markets);
+    let mut h = H::new();
+    h.response(
+        "/markets/keyset",
+        200,
+        &format!(r#"{{"markets":{MARKETS},"next_cursor":"later"}}"#),
+    );
+    h.response("/markets/keyset", 500, "unavailable");
+    assert!(h.e.store().markets().is_empty());
+    assert!(!h.e.store().loaded().markets);
+}
+#[test]
+fn price_history_duplicate_timestamp_retains_last_sample() {
+    let mut h = H::new();
+    h.load();
+    h.event(Event::Command(Command::FetchCandles {
+        command: 7,
+        symbol: "election-Yes".into(),
+        interval: "1m".into(),
+        limit: None,
+        from_ms: None,
+        to_ms: None,
+    }));
+    h.response(
+        "/prices-history",
+        200,
+        r#"{"history":[{"t":100,"p":0.3},{"t":100,"p":0.6}]}"#,
+    );
+    assert_eq!(
+        h.done.last().unwrap().as_ref().unwrap(),
+        r#"[{"timestamp":100000.0,"open":0.6,"high":0.6,"low":0.6,"close":0.6,"volume":0.0}]"#
+    );
+}
+
+#[test]
+fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_intent() {
+    let mut h = H::new();
+    h.e = Engine::new(Polymarket::new(Options {
+        polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
+            market_slugs: Some(vec!["one/a".into(), "two b".into()]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }));
+    h.http.clear();
+    h.e.start(h.now);
+    h.collect();
+    assert_eq!(
+        h.http[0].url,
+        "https://gamma-api.polymarket.com/markets/keyset?active=true&closed=false&limit=100&slug=one%2Fa&slug=two%20b"
+    );
+    h.load();
+    assert!(h.e.store().loaded().orders);
+    assert!(h.http.is_empty());
+    assert!(h.socket.is_none());
+    for slugs in [vec![], vec!["".into()], vec!["one".into(), "one".into()]] {
+        let mut e = Engine::new(Polymarket::new(Options {
+            polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
+                market_slugs: Some(slugs),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        e.start(0.0);
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
 }

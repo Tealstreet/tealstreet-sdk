@@ -4,6 +4,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
+import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
@@ -1030,6 +1031,7 @@ export const VENUES = {
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
   },
+  polymarket,
   kucoin: {
     ...kucoin,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
@@ -1050,7 +1052,7 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance, ...Object.values(value && typeof value === 'object' ? value : {})]))]
     .filter((value) => value?.defaults && value?.interceptors);
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */

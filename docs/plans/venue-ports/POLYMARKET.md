@@ -185,3 +185,38 @@ clients to /markets/keyset. Official keyset docs confirm max100, markets array,
 next_cursor -> after_cursor, and no offset parameter. The capture will be
 replaced after complete keyset discovery is implemented in Rust and reference
 TS; this avoids claiming a truncated market universe passed.
+
+### Gate phase checkpoint (review passed; shared gates completing)
+
+Registered Wasm feature/default dispatcher, typed wallet/L2/funder options, SDK
+wrapper and fixed leverage, CI matrix, public/private harness protocols and
+fixtures. Root44 typecheck tasks,28 lint tasks,1,431 native Rust tests (61
+Polymarket), workspace native clippy, wasm32 clippy, bans and fmt PASS.
+255 harness tests PASS. Actual SDK/Wasm file12 tests PASS, including accepted
+batch identity through host Error fields, matched partials, final cancellation
+proof and floor sizing in both frame consumers.
+
+Independent gate review found2P2s: freshly signed stale clocks could be masked,
+and DELETE/order unexpected nested fields were normalized. Fixed canonical
+L1/L2 seconds and order milliseconds freshness before masking; restrict
+entropy normalization toPOST/order. Freshly re-signed negative fixtures and
+independent counterexamples now fail as intended; review PASS. Taped Gamma
+metadata independently requires both public subscriptions and private auth.
+
+Scope: benchmark is2Gamma markets,4outcome markets,2full books. An unfiltered
+live attempt traversed>43,000Gamma rows/~295MB before the recorder120s startup
+timeout; it is EXCLUDED from the fixture and gate claims. Default unfiltered
+engine still performs the complete keyset walk. Explicit optional marketSlugs
+scopes production discovery and this reproducible fixture, using exact
+repeated slug parameters. Filtervalidation/cursorcycles/failurepaths are
+regression tested; no hidden cap or changed gate threshold.
+
+The scoped genuine20s capture has191frames and2books; the trimmed fixture
+keeps185records/182frames. Initial three-run public PASS: TS/Rust workerCPU
+25.0/19.5ms, steady8.6/3.6ms, retained21.2/0.8MB; selectedWasm795,169bytes
+against1,258,291budget. PrivatePASS: allstate/fills/commands/exactsignedwrites,
+31records/12frames/7commands, TS/RustCPU142.7/56.5ms informational.
+A later recheck under simultaneous local verification failed TS backing-buffer
+settling before comparison (11samples/8transitions/1,025ms); the strict
+1second deadline is unchanged. Rechecking unchanged after broad checks.
+Binance public/private, combinedWasm suite and root tests remain before PR.

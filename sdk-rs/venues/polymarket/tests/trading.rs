@@ -30,6 +30,7 @@ impl H {
                     api_passphrase: Some("pass-test".into()),
                     signer_type,
                     funder_address: funder.map(str::to_owned),
+                    market_slugs: None,
                 }),
                 ..Default::default()
             })),
@@ -40,7 +41,7 @@ impl H {
         };
         h.e.start(h.now);
         h.collect();
-        h.response("/markets", 200, MARKETS);
+        h.response("/markets/keyset", 200, MARKETS);
         h.response("/midpoints", 200, r#"{"1":"0.5","2":"0.5"}"#);
         h.response("/balance-allowance", 200, r#"{"balance":"1000000000"}"#);
         h.response(
@@ -96,6 +97,9 @@ impl H {
         });
     }
     fn response(&mut self, path: &str, status: u16, body: &str) {
+        let wrapped = (path.contains("/markets") && body.trim_start().starts_with('['))
+            .then(|| format!(r#"{{"markets":{body}}}"#));
+        let body = wrapped.as_deref().unwrap_or(body);
         let r = self.take(path);
         self.respond(r, status, body);
     }

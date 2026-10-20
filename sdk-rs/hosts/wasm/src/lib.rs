@@ -8,6 +8,7 @@
     feature = "bitrue",
     feature = "binance",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -23,7 +24,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, polymarket, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -60,6 +61,10 @@ use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "orderly")]
 use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
+#[cfg(feature = "polymarket")]
+use safe_cex_venue_polymarket::{
+    Options as PolymarketOptions, Polymarket, PolymarketOptions as PolymarketAccountOptions,
+};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -112,6 +117,7 @@ struct KucoinExtra {
 #[cfg(any(
     feature = "binance",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -130,6 +136,9 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "polymarket")]
+    #[serde(default)]
+    polymarket: Option<PolymarketAccountOptions>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -159,6 +168,24 @@ struct EngineOptions {
     public_data_only: bool,
     #[serde(default)]
     key: Option<String>,
+    #[cfg(any(
+        feature = "binance",
+        feature = "kucoin",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "woo",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "okx"
+    ))]
     #[serde(default)]
     secret: Option<String>,
     #[cfg(any(feature = "backpack", feature = "bitrue"))]
@@ -650,6 +677,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "binance",
         feature = "kucoin",
+        feature = "polymarket",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -676,6 +704,12 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "polymarket")]
+            "polymarket" => Box::new(Engine::new(Polymarket::new(PolymarketOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                polymarket: options.polymarket,
+            }))),
             #[cfg(feature = "orderly")]
             "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
                 Box::new(Engine::new(Orderly::new(OrderlyOptions {

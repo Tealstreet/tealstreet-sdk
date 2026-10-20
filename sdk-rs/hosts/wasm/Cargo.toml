@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+polymarket = ["dep:safe-cex-venue-polymarket"]
 lighter = ["dep:safe-cex-venue-lighter"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
@@ -18,6 +19,7 @@ mexc = ["dep:safe-cex-venue-mexc"]
 bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 default = [
+    "polymarket",
     "lighter",
     "woo",
     "bitrue",
@@ -44,6 +46,7 @@ okx = ["dep:safe-cex-venue-okx"]
 orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
+safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true }
 safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }
 safe-cex-venue-woo = { workspace = true, optional = true }
 safe-cex-venue-bitrue = { workspace = true, optional = true }

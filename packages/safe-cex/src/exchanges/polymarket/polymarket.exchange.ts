@@ -372,8 +372,13 @@ export class PolymarketExchange extends BaseExchange {
    * Each market has 2 tokens (YES and NO) that can be traded.
    */
   fetchMarkets = async (): Promise<Market[]> => {
+    const slugs = this.options.polymarket?.marketSlugs;
+    if (slugs !== undefined && (!Array.isArray(slugs) || slugs.length === 0 || slugs.length > 100 ||
+        slugs.some((slug) => typeof slug !== 'string' || !slug.trim()) || new Set(slugs).size !== slugs.length)) {
+      throw new Error('Polymarket marketSlugs must contain 1-100 unique nonempty strings');
+    }
     try {
-      const gammaMarkets = await this.api.getGammaMarkets({ active: true, closed: false });
+      const gammaMarkets = await this.api.getGammaMarkets({ active: true, closed: false, ...(slugs !== undefined ? { slug: slugs } : {}) });
 
       const markets: Market[] = [];
 
@@ -795,27 +800,30 @@ export class PolymarketExchange extends BaseExchange {
       return [];
     }
 
-    try {
-      const history = await this.api.getPriceHistory(
-        tokenId,
-        opts.from,
-        opts.to,
-        undefined,
-        60, // 1 minute fidelity
-      );
-
-      return history.map((h) => ({
-        timestamp: h.t * 1000,
-        open: parseFloat(h.p),
-        high: parseFloat(h.p),
-        low: parseFloat(h.p),
-        close: parseFloat(h.p),
-        volume: 0,
-      }));
-    } catch (err) {
-      this.log(`Error fetching OHLCV: ${err}`, LogSeverity.Warning);
-      return [];
+    const fidelityByInterval: Record<string, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
+    const fidelity = fidelityByInterval[opts.interval];
+    if (!fidelity || opts.limit === 0 ||
+        [opts.from, opts.to].some((v) => v !== undefined && (!Number.isFinite(v) || v < 0)) ||
+        (opts.from !== undefined && opts.to !== undefined && opts.from > opts.to)) {
+      throw new Error('Invalid Polymarket candle bounds or interval');
     }
+    const history = await this.api.getPriceHistory(
+      tokenId,
+      opts.from === undefined ? undefined : Math.floor(opts.from / 1000),
+      opts.to === undefined ? undefined : Math.floor(opts.to / 1000),
+      undefined,
+      fidelity,
+    );
+    const candles: Candle[] = history.map((h) => {
+      const timestamp = Number(h.t) * 1000;
+      const price = Number(h.p);
+      if (!Number.isFinite(timestamp) || timestamp < 0 || !Number.isFinite(price) || price < 0 || price > 1) {
+        throw new Error('Invalid Polymarket price history');
+      }
+      return { timestamp, open: price, high: price, low: price, close: price, volume: 0 };
+    }).filter((c) => (opts.from === undefined || c.timestamp >= opts.from) && (opts.to === undefined || c.timestamp <= opts.to));
+    const unique = [...new Map(candles.map((c) => [c.timestamp, c])).values()].sort((a, b) => a.timestamp - b.timestamp);
+    return opts.limit === undefined ? unique : unique.slice(-opts.limit);
   };
 
   /**
@@ -831,8 +839,8 @@ export class PolymarketExchange extends BaseExchange {
       try {
         const candles = await this.fetchOHLCV({
           ...opts,
-          from: Math.floor((Date.now() - 60000) / 1000),
-          to: Math.floor(Date.now() / 1000),
+          from: Date.now() - 60000,
+          to: Date.now(),
         });
 
         for (const candle of candles) {

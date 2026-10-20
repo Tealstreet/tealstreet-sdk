@@ -33,6 +33,7 @@ pub struct PolymarketOptions {
     #[serde(default)]
     pub signer_type: u8,
     pub funder_address: Option<String>,
+    pub market_slugs: Option<Vec<String>>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct Options {
@@ -44,7 +45,6 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     Markets {
-        offset: usize,
         count: usize,
         rows: Vec<Market>,
         metadata: Vec<PredictionMarket>,
@@ -92,6 +92,7 @@ pub struct Polymarket {
     pub(crate) connections: [Connection; 2],
     books: HashMap<String, BookState>,
     market_ids: HashSet<String>,
+    market_cursors: HashSet<String>,
     market_symbols: HashSet<String>,
     candles: BTreeMap<(String, String), CandleSubscription>,
     candle_timer: Option<TimerId>,
@@ -144,6 +145,7 @@ impl Polymarket {
             account: Default::default(),
             trading: Default::default(),
             market_ids: Default::default(),
+            market_cursors: Default::default(),
             market_symbols: Default::default(),
             connections: Default::default(),
             books: Default::default(),
@@ -161,17 +163,41 @@ impl Polymarket {
     fn markets(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        offset: usize,
+        cursor: Option<String>,
         rows: Vec<Market>,
         metadata: Vec<PredictionMarket>,
     ) {
+        let mut url = format!("{GAMMA}/markets/keyset?active=true&closed=false&limit={GAMMA_PAGE}");
+        if let Some(slugs) = self
+            .options
+            .polymarket
+            .as_ref()
+            .and_then(|p| p.market_slugs.as_ref())
+        {
+            if slugs.is_empty()
+                || slugs.len() > 100
+                || slugs.iter().any(|s| s.trim().is_empty())
+                || slugs.iter().collect::<HashSet<_>>().len() != slugs.len()
+            {
+                cx.log(
+                    LogLevel::Error,
+                    "Polymarket marketSlugs must contain1..100 unique nonempty slugs",
+                );
+                return;
+            }
+            for slug in slugs {
+                url.push_str(&format!("&slug={}", encode(slug)));
+            }
+        }
+        if let Some(cursor) = &cursor {
+            url.push_str(&format!("&after_cursor={}", encode(cursor)));
+        }
         cx.request_streamed(
             Method::Get,
-            format!("{GAMMA}/markets?active=true&closed=false&limit={GAMMA_PAGE}&offset={offset}"),
+            url,
             vec![],
-            ArrayAt::Root,
+            ArrayAt::Field("markets"),
             Pending::Markets {
-                offset,
                 count: 0,
                 rows,
                 metadata,
@@ -215,9 +241,15 @@ impl Polymarket {
         if !self.books.is_empty() {
             self.connect(cx, 0);
         }
-        if self.options.public_data_only
-            || (self.options.key.is_none() && self.options.polymarket.is_none())
-        {
+        let private_intent = self.options.key.as_ref().is_some_and(|k| !k.is_empty())
+            || self.options.polymarket.as_ref().is_some_and(|p| {
+                p.api_key.is_some()
+                    || p.api_secret.is_some()
+                    || p.api_passphrase.is_some()
+                    || p.signer_type != 0
+                    || p.funder_address.is_some()
+            });
+        if self.options.public_data_only || !private_intent {
             cx.store.set_balance(Default::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
@@ -538,7 +570,7 @@ fn valid_level(price: f64, size: f64) -> bool {
 impl Venue for Polymarket {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.markets(cx, 0, vec![], vec![]);
+        self.markets(cx, None, vec![], vec![]);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let Some(i) = self
@@ -624,7 +656,6 @@ impl Venue for Polymarket {
         match pending {
             Pending::Account(_) | Pending::Trade(_) => unreachable!(),
             Pending::Markets {
-                offset,
                 count,
                 rows,
                 metadata,
@@ -641,8 +672,36 @@ impl Venue for Polymarket {
                     cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
                     return;
                 }
+                #[derive(Deserialize)]
+                struct Page<'a> {
+                    markets: Vec<serde::de::IgnoredAny>,
+                    #[serde(borrow)]
+                    next_cursor: Option<std::borrow::Cow<'a, str>>,
+                }
+                let Ok(page) = serde_json::from_str::<Page>(response.body) else {
+                    cx.log(LogLevel::Error, "Invalid Polymarket keyset envelope");
+                    return;
+                };
+                if !page.markets.is_empty() {
+                    cx.log(LogLevel::Error, "Unstreamed Polymarket market page");
+                    return;
+                }
+                if let Some(cursor) = page.next_cursor {
+                    if cursor.is_empty()
+                        || self.market_cursors.len() >= 10000
+                        || !self.market_cursors.insert(cursor.to_string())
+                    {
+                        cx.log(LogLevel::Error, "Polymarket market cursor did not advance");
+                        return;
+                    }
+                    self.markets(cx, Some(cursor.into_owned()), rows, metadata);
+                    return;
+                }
                 if count == GAMMA_PAGE {
-                    self.markets(cx, offset + GAMMA_PAGE, rows, metadata);
+                    cx.log(
+                        LogLevel::Error,
+                        "Polymarket market page is missing its next cursor",
+                    );
                     return;
                 }
                 cx.store.set_markets(rows);
@@ -711,7 +770,14 @@ impl Venue for Polymarket {
                         && to_ms.is_none_or(|to| c.timestamp <= to)
                 });
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                rows.dedup_by(|a, b| a.timestamp == b.timestamp);
+                rows.dedup_by(|later, earlier| {
+                    if later.timestamp == earlier.timestamp {
+                        *earlier = *later;
+                        true
+                    } else {
+                        false
+                    }
+                });
                 if rows.len() > limit {
                     rows.drain(..rows.len() - limit);
                 }
@@ -877,7 +943,8 @@ impl Venue for Polymarket {
             } else {
                 self.market_ids.clear();
                 self.market_symbols.clear();
-                self.markets(cx, 0, vec![], vec![]);
+                self.market_cursors.clear();
+                self.markets(cx, None, vec![], vec![]);
             }
             return;
         }

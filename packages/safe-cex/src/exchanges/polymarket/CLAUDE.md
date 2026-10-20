@@ -26,7 +26,10 @@ The integration uses three APIs:
 | Gamma | `https://gamma-api.polymarket.com` | Market metadata and discovery |
 | Data | `https://data-api.polymarket.com` | Current user positions |
 
-Gamma market discovery is paginated with `limit` and `offset`. `clobTokenIds` and `outcomes` are JSON-encoded strings and must be parsed and zipped one-to-one. Malformed or unequal arrays are skipped. Each token becomes one safe-cex market. `orderPriceMinTickSize` controls price precision, `orderMinSize` controls minimum amount, and `negRisk` is retained for signing.
+Gamma market discovery uses `/markets/keyset`, capped at100 rows, with the
+opaque response `next_cursor` sent as `after_cursor`. Deep offset pagination
+is rejected by the current API; never stop after the silently capped first
+legacy page. Missing, repeated, or malformed page data fails closed. `clobTokenIds` and `outcomes` are JSON-encoded strings and must be parsed and zipped one-to-one. Malformed or unequal arrays are skipped. Each token becomes one safe-cex market. `orderPriceMinTickSize` controls price precision, `orderMinSize` controls minimum amount, and `negRisk` is retained for signing.
 
 Collateral and the exchange metadata quote are `pUSD`, not legacy USDC.e. Balance requests use `/balance-allowance` with `asset_type=COLLATERAL` and the account signature type.
 
@@ -83,7 +86,12 @@ The public and private channels are distinct:
 - market: `wss://ws-subscriptions-clob.polymarket.com/ws/market`
 - user: `wss://ws-subscriptions-clob.polymarket.com/ws/user`
 
-Subscription `type` values are lowercase `market` and `user`. Heartbeats are raw `PING` frames every 10 seconds; raw `PONG` marks the connection healthy. Market `price_change` events contain a `price_changes` array, while user `order` and `trade` events arrive as direct event objects.
+Subscription `type` values are lowercase `market` and `user`. Heartbeats are raw `PING` frames every 10 seconds; raw `PONG` marks the connection healthy. Initial market frames may be arrays of events. `book` requires both full
+sides, sorted best-first; `price_change` applies every absolute-size level
+change (zero deletes) without throttling away intermediate depth changes.
+Reconnect discards prior books until a new snapshot. Quote, trade and tick
+events have independent monotonic timestamps; tick changes update market
+precision/signing metadata. Market `price_change` events contain a `price_changes` array, while user `order` and `trade` events arrive as direct event objects.
 
 `start()` initializes external public data first, loads Gamma markets and initial tickers, then starts private polling and the user WebSocket only when credentials exist. Public-data-only startup returns before private work. The market WebSocket connects lazily when an order-book listener subscribes. Both sockets are disposed with the exchange.
 
@@ -114,3 +122,37 @@ For fast iteration, run the `polymarket.*.test.ts` files in `src/__tests__/audit
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine port
+
+The optional `engine: 'rust'` uses `safe-cex-venue-polymarket` with the same
+wallet key and nested `polymarket` options. Supplied L2 credentials must be a
+complete triple; otherwise L1 derivation reads fresh server time. Non-EOA
+accounts require a funder. Prediction metadata and holding settlement flags
+are typed frame sections, hydrated in both worker and main-thread stores.
+
+Only unique owned trade executions emit fills; cumulative order notifications
+and repeated settlement statuses never emit again. Maker executions retain
+their own order/token/side/price/amount. Failed and stale snapshots preserve
+known state. Zero outcome price is valid. Balance PnL aggregates holdings.
+
+A multi-order failure reports every earlier accepted native ID. A matched
+placement acknowledgement alone does not prove a GTC order fully filled.
+Cancel-and-replace requires a fresh terminal order read covering all known
+execution evidence; replacement shares floor to market precision so final
+fills plus replacement never exceed the requested total. Ambiguous writes
+are never retried. Caller IDs and unsupported shapes reject the whole batch.
+
+Price history uses millisecond caller bounds, converts raw request bounds to
+seconds and `fidelity` to interval minutes, and returns sampled points with
+OHLC equal and zero volume. Unsupported historical fills/orders/income/public
+trades return explicit errors in the Rust engine. Derivatives setters perform
+no writes; leverage is always1 and position mode one-way. Development-only
+enablement remains pending the credentialed production lifecycle validation
+described above; automated fixtures never place live orders.
+
+For large prediction universes, optional `polymarket.marketSlugs` explicitly
+scopes discovery to1–100 distinct nonempty Gamma slugs. Queries use repeated
+`slug` parameters (bracketed arrays are ignored by Gamma). Omit the option for
+the complete keyset walk. A filter never changes token identity or truncates
+an outcome pair. Public performance fixtures disclose their selected slugs.

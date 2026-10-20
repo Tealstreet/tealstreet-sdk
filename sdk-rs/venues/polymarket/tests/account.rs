@@ -69,6 +69,9 @@ impl H {
         self.collect();
     }
     fn response(&mut self, path: &str, status: u16, body: &str) {
+        let wrapped = (path.contains("/markets") && body.trim_start().starts_with('['))
+            .then(|| format!(r#"{{"markets":{body}}}"#));
+        let body = wrapped.as_deref().unwrap_or(body);
         let i = self
             .http
             .iter()

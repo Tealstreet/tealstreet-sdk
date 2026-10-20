@@ -439,7 +439,7 @@ impl Polymarket {
             return;
         }
         if matches!(&command, Command::CancelOrders { ids, .. } if ids.is_empty()) {
-            cx.done(command_id, Ok("null".into()));
+            cx.done(command_id, Ok("[]".into()));
             return;
         }
         let result = (|| {
@@ -713,7 +713,7 @@ impl Polymarket {
                             ack.not_canceled
                         ));
                     }
-                    self.trading_finish(cx, command, Ok("null".into()));
+                    self.trading_finish(cx, command, Ok("[]".into()));
                 }
                 Request::ReplaceCancel {
                     mut replacement, ..

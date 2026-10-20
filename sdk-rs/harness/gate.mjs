@@ -151,6 +151,18 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  polymarket() {
+    // Reference repairs (not output normalization): preserve initial array books,
+    // every sorted absolute depth change, dynamic ticks and event watermarks;
+    // use complete Gamma keyset discovery and interval-minute sampled candles.
+    // Native regressions additionally pin: one fill per owned execution across
+    // settlement statuses, zero resolution price, failed/stale snapshot guards,
+    // reported partial batch IDs, partially matched GTC acknowledgements, and
+    // coherent final-fill cancel proofs with replacement leaves rounded down.
+    // Share sizing uses financial half-up precision, correcting TS toFixed's
+    // binary midpoint artifact; JavaScript formatting is never emulated.
+    // Unsupported history contracts fail explicitly instead of empty success.
+  },
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
     // - Validate every cancel acknowledgement before cancel+replace continues.
