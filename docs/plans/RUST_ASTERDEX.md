@@ -212,3 +212,13 @@ for green CI, merge, and cut a fresh follow-up branch.
 - A final credential audit found forcedV1 secondary HMAC incorrectly inherited
   an unrelated auth.privateKey override. A request-level regression and narrow
   V1-only selection fix are in progress. V3 auth precedence already matches TS.
+
+### Secondary HMAC review fix
+
+- ForcedV1 secondary reads now use the raw secondary secret even when a V3 auth
+  block is present. PrimaryV1 and both V3 credential precedence paths are unchanged.
+  Exact emitted query signatures match independently computed Python HMAC vectors;
+  independent review clear. All85 Aster native tests and strict clippy/fmt pass.
+- Rebuilding selected and combined artifacts after this narrow credential fix;
+  final private/native checks run again before PR. Previous public performance
+  and Binance proofs are preserved above.

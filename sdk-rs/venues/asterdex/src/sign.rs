@@ -580,6 +580,73 @@ mod tests {
     }
 
     #[test]
+    fn v1_secondary_hmac_ignores_v3_auth_overrides_while_v3_retains_them() {
+        let case = corpus().remove(0);
+        let engine = |version| {
+            crate::AsterDex::new(crate::Options {
+                api_version: Some(version),
+                key: Some("primary-key".into()),
+                secret: Some("primary-raw-secret".into()),
+                read_key: Some("secondary-key".into()),
+                read_secret: Some("secondary-raw-secret".into()),
+                auth_user_address: Some(case.user.clone()),
+                auth_signer_address: Some(case.signer.clone()),
+                auth_private_key: Some(case.private_key.clone()),
+                ..crate::Options::default()
+            })
+        };
+        let v1 = engine(Version::V1);
+        // Independent Python hashlib/hmac vectors, using the exact native payload.
+        for (credentials, expected) in [
+            (
+                v1.credentials.as_ref().unwrap(),
+                "29306ee689ad7468724aa8f72aed3a3bb507291d3c577faa91fda70fcf7cb3c0",
+            ),
+            (
+                v1.read_credentials.as_ref().unwrap(),
+                "cd0441e53172012534659d4a39a53bd924f19b2c4f35e4f01ca7be577ea7372d",
+            ),
+        ] {
+            let query = Query::new()
+                .str("symbol", "BTCUSDT")
+                .signed(
+                    credentials,
+                    Method::Get,
+                    "/fapi/v1/account",
+                    1_700_000_000_000.0,
+                    false,
+                )
+                .unwrap();
+            assert_eq!(
+                query,
+                format!(
+                    "symbol=BTCUSDT&recvWindow=20000&timestamp=1700000000000&signature={expected}"
+                )
+            );
+        }
+        let v3 = engine(Version::V3);
+        for credentials in [
+            v3.credentials.as_ref().unwrap(),
+            v3.read_credentials.as_ref().unwrap(),
+        ] {
+            assert_eq!(credentials.secret, case.private_key);
+            assert_eq!(credentials.signer.as_deref(), Some(case.signer.as_str()));
+            assert_eq!(credentials.user.as_deref(), Some(case.user.as_str()));
+            assert!(
+                Query::new()
+                    .signed(
+                        credentials,
+                        Method::Get,
+                        "/fapi/v3/account",
+                        case.now_ms,
+                        false,
+                    )
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
     fn engines_with_different_owners_share_the_agent_nonce_sequence() {
         let secret = format!("0x{}", "92".repeat(32));
         let signer = ethereum::private_key_address(&secret).unwrap();

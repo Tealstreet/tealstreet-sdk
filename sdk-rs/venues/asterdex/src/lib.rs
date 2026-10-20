@@ -185,9 +185,12 @@ impl AsterDex {
             .map(|(key, secret)| Credentials {
                 version,
                 key: key.clone(),
-                secret: nonempty(options.auth_private_key.as_deref())
-                    .unwrap_or(secret)
-                    .to_owned(),
+                secret: if version == Version::V3 {
+                    nonempty(options.auth_private_key.as_deref()).unwrap_or(secret)
+                } else {
+                    secret
+                }
+                .to_owned(),
                 user: credentials.as_ref().and_then(|c| c.user.clone()),
                 signer: Some(
                     nonempty(options.auth_signer_address.as_deref())
