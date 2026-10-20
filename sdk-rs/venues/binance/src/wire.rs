@@ -276,6 +276,40 @@ pub struct SymbolConfig<'a> {
     pub leverage: f64,
 }
 
+/// A number that may be absent, bare or a decimal string.
+fn optional_number<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    number(deserializer).map(Some)
+}
+
+/// One `positionRisk` row (USD-M `/fapi/v3`, portfolio margin `/papi/v1/um`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionRisk<'a> {
+    /// Portfolio margin rows carry the symbol's leverage.
+    #[serde(default, deserialize_with = "optional_number")]
+    pub leverage: Option<f64>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub position_side: Str<'a>,
+    #[serde(borrow)]
+    pub position_amt: Str<'a>,
+    #[serde(borrow)]
+    pub entry_price: Str<'a>,
+    #[serde(borrow)]
+    pub un_realized_profit: Str<'a>,
+    #[serde(borrow)]
+    pub liquidation_price: Str<'a>,
+    #[serde(borrow)]
+    pub notional: Str<'a>,
+    #[serde(borrow, default)]
+    pub isolated_margin: Option<Str<'a>>,
+    #[serde(default)]
+    pub update_time: f64,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account<'a> {
