@@ -1,5 +1,6 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -51,6 +52,7 @@ pub struct Pending {
 pub(crate) enum Job {
     Account(account::Request),
     Trade(trading::Request),
+    History(Box<history::Request>),
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
@@ -195,6 +197,21 @@ impl Grvt {
                 ],
                 None,
             ),
+            Job::History(request) => (
+                if request.is_public() {
+                    self.mdg()
+                } else if self.options.testnet {
+                    "https://trades.testnet.grvt.io"
+                } else {
+                    "https://trades.grvt.io"
+                },
+                if request.is_public() {
+                    vec![("Content-Type", "application/json".into())]
+                } else {
+                    self.account_headers()
+                },
+                request.array_at(),
+            ),
             Job::Trade(_) => (
                 if self.options.testnet {
                     "https://trades.testnet.grvt.io"
@@ -226,6 +243,7 @@ impl Grvt {
         match pending.job {
             Job::Account(request) => self.account_failed(cx, request, error),
             Job::Trade(request) => self.trade_failed(cx, request, error),
+            Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
                 if self.startup_retry.is_none() {
@@ -688,6 +706,7 @@ impl Venue for Grvt {
         match &mut pending.job {
             Job::Account(request) => self.account_item(cx, request, item),
             Job::Trade(_) => {}
+            Job::History(request) => self.history_item(cx, request, item),
             Job::Markets {
                 rows,
                 metadata,
@@ -753,14 +772,23 @@ impl Venue for Grvt {
             }
         }
     }
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        response: Response<'_>,
+    ) {
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
             if code == "1000"
                 && !pending.auth_resent
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles { .. })
+                && !matches!(&pending.job,Job::History(request) if request.is_public())
             {
+                if let Job::History(request) = &mut pending.job {
+                    request.reset();
+                }
                 self.account_refresh(cx, pending);
             } else {
                 self.fail_pending(cx, pending, &error);
@@ -770,6 +798,7 @@ impl Venue for Grvt {
         match pending.job {
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
+            Job::History(request) => self.history_response(cx, *request, response),
             Job::Markets {
                 rows,
                 metadata,
@@ -878,6 +907,7 @@ impl Venue for Grvt {
                 }
                 Job::Account(request) => request.reset(),
                 Job::Trade(_) => {}
+                Job::History(request) => request.reset(),
             }
             self.send_request(cx, pending);
             return;
@@ -951,6 +981,10 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::Query { command, query } = command {
+            self.start_query(cx, command, query);
+            return;
+        }
         if let Command::FetchLeverage { command, symbol } = command {
             self.fetch_leverage_command(cx, command, symbol);
             return;

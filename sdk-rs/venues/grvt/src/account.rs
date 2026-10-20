@@ -75,6 +75,7 @@ pub(crate) struct Account {
     first_sequence: HashMap<(String, String), u64>,
     placement_created: HashMap<String, u64>,
     pending_placements: HashSet<String>,
+    prior_lifecycle: HashMap<String, (u64, Option<String>)>,
 }
 impl Account {
     pub(crate) fn order_created(&self, client: &str) -> Option<u64> {
@@ -94,6 +95,16 @@ impl Account {
             return;
         }
         if native.is_none() {
+            let prior_created = self.order_created.get(client).copied().unwrap_or(0);
+            let prior_native = self.native_ids.get(client).cloned().or_else(|| {
+                self.terminal
+                    .get(client)
+                    .and_then(|(_, native)| native.clone())
+            });
+            if prior_created > 0 || prior_native.is_some() {
+                self.prior_lifecycle
+                    .insert(client.to_owned(), (prior_created, prior_native));
+            }
             self.terminal.remove(client);
             self.terminal_queue.retain(|id| id != client);
             self.native_ids.remove(client);
@@ -118,6 +129,7 @@ impl Account {
                 self.order_created.remove(&id);
                 self.placement_created.remove(&id);
                 self.pending_placements.remove(&id);
+                self.prior_lifecycle.remove(&id);
             }
         }
     }
@@ -280,7 +292,7 @@ struct BuilderWire<'a> {
 struct OrderWire<'a> {
     #[serde(borrow, rename = "oi", alias = "order_id", default)]
     id: Text<'a>,
-    #[serde(rename = "im", alias = "is_market")]
+    #[serde(rename = "im", alias = "is_market", default)]
     market: bool,
     #[serde(rename = "ro", alias = "reduce_only", default)]
     reduce_only: bool,
@@ -949,6 +961,7 @@ impl Grvt {
     }
     fn remember_identity(&mut self, decoded: &DecodedOrder) {
         self.account.pending_placements.remove(&decoded.order.id);
+        self.account.prior_lifecycle.remove(&decoded.order.id);
         if !self.account.order_times.contains_key(&decoded.order.id) {
             self.account
                 .identity_queue
@@ -974,11 +987,24 @@ impl Grvt {
                 self.account.order_created.remove(&id);
                 self.account.placement_created.remove(&id);
                 self.account.pending_placements.remove(&id);
+                self.account.prior_lifecycle.remove(&id);
             }
         }
     }
     fn accept_order(&mut self, store: &Store, decoded: &DecodedOrder) -> bool {
         let id = &decoded.order.id;
+        if self.account.pending_placements.contains(id)
+            && self
+                .account
+                .prior_lifecycle
+                .get(id)
+                .is_some_and(|(created, native)| {
+                    (native.is_some() && native == &decoded.native_id)
+                        || (decoded.created_ns > 0 && decoded.created_ns <= *created)
+                })
+        {
+            return false;
+        }
         let created = self.account.order_created.get(id).copied().unwrap_or(0);
         if decoded.created_ns > 0 && decoded.created_ns < created {
             return false;

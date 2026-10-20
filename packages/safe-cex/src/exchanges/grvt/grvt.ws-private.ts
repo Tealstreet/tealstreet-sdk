@@ -726,6 +726,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
 
       return {
         id: orderId,
+        ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {}),
         status,
         symbol: market.symbol,
         type,

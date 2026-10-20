@@ -1301,6 +1301,7 @@ export class GrvtExchange extends BaseExchange {
 
     return {
       id: orderId,
+      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {}),
       symbol: symbol,
       type,
       side: isBuying ? OrderSide.Buy : OrderSide.Sell,
@@ -1345,7 +1346,7 @@ export class GrvtExchange extends BaseExchange {
     return this.fetchOpenOrders();
   };
 
-  placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+  placeOrder = async (opts: PlaceOrderOpts, execution?: { isMarket: boolean; limitPrice: number }): Promise<string[]> => {
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
     if ((opts.type === OrderType.Market || opts.type === OrderType.Limit) && (opts.takeProfit !== undefined || opts.stopLoss !== undefined)) {
       for (const price of [opts.takeProfit, opts.stopLoss]) {
@@ -1396,7 +1397,7 @@ export class GrvtExchange extends BaseExchange {
 
       // Map safe-cex types to GRVT types
       const side: GrvtOrderSide = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-      const type: GrvtOrderType = [OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit].includes(opts.type) ? 'MARKET' : 'LIMIT';
+      const type: GrvtOrderType = execution ? (execution.isMarket ? 'MARKET' : 'LIMIT') : [OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit].includes(opts.type) ? 'MARKET' : 'LIMIT';
 
       // Map time in force
       let timeInForce: GrvtTimeInForce = 'GOOD_TILL_TIME';
@@ -1408,7 +1409,8 @@ export class GrvtExchange extends BaseExchange {
 
       // market.precision.amount and market.precision.price are step sizes (e.g., 0.001)
       // Round to the nearest multiple of the step size
-      const price = opts.price ? adjust(opts.price, market.precision.price) : 0;
+      const executionPrice = execution?.limitPrice ?? opts.price;
+      const price = type === 'LIMIT' && executionPrice ? adjust(executionPrice, market.precision.price) : 0;
       const size = adjust(opts.amount, market.precision.amount);
 
       this.log(`Precision - price: ${market.precision.price}, amount: ${market.precision.amount}`, LogSeverity.Debug);
@@ -1818,8 +1820,18 @@ export class GrvtExchange extends BaseExchange {
         timeInForce: order.timeInForce,
       };
 
+      let replacementExecution: { isMarket: boolean; limitPrice: number } | undefined;
       if (!Number.isFinite(newOrderOpts.amount) || newOrderOpts.amount <= 0) throw new Error('GRVT replacement has no remaining quantity');
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
+        const info = order.info;
+        const legs = info?.legs ?? info?.l;
+        const isMarket = info?.is_market ?? info?.im ?? false;
+        const limitPrice = Number(legs?.[0]?.limit_price ?? legs?.[0]?.lp ?? 0);
+        if (typeof isMarket !== 'boolean' || !Array.isArray(legs) || legs.length !== 1 || !Number.isFinite(limitPrice)
+          || (!isMarket && limitPrice <= 0) || (isMarket && order.timeInForce === OrderTimeInForce.PostOnly)) {
+          throw new Error('Cannot safely update GRVT order: invalid native execution semantics');
+        }
+        replacementExecution = { isMarket, limitPrice: isMarket ? 0 : limitPrice };
         const trigger = getGrvtTriggerMetadata(order.info);
         if (!trigger || trigger.type !== (order.type === OrderType.StopLoss ? 'STOP_LOSS' : 'TAKE_PROFIT')) {
           throw new Error(`Cannot safely update GRVT order ${order.id}: missing trigger metadata`);
@@ -1853,7 +1865,7 @@ export class GrvtExchange extends BaseExchange {
       this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);
 
       // Step 2: Create the semantically equivalent replacement.
-      const newOrderIds = await this.placeOrder(newOrderOpts);
+      const newOrderIds = replacementExecution ? await this.placeOrder(newOrderOpts, replacementExecution) : await this.placeOrder(newOrderOpts);
       this.log(
         `Order updated successfully: cancelled ${order.id}, created ${newOrderIds.join(', ')}`,
         LogSeverity.Info,

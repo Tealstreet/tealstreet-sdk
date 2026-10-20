@@ -24,3 +24,24 @@ describe('GRVT private native values', () => {
     expect(position).toMatchObject({ marginType: MarginType.Cross, entryPrice: 100, contracts: 1 });
   });
 });
+
+describe('GRVT session resend headers', () => {
+  it('refreshes the SDK cookie together with its proxy session header', async () => {
+    const { createTradingAPI } = await import('../../exchanges/grvt/grvt.api');
+    const owner = { apiExtras: { sessionCookie: 'session-before', accountId: 'account' }, log: vi.fn(),
+      authenticate: vi.fn(async () => { owner.apiExtras.sessionCookie = 'session-after'; return true; }) };
+    const api = createTradingAPI({} as any, owner);
+    let attempts = 0;
+    api.defaults.adapter = async (config) => {
+      if (attempts++ === 0) {
+        throw Object.assign(new Error('Session expired'), { config, response: { status: 401, data: { c: 1000, m: 'Session expired' } } });
+      }
+      expect(config.headers.get('Cookie')).toBe('rm=true; gravity=session-after');
+      expect(config.headers.get('X-Ts-Grvt-Session')).toBe('session-after');
+      return { config, data: { r: { a: true } }, status: 200, statusText: 'OK', headers: {} };
+    };
+    await api.post('/lite/v1/cancel_order', { sa: '777', oi: '0x123' }, { headers: { Cookie: 'gravity=session-before' } });
+    expect(attempts).toBe(2);
+    expect(owner.authenticate).toHaveBeenCalledOnce();
+  });
+});

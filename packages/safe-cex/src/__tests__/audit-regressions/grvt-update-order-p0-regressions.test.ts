@@ -27,10 +27,11 @@ const makeExchange = () => {
 
 const rawStopOrder = (overrides: Record<string, unknown> = {}) => ({
   order_id: '0xstop',
+  is_market: false,
   time_in_force: 'GOOD_TILL_TIME',
   post_only: true,
   reduce_only: true,
-  legs: [{ instrument: 'BTC_USDT_Perp', is_buying_asset: false, limit_price: '0', size: '2' }],
+  legs: [{ instrument: 'BTC_USDT_Perp', is_buying_asset: false, limit_price: '58000', size: '2' }],
   state: { status: 'OPEN', book_size: ['2'], traded_size: ['0'], update_time: '1700000000000000000' },
   metadata: {
     client_order_id: '501',
@@ -102,7 +103,7 @@ describe('GRVT P0 audit regressions', () => {
       timeInForce: OrderTimeInForce.PostOnly,
       close: true,
       slTriggerType: OrderStopTriggerType.MarkPrice,
-    });
+    }, { isMarket: false, limitPrice: 58000 });
   });
 
   it('does not cancel an order when its upstream time-in-force or trigger metadata cannot be preserved', async () => {
