@@ -452,8 +452,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   once; other errors never change the account type.
 - ~~Medium: demo reduce-only fill check missing.~~ Fixed: a locally published Demo
   reduce-only limit is checked against its executions at 1 s, 3 s and 8.25 s; a
-  complete read proving a full fill retires it (terminal fence), otherwise orders are
-  re-read after the grace. Partial, failed or paged reads never prove a fill.
+  complete cursor walk (20 pages, as TS) proving a full fill retires it (terminal
+  fence); otherwise, or on failure, orders are re-read after the grace. Partial,
+  failed or capped walks never prove a fill.
 - ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
   read failing in transport or at the venue keeps the ready stream and last-good
   state and retries next tick; malformed content and initial snapshots still

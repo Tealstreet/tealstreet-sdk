@@ -1594,14 +1594,23 @@ fn demo_reduce_only_limit_filled_without_stream_events_is_retired_by_its_executi
     h.reply(
         check.id,
         200,
-        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"0.4","execType":"Trade","execTime":"1"},{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e2","side":"Sell","execPrice":"100","execQty":"0.6","execType":"Trade","execTime":"2"}]}}"#,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"page2","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"0.4","execType":"Trade","execTime":"1"},{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e2","side":"Sell","execPrice":"100","execQty":"0.6","execType":"Trade","execTime":"2"}]}}"#,
+    );
+    // Bybit returns a cursor even on a short page; the walk follows it.
+    assert!(h.engine.store().order("ro-1").is_some());
+    let next = h.take("/v5/execution/list");
+    assert!(next.url.contains("cursor=page2"), "{}", next.url);
+    h.reply(
+        next.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[]}}"#,
     );
     assert!(
         h.engine.store().order("ro-1").is_none(),
         "a fully filled order stayed on the chart"
     );
     // A stale replica cannot reopen it.
-    h.message("/v5/private", r#"{"topic":"order","data":[]}"#);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"ro-1","orderStatus":"New","orderType":"Limit","side":"Sell","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1","reduceOnly":true}]}"#);
     assert!(h.engine.store().order("ro-1").is_none());
 }
 
@@ -1631,6 +1640,9 @@ fn demo_reduce_only_partial_or_failed_check_never_proves_a_fill() {
         200,
         r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"more","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"1","execType":"Trade","execTime":"1"}]}}"#,
     );
+    // The next page fails, so the walk is incomplete.
+    let next = h.take("/v5/execution/list");
+    h.reply(next.id, 500, "upstream");
     assert!(
         h.engine.store().order("ro-1").is_some(),
         "an incomplete page proved a full fill"

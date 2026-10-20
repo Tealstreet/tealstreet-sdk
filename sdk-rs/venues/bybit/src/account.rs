@@ -50,8 +50,12 @@ pub enum Request {
     /// Executions for one Demo reduce-only limit order whose stream events may never come.
     FillRepair {
         order_id: String,
+        symbol: String,
         placed_at: f64,
         session: u32,
+        cursor: Option<String>,
+        filled: f64,
+        pages: u8,
     },
 }
 
@@ -1416,47 +1420,94 @@ impl BybitLinear {
         if cx.store.order(&id).is_none() {
             return;
         }
+        self.request_fill_page(cx, id, symbol, placed_at, None, 0.0, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn request_fill_page(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: String,
+        symbol: String,
+        placed_at: f64,
+        cursor: Option<String>,
+        filled: f64,
+        pages: u8,
+    ) {
         let query = Query::new()
             .str("category", self.paths.category)
             .str("symbol", &symbol)
             .str("orderId", &id)
-            .num("limit", 100.0);
+            .num("limit", 100.0)
+            .opt_str("cursor", cursor.as_deref());
         self.send(
             cx,
             Rest::get("/v5/execution/list", query).signed(),
             Then::Account(Request::FillRepair {
                 order_id: id,
+                symbol,
                 placed_at,
                 session: self.account.session_version,
+                cursor,
+                filled,
+                pages,
             }),
         );
     }
 
-    fn on_fill_repair(&mut self, cx: &mut Cx<'_, Pending>, id: &str, placed_at: f64, body: &str) {
-        let Some(order) = cx.store.order(id).cloned() else {
+    /// Bybit returns a cursor even on a short page; walk it as TS does (20 pages).
+    #[allow(clippy::too_many_arguments)]
+    fn on_fill_repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: String,
+        symbol: String,
+        placed_at: f64,
+        cursor: Option<String>,
+        mut filled: f64,
+        pages: u8,
+        body: &str,
+    ) {
+        let Some(order) = cx.store.order(&id).cloned() else {
             return;
         };
-        let listed = serde_json::from_str::<Listed<ExecutionRow>>(body)
+        let page = serde_json::from_str::<Listed<ExecutionRow>>(body)
             .ok()
             .and_then(|l| l.result);
-        // Only a complete, readable page can prove a full fill.
-        let filled = listed
-            .filter(|r| r.next_page_cursor.as_deref().is_none_or(str::is_empty))
-            .map(|r| {
-                r.list
-                    .iter()
-                    .filter(|e| e.order_id.as_ref() == id)
-                    .map(|e| float_of(&e.exec_qty))
-                    .filter(|q| q.is_finite() && *q > 0.0)
-                    .sum::<f64>()
-            });
+        let mut complete = false;
+        if let Some(page) = page {
+            filled += page
+                .list
+                .iter()
+                .filter(|e| e.order_id.as_ref() == id)
+                .map(|e| float_of(&e.exec_qty))
+                .filter(|q| q.is_finite() && *q > 0.0)
+                .sum::<f64>();
+            let next = page.next_page_cursor.filter(|c| !c.is_empty());
+            match next {
+                Some(next) if !page.list.is_empty() && cursor.as_ref() != Some(&next) => {
+                    if pages + 1 < 20 {
+                        self.request_fill_page(
+                            cx,
+                            id,
+                            symbol,
+                            placed_at,
+                            Some(next),
+                            filled,
+                            pages + 1,
+                        );
+                        return;
+                    }
+                }
+                _ => complete = true,
+            }
+        }
         let target = order.amount.max(order.remaining + order.filled);
-        if filled
-            .is_some_and(|filled| target > 0.0 && filled >= target - (target * 1e-8).max(1e-12))
-        {
-            self.remember_terminal_order(id);
+        // Only a complete, readable walk can prove a full fill.
+        if complete && target > 0.0 && filled >= target - (target * 1e-8).max(1e-12) {
+            self.remember_terminal_order(&id);
             let children = [format!("{id}__stop_loss"), format!("{id}__take_profit")];
-            cx.store.remove_orders(&[id, &children[0], &children[1]]);
+            cx.store.remove_orders(&[&id, &children[0], &children[1]]);
             return;
         }
         if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
@@ -1953,18 +2004,31 @@ impl BybitLinear {
         match request {
             Request::FillRepair {
                 order_id,
+                symbol,
                 placed_at,
                 session,
+                cursor,
+                filled,
+                pages,
             } => {
                 if session != self.account.session_version {
                     return;
                 }
                 match outcome {
-                    Ok(body) => self.on_fill_repair(cx, &order_id, placed_at, body),
-                    Err(message) => cx.log(
-                        LogLevel::Warning,
-                        format!("Bybit fill check for order {order_id} failed: {message}"),
+                    Ok(body) => self.on_fill_repair(
+                        cx, order_id, symbol, placed_at, cursor, filled, pages, body,
                     ),
+                    Err(message) => {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Bybit fill check for order {order_id} failed: {message}"),
+                        );
+                        // After the grace a failed check still lets open orders correct the row.
+                        if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
+                            self.account.orders_follow_up |= self.account.orders.is_some();
+                            self.fetch_orders(cx);
+                        }
+                    }
                 }
             }
             Request::AccountInfo => {
