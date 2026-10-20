@@ -769,6 +769,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.invalid".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "public");
@@ -799,6 +800,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/catalog".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "secondary");
@@ -840,6 +842,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/catalog".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "read-public");
@@ -881,6 +884,7 @@ mod tests {
             timeout_ms: None,
             url: "https://fapi.asterdex.com/fapi/v3/account?signature=exact".into(),
             headers: vec![("x-mbx-apikey", "read-wallet".into())],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "secondary-cors");
@@ -920,6 +924,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/time".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         let direct = state.http(&request).unwrap();
@@ -1095,7 +1100,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 60);
+        assert_eq!(examples.len(), 69);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
@@ -1106,6 +1111,7 @@ mod tests {
                     timeout_ms: None,
                     url: http.request.url,
                     headers: vec![("Content-Type", "application/json".into())],
+                    signer_headers: vec![],
                     body: None,
                 };
                 if let Some(key) = http.request.headers.get("x-mbx-apikey") {

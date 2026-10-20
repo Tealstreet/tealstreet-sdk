@@ -4,6 +4,8 @@ mod funding;
 mod history;
 mod http;
 pub mod sign;
+#[cfg(feature = "spot")]
+pub mod spot;
 mod trading;
 mod wire;
 
@@ -245,7 +247,7 @@ impl Kucoin {
                 body,
                 pending,
                 stream: None,
-                authenticated: true,
+                authenticated: self.credentials.is_some(),
             },
         );
     }
@@ -266,7 +268,7 @@ impl Kucoin {
                 body,
                 pending,
                 stream: Some(at),
-                authenticated: true,
+                authenticated: self.credentials.is_some(),
             },
         );
     }

@@ -2423,3 +2423,53 @@ Independent causal/provenance review and strict TS/Rust functional replay must
 validate the new capture before its performance gate. Native production,
 clock, deadlines, matching, hashes and thresholds remain unchanged. Related
 Bitunix/Binance controls are already green under the latest shared identity.
+
+
+Resumed checkpoint: clean branch 2d937ade40, PR #1309 remains open into
+feat/rust-rewrite at old remote head 6b2d580332. Required fetch now advances
+landing to 1a10f714ec, adding the KuCoin Spot product, delegated Paradex signing,
+engine feature isolation and read-only audit findings. Merge in progress:
+preserve the nested structure, Bitunix registration/net realized PnL, paced
+KuCoin futures HTTP and all strict replay/lifecycle/identity protections while
+adding the incoming product and signing interfaces. Independent reviewers own
+disjoint conflict scopes (harness, hosts, KuCoin); root owns the merge and gates.
+
+The new actual standard twenty-second KuCoin recording completed successfully
+with 10,031 frames, 73 store updates and two books. Preserve its raw bytes in
+/tmp/bitunix-df2-kucoin-public.jsonl for causal/provenance review. Landing also
+contains a new KuCoin futures fixture; audit both captures before selecting
+current evidence. Do not retime or pad either capture or alter measurement
+policy. Rebuild and verify the merged source before replay; run full source
+and native/host/consumer checks plus affected new product/signing controls.
+Earlier passing controls remain historical evidence, not claims about newly
+changed code. Finish remaining OKX gates and refresh Bitunix/Binance controls
+on the merged candidate, then push/review/green CI/merge/fresh branch.
+
+
+Merge conflict audit is complete for hosts, paced KuCoin futures and the strict
+harness. All fifty source-only host tests and focused ninety-seven harness
+controls pass; full merged checks are running. Preserve both incoming delegated
+signing and our bounded binary/lifecycle/validated request identity protections.
+KuCoin Spot is a distinct product; incoming no-auth-on-public futures guard is
+combined with dispatch-time secondary credential selection and FIFO pacing.
+
+Fresh capture provenance audit passes. Raw SHA-256 is
+2a649f46a1a587fd1c9830eec72fe35b3201c15da5979270ae07002eaff38632.
+The standard twenty-second recorder exits at 20,168 ms because the last actual
+transport callbacks settle after its stop request; trimming at twenty seconds
+would discard thirty-five real messages. rust:trim-tape --seconds 21 retains
+all 10,045 original rows byte-for-byte (10,031 WS, seven HTTP, three connect,
+three open and metadata); no acquisition extension, padding or retiming. Gzip
+SHA-256 is 13fda57afbc3748079de63cf0261788807903faa21f0767bef88306143c1f086.
+Bullet receipts at 1491/1549/1551 precede their connects and opens, with quota
+slots available after markets 948 and tickers 1348. The incoming 6830bc02
+fixture still has three tokens before the third shared quota slot at 1000;
+retain the independently audited paced capture instead. Strict functional
+replay must precede its performance gate after the merged build.
+
+New merge audit finds the incoming Spot harness erases arbitrary REST connectId
+and overbroad generated clientOid values and keys socket audit by URL. Bounded
+follow-up: preserve unsupported HTTP fields, recognize only source-proven
+generated IDs, bind audit state to actual sockets, add fail-before controls,
+and independently review before actual replay. No economic projection or gate
+threshold changes are authorized.

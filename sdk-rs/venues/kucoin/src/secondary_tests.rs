@@ -1,5 +1,5 @@
 use super::*;
-use safe_cex_engine::{Action, Engine, ReadCredentials};
+use safe_cex_engine::{Action, Engine, Event, Notice, Query, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -30,6 +30,17 @@ impl Venue for Probe {
                 },
             );
         }
+        self.0.signed_streamed(
+            cx,
+            Method::Get,
+            "/secondary-test-streamed",
+            None,
+            ArrayAt::EnvelopeField("data"),
+            Pending::Markets {
+                rows: vec![],
+                invalid: false,
+            },
+        );
     }
 
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -61,7 +72,7 @@ fn secondary_get_keeps_primary_mutations() {
         })
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 5);
     for request in requests {
         let expected = if request.method == Method::Get {
             "read-key"
@@ -90,7 +101,7 @@ fn secondary_get_keeps_primary_mutations() {
             sign::headers(
                 &credentials,
                 request.method,
-                "/secondary-test",
+                request.url.strip_prefix(REST).unwrap(),
                 "",
                 1700000000000.0
             )
@@ -116,4 +127,133 @@ fn invalid_secondary_identity_stops_startup_before_io() {
         a,
         Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
     )));
+}
+
+fn public_only_options() -> Options {
+    let mut opts = options();
+    opts.public_data_only = true;
+    opts.broker = Some(sign::BrokerOptions {
+        partner: "broker-partner".into(),
+        broker_key: "broker-secret".into(),
+        broker_name: "broker-name".into(),
+        verify: Some(true),
+    });
+    opts
+}
+#[test]
+fn public_only_signing_helpers_do_not_reintroduce_secondary_identity() {
+    let mut engine = Engine::new(Probe(Kucoin::new(public_only_options())));
+    engine.start(1700000000000.0);
+    let requests = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 5);
+    for request in requests {
+        assert!(
+            request.headers.is_empty(),
+            "public-only helper authenticated {}",
+            request.url
+        );
+        assert_eq!(request.route, None);
+    }
+}
+#[test]
+fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_blocked() {
+    let mut engine = Engine::new(Kucoin::new(public_only_options()));
+    let market = serde_json::from_str::<Instrument>(r#"{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001}"#).unwrap().market().unwrap();
+    let symbol = market.symbol.clone();
+    engine.store_mut().set_markets(vec![market]);
+    engine.start(1700000000000.0);
+    assert!(engine.drain_actions().all(|a| {
+        match a {
+            Action::Http(r) => !r
+                .headers
+                .iter()
+                .any(|(name, _)| name.starts_with("KC-API-") || *name == "KC-BROKER-NAME"),
+            _ => true,
+        }
+    }));
+    engine.handle(
+        1700000000000.0,
+        Event::Command(Command::Query {
+            command: 73,
+            query: Query::PublicTrades {
+                symbol: symbol.clone(),
+                limit: Some(10),
+            },
+        }),
+    );
+    let requests = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.method, Method::Get);
+    assert!(
+        request
+            .url
+            .ends_with("/api/v1/trade/history?symbol=XBTUSDTM")
+    );
+    assert!(
+        !request
+            .headers
+            .iter()
+            .any(|(name, _)| name.starts_with("KC-API-") || *name == "KC-BROKER-NAME"),
+        "public-only trade history carried authentication"
+    );
+    // An unsigned public GET still belongs to the host's configured GET/read route.
+    assert_eq!(request.route, None);
+    engine.handle(
+        1700000000000.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":"200000","data":[]}"#,
+            },
+        },
+    );
+    assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 73, result: Ok(result) }) if result == "[]")));
+    let queries = [
+        Query::Fills {
+            symbol: Some(symbol.clone()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        },
+        Query::OrderHistory {
+            symbol: Some(symbol.clone()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        },
+        Query::Income {
+            symbol: Some(symbol),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        },
+    ];
+    for (index, query) in queries.into_iter().enumerate() {
+        let command = 74 + index as u32;
+        engine.handle(
+            1700000000000.0,
+            Event::Command(Command::Query { command, query }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone { command: done, result: Err(error) })] if *done == command && error.contains("credentials"))
+        );
+    }
 }

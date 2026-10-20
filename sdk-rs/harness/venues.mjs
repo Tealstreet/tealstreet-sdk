@@ -15,6 +15,7 @@ import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
+import { kucoinspot } from './kucoinspot.mjs';
 import { createRequire } from 'node:module';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
@@ -1864,6 +1865,7 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  kucoinspot,
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
   bybitspot: bybit('bybitspot', 'BybitSpotExchange'),

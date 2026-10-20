@@ -59,6 +59,7 @@ if (values['tealstreet-ws-route']) {
   live = createEngineTransport(values.venue, { ...options, transport: tealstreetTransport, tealstreetWsRoute: true, tealstreetProxy: false, tealstreetTunnel: false }, live);
 }
 const connections = new Map();
+let requestOrdinal = 0;
 const tickerSymbols = new Set();
 const closedUrls = new Set();
 const recording = {
@@ -108,10 +109,12 @@ const recording = {
     };
   },
   async request(request) {
+    // Equal requests may complete out of order; retain dispatch identity.
+    const ordinal = requestOrdinal++;
     const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect ? { ...request, route: 'direct' } : request;
     const response = await live.request(outgoing);
     const recorded = (body) => { httpResponses++; write({
-      type: 'http', method: request.method, url: request.url,
+      type: 'http', requestOrdinal: ordinal, method: request.method, url: request.url,
       ...(request.body === undefined ? {} : { requestBody: request.body }),
       status: response.status, headers: response.headers ?? '', body,
     }); };

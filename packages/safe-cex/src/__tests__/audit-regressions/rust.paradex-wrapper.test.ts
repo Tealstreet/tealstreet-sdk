@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, Market, PlaceOrderOpts } from '../../types';
+import type { ExchangeOptions, Market, PayloadSignerRequest, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,7 +43,7 @@ describe('Rust Paradex account boundary', () => {
     const exchange = new RustEngineExchange('paradex', { ...credentials, secret: '', ...options }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     exchanges.push(exchange);
-    return { exchange, load, construct, commands };
+    return { exchange, load, construct, commands, engine };
   };
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
@@ -69,19 +69,42 @@ describe('Rust Paradex account boundary', () => {
   it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     'rejects explicitly requested private mode with missing fields before loading: %j', async (missing) => {
       const { exchange, load, construct } = setup({ ...missing, publicDataOnly: false });
-      await expect(exchange.start()).rejects.toThrow('private accounts require a local subkey');
+      await expect(exchange.start()).rejects.toThrow('private accounts require a key');
       expect(load).not.toHaveBeenCalled();
       expect(construct).not.toHaveBeenCalled();
     },
   );
 
-  it('rejects a remote payload signer before loading or starting an engine', async () => {
+  it('loads delegated payload signing with an opaque public key', async () => {
     const payloadSigner = vi.fn(async () => ({ signature: '["1","2"]' }));
-    const { exchange, load, construct } = setup({ payloadSigner });
-    await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
-    expect(load).not.toHaveBeenCalled();
-    expect(construct).not.toHaveBeenCalled();
+    const { exchange, construct } = setup({ payloadSigner, key: 'public-subkey' });
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'public-subkey', payloadSigner: true });
     expect(payloadSigner).not.toHaveBeenCalled();
+  });
+
+  it('allows the TS remote HTTP signer alongside local JWT signing', async () => {
+    const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+    const { exchange, construct } = setup({ remoteSigner });
+    await exchange.start();
+    expect(construct).toHaveBeenCalledOnce();
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+  });
+
+  it('calls the payload callback with the TS options receiver and one argument', async () => {
+    const payload = { exchangeName: 'paradex', key: 'public-subkey', payload: '0x123', scheme: 'stark', encoding: 'felt-pair' };
+    const payloadSigner = vi.fn(function (this: ExchangeOptions, request: PayloadSignerRequest) {
+      expect(this.key).toBe('public-subkey');
+      expect(arguments.length).toBe(1);
+      expect(request).toEqual(payload);
+      return { signature: 'opaque' };
+    });
+    const { exchange, engine } = setup({ payloadSigner, key: 'public-subkey' });
+    engine.start = () => JSON.stringify([{ op: 'signPayload', request: 1, payload, timeoutMs: 20_000 }]);
+    engine.payloadSigned = () => '[]';
+    engine.payloadSignFailed = () => '[]';
+    await exchange.start();
+    await vi.waitFor(() => expect(payloadSigner).toHaveBeenCalledOnce());
   });
 
   it('honors caller IDs verbatim and mints bounded attributed IDs', async () => {

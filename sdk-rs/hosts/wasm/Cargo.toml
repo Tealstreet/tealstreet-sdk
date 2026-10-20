@@ -8,28 +8,30 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-bitunix = ["dep:safe-cex-venue-bitunix"]
-# Polling-only builds trade parser bytes for lower first-subscription CPU.
+bitunix = ["dep:safe-cex-venue-bitunix", "text-ingress"]
+# Paradex streams binary SBE; its JSON control messages use the stable text entry.
+text-ingress = []
+grvt = ["dep:safe-cex-venue-grvt", "text-ingress"]
+polymarket = ["dep:safe-cex-venue-polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
+coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
+# Polling-only builds isolate the startup subscription decoder.
 cold-subscriptions = []
-breakoutprop = ["dep:safe-cex-venue-breakoutprop", "cold-subscriptions"]
-grvt = ["dep:safe-cex-venue-grvt"]
-polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymarket"]
-coinbase = ["dep:safe-cex-venue-coinbase"]
+breakoutprop = ["dep:safe-cex-venue-breakoutprop", "text-ingress", "cold-subscriptions"]
 paradex = ["dep:safe-cex-venue-paradex"]
-apexomni = ["dep:safe-cex-venue-apexomni", "safe-cex-engine/command-apexomni"]
-txflow = ["dep:safe-cex-venue-txflow"]
-kraken = ["dep:safe-cex-venue-kraken"]
-asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-engine/command-asterdex"]
-lighter = ["dep:safe-cex-venue-lighter"]
-woo = ["dep:safe-cex-venue-woo"]
-bitrue = ["dep:safe-cex-venue-bitrue"]
-bitget = ["dep:safe-cex-venue-bitget"]
-backpack = ["dep:safe-cex-venue-backpack"]
-blofin = ["dep:safe-cex-venue-blofin"]
-mexc = ["dep:safe-cex-venue-mexc"]
-bingx = ["dep:safe-cex-venue-bingx"]
-weex = ["dep:safe-cex-venue-weex"]
-phemex = ["dep:safe-cex-venue-phemex"]
+apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress", "safe-cex-engine/command-apexomni"]
+txflow = ["dep:safe-cex-venue-txflow", "text-ingress"]
+kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
+asterdex = ["dep:safe-cex-venue-asterdex", "text-ingress", "safe-cex-engine/command-asterdex"]
+lighter = ["dep:safe-cex-venue-lighter", "text-ingress"]
+woo = ["dep:safe-cex-venue-woo", "text-ingress"]
+bitrue = ["dep:safe-cex-venue-bitrue", "text-ingress"]
+bitget = ["dep:safe-cex-venue-bitget", "text-ingress"]
+backpack = ["dep:safe-cex-venue-backpack", "text-ingress"]
+blofin = ["dep:safe-cex-venue-blofin", "text-ingress"]
+mexc = ["dep:safe-cex-venue-mexc", "text-ingress"]
+bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
+weex = ["dep:safe-cex-venue-weex", "text-ingress"]
+phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
 default = [
     "bitunix",
     "breakoutprop",
@@ -46,6 +48,7 @@ default = [
     "bitrue",
     "binance",
     "kucoin",
+    "kucoinspot",
     "bybit",
     "hyperliquid",
     "okx",
@@ -59,13 +62,14 @@ default = [
     "orderly",
     "phemex",
 ]
-cryptocom = ["dep:safe-cex-venue-cryptocom"]
-binance = ["dep:safe-cex-venue-binance"]
-kucoin = ["dep:safe-cex-venue-kucoin"]
-bybit = ["dep:safe-cex-venue-bybit", "cold-subscriptions"]
-hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
-okx = ["dep:safe-cex-venue-okx"]
-orderly = ["dep:safe-cex-venue-orderly"]
+cryptocom = ["dep:safe-cex-venue-cryptocom", "text-ingress"]
+binance = ["dep:safe-cex-venue-binance", "text-ingress"]
+kucoin = ["dep:safe-cex-venue-kucoin", "text-ingress"]
+kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
+bybit = ["dep:safe-cex-venue-bybit", "text-ingress", "cold-subscriptions"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid", "text-ingress"]
+okx = ["dep:safe-cex-venue-okx", "text-ingress"]
+orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
 
 [dependencies]
 safe-cex-venue-bitunix = { workspace = true, optional = true }

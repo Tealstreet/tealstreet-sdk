@@ -180,7 +180,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance'])
           expect(payload).not.toHaveProperty(key);
       }
-      if (['bybitspot', 'coinbasespot', 'binancespot', 'hyperliquidspot', 'krakenspot'].includes(name))
+      if (['bybitspot', 'coinbasespot', 'binancespot', 'kucoinspot', 'hyperliquidspot', 'krakenspot'].includes(name))
         expect(lateStore.markets.every((row) => row.isSpot)).toBe(true);
       if (name === 'hyperliquidspot' || name === 'krakenspot') {
         expect(input.spotMarkets.length).toBeGreaterThan(0);

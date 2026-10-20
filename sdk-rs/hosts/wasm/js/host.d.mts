@@ -12,6 +12,11 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Default account HTTP adapter, resolved by the routing host. */
+  httpMode?: 'direct' | 'how';
+  signPayload?(request: {
+    exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
+  }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };
   /** Host-derived protocol options; apply after caller options when constructing the engine. */
   engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
@@ -68,6 +73,9 @@ export interface WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  /** Headers are name:value lines, with no added whitespace. */
+  payloadSigned?(request: number, signature: string, headers: string, now: number): string;
+  payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
 }
 

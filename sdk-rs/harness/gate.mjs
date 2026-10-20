@@ -30,6 +30,7 @@ const { values } = parseArgs({
 });
 const outDir = `sdk-rs/harness/out/${values.venue}-${values.tape.split('/').at(-1).replaceAll('.', '-')}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
+console.log(`Replay output: ${outDir}`);
 
 const rawTape = readFileSync(values.tape);
 const smokeResult = assertLiveSmokeComplete((values.tape.endsWith('.gz') ? gunzipSync(rawTape) : rawTape).toString('utf8').split('\n').filter(Boolean).map(JSON.parse));
@@ -127,6 +128,9 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 // exact-instrument cancellations; ambiguous ACKs cannot retarget a client ID.
 // Phemex REST totals exclude position UPnL, matching its stream totals, while
 // authoritative revision fences preserve newer private state.
+// KuCoin Spot fixes stay in production: native execution deduplication, stale
+// read and malformed account-row fences, and URL-encoded cancellation IDs.
+// Both replay outputs are compared directly without a KuCoin Spot repair.
 const fixBackpack = (ts) => {
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)

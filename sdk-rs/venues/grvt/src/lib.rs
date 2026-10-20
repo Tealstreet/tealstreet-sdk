@@ -1192,6 +1192,7 @@ impl Venue for Grvt {
                 cx.done(command, Err("GRVT private phase pending".into()))
             }
             Command::CancelOrdersWithSymbols { command, .. }
+            | Command::AmendOrderWithSymbol { command, .. }
             | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
