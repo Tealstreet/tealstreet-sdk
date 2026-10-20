@@ -67,23 +67,22 @@ High:
   (`binance/src/account.rs:1169`).
 
 Medium:
-- Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).
-- Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.
-- Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).
-- No per-order lock between amend and cancel in most venues.
+- ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
+- ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
+- ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
+- ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
 - Stale snapshot reopens canceled orders: Binance USD-M/PM (`trading.rs:1463`),
   Bybit Demo/Hyro (`account.rs:1824`).
-- REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.
-- BloFin replays pre-session fills (`blofin/src/account.rs:1231`).
-- Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`,
-  kraken spot ignores checksum, asterdex/lighter keep books while waiting.
+- ~~REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.~~ Independent execution axes also cover Aster/WOO fallback; startup baselines do not let later REST consume stream fills. See [verification](RUST_ORDER_RACES.md).
+- ~~BloFin replays pre-session fills (`blofin/src/account.rs:1231`).~~ Session cutoff and one-time complete REST baseline preserve live continuation without historical replay. See [verification](RUST_ORDER_RACES.md).
+- ~~Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`, kraken spot ignores checksum, asterdex/lighter keep books while waiting.~~ Explicit invalidation and recovery snapshot clears, WOO continuity and Kraken Spot CRC. Binance/Bybit iterator-contract follow-up was sent to their lane. See [verification](RUST_ORDER_RACES.md).
 - Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).
-- Write timeout discards optimistic state instead of refreshing: orderly, okx.
+- ~~Write timeout discards optimistic state instead of refreshing: orderly, okx.~~ Unknown order outcomes preserve pending state and force fresh reads; includes HTTP408/5xx and OKX50004. Config-specific confirmation is not claimed. See [verification](RUST_ORDER_RACES.md).
 
 Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
-coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
-`uuid().unwrap_or_default()` in Binance; Backpack empty positions on any 404;
-OKX `partially_effective` final; Lighter late-fill drop; Bybit unused `exec_id`.
+coinbase public, grvt, paradex, polymarket); ~~KuCoin client-id collisions~~;
+`uuid().unwrap_or_default()` in Binance; ~~Backpack empty positions on any 404~~;
+~~OKX `partially_effective` final~~; ~~Lighter late-fill drop~~; Bybit unused `exec_id`.
 
 Engine root causes: `Fill` has no execution id and the store replaces lists with
 no freshness fence, so every venue reinvents dedupe and terminal fencing.
@@ -315,13 +314,8 @@ Futures matches TS on nearly every input; no high regression.
 
 ### Orderly and TxFlow (already default to Rust)
 TxFlow loses nothing (master TS was a placeholder).
-- High (Orderly, all six brokers): standalone SL/TP rejected because the app
-  always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS
-  ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.
-- Medium: cancel-all only loops symbols in the store instead of the unscoped
-  DELETE (`rust.exchange.ts` has no Orderly override; engine supports
-  `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on
-  that side (`trading.rs:254`).
+- ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
+- ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
 - Low: one bad market row or unknown order row fails closed (startup lane);
   trailing-stop display price; cancels skipped for unknown/finished ids;
   candle `from`/`to` filtering a latest-N fetch.
