@@ -361,7 +361,7 @@ export class RustEngineExchange extends BaseExchange {
   private loadWorkerCapabilities = (): Promise<void> =>
     (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
       (record) => {
-        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptCapabilities(record as EngineCapabilities);
+        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
       },
       (error: unknown) => {
         this.workerCapabilities = undefined;

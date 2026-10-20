@@ -144,9 +144,10 @@ do not survive a JSON bridge. Interrupted forwarded writes carry
 `workerCallClientOrderIds`); requests still buffered when a worker stops before
 startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
 
-A bridged mirror never builds an engine for capabilities: `loadCapabilities`
-asks the worker (`fetchEngineCapabilities`), and once the mirror store reports
-markets loaded it adopts that record automatically. Capability-defined methods
+A bridged mirror never builds an engine for capabilities. In frame mode it
+adopts the record a snapshot frame carries; in store-payload mode (and from
+`loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the
+mirror store reports markets loaded. Capability-defined methods
 (Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
 the mirror, and the tier methods forward to the worker
 (`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds. Branded
