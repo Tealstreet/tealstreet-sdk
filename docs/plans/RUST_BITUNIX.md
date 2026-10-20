@@ -1262,3 +1262,23 @@ steady433.2/187.8ms, retained6.2/4.8MB, peak35.4/10.7MB. Coinbaseorigin
 5c0e437faf read-onlyaudited (balancecurrencyheaderreservationoddN needs+8);
 HOLDnextmerge untilPhemexearlypublication causality proven/fixed/reviewed.
 Nohashrewrite, timing/threshold/sample changes orrerun-to-green.
+
+### Phemex bounded request-budget correction
+
+Three independent source audits confirmTSparentxhr usesaxios-rate-limit
+maxRPS3, unlimitedXHR distinct. Installedlimiter isFIFO first-dispatch
+1000msfixedwindow, products+tickers consumeslots1/2, BTCsnapshot3, ETH4
+queued; firstWSdepthboth228ms, recordedHTTPcompletions252/266ms. Native
+request() dispatchesallimmediately. Everylater127bookeventrows/hashes match
+exactly, isolating earlyETHpublication. NoTSproductionbug ormissinggeneric
+HTTPdrain proven. No initialBookSnapshots barrier: snapshotsrequirefirstWS
+frame; settingreadinesswoulddeadlock orchangetapeinit.
+
+Plan nativevenue-only typed3/1000FIFO overeverylimitedxhr route, retaining
+unlimitedcreatePUT/cancelDELETE andexactsettings/private/historysplit. Sign
+atdispatch, retriesreenterbudget, stale depthrequestsdropbeforequota where
+required; preserve streameditems/Pendingroles, commands andwholebatchguards.
+Add quota/FIFO/freshsignatures/stale/stream/private+unlimited regressions.
+Independent plan+implementation audits, fullnativechecks andrebuiltprivate/
+unchanged3runpublicgates required. Nooraclehash/bookdeletion, thresholds,
+sampling, readinessorfixturetiming changes. Coinbaseholduntilreviewedpass.
