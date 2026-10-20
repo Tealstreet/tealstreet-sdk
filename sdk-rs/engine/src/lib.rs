@@ -13,6 +13,7 @@ mod order_locks;
 pub mod paging;
 pub mod public_feed;
 pub mod socket;
+pub mod startup;
 pub mod store;
 pub mod time;
 pub mod url;

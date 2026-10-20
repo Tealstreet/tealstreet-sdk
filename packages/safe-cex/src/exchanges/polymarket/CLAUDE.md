@@ -171,6 +171,28 @@ An upper-only bound requires `from`, and `from` must be at least 1000ms because
 the endpoint treats `startTs=0` as absent. These unsupported requests reject
 before transport rather than silently omitting older requested data.
 
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+### Rust partial-catalogue account safety
+
+An owned Data API holding whose market the catalogue walk skipped as malformed
+(or an unidentifiable skipped row) fails visibly and preserves the prior
+snapshot. A holding on a market discovery does not list at all (e.g. a resolved,
+`closed` market) is skipped with a one-time log, as TS does, so redeemable
+positions cannot block loading. A documented `slug` outside an explicit
+`marketSlugs` selection remains intentionally out of scope. Missing `curPrice`
+requires an observed positive last price or an actual last-trade observation;
+a BBO-only row's default zero is not a price. Explicit native `curPrice: 0`
+remains valid. Full rejected-row isolation is tracked separately.
+
 ## Rust socket supervision
 
 Both Rust market and user sockets use `engine::socket::Supervisor` for a 10-second connection deadline and capped exponential reconnect delay with jitter. Native raw `PING` remains every10 seconds, and only exact raw `PONG` satisfies its deadline; ordinary market/user data cannot keep an unanswered ping alive. Short open/close flaps retain the failure count. Public subscriptions remain lazy and reconnect requires a fresh book snapshot.
