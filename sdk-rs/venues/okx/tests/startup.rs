@@ -428,3 +428,50 @@ fn failed_account_config_is_retried_by_the_account_timer() {
     let loaded = engine.store().loaded();
     assert!(loaded.balance && loaded.orders && loaded.positions);
 }
+
+#[test]
+fn catalogue_rate_limit_retry_waits_for_retry_after() {
+    let mut engine = Engine::new(Okx::new(Options::default()));
+    engine.start(0.);
+    let Action::Http(request) = actions(&mut engine).remove(0) else {
+        panic!("catalogue request")
+    };
+    engine.handle(
+        0.,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 429,
+                headers: "Retry-After: 120",
+                body: "",
+            },
+        },
+    );
+    let mut timers = Vec::new();
+    let mut retried_at = None;
+    let mut now = 0.;
+    loop {
+        for action in actions(&mut engine) {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::Http(r) if r.url.contains("/api/v5/public/instruments") => {
+                    retried_at.get_or_insert(now);
+                }
+                _ => {}
+            }
+        }
+        if retried_at.is_some() || timers.is_empty() {
+            break;
+        }
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (timer, at) = timers.remove(0);
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    assert_eq!(
+        retried_at,
+        Some(120_000.),
+        "catalogue retried only after Retry-After"
+    );
+}

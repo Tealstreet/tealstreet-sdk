@@ -24,6 +24,12 @@ impl<K: PartialEq> Backoff<K> {
 
     /// At most one retry per independent read; no write request enters this API.
     pub fn failed<P>(&mut self, cx: &mut Cx<'_, P>, key: K) {
+        self.failed_after(cx, key, 0.0);
+    }
+
+    /// As `failed`, waiting at least `minimum_ms`: a venue rate-limit or ban
+    /// window must not be retried into, since bans escalate and block trading.
+    pub fn failed_after<P>(&mut self, cx: &mut Cx<'_, P>, key: K, minimum_ms: f64) {
         let index = match self.reads.iter().position(|read| read.key == key) {
             Some(index) => index,
             None => {
@@ -40,8 +46,13 @@ impl<K: PartialEq> Backoff<K> {
             return;
         }
         read.attempts = read.attempts.saturating_add(1);
-        let delay = (1_000u32 << read.attempts.saturating_sub(1).min(5)).min(30_000);
-        read.timer = Some(cx.set_timer(f64::from(delay)));
+        let delay = f64::from((1_000u32 << read.attempts.saturating_sub(1).min(5)).min(30_000));
+        let minimum = if minimum_ms.is_finite() {
+            minimum_ms
+        } else {
+            0.0
+        };
+        read.timer = Some(cx.set_timer(delay.max(minimum)));
         cx.log(
             LogLevel::Warning,
             "Public discovery read failed; retry scheduled",
@@ -65,6 +76,19 @@ impl<K: Clone> Backoff<K> {
         read.timer = None;
         Some(read.key.clone())
     }
+}
+
+/// The pause a rate-limited response asks for: `Retry-After` seconds on a 418
+/// or 429, else `default_ms` for those statuses, else none.
+pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f64 {
+    if !matches!(response.status, 418 | 429) {
+        return 0.0;
+    }
+    response
+        .header("retry-after")
+        .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+        .map_or(default_ms, |seconds| seconds * 1_000.0)
 }
 
 /// Do not expose raw catalogue rows, which can arrive through authenticated APIs.

@@ -3784,6 +3784,49 @@ mod startup_tests {
     use crate::startup::{Backoff, number_or_zero};
 
     #[test]
+    fn discovery_retry_waits_out_a_rate_limit_window() {
+        use crate::startup::rate_limit_pause_ms;
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = Backoff::default();
+        retry.failed_after(&mut cx, "markets", 120_000.0);
+        retry.failed_after(&mut cx, "tickers", 10.0);
+        let delays: Vec<_> = cx
+            .io
+            .actions
+            .drain(..)
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(delays, [120_000.0, 1_000.0]);
+        let response = |status, headers| Response {
+            status,
+            headers,
+            body: "",
+        };
+        assert_eq!(
+            rate_limit_pause_ms(&response(429, "Retry-After: 30"), 5_000.0),
+            30_000.0
+        );
+        assert_eq!(rate_limit_pause_ms(&response(418, ""), 5_000.0), 5_000.0);
+        assert_eq!(
+            rate_limit_pause_ms(&response(429, "retry-after: soon"), 5_000.0),
+            5_000.0
+        );
+        assert_eq!(
+            rate_limit_pause_ms(&response(503, "Retry-After: 30"), 5_000.0),
+            0.0
+        );
+    }
+
+    #[test]
     fn discovery_backoff_caps_deduplicates_and_resets_independent_reads() {
         let mut io = Io::<()>::default();
         let mut store = Store::default();

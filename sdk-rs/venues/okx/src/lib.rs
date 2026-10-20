@@ -136,6 +136,8 @@ pub struct Okx {
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    /// Discovery retries wait out a rate-limit window the venue announced.
+    discovery_paused_until: f64,
     catalogue_incomplete: bool,
     ticker_reading: bool,
     ticker_refresh_pending: bool,
@@ -176,6 +178,7 @@ impl Okx {
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
             startup: Default::default(),
+            discovery_paused_until: 0.0,
             catalogue_incomplete: false,
             ticker_reading: false,
             ticker_refresh_pending: false,
@@ -1055,6 +1058,10 @@ impl Venue for Okx {
             }
             other => other,
         };
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            let pause = safe_cex_engine::startup::rate_limit_pause_ms(&response, 10_000.0);
+            self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+        }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())
         } else {
@@ -1082,7 +1089,8 @@ impl Venue for Okx {
                 }
                 self.catalogue_incomplete = incomplete;
                 if incomplete {
-                    self.startup.failed(cx, true);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, true, pause);
                 } else {
                     self.startup.succeeded(cx, &true);
                 }
@@ -1145,7 +1153,8 @@ impl Venue for Okx {
                 self.ticker_reading = false;
                 let refresh = std::mem::take(&mut self.ticker_refresh_pending);
                 if incomplete {
-                    self.startup.failed(cx, false);
+                    let pause = self.discovery_paused_until - cx.now;
+                    self.startup.failed_after(cx, false, pause);
                 } else {
                     self.startup.succeeded(cx, &false);
                 }
@@ -1227,7 +1236,8 @@ impl Venue for Okx {
                 self.ticker_reading = false;
                 self.ticker_refresh_pending = false;
             }
-            self.startup.failed(cx, markets);
+            let pause = self.discovery_paused_until - cx.now;
+            self.startup.failed_after(cx, markets, pause);
         }
     }
 
