@@ -48,6 +48,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binancepm: 'binancepm',
   bitget: 'bitget',
   bitgetusdc: 'bitgetusdc',
+  bitgetinverse: 'bitgetinverse',
   blofin: 'blofin',
   bitrue: 'bitrue',
   mexc: 'mexc',
@@ -76,6 +77,7 @@ const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   bitget: bitgetClientOrderIdRule,
   bitgetusdc: bitgetClientOrderIdRule,
+  bitgetinverse: bitgetClientOrderIdRule,
   backpack: {
     label: 'Backpack',
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -161,7 +163,7 @@ export class RustEngineExchange extends BaseExchange {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin');
+    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
 

@@ -349,3 +349,13 @@ the shell shrinks as its pieces move into the engine.
 All PRs target `feat/rust-rewrite`. Master receives one merge when the browser
 build is ready to ship. Nothing reaches master or the tealstreet-next mirror
 before then.
+
+### Optional collateral balances
+
+A `BALANCE` payload may append `u32 count`, `u32 coin[count]` string references,
+8-byte padding, then `f64 amount[count]` and `f64 notional[count]` after its four
+scalar values. A legacy 32-byte payload leaves coin balances unspecified; an
+appended zero count explicitly clears them. Bitget inverse frames carry native
+order amount/filled and display remaining; their position notional is the native
+contract quantity. The worker adapter retains these native quantities in the
+existing TS `extra` fields alongside coin balances.

@@ -4,6 +4,7 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG, MARKET_FLAG, TICKER_FIELDS, orderEnums, positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
+import { subtract } from '../utils/safe-math';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
 export type FrameCandle = { symbol: string; interval: string; candle: Candle };
@@ -20,7 +21,7 @@ export class FrameApplier {
   private marketSymbols: string[] = [];
   private contractSizes: number[] = [];
 
-  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false) {}
+  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false) {}
 
   /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
   apply(frame: Frame): void {
@@ -98,7 +99,9 @@ export class FrameApplier {
         const native = orders.remainingNative?.[i];
         const nativeExtra = market?.isInverse && native !== undefined && Number.isFinite(native)
           ? { remainingNative: native, remainingNotional: native }
-          : undefined;
+          : this.inverseNativeAmounts
+            ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
+            : undefined;
         const extra = nativeExtra || enums.rejectReason || this.nativePlacementAmounts
           ? {
               ...nativeExtra,
@@ -128,7 +131,7 @@ export class FrameApplier {
           ...(orders.parentId(i) !== undefined && { parentId: orders.parentId(i) }),
           ...(enums.timeInForce !== undefined && { timeInForce: enums.timeInForce as Order['timeInForce'] }),
           ...(enums.type === 'take_profit_market' && trigger && { tpTriggerType: trigger }),
-          ...(enums.type === 'stop_market' && trigger && { slTriggerType: trigger }),
+          ...((enums.type === 'stop_market' || enums.type === 'trailing_stop_market') && trigger && { slTriggerType: trigger }),
           ...(finite(orders.takeProfit[i]) !== undefined && { takeProfit: orders.takeProfit[i] }),
           ...(finite(orders.stopLoss[i]) !== undefined && { stopLoss: orders.stopLoss[i] }),
           ...(extra && { extra }),
@@ -154,7 +157,7 @@ export class FrameApplier {
           leverage: positions.leverage[i],
           unrealizedPnl: positions.unrealizedPnl[i],
           contracts: positions.contracts[i],
-          ...(market?.isInverse && {
+          ...((market?.isInverse || this.inverseNativeAmounts) && {
             extra: { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] },
           }),
           liquidationPrice: positions.liquidationPrice[i],

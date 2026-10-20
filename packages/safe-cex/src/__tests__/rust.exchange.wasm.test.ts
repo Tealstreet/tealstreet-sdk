@@ -922,6 +922,24 @@ describe('RustEngineExchange', () => {
     expect(tape.writes).toHaveLength(1);
   });
 
+  it.each([OrderType.StopLoss, OrderType.TakeProfit])(
+    'rejects a whole spot batch when its final %s has no trigger through the WASM boundary',
+    async (type) => {
+      const tape = bybitTransport('spot');
+      setWasmEngineLoader(loadNodeEngine);
+      setRustEngineTransport(() => tape.transport);
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      await exchange.start();
+      const requestsBefore = tape.requests.length;
+      const valid = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
+      await expect(exchange.placeOrders([valid, { ...valid, type, price: undefined }])).rejects.toThrow(
+        'finite positive trigger price',
+      );
+      expect(tape.requests).toHaveLength(requestsBefore);
+      expect(tape.writes).toEqual([]);
+    },
+  );
+
   it.each([false, true])('selects the demo REST and socket environments (testnet=%s)', async (testnet) => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);

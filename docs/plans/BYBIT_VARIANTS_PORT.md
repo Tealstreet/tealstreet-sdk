@@ -626,3 +626,22 @@ The landing advanced to `d172a666b1` (Bitget inverse/UTA/trailing parity), makin
 the PR conflict. Stop the incomplete broader matrix, integrate the new position
 extensions/harness/aliases, then validate the corrected final source. Do not
 merge until the blocker is fixed, independent review passes and CI is green.
+
+The stop-trigger fix is frozen: all 121 Bybit native cases, strict Clippy and
+formatting pass; the four mixed-batch regressions were proved red/green.
+Whole-batch validation precedes mode/Hyro reads and all writes. The shared
+helper validates the rounded finite positive effective trigger and is reused
+for standalone and position-stop planning; attached normal bracket parents are
+unchanged. Independent review and seven focused stop-path cases pass. No
+additional native blocker was found; no TS bug correction was added for this
+Rust-only defect.
+
+The Bitget extension is specifically an optional BALANCE collateral tail, not
+new POSITION columns: absent legacy data leaves coins unspecified, an appended
+zero count clears holdings. Preserve legacy four-scalar balance and nine-column
+positions, both inverse families, exact native order tails and existing buffer
+reuse. Bitget inverse adds one private gate (36 total: 16 public/20 private),
+plus four independent documented UTA/Classic trailing integration cases. The
+172 harness helpers and native Bitget trading26 cases pass; request/body/signature
+and mutation consumption checks remain strict and its incoming fixture is
+unchanged. Final-source combined build/checks and gates must run after merge.

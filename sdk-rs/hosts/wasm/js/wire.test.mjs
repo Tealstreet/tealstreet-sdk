@@ -195,3 +195,38 @@ test('books preserve section order, empty sides and shared transferred row views
   books[0].bids[1] = 6;
   assert.equal(frame.books().next().value.bids[1], 6);
 });
+
+function balanceFrame(coins) {
+  const strings = coins?.map((c) => c.base) ?? [];
+  const stringBuffer = stringFrame(strings).buffer;
+  const count = strings.length;
+  const at = (36 + count * 4 + 7) & ~7;
+  const length = coins ? at + count * 16 : 32;
+  const result = new ArrayBuffer(16 + 8 + length + stringBuffer.byteLength - 16);
+  const view = new DataView(result);
+  new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
+  view.setUint16(6, 2, true);
+  view.setUint16(16, SECTION.BALANCE, true);
+  view.setUint32(20, length, true);
+  [1, 2, 3, 4].forEach((v, i) => view.setFloat64(24 + i * 8, v, true));
+  if (coins) {
+    view.setUint32(56, count, true);
+    coins.forEach((coin, i) => {
+      view.setUint32(60 + i * 4, i, true);
+      view.setFloat64(24 + at + i * 8, coin.amount, true);
+      view.setFloat64(24 + at + count * 8 + i * 8, coin.notional, true);
+    });
+  }
+  new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
+  return result;
+}
+
+test('optional collateral columns survive buffer transfer and distinguish absent from empty', () => {
+  assert.deepEqual(new Frame(balanceFrame()).balance(), { used: 1, free: 2, total: 3, upnl: 4 });
+  assert.deepEqual(new Frame(balanceFrame([])).balance().coins, {});
+  const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }, { base: 'ETH', amount: 2, notional: 6000 }];
+  const buffer = balanceFrame(coins);
+  const transferred = structuredClone(buffer, { transfer: [buffer] });
+  assert.equal(buffer.byteLength, 0);
+  assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
+});

@@ -34,7 +34,7 @@ struct Job {
 pub struct Request {
     command: CommandId,
     call: Planned,
-    started: f64,
+    stream_revision: u64,
     signature_retry: bool,
     read_retries: u8,
 }
@@ -95,6 +95,12 @@ struct CancelId {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Payload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trailing_stop_params: Option<Vec<TrailingParams>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_callback_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_trigger_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,6 +185,16 @@ struct Payload {
     kind: Option<&'static str>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrailingParams {
+    activation_price: String,
+    activation_type: &'static str,
+    trail_type: &'static str,
+    trail_variance: String,
+    pre_order_type: &'static str,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ReplyData<'a> {
@@ -249,9 +265,6 @@ impl BitgetFutures {
                     .ok_or_else(|| format!("Market {} not found", o.symbol))?;
                 if o.kind == OrderType::Conditional || o.trigger_price.is_some() {
                     return Err("Bitget opening conditional orders are unsupported".into());
-                }
-                if self.account.uta && o.kind == OrderType::TrailingStopLoss {
-                    return Err("Bitget UTA trailing-stop orders are not supported yet".into());
                 }
                 if !o.amount.is_finite()
                     || o.amount < 0.0
@@ -433,11 +446,19 @@ impl BitgetFutures {
                 if self.account.uta {
                     paths::SETTINGS.to_owned()
                 } else {
+                    let coin = match self.margin_coin(cx, symbol) {
+                        Ok(coin) => coin,
+                        Err(error) => {
+                            cx.done(job.id, Err(error));
+                            self.resume_trading(cx);
+                            return;
+                        }
+                    };
                     format!(
                         "{}?symbol={symbol}&productType={}&marginCoin={}",
                         paths::ACCOUNT,
                         self.product(),
-                        self.coin()
+                        coin
                     )
                 }
             }
@@ -476,7 +497,7 @@ impl BitgetFutures {
             Pending::Trade(Box::new(Request {
                 command,
                 call,
-                started: cx.now,
+                stream_revision: self.order_revision_clock(),
                 signature_retry,
                 read_retries,
             })),
@@ -498,7 +519,7 @@ impl BitgetFutures {
                     .filter(|o| native.contains(&native_id(o)))
                     .cloned()
                     .collect();
-                job.calls = self.cancel_calls(&orders, true).into();
+                job.calls = self.cancel_calls(cx, &orders, true)?.into();
             }
             Command::CancelSymbolOrders { symbol, .. } => {
                 let orders: Vec<_> = cx
@@ -508,7 +529,7 @@ impl BitgetFutures {
                     .filter(|o| o.symbol == *symbol)
                     .cloned()
                     .collect();
-                job.calls = self.cancel_calls(&orders, true).into();
+                job.calls = self.cancel_calls(cx, &orders, true)?.into();
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -529,7 +550,7 @@ impl BitgetFutures {
                         .store
                         .setting(symbol)
                         .is_some_and(|s| s.margin_type == Some(MarginType::Isolated));
-                let mut p = self.classic(symbol);
+                let mut p = self.classic(cx, symbol)?;
                 p.leverage = Some(Leverage::Number(leverage));
                 let path = if self.account.uta && isolated_hedge {
                     p = Payload {
@@ -565,7 +586,7 @@ impl BitgetFutures {
                 } else {
                     MarginType::Cross
                 };
-                let mut p = self.classic(symbol);
+                let mut p = self.classic(cx, symbol)?;
                 p.margin_mode = Some(margin_text(margin));
                 let path = if self.account.uta {
                     p = Payload {
@@ -623,13 +644,13 @@ impl BitgetFutures {
         Ok(())
     }
 
-    fn classic(&self, symbol: &str) -> Payload {
-        Payload {
+    fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
+        Ok(Payload {
             symbol: Some(symbol.into()),
             product_type: Some(self.product().into()),
-            margin_coin: Some(self.coin().into()),
+            margin_coin: Some(self.margin_coin(cx, symbol)?.into()),
             ..Payload::default()
-        }
+        })
     }
 
     fn place_calls(
@@ -679,7 +700,7 @@ impl BitgetFutures {
         }
         for (symbol, orders) in groups {
             for chunk in orders.chunks(50) {
-                let mut payload = self.classic(&symbol);
+                let mut payload = self.classic(cx, &symbol)?;
                 payload.margin_mode = Some(margin_text(
                     cx.store
                         .setting(&symbol)
@@ -785,7 +806,16 @@ impl BitgetFutures {
         let position = cx.store.positions().iter().find(|p| {
             p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
         });
-        let capacity = position.map_or(0.0, |p| floor_lot(p.contracts, m.precision.amount));
+        let capacity = position.map_or(0.0, |p| {
+            floor_lot(
+                if self.inverse() {
+                    p.notional
+                } else {
+                    p.contracts
+                },
+                m.precision.amount,
+            )
+        });
         let requested = num::adjust(o.amount, m.precision.amount);
         let size = if o.amount == 0.0 || capacity < m.precision.amount {
             0.0
@@ -808,7 +838,7 @@ impl BitgetFutures {
     fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
         let (plan, size) = self.plan_size(cx, o)?;
-        let mut p = self.classic(&o.symbol);
+        let mut p = self.classic(cx, &o.symbol)?;
         p.client_oid = Some(mint()?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
         p.trigger_price = o.price.map(|v| number(v, m.precision.price));
@@ -818,18 +848,14 @@ impl BitgetFutures {
             o.sl_trigger_type.or(o.trigger_type)
         }));
         if o.kind == OrderType::TrailingStopLoss {
-            let ticker = cx
-                .store
-                .ticker(&o.symbol)
-                .filter(|t| t.last > 0.0)
-                .ok_or("Bitget trailing stop requires a ticker")?;
-            let stop = o.price.ok_or("trailing trigger price is required")?;
-            if o.amount <= 0.0 {
-                return Err("Bitget trailing stop requires an explicit size".into());
-            }
-            p.size = Some(number(o.amount, m.precision.amount));
+            let (size, _, ratio) = self.trailing_values(cx, o, None)?;
+            p.size = Some(num::format(size));
             p.plan_type = Some("track_plan".into());
-            p.side = Some(side_text(o.side));
+            p.side = Some(side_text(if cx.store.hedged() {
+                o.side.opposite()
+            } else {
+                o.side
+            }));
             p.trade_side = cx.store.hedged().then_some("close");
             p.order_type = Some("market");
             p.margin_mode = Some(margin_text(
@@ -838,11 +864,7 @@ impl BitgetFutures {
                     .and_then(|s| s.margin_type)
                     .unwrap_or(MarginType::Cross),
             ));
-            let distance = num::adjust((ticker.last - stop).abs(), m.precision.price);
-            p.callback_ratio = Some(num::format(num::adjust(
-                distance * 100.0 / ticker.last,
-                0.1,
-            )));
+            p.callback_ratio = Some(num::format(ratio));
         } else {
             p.plan_type = Some(plan);
             p.size = (size > 0.0).then(|| num::format(size));
@@ -857,11 +879,102 @@ impl BitgetFutures {
         Ok(p)
     }
 
+    fn trailing_values(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+        retained: Option<(&str, f64)>,
+    ) -> Result<(f64, f64, f64), String> {
+        let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let stop = o
+            .price
+            .filter(|p| p.is_finite() && *p > 0.0)
+            .ok_or("Bitget trailing stop requires a positive trigger price")?;
+        let size = num::adjust(o.amount, m.precision.amount);
+        if !size.is_finite() || size <= 0.0 {
+            return Err("Bitget trailing stop requires an explicit positive size".into());
+        }
+        if let Some((kind, variance)) = retained {
+            if !variance.is_finite()
+                || variance <= 0.0
+                || !matches!(kind, "ratio" | "distance")
+                || (!self.account.uta && (kind != "ratio" || variance > 10.0))
+            {
+                return Err(
+                    "Bitget native trailing parameters are invalid; refresh before editing".into(),
+                );
+            }
+            return Ok((size, variance, variance));
+        }
+        let ticker = cx
+            .store
+            .ticker(&o.symbol)
+            .filter(|t| t.last.is_finite() && t.last > 0.0)
+            .ok_or("Bitget trailing stop requires a positive ticker")?;
+        let distance = num::adjust((ticker.last - stop).abs(), m.precision.price);
+        if !distance.is_finite() || distance <= 0.0 {
+            return Err("Bitget trailing distance must be at least one price tick".into());
+        }
+        let ratio = num::adjust(distance * 100.0 / ticker.last, 0.1);
+        if !self.account.uta && (!ratio.is_finite() || ratio <= 0.0 || ratio > 10.0) {
+            return Err(
+                "Bitget trailing callback percentage must be greater than zero and at most 10"
+                    .into(),
+            );
+        }
+        Ok((size, distance, ratio))
+    }
+
     fn strategy_payload(
         &self,
         cx: &Cx<'_, Pending>,
         o: &PlaceOrderOpts,
     ) -> Result<Payload, String> {
+        self.strategy_payload_with_trailing(cx, o, None)
+    }
+
+    fn strategy_payload_with_trailing(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+        retained: Option<(&str, f64)>,
+    ) -> Result<Payload, String> {
+        if o.kind == OrderType::TrailingStopLoss {
+            let (size, distance, _) = self.trailing_values(cx, o, retained)?;
+            let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+            return Ok(Payload {
+                category: Some(self.product().to_uppercase()),
+                symbol: Some(o.symbol.clone()),
+                kind: Some("trailing_stop"),
+                side: Some(side_text(o.side)),
+                pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+                qty: Some(num::format(size)),
+                reduce_only: (!cx.store.hedged()).then_some("yes"),
+                margin_mode: Some(margin_text(
+                    cx.store
+                        .setting(&o.symbol)
+                        .and_then(|s| s.margin_type)
+                        .unwrap_or(MarginType::Cross),
+                )),
+                // UTA only accepts clientOid for tpsl. Distance avoids an
+                // undocumented ratio unit conversion and keeps chart prices exact.
+                trailing_stop_params: Some(vec![TrailingParams {
+                    activation_price: number(
+                        o.price.ok_or("trailing price is required")?,
+                        m.precision.price,
+                    ),
+                    activation_type: uta_trigger(o.sl_trigger_type.or(o.trigger_type)),
+                    trail_type: if retained.is_some_and(|(kind, _)| kind == "ratio") {
+                        "ratio"
+                    } else {
+                        "distance"
+                    },
+                    trail_variance: num::format(distance),
+                    pre_order_type: "market",
+                }]),
+                ..Payload::default()
+            });
+        }
         if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
             return Err("unsupported Bitget UTA strategy type".into());
         }
@@ -903,7 +1016,12 @@ impl BitgetFutures {
         Ok(p)
     }
 
-    fn cancel_calls(&self, orders: &[Order], idempotent_missing: bool) -> Vec<Planned> {
+    fn cancel_calls(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[Order],
+        idempotent_missing: bool,
+    ) -> Result<Vec<Planned>, String> {
         let mut calls = vec![];
         let mut normal: Vec<(String, Vec<Order>)> = vec![];
         let mut seen = HashSet::new();
@@ -943,8 +1061,12 @@ impl BitgetFutures {
                     },
                 });
             } else if strategy {
-                let mut payload = self.classic(&order.symbol);
-                payload.order_id = Some(id);
+                let mut payload = self.classic(cx, &order.symbol)?;
+                if order.kind == OrderType::TrailingStopLoss {
+                    payload.order_id_list = Some(vec![CancelId { order_id: id }]);
+                } else {
+                    payload.order_id = Some(id);
+                }
                 payload.plan_type = Some(
                     self.account
                         .plans
@@ -970,7 +1092,7 @@ impl BitgetFutures {
         let mut normal_calls = vec![];
         for (symbol, rows) in normal {
             for chunk in rows.chunks(50) {
-                let mut p = self.classic(&symbol);
+                let mut p = self.classic(cx, &symbol)?;
                 p.order_id_list = Some(
                     chunk
                         .iter()
@@ -990,7 +1112,7 @@ impl BitgetFutures {
             }
         }
         normal_calls.extend(calls);
-        normal_calls
+        Ok(normal_calls)
     }
 
     fn plan_amend(
@@ -1036,8 +1158,34 @@ impl BitgetFutures {
                     .plans
                     .get(&order.id)
                     .is_some_and(|p| p == "uta_tpsl"));
+        if standalone && !self.account.uta && order.kind == OrderType::TrailingStopLoss {
+            let mut opts = place_opts(&order);
+            opts.price = Some(next_price);
+            opts.amount = next_amount;
+            let retained = if price.is_none() {
+                Some(self.account.trailing.get(&order.id)
+                    .map(|(kind, variance)| (kind.as_str(), *variance))
+                    .ok_or("Bitget native trailing parameters are unavailable; refresh before editing")?)
+            } else {
+                None
+            };
+            let (_, _, ratio) = self.trailing_values(cx, &opts, retained)?;
+            job.calls.push_back(Planned {
+                path: "/api/v2/mix/order/modify-plan-order",
+                payload: Payload {
+                    product_type: Some(self.product().into()),
+                    order_id: Some(native_id(&order)),
+                    new_size: amount.map(|_| num::format(next_amount)),
+                    new_trigger_price: price.map(|_| num::format(next_price)),
+                    new_callback_ratio: Some(num::format(ratio)),
+                    ..Payload::default()
+                },
+                effect: Effect::Place { expected: 1 },
+            });
+            return Ok(());
+        }
         if standalone && !self.account.uta {
-            let mut p = self.classic(&order.symbol);
+            let mut p = self.classic(cx, &order.symbol)?;
             p.order_id = Some(native_id(&order));
             p.trigger_price = price.map(|_| num::format(next_price));
             p.size = Some(if amount.is_some_and(|a| a > 0.0) {
@@ -1078,10 +1226,26 @@ impl BitgetFutures {
             opts.price = Some(next_price);
             opts.amount = next_amount;
         }
-        let mut replacement = self.place_calls(cx, &[opts.clone()])?;
+        let mut replacement = if standalone && self.account.uta {
+            vec![]
+        } else {
+            self.place_calls(cx, &[opts.clone()])?
+        };
         if standalone && self.account.uta {
-            let mut original = self.strategy_payload(cx, &place_opts(&order))?;
-            let mut next = self.strategy_payload(cx, &opts)?;
+            let retained = if order.kind == OrderType::TrailingStopLoss {
+                Some(self.account.trailing.get(&order.id)
+                    .map(|(kind, variance)| (kind.as_str(), *variance))
+                    .ok_or("Bitget native trailing parameters are unavailable; refresh before editing")?)
+            } else {
+                None
+            };
+            let mut original =
+                self.strategy_payload_with_trailing(cx, &place_opts(&order), retained)?;
+            let mut next = self.strategy_payload_with_trailing(
+                cx,
+                &opts,
+                if price.is_none() { retained } else { None },
+            )?;
             if linked.len() > 1 {
                 for related in &linked {
                     let original_price = number(related.price, m.precision.price);
@@ -1118,7 +1282,7 @@ impl BitgetFutures {
                 effect: Effect::Place { expected: 1 },
             });
         }
-        let mut fallback: VecDeque<_> = self.cancel_calls(&linked, false).into();
+        let mut fallback: VecDeque<_> = self.cancel_calls(cx, &linked, false)?.into();
         fallback.extend(replacement);
         if !standalone
             && order.kind == OrderType::Limit
@@ -1340,6 +1504,7 @@ impl BitgetFutures {
             self.resume_trading(cx);
             return;
         }
+        let mut write_noted = false;
         if error.is_none()
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
@@ -1353,7 +1518,10 @@ impl BitgetFutures {
             for order in orders {
                 if accepted.contains(&native_id(order)) {
                     self.mark_canceled(cx, &order.id);
-                    self.note_write(cx);
+                    if !write_noted {
+                        self.note_write(cx);
+                        write_noted = true;
+                    }
                 }
             }
             if data.is_some_and(|d| !d.failure_list.is_empty()) {
@@ -1411,6 +1579,34 @@ impl BitgetFutures {
                 }
                 if !ids.is_empty() {
                     self.note_write(cx);
+                    write_noted = true;
+                }
+                if error.is_none() {
+                    let p = &request.call.payload;
+                    let trailing = p
+                        .callback_ratio
+                        .as_ref()
+                        .or(p.new_callback_ratio.as_ref())
+                        .and_then(|v| v.parse().ok())
+                        .map(|v| ("ratio".to_owned(), v))
+                        .or_else(|| {
+                            p.trailing_stop_params
+                                .as_ref()
+                                .and_then(|rows| rows.first())
+                                .and_then(|v| {
+                                    v.trail_variance
+                                        .parse()
+                                        .ok()
+                                        .map(|variance| (v.trail_type.to_owned(), variance))
+                                })
+                        });
+                    if let Some(trailing) = trailing {
+                        for id in &ids {
+                            if self.order_revision(id) <= request.stream_revision {
+                                self.account.trailing.insert(id.clone(), trailing.clone());
+                            }
+                        }
+                    }
                 }
                 job.ids.extend(ids);
             }
@@ -1468,9 +1664,8 @@ impl BitgetFutures {
                         cx,
                         &id,
                         &next,
-                        (price, amount, job.original.clone()),
+                        (price, amount, job.original.clone(), request.stream_revision),
                         &client,
-                        request.started,
                     );
                     job.ids.push(next);
                 } else {
@@ -1503,24 +1698,24 @@ impl BitgetFutures {
                     .map(|d| d.order_id.text().into_owned())
                     .filter(|s| !s.is_empty() && s != &id);
                 if let Some(next) = next {
+                    let newer_stream = self.order_revision(&next) > request.stream_revision;
                     self.commit_amend(
                         cx,
                         &id,
                         &next,
-                        (price, amount, job.original.clone()),
+                        (price, amount, job.original.clone(), request.stream_revision),
                         &client,
-                        request.started,
                     );
                     if !self.order_terminal(&next)
+                        && !newer_stream
                         && let Some(data) = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref())
                     {
+                        let inverse = self.inverse();
                         cx.store.update_order(&next, |o| {
-                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
-                                && o.last_update <= request.started
-                            {
+                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 if let Some(filled) = data.base_volume.0 {
                                     o.filled = filled;
-                                    o.remaining = clean((o.amount - filled).max(0.0));
+                                    amend_remaining(o, inverse);
                                 }
                                 if let Some(status) = crate::account::order_status(&data.status) {
                                     o.status = status;
@@ -1577,7 +1772,9 @@ impl BitgetFutures {
             }
             _ => {}
         }
-        self.note_write(cx);
+        if !write_noted && request.call.path != paths::ORDER_DETAIL {
+            self.note_write(cx);
+        }
         self.trading.active = Some(job);
         self.resume_trading(cx);
     }
@@ -1587,12 +1784,15 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         old: &str,
         next: &str,
-        values: (f64, f64, Option<Order>),
+        values: (f64, f64, Option<Order>, u64),
         client: &str,
-        started: f64,
     ) {
-        let (price, amount, fallback) = values;
+        let (price, amount, fallback, stream_revision) = values;
         let original = cx.store.order(old).cloned().or(fallback);
+        let newer_stream = self.order_revision(old) > stream_revision;
+        if old != next {
+            self.mark_canceled(cx, old);
+        }
         if self.order_terminal(next)
             || (old == next
                 && original.as_ref().is_some_and(|o| {
@@ -1601,17 +1801,15 @@ impl BitgetFutures {
         {
             return;
         }
-        if old != next {
-            self.mark_canceled(cx, old);
-        }
         if let Some(mut order) = original {
             if old != next && cx.store.order(next).is_some() {
                 return;
             }
-            if order.last_update <= started {
+            // Old-ID events describe the canceled order, not its replacement.
+            if old != next || !newer_stream {
                 order.price = price;
                 order.amount = amount;
-                order.remaining = clean((amount - order.filled).max(0.0));
+                amend_remaining(&mut order, self.inverse());
             }
             order.id = next.to_owned();
             order.client_order_id = Some(client.to_owned());
@@ -1701,6 +1899,7 @@ fn needs_position_read(cx: &Cx<'_, Pending>, command: &Command, uta: bool) -> bo
     if let Command::PlaceOrders { orders, .. } = command {
         orders.iter().any(|o| {
             is_algo(o.kind)
+                && o.kind != OrderType::TrailingStopLoss
                 && (o.amount > 0.0 || uta)
                 && !cx.store.positions().iter().any(|p| {
                     p.symbol == o.symbol
@@ -1711,6 +1910,7 @@ fn needs_position_read(cx: &Cx<'_, Pending>, command: &Command, uta: bool) -> bo
     } else if uta && let Command::AmendOrder { id, .. } = command {
         cx.store.order(id).is_some_and(|o| {
             is_algo(o.kind)
+                && o.kind != OrderType::TrailingStopLoss
                 && !cx.store.positions().iter().any(|p| {
                     p.symbol == o.symbol
                         && p.side == protected_position(o.side)
@@ -1779,6 +1979,20 @@ fn uta_trigger(value: Option<StopTriggerType>) -> &'static str {
         "market"
     } else {
         "mark"
+    }
+}
+fn amend_remaining(order: &mut Order, inverse: bool) {
+    let native = clean((order.amount - order.filled).max(0.0));
+    order.remaining = if inverse && order.price > 0.0 {
+        (native / order.price * 100_000_000.0).round() / 100_000_000.0
+    } else {
+        native
+    };
+    if inverse {
+        order
+            .extra
+            .get_or_insert_with(OrderExtra::default)
+            .remaining_native = Some(native);
     }
 }
 fn number(v: f64, step: f64) -> String {

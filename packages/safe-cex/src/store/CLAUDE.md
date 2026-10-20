@@ -248,5 +248,7 @@ An optional trailing `ORDERS.remainingNative` frame column carries the venue's
 exact native leaves quantity into `extra.remainingNative`; inverse markets also
 publish `extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
 by price, or from an amount-zero Full position stop. Legacy seven-column frames
-remain readable and leave those extras absent. Order rejection metadata must
-survive alongside the native sizing fields.
+remain readable. Bybit leaves those extras absent on legacy frames; Bitget
+inverse publishes native amount/filled, so its adapter can subtract those values
+when the exact optional tail is absent. Order rejection metadata must survive
+alongside the native sizing fields.

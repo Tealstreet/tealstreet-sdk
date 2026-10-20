@@ -403,12 +403,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -639,6 +641,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
+          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -692,6 +695,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
+    ...(venue.inverseNativeAmounts ? { remainingNative: o.extra?.remainingNative } : {}),
     ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     remaining: o.remaining,
     reduceOnly: Boolean(o.reduceOnly),
@@ -705,6 +709,7 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
+    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,

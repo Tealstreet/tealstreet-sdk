@@ -194,6 +194,14 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Bitget inverse account and native contract sizing
+        if: matrix.venue == 'bitget'
+        run: |
+          yarn rust:private-tape-bitgetinverse
+          yarn rust:gate --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --runs 1 --books ''
+      - name: Bitget UTA ledger and Classic/UTA trailing native contracts
+        if: matrix.venue == 'bitget'
+        run: yarn rust:test-bitget-parity
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |

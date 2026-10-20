@@ -227,6 +227,88 @@ fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     assert!(h.requests.is_empty());
 }
 
+fn assert_missing_stop_trigger_rejects_batch(variant: Variant, kind: OrderType) {
+    let mut h = ready(variant);
+    let valid = order("BTCUSDT", 0.1);
+    let mut invalid = valid.clone();
+    invalid.kind = kind;
+    invalid.price = None;
+    place(&mut h, 1, vec![valid, invalid]);
+    assert!(
+        h.requests.is_empty(),
+        "invalid stop must cause no HTTP: {:?}",
+        h.paths()
+    );
+    assert!(h.result(1).is_some_and(Result::is_err));
+}
+
+#[test]
+fn spot_stop_loss_without_trigger_rejects_whole_batch_before_io() {
+    assert_missing_stop_trigger_rejects_batch(Variant::Spot, OrderType::StopLoss);
+}
+
+#[test]
+fn spot_take_profit_without_trigger_rejects_whole_batch_before_io() {
+    assert_missing_stop_trigger_rejects_batch(Variant::Spot, OrderType::TakeProfit);
+}
+
+#[test]
+fn flat_linear_stop_loss_without_trigger_rejects_whole_batch_before_io() {
+    assert_missing_stop_trigger_rejects_batch(Variant::Linear, OrderType::StopLoss);
+}
+
+#[test]
+fn flat_linear_take_profit_without_trigger_rejects_whole_batch_before_io() {
+    assert_missing_stop_trigger_rejects_batch(Variant::Linear, OrderType::TakeProfit);
+}
+
+#[test]
+fn standalone_stops_require_finite_positive_rounded_triggers() {
+    for variant in [Variant::Spot, Variant::Linear] {
+        for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+            for explicit in [false, true] {
+                for trigger in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 0.001] {
+                    let mut h = ready(variant);
+                    let mut invalid = order("BTCUSDT", 0.1);
+                    invalid.kind = kind;
+                    invalid.price = (!explicit).then_some(trigger);
+                    invalid.trigger_price = explicit.then_some(trigger);
+                    place(&mut h, 1, vec![order("BTCUSDT", 0.1), invalid]);
+                    assert!(
+                        h.requests.is_empty(),
+                        "{variant:?} {kind:?} trigger={trigger}"
+                    );
+                    assert!(h.result(1).is_some_and(Result::is_err));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn standalone_stops_accept_explicit_trigger_or_price_fallback() {
+    for variant in [Variant::Spot, Variant::Linear] {
+        for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+            for explicit in [false, true] {
+                let mut h = ready(variant);
+                let mut opts = order("BTCUSDT", 0.1);
+                opts.kind = kind;
+                opts.price = (!explicit).then_some(100.0);
+                opts.trigger_price = explicit.then_some(100.0);
+                place(&mut h, 1, vec![opts]);
+                if !variant.is_spot() {
+                    resolve_mode(&mut h, "BTCUSDT");
+                }
+                let request = h.take("/v5/order/create");
+                assert!(body(&request).contains("\"triggerPrice\":\"100\""));
+                if variant.is_spot() {
+                    assert!(body(&request).contains("\"orderFilter\":\"tpslOrder\""));
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn explicit_native_execution_controls_use_singles_and_are_validated() {
     let mut h = ready(Variant::Inverse);

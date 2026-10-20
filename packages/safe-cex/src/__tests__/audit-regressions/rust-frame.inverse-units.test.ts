@@ -6,6 +6,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CrossTradeManager } from '../../crossTrade/runtime/CrossTradeManager';
+import { BaseExchange } from '../../exchanges/base';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 
@@ -127,5 +128,22 @@ describe('Rust frames preserve inverse native units', () => {
     ] }));
     expect(store.positions[0].extra).toBeUndefined();
     expect(store.orders[0].extra).toBeUndefined();
+  });
+
+  it('keeps venue-specific legacy inverse sizing and exact native tails through the main-thread bridge', () => {
+    for (const venue of ['bybitinverse', 'bitgetinverse'] as const) {
+      for (const native of [false, true]) {
+        const store = new DefaultStore();
+        const exchange = new BaseExchange(venue, { key: '', secret: '' }, store);
+        exchange.applyWorkerFrame(fixture({ native, positions: true, orders: [
+          { id: 'inverse', amount: 1000, filled: 100, remaining: 0.018, native: 777 },
+        ] }).buffer);
+        expect(store.positions[0].extra).toMatchObject({ contractsNative: 1000, unrealizedPnlNative: 0.002 });
+        if (native) expect(store.orders[0].extra).toEqual({ remainingNative: 777, remainingNotional: 777 });
+        else if (venue === 'bitgetinverse') expect(store.orders[0].extra).toEqual({ remainingNative: 900 });
+        else expect(store.orders[0].extra).toBeUndefined();
+        exchange.dispose();
+      }
+    }
   });
 });

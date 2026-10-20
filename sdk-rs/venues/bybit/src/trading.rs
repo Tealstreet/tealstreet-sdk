@@ -122,6 +122,33 @@ fn number(value: f64) -> String {
     num::format(value)
 }
 
+fn stop_trigger_price(opts: &PlaceOrderOpts, precision: f64) -> Result<f64, String> {
+    opts.trigger_price
+        .filter(|price| *price != 0.0)
+        .or(opts.price.filter(|price| *price != 0.0))
+        .map(|price| num::adjust(price, precision))
+        .filter(|price| price.is_finite() && *price > 0.0)
+        .ok_or_else(|| {
+            format!(
+                "A stop needs a finite positive trigger price ({})",
+                opts.symbol
+            )
+        })
+}
+
+fn validate_stop_triggers(cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
+    for opts in orders {
+        if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+            let market = cx
+                .store
+                .market(&opts.symbol)
+                .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+            stop_trigger_price(opts, market.precision.price)?;
+        }
+    }
+    Ok(())
+}
+
 /// `^[A-Za-z0-9_-]{1,36}$`, Bybit's `orderLinkId` rule.
 fn valid_client_order_id(id: &str) -> bool {
     (1..=36).contains(&id.len())
@@ -277,6 +304,14 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // Validate the whole batch before mode reads or writes: an unpriced
+        // protective order must never become an ordinary market order.
+        if let Command::PlaceOrders { command, orders } = &command
+            && let Err(error) = validate_stop_triggers(cx, orders)
+        {
+            cx.done(*command, Err(error));
+            return;
+        }
         if self.variant.is_hyro() {
             if !self.private_ready() {
                 let id = match &command {
@@ -1055,11 +1090,11 @@ impl BybitLinear {
         let price = opts.price.filter(|p| *p != 0.0).map(adjust_price);
         // A stop with no position to attach to is a reduce-only conditional
         // market order triggering at its price.
-        let trigger_price = opts
-            .trigger_price
-            .filter(|p| *p != 0.0)
-            .or(if stop { price } else { None })
-            .map(adjust_price);
+        let trigger_price = if stop {
+            Some(stop_trigger_price(opts, p_price)?)
+        } else {
+            opts.trigger_price.filter(|p| *p != 0.0).map(adjust_price)
+        };
         let conditional = opts.kind == OrderType::Conditional;
         if conditional && trigger_price.is_none() {
             return Err(format!(
@@ -1202,11 +1237,7 @@ impl BybitLinear {
             .store
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
-        let price = opts
-            .trigger_price
-            .or(opts.price)
-            .map(|p| num::adjust(p, market.precision.price))
-            .ok_or_else(|| format!("A stop needs a price ({})", opts.symbol))?;
+        let price = stop_trigger_price(opts, market.precision.price)?;
         let amount = num::adjust(opts.amount, market.precision.amount);
         let partial = amount != 0.0;
         let mut body = Body::new()

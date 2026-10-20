@@ -239,7 +239,18 @@ export class Frame {
     const section = this.first(SECTION.BALANCE);
     if (!section) return undefined;
     const [used, free, total, upnl] = new Float64Array(this.buffer, section.offset, 4);
-    return { used, free, total, upnl };
+    if (section.length <= 32) return { used, free, total, upnl };
+    const count = new Uint32Array(this.buffer, section.offset + 32, 1)[0];
+    const refs = new Uint32Array(this.buffer, section.offset + 36, count);
+    const at = align8(section.offset + 36 + count * 4);
+    const amounts = new Float64Array(this.buffer, at, count);
+    const notionals = new Float64Array(this.buffer, at + count * 8, count);
+    const coins = {};
+    for (let i = 0; i < count; i++) {
+      const base = this.string(refs[i]);
+      Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
+    }
+    return { used, free, total, upnl, coins };
   }
 
   status() {
