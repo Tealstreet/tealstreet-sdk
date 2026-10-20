@@ -279,7 +279,8 @@ export function auditFixerChanges(venue, before, after) {
         // Add-only string lists: every observed entry must survive, counting
         // duplicates, so an insertion cannot hide a substituted or dropped entry.
         const strings = (rows) => ownKeys(rows).length === rows.length
-          && rows.every((row, index) => Object.hasOwn(rows, index) && typeof row === 'string');
+          && Array.from({ length: rows.length }, (_, index) => index)
+            .every((index) => Object.hasOwn(rows, index) && typeof rows[index] === 'string');
         if (rule?.retainAll && strings(left) && strings(right)) {
           const remaining = new Map();
           for (const row of right) remaining.set(row, (remaining.get(row) ?? 0) + 1);
@@ -288,6 +289,10 @@ export function auditFixerChanges(venue, before, after) {
             else record(path, false, '@dropped');
           }
           for (const count of remaining.values()) for (let added = 0; added < count; added++) record(path, true, '@added');
+          // Retained entries keep their relative order unless reordering is declared.
+          let next = 0;
+          const ordered = left.every((row) => (next = right.indexOf(row, next) + 1) > 0);
+          if (!ordered) record(path, Boolean(rule.reorder), '@order');
           return;
         }
         const leftMap = keyed(left), rightMap = keyed(right);

@@ -139,6 +139,11 @@ test('MEXC may add expected subscriptions but never drop an observed one', () =>
     assert.ok(result.errors.some((error) => error.includes('@dropped')), JSON.stringify([before, after]));
   }
   assert.ok(audit('mexc', { subscriptions: ['a'] }, (output) => { output.subscriptions = ['a', 1]; }).errors.length);
+  // A hole must not free an own-key slot for an unaudited property.
+  const holed = ['a', , 'b'];
+  holed.x = { smuggled: 1 };
+  assert.ok(auditFixerChanges('mexc', { subscriptions: ['a', 'b'] }, { subscriptions: holed }).errors.length);
+  assert.equal(audit('mexc', { subscriptions: ['b', 'c'] }, (output) => { output.subscriptions = ['c', 'b']; }).counts['subscriptions@order'], 1);
   assert.ok(audit('mexc', { requests: ['GET a'] }, (output) => { output.requests = []; }).errors.length);
 });
 
