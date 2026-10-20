@@ -241,7 +241,16 @@ This evidence certifies the integrated runtime; later changes at this checkpoint
 are documentation/test expectations only. Earlier pre-integration failures above
 remain recorded and do not substitute for these final-source passes.
 
-## Authorized next task after this PR merges
+Independent gate review passed at e6390fdb06: all 94 replay output files have
+the expected run counts and zero unserved requests, missing/unused writes,
+invalid signatures or protocol errors. Artifact sizes/hashes, test counts and
+unchanged executable gate policy were independently verified.
+
+## Deferred assignment for handoff (wind-down)
+
+Owner subsequently instructed this lane to finish the current PR, merge only
+on green CI, write the remaining assignment to the requested handoff and stop.
+The next Bybit assignment below is unstarted and must not begin during wind-down.
 
 Owner confirmed the Partial cancel/recreate decision against TS, including
 the missing-mark path. After this follow-up merges green, cut a fresh branch
