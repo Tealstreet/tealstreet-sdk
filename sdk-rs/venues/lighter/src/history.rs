@@ -26,6 +26,8 @@ pub struct Request {
     count: usize,
     failed: Option<String>,
     pages: u32,
+    /// Trades arrive newest first; a row older than `from` ends the window.
+    past_window: bool,
 }
 enum Read {
     Fills,
@@ -398,6 +400,7 @@ impl Lighter {
             count: 0,
             failed: None,
             pages: 0,
+            past_window: false,
         };
         self.history_request(cx, request);
     }
@@ -499,6 +502,9 @@ impl Lighter {
         let timestamp = millis(t.transaction_time.as_ref().map_or(t.timestamp.0, |n| n.0));
         if timestamp <= 0.0 {
             return Err("Invalid Lighter execution timestamp".into());
+        }
+        if request.from.is_some_and(|from| timestamp < from) {
+            request.past_window = true;
         }
         if !within(request, timestamp) {
             return Ok(());
@@ -755,6 +761,7 @@ impl Lighter {
             .next_cursor
             .filter(|c| !c.is_empty())
             .map(Cow::into_owned);
+        let enough = enough || request.past_window;
         if !enough && let Some(cursor) = cursor {
             if !request.cursors.insert(cursor.clone()) || request.pages >= 1000 {
                 cx.done(
@@ -778,6 +785,7 @@ impl Lighter {
             request.stage = Stage::Funding;
             request.cursor = None;
             request.cursors.clear();
+            request.past_window = false;
             self.history_request(cx, request);
             return;
         }

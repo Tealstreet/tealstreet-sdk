@@ -333,6 +333,14 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -555,7 +563,10 @@ impl Venue for PhemexPerpetuals {
         if let Ok(e) = serde_json::from_str::<Envelope<'_>>(r.body)
             && (e.error.is_some() || e.code.is_some_and(|n| n != 0))
         {
-            self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg));
+            match p {
+                Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
+                p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
+            }
             return;
         }
         match p {
@@ -809,11 +820,6 @@ impl Venue for PhemexPerpetuals {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.last.is_some())
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
