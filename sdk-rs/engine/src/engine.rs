@@ -1089,17 +1089,18 @@ pub trait Venue {
 const STARTUP_WATCH_MS: f64 = 60_000.0;
 const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
-fn watch_startup<P>(cx: &mut Cx<'_, P>) -> bool {
+fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     let loaded = cx.store.loaded();
+    let tickers = cx.io.public_feed_policy != PublicFeedPolicy::Disabled;
     let missing: Vec<&str> = [
-        ("markets", loaded.markets),
-        ("tickers", loaded.tickers),
-        ("balance", loaded.balance),
-        ("orders", loaded.orders),
-        ("positions", loaded.positions),
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
     ]
     .into_iter()
-    .filter_map(|(name, done)| (!done).then_some(name))
+    .filter_map(|(name, done, required)| (required && !done).then_some(name))
     .collect();
     if missing.is_empty() {
         return false;
@@ -1127,6 +1128,8 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
+    /// Hosts opt in when the account can sign; public-only engines have no account sections.
+    account_startup: bool,
     shared_books: HashMap<String, Book>,
     shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
     shared_ticker_revision: u64,
@@ -1157,6 +1160,7 @@ impl<V: Venue> Engine<V> {
             io: Io::default(),
             started: false,
             startup_watch_at: None,
+            account_startup: false,
             shared_books: HashMap::new(),
             shared_tickers: HashMap::new(),
             shared_ticker_revision: 0,
@@ -1178,6 +1182,12 @@ impl<V: Venue> Engine<V> {
         }
         self.io.public_feed_policy = policy;
         Ok(())
+    }
+
+    /// Account sections (balance, orders, positions) are expected at startup only
+    /// for an account that can sign, matching the SDK's readiness rule.
+    pub fn set_account_startup(&mut self, account: bool) {
+        self.account_startup = account;
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -1429,7 +1439,8 @@ impl<V: Venue> Engine<V> {
         if let Some(at) = self.startup_watch_at
             && now >= at
         {
-            self.startup_watch_at = watch_startup(&mut cx).then_some(now + STARTUP_REPEAT_MS);
+            self.startup_watch_at =
+                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
         match event {
             Event::TickIntervalChanged { interval_ms } => {
@@ -3935,6 +3946,7 @@ mod startup_watch_tests {
     #[test]
     fn unloaded_startup_is_reported_until_every_section_loads() {
         let mut engine = Engine::new(Idle);
+        engine.set_account_startup(true);
         engine.start(0.0);
         assert!(
             engine
@@ -3968,5 +3980,26 @@ mod startup_watch_tests {
         engine.store_mut().set_tickers(vec![]);
         assert!(notices(&mut engine, repeat + STARTUP_REPEAT_MS).is_empty());
         assert!(notices(&mut engine, repeat + 10.0 * STARTUP_REPEAT_MS).is_empty());
+    }
+
+    #[test]
+    fn public_only_engine_is_not_told_its_account_never_loaded() {
+        let mut engine = Engine::new(Idle);
+        engine.start(0.0);
+        engine.store_mut().set_markets(vec![]);
+        engine.store_mut().set_tickers(vec![]);
+        assert!(notices(&mut engine, STARTUP_WATCH_MS).is_empty());
+        let mut disabled = Engine::new(Idle);
+        disabled
+            .set_public_feed_policy(PublicFeedPolicy::Disabled)
+            .unwrap();
+        disabled.set_account_startup(true);
+        disabled.start(0.0);
+        let store = disabled.store_mut();
+        store.set_markets(vec![]);
+        store.set_balance(Default::default());
+        store.set_orders(vec![]);
+        store.set_positions(vec![]);
+        assert!(notices(&mut disabled, STARTUP_WATCH_MS).is_empty());
     }
 }

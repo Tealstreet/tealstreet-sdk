@@ -2147,6 +2147,10 @@ impl BinanceFutures {
         } else if cx.store.loaded().tickers && self.account.valuation_wait_since.is_none() {
             self.account.valuation_wait_since = Some(cx.now);
         }
+        // An asset that regained a price gets a fresh wait if it loses it again.
+        self.account
+            .zero_valued_assets
+            .retain(|asset| zero_valued.contains(asset));
         for asset in zero_valued {
             if !STABLECOINS.contains(&asset.as_str())
                 && self.account.zero_valued_assets.insert(asset.clone())
