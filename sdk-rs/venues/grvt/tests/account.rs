@@ -1,6 +1,8 @@
 use safe_cex_engine::model::{OrderSide, PositionSide};
 use safe_cex_engine::wire::{section, sections};
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketChannel, SocketId};
+use safe_cex_engine::{
+    Action, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_grvt::{Grvt, Options};
 
 const NOW: f64 = 1_700_000_000_000.;
@@ -22,11 +24,15 @@ impl Harness {
         })
     }
     fn with_options(options: Options) -> Self {
+        Self::with_policy(options, PublicFeedPolicy::Direct)
+    }
+    fn with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut engine = Engine::new(Grvt::new(Options {
             key: Some("fixture-api-key".into()),
             secret: Some(format!("0x{}", "01".repeat(32))),
             ..options
         }));
+        engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut h = Self {
             engine,
@@ -126,6 +132,94 @@ impl Harness {
         self.engine.handle(self.now, Event::TimerFired { timer });
         self.collect();
     }
+}
+
+#[test]
+fn shared_quotes_match_direct_private_pnl_and_survive_native_summary_and_catalog_refresh() {
+    let mut results = Vec::new();
+    for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Shared] {
+        let mut h = Harness::with_policy(Options::default(), policy);
+        if policy == PublicFeedPolicy::Shared {
+            h.engine
+                .apply_public_feed(
+                    h.now,
+                    serde_json::from_str(r#"{"tickers":[{"symbol":"BTC_USDT_PERP","last":120}]}"#)
+                        .unwrap(),
+                )
+                .unwrap();
+            assert!(!h.engine.store().loaded().balance);
+            assert!(!h.engine.store().loaded().positions);
+        }
+        h.authenticate();
+        h.open();
+        h.reply("positions", r#"{"r":[]}"#, "");
+        h.ws(r#"{"s":"v1.position","f":{"i":"BTC_USDT_Perp","s":"2","ep":"100","n":"200","l":"20","el":"50","up":"0","et":"1700000000100000000"}}"#);
+        if policy == PublicFeedPolicy::Direct {
+            let public = h
+                .actions
+                .iter()
+                .find_map(|action| match action {
+                    Action::WsConnect {
+                        socket,
+                        channel: Some(SocketChannel::Public),
+                        ..
+                    } => Some(*socket),
+                    _ => None,
+                })
+                .unwrap();
+            h.engine.handle(h.now, Event::WsOpened { socket: public });
+            h.engine.handle(h.now, Event::WsMessage { socket: public, text: r#"{"s":"v1.ticker.d","s1":"BTC_USDT_Perp","sn":"0","f":{"i":"BTC_USDT_Perp","lp":"120"}}"# });
+        } else {
+            h.engine
+                .apply_public_feed(
+                    h.now,
+                    serde_json::from_str(r#"{"tickers":[{"symbol":"BTC_USDT_PERP","last":120}]}"#)
+                        .unwrap(),
+                )
+                .unwrap();
+        }
+        assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 40.);
+        assert_eq!(h.engine.store().balance().upnl, 40.);
+        let before = h.engine.store().balance().clone();
+
+        // The native account poll reports stale server PnL, then values its local
+        // positions from the same authoritative ticker cache as direct mode.
+        let tick = h
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms }
+                    if *at_ms > NOW + 59_000. && *at_ms < NOW + 61_000. =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .unwrap();
+        h.timer(tick.0, tick.1);
+        h.reply("aggregated_account_summary", SUMMARY, "");
+        assert_eq!(h.engine.store().balance(), &before);
+
+        let refresh = h
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms }
+                    if *at_ms > NOW + 299_000. && *at_ms < NOW + 301_000. =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .unwrap();
+        h.timer(refresh.0, refresh.1);
+        h.reply("all_instruments", CATALOG, "");
+        assert_eq!(h.engine.store().ticker("BTC_USDT_PERP").unwrap().last, 120.);
+        assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 40.);
+        assert_eq!(h.engine.store().balance(), &before);
+        results.push((h.engine.store().positions()[0].unrealized_pnl, before));
+    }
+    assert_eq!(results[0], results[1]);
 }
 
 #[test]

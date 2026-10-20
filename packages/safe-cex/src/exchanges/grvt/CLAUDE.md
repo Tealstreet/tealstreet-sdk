@@ -855,3 +855,12 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 ## Rust socket supervision
 
 All Rust public, per-timeframe candle and private sockets use `engine::socket::Supervisor` for connection deadlines and capped exponential reconnect delay with jitter. Public/candle idle deadlines remain 20 seconds; the private idle deadline is 90 seconds and proxy authentication has a separate 15-second deadline. Native lowercase ping/pong remains venue-owned, including the replaceable, socket/generation-fenced private ping five seconds after a pong. Terminal authentication rejection still suppresses retries; dropping the last candle interest cancels its supervision and pending reconnect.
+
+## Rust shared public feed
+
+Shared provider quotes enter the native ticker store and run GRVT's existing
+position and balance PnL calculation using the current last price. This starts
+only after native private balance and position snapshots are loaded; a public
+quote cannot mark private datasets ready. Native account-summary and catalog
+refreshes retain provider quotes and the resulting private PnL. Summary equity,
+available funds and margin usage continue to come from the authenticated venue.
