@@ -161,7 +161,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
-    if (!['hyperliquid', 'lighter'].includes(this.name) && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+    if (
+      !['hyperliquid', 'lighter'].includes(this.name) &&
+      !this.isPublicDataOnly &&
+      (!this.options.key || !this.options.secret)
+    ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
@@ -181,12 +185,13 @@ export class RustEngineExchange extends BaseExchange {
         publicDataOnly: Boolean(publicDataOnly),
         ...(this.name === 'backpack' ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
-        ...(this.name === 'lighter' ? {
-          apiKeyIndex: this.options.apiKeyIndex,
-          lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex === undefined
-            ? undefined : Number(this.options.extra.lighterIntegratorAccountIndex),
-          lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
-        } : {}),
+        ...(this.name === 'lighter'
+          ? {
+              apiKeyIndex: this.options.apiKeyIndex,
+              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+            }
+          : {}),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
@@ -299,12 +304,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.clientOrderIdRule) this.assertCallerClientOrderIds(orders);
+    this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    if (this.clientOrderIdRule) this.resolveCallerClientOrderId(opts);
+    this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
 

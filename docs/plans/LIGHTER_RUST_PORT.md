@@ -86,3 +86,51 @@ runtime integrator approval check does not validate fee caps required by docs.
   finish strict harness/private tape; remove unused grouped/approval signer
   surface and any crypto helper that only that unused surface kept alive;
   public recording, all gates, PR reviews and green-CI merge.
+
+### Private, trading and query phase review checkpoint
+
+- Account: 23 native regressions pass, including atomic scoped order snapshots,
+  source clocks for positions/orders, stale-close protection, accepted/uncertain
+  settings barriers, sparse position payloads, available-balance progress during
+  busy order streams, dual execution IDs and never-open socket handshakes.
+- Trading: 19 regressions pass. Private/trading cross-review fixed source fill
+  races before replacement, terminal ACK resurrection, queued settings and
+  unknown-write barriers. Caller IDs reject before any write, including batches.
+- Queries: 16 regressions pass. Independent account reviewer accepted native
+  execution/ledger sources, exact IDs, cursor/range failure behavior, signed fee
+  ticks/rebates, source-side PnL and shared official hyphenated order mapping.
+- Signer adversarial review checked preimages/FP5/auth, entropy and key cleanup;
+  corrected protocol bounds and current market IDs. Current active perps include
+  IDs 4095..4099. Independent high-market vectors cover 4098 and 32767.
+- Removed unused grouped/approval signer surface and the now-unused 32-byte
+  Poseidon hash/compression facade functions and standalone dead fixture.
+  Retained fp5 hashing, key derivation, signing and security verification vectors.
+- Public review follow-ups fixed pre-market book unsubscribe, REST snapshots
+  incorrectly authorizing WS nonce continuity, reconnect generations, and stale
+  background candle replies. Live stats showed empty BBO strings; row-wise
+  decoding now retains all other markets and handles absent quotes.
+- Wrapper: 316 targeted tests pass (caller-ID suite plus Lighter wrapper).
+  Six real-Wasm Lighter boundary tests pass. Root lint: 28 tasks passed.
+- Private gate first PASS: 14 events, 8 commands, 11 signed transactions in 10
+  HTTP writes. Exact auth/economic bodies and fresh signatures independently
+  verified with Go-WASM; TS signer is real. Performance is informational for
+  private tapes (155.1/189.6 ms TS/Rust; retained 1.2/1.0 MB).
+- Public live recording: 20 seconds, 27,080 WS frames, both ETH/BTC books.
+  Six-second fixture: 8,880 records. First public gate found stats decode bug;
+  no normalizer added. Rebuild and public gate rerun pending.
+
+Additional deliberate TS fixes to list in final gates/PR: native fee rate units
+and signed rebates; execution history rather than cumulative inactive orders;
+first-five-second live fills; by-market execution side/market identity;
+approval expiry and both fee caps; current large-ID leverage; net-mode no-op;
+hyphenated terminal statuses and late-read/late-WS source protection.
+
+### Committable implementation checkpoint
+
+Private, trading, query and signing reviews are accepted after fixes. Native
+Lighter coverage is 78 tests (23 account, 16 history, 19 trading, 10 public,
+5 public review regressions and 5 signing tests). Targeted all-target Clippy and
+bans pass. Harness coverage is 158 tests, including 11 Lighter verifier/oracle
+regressions. All four original public-review regressions are retained alongside
+the new candle race test in its own file. Remaining work is final replay and
+workspace gates, PR adversarial reviews, CI and merge.

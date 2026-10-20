@@ -279,3 +279,79 @@ fn metadata_failure_falls_back_but_invalid_success_never_clears() {
             .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("orderBooks")))
     );
 }
+
+#[test]
+fn subscription_can_be_cancelled_before_markets_arrive() {
+    let mut e = Engine::new(Lighter::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(
+        1000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    e.handle(
+        1001.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    reply(&mut e, request, MARKETS);
+    assert!(e.book("ETH").is_none());
+}
+
+#[test]
+fn rest_book_cannot_establish_websocket_nonce_continuity() {
+    let (mut e, s) = seeded();
+    book(&mut e);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"2"}],"asks":[]}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(100.0, 2.0)]);
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"order_book:0","type":"update/order_book","order_book":{"begin_nonce":10,"nonce":11,"bids":[{"price":"99","size":"1"}],"asks":[]}}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+}
+
+#[test]
+fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
+    let (mut e, s) = seeded();
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"market_stats:all","type":"subscribed/market_stats","market_stats":{"0":{"market_id":0,"mark_price":"100","best_bid_price":"","best_ask_price":""},"1":{"market_id":1,"mark_price":"200","current_funding_rate":"0.0012"},"bad":{"market_id":999,"mark_price":{}}}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().mark, 100.0);
+    assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.0);
+    assert_eq!(e.store().ticker("BTC").unwrap().funding_rate, 0.0001);
+}

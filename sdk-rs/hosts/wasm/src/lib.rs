@@ -108,6 +108,7 @@ struct EngineOptions {
     api_key_index: Option<String>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
+    #[serde(deserialize_with = "optional_lighter_index")]
     lighter_integrator_account_index: Option<u64>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
@@ -163,6 +164,22 @@ struct EngineOptions {
 struct HyperliquidBuilder {
     address: String,
     fee_tenths_bps: u32,
+}
+
+#[cfg(feature = "lighter")]
+fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Index {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Index>::deserialize(d)?
+        .map(|index| match index {
+            Index::Number(n) => Ok(n),
+            Index::Text(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
+        })
+        .transpose()
 }
 
 #[derive(Serialize)]

@@ -51,7 +51,8 @@ pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
     e.start(NOW);
     let mut private = None;
     for _ in 0..30 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.sort_by_key(|a| !matches!(a, Action::Http(r) if r.url.contains("exchangeStats")));
         if actions.is_empty() {
             break;
         }

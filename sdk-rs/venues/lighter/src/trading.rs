@@ -35,7 +35,7 @@ enum Step {
         requested: bool,
     },
     Place(Vec<Prepared>),
-    Cancel(Order),
+    Cancel(Box<Order>),
     Setting {
         symbol: String,
         leverage: Option<f64>,
@@ -100,6 +100,8 @@ impl Number {
 }
 #[derive(Deserialize, Default)]
 struct Tier {
+    #[serde(default)]
+    code: Option<Number>,
     #[serde(default, alias = "userTierName")]
     user_tier_name: Option<String>,
     #[serde(default, alias = "userTier")]
@@ -176,7 +178,11 @@ impl Lighter {
             .iter_mut()
             .chain(self.trading.queue.iter_mut())
         {
-            if job.amend.as_ref().is_some_and(|old| old.id == id && timestamp >= old.last_update) {
+            if job
+                .amend
+                .as_ref()
+                .is_some_and(|old| old.id == id && timestamp >= old.last_update)
+            {
                 job.amend_filled = true;
             }
         }
@@ -224,7 +230,7 @@ impl Lighter {
                         cx.done(command, Err(error));
                         return;
                     }
-                    steps.push_back(Step::Cancel(order));
+                    steps.push_back(Step::Cancel(Box::new(order)));
                 }
                 (command, steps)
             }
@@ -238,7 +244,7 @@ impl Lighter {
                             && matches!(o.status, OrderStatus::Open | OrderStatus::Creating)
                     })
                     .cloned()
-                    .map(Step::Cancel)
+                    .map(|order| Step::Cancel(Box::new(order)))
                     .collect(),
             ),
             Command::AmendOrder {
@@ -307,7 +313,7 @@ impl Lighter {
                         return;
                     }
                 };
-                steps.push_front(Step::Cancel(old.clone()));
+                steps.push_front(Step::Cancel(Box::new(old.clone())));
                 amend = Some(old);
                 (command, steps)
             }
@@ -572,7 +578,7 @@ impl Lighter {
                         .iter()
                         .map(|p| sign::Transaction::Create {
                             order: p.native.clone(),
-                            builder: builder.clone(),
+                            builder,
                         })
                         .collect(),
                     Effect::Place,
@@ -654,6 +660,11 @@ impl Lighter {
             Request::Tier => {
                 if response.status < 300
                     && let Ok(tier) = serde_json::from_str::<Tier>(response.body)
+                    && tier
+                        .code
+                        .as_ref()
+                        .and_then(Number::integer)
+                        .is_none_or(|code| code == 200)
                     && tier.name().is_some_and(|s| {
                         matches!(s.trim().to_ascii_lowercase().as_str(), "standard" | "std")
                     })
@@ -683,7 +694,8 @@ impl Lighter {
                                 && a.max_perps_maker_fee
                                     .as_ref()
                                     .and_then(Number::integer)
-                                    .is_some_and(|fee| fee >= u64::from(builder.maker_fee))
+                                    .unwrap_or(0)
+                                    >= u64::from(builder.maker_fee)
                                 && a.max_perps_taker_fee
                                     .as_ref()
                                     .and_then(Number::integer)
@@ -1175,7 +1187,7 @@ fn market_id(cx: &Cx<'_, Pending>, symbol: &str) -> Result<u32, String> {
     cx.store
         .market(symbol)
         .and_then(|m| m.id.parse::<u32>().ok())
-        .filter(|n| *n <= 254)
+        .filter(|n| *n <= 32767 && *n != 255)
         .ok_or_else(|| format!("Invalid Lighter perps market {symbol}"))
 }
 fn has_position(cx: &Cx<'_, Pending>, symbol: &str, side: OrderSide) -> bool {

@@ -1,11 +1,12 @@
 //! Native Lighter transaction envelopes and ECgFp5 signing.
-use safe_cex_crypto::lighter::{
-    SchnorrNonce, poseidon2_hash, poseidon2_hash_fp5, poseidon2_two_to_one, schnorr_sign,
-};
+use safe_cex_crypto::lighter::{SchnorrNonce, poseidon2_hash_fp5, schnorr_sign};
 use serde::Serialize;
 use zeroize::{Zeroize, Zeroizing};
 
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+const MAX_ACCOUNT: u64 = (1 << 48) - 2;
+const MAX_ORDER_VALUE: u64 = (1 << 48) - 1;
+const MAX_ORDER_INDEX: u64 = (1 << 60) - 1;
 const TX_TTL: u64 = 10 * 60 * 1_000;
 const ORDER_TTL: u64 = 28 * 24 * 60 * 60 * 1_000;
 
@@ -31,25 +32,9 @@ pub struct Builder {
 }
 
 #[derive(Clone, Debug)]
-pub struct Approval {
-    pub account_index: u64,
-    pub max_perps_taker_fee: u32,
-    pub max_perps_maker_fee: u32,
-    pub max_spot_taker_fee: u32,
-    pub max_spot_maker_fee: u32,
-    pub expiry: u64,
-    pub l1_signature: Option<String>,
-}
-
-#[derive(Clone, Debug)]
 pub enum Transaction {
     Create {
         order: Order,
-        builder: Option<Builder>,
-    },
-    Grouped {
-        grouping_type: u8,
-        orders: Vec<Order>,
         builder: Option<Builder>,
     },
     Cancel {
@@ -61,7 +46,6 @@ pub enum Transaction {
         leverage: f64,
         margin_mode: u8,
     },
-    ApproveIntegrator(Approval),
 }
 
 pub struct SignedTransaction {
@@ -121,20 +105,6 @@ struct CreateInfo<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct GroupedInfo<'a> {
-    account_index: u64,
-    api_key_index: u8,
-    grouping_type: u8,
-    orders: &'a [OrderInfo],
-    expired_at: u64,
-    nonce: u64,
-    sig: &'a str,
-    #[serde(rename = "L2TxAttributes", skip_serializing_if = "Option::is_none")]
-    attributes: Option<Attributes>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
 struct CancelInfo<'a> {
     account_index: u64,
     api_key_index: u8,
@@ -158,26 +128,15 @@ struct LeverageInfo<'a> {
     sig: &'a str,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
-struct ApprovalInfo<'a> {
-    account_index: u64,
-    api_key_index: u8,
-    integrator_account_index: u64,
-    max_perps_taker_fee: u32,
-    max_perps_maker_fee: u32,
-    max_spot_taker_fee: u32,
-    max_spot_maker_fee: u32,
-    approval_expiry: u64,
-    expired_at: u64,
-    nonce: u64,
-    sig: &'a str,
-    #[serde(rename = "L1Sig", skip_serializing_if = "Option::is_none")]
-    l1_sig: Option<&'a str>,
+fn valid_market(market: u32) -> bool {
+    market <= 32_767 && market != 255
 }
 
 fn safe_integer(value: u64, name: &str) -> Result<(), String> {
-    if value > MAX_SAFE_INTEGER {
+    bounded(value, MAX_SAFE_INTEGER, name)
+}
+fn bounded(value: u64, maximum: u64, name: &str) -> Result<(), String> {
+    if value > maximum {
         return Err(format!("{name} exceeds the supported integer range"));
     }
     Ok(())
@@ -204,11 +163,11 @@ fn random_nonce() -> Result<SchnorrNonce, String> {
 
 impl OrderInfo {
     fn new(order: &Order, now_ms: u64) -> Result<Self, String> {
-        if order.market_id > 254 || order.order_type > 5 || order.time_in_force > 2 {
+        if !valid_market(order.market_id) || order.order_type > 5 || order.time_in_force > 2 {
             return Err("Invalid Lighter order market, type or time in force".into());
         }
-        safe_integer(order.order_id, "client order index")?;
-        safe_integer(order.amount, "base amount")?;
+        bounded(order.order_id, MAX_ORDER_VALUE, "client order index")?;
+        bounded(order.amount, MAX_ORDER_VALUE, "base amount")?;
         let order_expiry =
             order
                 .order_expiry
@@ -256,7 +215,11 @@ impl OrderInfo {
 fn attributes(builder: Option<Builder>) -> Result<Option<Attributes>, String> {
     builder
         .map(|builder| {
-            safe_integer(builder.account_index, "integrator account index")?;
+            bounded(
+                builder.account_index,
+                MAX_ACCOUNT,
+                "integrator account index",
+            )?;
             Ok(Attributes {
                 account_index: builder.account_index,
                 taker_fee: builder.taker_fee,
@@ -287,53 +250,6 @@ fn signing_preimage(data: &[u8], attributes: &Option<Attributes>) -> Result<Vec<
     Ok(preimage)
 }
 
-fn validate_group(grouping_type: u8, orders: &[Order]) -> Result<(), String> {
-    let count = if grouping_type == 3 { 3 } else { 2 };
-    if !(1..=3).contains(&grouping_type) || orders.len() != count {
-        return Err("Invalid Lighter grouped order count or grouping type".into());
-    }
-    for (index, order) in orders.iter().enumerate() {
-        if order.market_id != orders[0].market_id
-            || orders[..index]
-                .iter()
-                .any(|other| other.order_id == order.order_id)
-        {
-            return Err(
-                "Lighter grouped orders require one market and unique order indexes".into(),
-            );
-        }
-    }
-    if grouping_type == 2 {
-        let first = &orders[0];
-        let second = &orders[1];
-        if first.is_buy != second.is_buy
-            || first.amount != second.amount
-            || !first.reduce_only
-            || !second.reduce_only
-            || !((matches!(first.order_type, 2 | 3) && matches!(second.order_type, 4 | 5))
-                || (matches!(first.order_type, 4 | 5) && matches!(second.order_type, 2 | 3)))
-        {
-            return Err(
-                "Lighter OCO requires matching reduce-only stop-loss and take-profit legs".into(),
-            );
-        }
-    } else {
-        let parent = &orders[0];
-        if parent.order_type > 1
-            || orders[1..].iter().any(|child| {
-                child.is_buy == parent.is_buy
-                    || child.amount != 0
-                    || !(2..=5).contains(&child.order_type)
-            })
-            || (grouping_type == 3
-                && (matches!(orders[1].order_type, 2 | 3) == matches!(orders[2].order_type, 2 | 3)))
-        {
-            return Err("Invalid Lighter OTO or OTOCO parent/child orders".into());
-        }
-    }
-    Ok(())
-}
-
 impl Signer {
     pub fn new(
         secret: &str,
@@ -341,7 +257,7 @@ impl Signer {
         account_index: u64,
         api_key_index: u8,
     ) -> Result<Self, String> {
-        safe_integer(account_index, "account index")?;
+        bounded(account_index, MAX_ACCOUNT, "account index")?;
         if api_key_index > 254 {
             return Err("Lighter API key index must be in 0..=254".into());
         }
@@ -377,7 +293,7 @@ impl Signer {
         deadline_seconds: u64,
         schnorr_nonce: SchnorrNonce,
     ) -> Result<String, String> {
-        safe_integer(deadline_seconds, "authentication deadline")?;
+        bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
         let message = format!(
             "{deadline_seconds}:{}:{}",
             self.account_index, self.api_key_index
@@ -409,13 +325,11 @@ impl Signer {
         let expired_at = now_ms
             .checked_add(TX_TTL)
             .ok_or("Lighter expiry overflow")?;
-        safe_integer(expired_at, "transaction expiry")?;
+        bounded(expired_at, MAX_ORDER_VALUE, "transaction expiry")?;
         let tx_type = match tx {
             Transaction::Create { .. } => 14,
-            Transaction::Grouped { .. } => 28,
             Transaction::Cancel { .. } => 15,
             Transaction::Leverage { .. } => 20,
-            Transaction::ApproveIntegrator(_) => 45,
         };
         let mut data = Vec::with_capacity(128);
         append_words(
@@ -435,35 +349,11 @@ impl Signer {
                 order.append(&mut data);
                 (vec![order], attributes(*builder)?, 0)
             }
-            Transaction::Grouped {
-                grouping_type,
-                orders,
-                builder,
-            } => {
-                validate_group(*grouping_type, orders)?;
-                let orders = orders
-                    .iter()
-                    .map(|order| OrderInfo::new(order, now_ms))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let mut combined: Option<[u8; 32]> = None;
-                for order in &orders {
-                    let mut order_data = Vec::with_capacity(80);
-                    order.append(&mut order_data);
-                    let hash = poseidon2_hash(&order_data)?;
-                    combined = Some(match combined {
-                        None => hash,
-                        Some(previous) => poseidon2_two_to_one(&previous, &hash)?,
-                    });
-                }
-                append_words(&mut data, &[(*grouping_type).into()]);
-                data.extend_from_slice(&combined.ok_or("Empty Lighter group")?);
-                (orders, attributes(*builder)?, 0)
-            }
             Transaction::Cancel {
                 market_id,
                 order_id,
             } => {
-                if *market_id > 254 || *order_id > i64::MAX as u64 {
+                if !valid_market(*market_id) || *order_id == 0 || *order_id > MAX_ORDER_INDEX {
                     return Err("Invalid Lighter cancellation market or order index".into());
                 }
                 append_words(&mut data, &[(*market_id).into(), *order_id]);
@@ -475,7 +365,7 @@ impl Signer {
                 margin_mode,
             } => {
                 let fraction = (10_000.0 / leverage).floor();
-                if *market_id > 254
+                if !valid_market(*market_id)
                     || !leverage.is_finite()
                     || *leverage <= 0.0
                     || *margin_mode > 1
@@ -490,33 +380,6 @@ impl Signer {
                 );
                 (Vec::new(), None, fraction)
             }
-            Transaction::ApproveIntegrator(approval) => {
-                safe_integer(approval.account_index, "integrator account index")?;
-                let fees = [
-                    approval.max_perps_taker_fee,
-                    approval.max_perps_maker_fee,
-                    approval.max_spot_taker_fee,
-                    approval.max_spot_maker_fee,
-                ];
-                if fees.iter().any(|fee| *fee > 1_000_000)
-                    || approval.expiry >= (1 << 48)
-                    || (fees.iter().all(|fee| *fee == 0) != (approval.expiry == 0))
-                {
-                    return Err("Invalid Lighter integrator approval fees or expiry".into());
-                }
-                append_words(
-                    &mut data,
-                    &[
-                        approval.account_index,
-                        fees[0].into(),
-                        fees[1].into(),
-                        fees[2].into(),
-                        fees[3].into(),
-                        approval.expiry,
-                    ],
-                );
-                (Vec::new(), None, 0)
-            }
         };
         let preimage = signing_preimage(&data, &attrs)?;
         let signature_bytes = schnorr_sign(&preimage, self.key.as_ref(), schnorr_nonce)?;
@@ -527,16 +390,6 @@ impl Signer {
                 account_index: self.account_index,
                 api_key_index: self.api_key_index,
                 order: &orders[0],
-                expired_at,
-                nonce,
-                sig: &encoded,
-                attributes: attrs,
-            }),
-            Transaction::Grouped { grouping_type, .. } => serde_json::to_string(&GroupedInfo {
-                account_index: self.account_index,
-                api_key_index: self.api_key_index,
-                grouping_type: *grouping_type,
-                orders: &orders,
                 expired_at,
                 nonce,
                 sig: &encoded,
@@ -567,23 +420,6 @@ impl Signer {
                 expired_at,
                 nonce,
                 sig: &encoded,
-            }),
-            Transaction::ApproveIntegrator(approval) => serde_json::to_string(&ApprovalInfo {
-                account_index: self.account_index,
-                api_key_index: self.api_key_index,
-                integrator_account_index: approval.account_index,
-                max_perps_taker_fee: approval.max_perps_taker_fee,
-                max_perps_maker_fee: approval.max_perps_maker_fee,
-                max_spot_taker_fee: approval.max_spot_taker_fee,
-                max_spot_maker_fee: approval.max_spot_maker_fee,
-                approval_expiry: approval.expiry,
-                expired_at,
-                nonce,
-                sig: &encoded,
-                l1_sig: approval
-                    .l1_signature
-                    .as_deref()
-                    .filter(|value| !value.is_empty()),
             }),
         }
         .map_err(|e| e.to_string())?;

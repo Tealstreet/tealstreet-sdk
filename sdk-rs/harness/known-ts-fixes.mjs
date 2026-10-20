@@ -56,3 +56,55 @@ export function fixBlofinAccount(account) {
     account.balance.upnl = 0;
   }
 }
+
+// TS emits the FILLED order total and the execution for one Lighter trade.
+// Build its corrected fill oracle from recorded execution IDs and quantities.
+export function fixLighterFills(account, records) {
+  const markets = new Map();
+  for (const record of records) {
+    if (record.type !== 'http' || !/\/orderBook(?:Details|s)$/.test(new URL(record.url).pathname) || record.status !== 200) continue;
+    const payload = parse(record.body);
+    for (const market of payload.order_book_details ?? payload.order_books ?? []) markets.set(String(market.market_id), market.symbol);
+  }
+  const flatten = (value) => Array.isArray(value) ? value.flatMap(flatten) : value && typeof value === 'object'
+    ? ('price' in value && ('size' in value || 'amount' in value)) ? [value] : Object.values(value).flatMap(flatten) : [];
+  const fills = new Map();
+  const seen = new Set();
+  let observed = false;
+  const accountId = records.find((record) => record.type === 'config')?.options?.applicationId;
+  for (const record of records) {
+    if (record.type !== 'ws') continue;
+    const message = parse(record.text);
+    const kind = String(message.type ?? '');
+    if (!String(message.channel ?? '').startsWith('account_all') || !/^(update|subscribed)/.test(kind)) continue;
+    const payload = message.data ?? message;
+    if (payload.fills === undefined && payload.trades === undefined) continue;
+    observed = true;
+    for (const fill of flatten(payload.fills ?? payload.trades)) {
+      const execution = fill.tradeId ?? fill.trade_id ?? fill.fillId ?? fill.fill_id;
+      const market = String(fill.market_id ?? fill.marketId ?? '');
+      const symbol = fill.symbol || markets.get(market);
+      const side = String(fill.ask_account_id ?? '') === String(accountId) ? 'sell'
+        : String(fill.bid_account_id ?? '') === String(accountId) ? 'buy' : String(fill.side ?? '').toLowerCase();
+      const id = fill.orderId ?? fill.order_id ?? (side === 'sell' ? fill.ask_id : fill.bid_id);
+      const amount = Number(fill.size ?? fill.amount), price = Number(fill.price);
+      if (execution == null || !symbol || !['buy','sell'].includes(side) || id == null || !(amount > 0) || !(price > 0)) continue;
+      const key = `${market || symbol}:${execution}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (kind.startsWith('subscribed')) continue;
+      fills.set(key, {id:String(id),symbol,side,amount,price});
+    }
+  }
+  if (observed) account.fills = [...fills.values()];
+}
+
+export function fixLighterCommands(results, records) {
+  const commands=records.filter(record=>record.type==='command');
+  for(let index=0;index<commands.length;index++) {
+    const command=commands[index];
+    // The venue is net only. A request to retain that mode needs no write;
+    // TS inherits the base unsupported method instead of acknowledging it.
+    if(command.op==='setPositionMode' && command.hedged===false && results[index]?.error==='Not implemented') results[index]={ok:null};
+  }
+}

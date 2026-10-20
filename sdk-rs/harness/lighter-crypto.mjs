@@ -35,9 +35,10 @@ const words = (...values) => Buffer.concat(values.map((value) => {
 })).toString('hex');
 const uint32 = (value) => Number(integer(value, 0xffff_ffffn));
 const orderWords = (order, now) => {
-  integer(order.MarketIndex, 254n);
+  integer(order.MarketIndex, 32767n);
+  if (order.MarketIndex === 255) throw new Error("Lighter market sentinel is not tradable");
   integer(order.ClientOrderIndex, (1n << 48n) - 1n);
-  integer(order.BaseAmount);
+  integer(order.BaseAmount, (1n << 48n) - 1n);
   uint32(order.Price); uint32(order.TriggerPrice);
   integer(order.IsAsk, 1n); integer(order.Type, 5n); integer(order.TimeInForce, 2n); integer(order.ReduceOnly, 1n);
   integer(order.OrderExpiry);
@@ -76,33 +77,27 @@ export function createLighterVerifier(options, oracle = crypto) {
   const verifyTransaction = ({type, info}, now) => {
     if (String(info.AccountIndex) !== account || info.ApiKeyIndex !== apiKey || !Number.isSafeInteger(info.ExpiredAt)
       || Math.abs(info.ExpiredAt - now - 600_000) > 60_000) return false;
-    integer(info.Nonce); integer(type, 255n);
+    integer(info.Nonce); integer(info.AccountIndex, (1n << 48n) - 2n);
+    integer(info.ExpiredAt, (1n << 48n) - 1n); integer(type, 255n);
     let preimage = words(options.testnet ? 300 : 304, type, info.Nonce, info.ExpiredAt, info.AccountIndex, info.ApiKeyIndex);
     let ids = [];
     if (type === 14) {
       preimage += orderWords(info, now);
       ids = [String(info.ClientOrderIndex)];
-    } else if (type === 28) {
-      if (!Array.isArray(info.Orders) || info.Orders.length < 2 || info.Orders.length > 3) return false;
-      integer(info.GroupingType,3n);
-      if (info.GroupingType === 0) return false;
-      const hashes = info.Orders.map((order) => result(oracle.poseidon2Hash(orderWords(order, now))));
-      const aggregate = hashes.reduce((previous,next) => previous ? result(oracle.poseidon2HashTwoToOne(previous,next)) : next, undefined);
-      preimage += words(info.GroupingType) + aggregate;
-      ids = info.Orders.map((order) => String(order.ClientOrderIndex));
     } else if (type === 15) {
-      integer(info.MarketIndex,254n);
+      integer(info.MarketIndex,32767n);
+      if (info.MarketIndex === 255) return false;
+      if (integer(info.Index, (1n << 60n) - 1n) === 0n) return false;
       preimage += words(info.MarketIndex,info.Index);
     } else if (type === 20) {
-      integer(info.MarketIndex,254n); integer(info.InitialMarginFraction,10_000n); integer(info.MarginMode,1n);
+      integer(info.MarketIndex,32767n);
+      if (info.MarketIndex === 255) return false; integer(info.InitialMarginFraction,10_000n); integer(info.MarginMode,1n);
       if (!info.InitialMarginFraction) return false;
       preimage += words(info.MarketIndex,info.InitialMarginFraction,info.MarginMode);
-    } else if (type === 45) {
-      preimage += words(info.IntegratorAccountIndex,info.MaxPerpsTakerFee,info.MaxPerpsMakerFee,info.MaxSpotTakerFee,info.MaxSpotMakerFee,info.ApprovalExpiry);
     } else return false;
     if (new Set(ids).size !== ids.length || ids.some((id) => generated.has(id))) return false;
     if (info.L2TxAttributes !== undefined) {
-      if (![14,28].includes(type)) return false;
+      if (type !== 14) return false;
       const attrs = info.L2TxAttributes;
       if (!attrs || Object.keys(attrs).sort().join(',') !== '1,2,3') return false;
       for (const value of Object.values(attrs)) integer(value);
@@ -124,16 +119,28 @@ export function createLighterVerifier(options, oracle = crypto) {
         if (token !== undefined && token !== null && !auth(token,now)) return false;
         if (/\/(accountActiveOrders|accountInactiveOrders|accountLimits|accountTxs)$/.test(parsed.pathname) && !token) return false;
         if (!/\/sendTx(?:Batch)?$/.test(parsed.pathname)) return method === 'GET';
-        return method === 'POST' && decodeLighterTransactions(body).every((tx) => verifyTransaction(tx,now));
+        const transactions = decodeLighterTransactions(body);
+        const ids = transactions.filter(({type}) => type === 14).map(({info}) => String(info.ClientOrderIndex));
+        return method === 'POST' && new Set(ids).size === ids.length
+          && transactions.every((tx) => verifyTransaction(tx,now));
       } catch { return false; }
     },
     subscribe(message, now=Date.now()) {
-      return !String(message.channel ?? '').startsWith('account_all_orders/') || auth(message.auth,now);
+      const channel = String(message.channel ?? '');
+      if (channel.startsWith('account_all_orders/')) return channel === `account_all_orders/${account}` && auth(message.auth,now);
+      if (channel.startsWith('account_all/')) return channel === `account_all/${account}`;
+      return true;
     },
     matched(record,{body}) {
       if (!/\/sendTx(?:Batch)?$/.test(new URL(record.url).pathname) || Number(JSON.parse(record.body).code) !== 200) return;
-      for (const {type,info} of decodeLighterTransactions(body)) {
-        const ids = type === 14 ? [info.ClientOrderIndex] : type === 28 ? info.Orders.map((order) => order.ClientOrderIndex) : [];
+      const transactions = decodeLighterTransactions(body);
+      const payload = JSON.parse(record.body);
+      const hashes = payload.tx_hash ?? payload.txHash;
+      const valid = transactions.length === 1 && typeof hashes === 'string' ? hashes.length > 0
+        : Array.isArray(hashes) && hashes.length === transactions.length && hashes.every((hash) => typeof hash === 'string' && hash.length > 0);
+      if (!valid) return;
+      for (const {type,info} of transactions) {
+        const ids = type === 14 ? [info.ClientOrderIndex] : [];
         for (const id of ids) {
           if (generated.has(String(id))) throw new Error('Lighter generated order index reused');
           generated.add(String(id));

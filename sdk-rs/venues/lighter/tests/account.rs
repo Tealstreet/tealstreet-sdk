@@ -147,7 +147,7 @@ fn reconnect_history_is_not_a_new_execution() {
     message(&mut e, s, now, &frame);
     let update = frame.replace("subscribed/account_all", "update/account_all");
     message(&mut e, s, now + 1.0, &update);
-    assert_eq!(fill_count(e.take_frame(now + 1.0).unwrap()), 0);
+    assert_eq!(e.take_frame(now + 1.0).map_or(0, fill_count), 0);
 }
 #[test]
 fn failed_scoped_orders_keep_every_last_known_good_order() {
@@ -323,4 +323,203 @@ fn api_key_zero_is_valid_and_255_is_the_unsupported_sentinel() {
     let (e, _) = ready_with(opts);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().free, 0.0);
+}
+#[test]
+fn sparse_position_aggregate_does_not_close_existing_exposure() {
+    let (mut e, s) = ready();
+    message(
+        &mut e,
+        s,
+        NOW + 1.0,
+        r#"{"channel":"account_all:718895","positions":{"1":{"market_id":1,"open_order_count":3}}}"#,
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].contracts, 2.0);
+}
+#[test]
+fn live_execution_during_initial_five_seconds_is_reported_once() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let now = NOW + 1.0;
+    let frame = format!(
+        r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":"99","order_id":"42","side":"buy","price":"90","size":"0.25","timestamp":{}}}]}}}}"#,
+        now as u64
+    );
+    for _ in 0..2 {
+        message(&mut e, s, now, &frame);
+    }
+    assert_eq!(fill_count(e.take_frame(now).unwrap()), 1);
+}
+#[test]
+fn native_hyphenated_types_tif_and_cancel_reasons_preserve_lifecycle() {
+    let (mut e, s) = ready();
+    for (id, kind) in [
+        ("51", "stop-loss"),
+        ("52", "stop-loss-limit"),
+        ("53", "take-profit"),
+        ("54", "take-profit-limit"),
+    ] {
+        let frame = format!(
+            r#"{{"channel":"account_all_orders:718895","orders":{{"1":[{{"order_index":"{id}","market_id":1,"type":"{kind}","time_in_force":"post-only","status":"open","initial_base_amount":"1","price":"120"}}]}}}}"#
+        );
+        message(&mut e, s, NOW + 1.0, &frame);
+        let order = e.store().orders().iter().find(|o| o.id == id).unwrap();
+        assert_eq!(
+            order.kind,
+            if kind.starts_with("stop") {
+                OrderType::StopLoss
+            } else {
+                OrderType::TakeProfit
+            }
+        );
+        assert_eq!(
+            order.time_in_force,
+            Some(safe_cex_engine::model::TimeInForce::PostOnly)
+        );
+        let cancel = frame.replace("\"status\":\"open\"", "\"status\":\"canceled-post-only\"");
+        message(&mut e, s, NOW + 2.0, &cancel);
+        assert!(!e.store().orders().iter().any(|o| o.id == id));
+        message(&mut e, s, NOW + 3.0, &frame);
+        assert!(!e.store().orders().iter().any(|o| o.id == id));
+    }
+}
+#[test]
+fn transaction_time_microseconds_prevents_late_position_and_order_regression() {
+    let (mut e, s) = ready();
+    let newer = ((NOW + 2000.0) * 1000.0) as u64;
+    let older = ((NOW + 1000.0) * 1000.0) as u64;
+    message(
+        &mut e,
+        s,
+        NOW + 2000.0,
+        &format!(
+            r#"{{"channel":"account_all:718895","transaction_time":{newer},"positions":{{"1":{{"market_id":1,"position":"0"}}}}}}"#
+        ),
+    );
+    message(
+        &mut e,
+        s,
+        NOW + 3000.0,
+        &format!(
+            r#"{{"channel":"account_all:718895","transaction_time":{older},"positions":{{"1":{{"market_id":1,"position":"3","avg_entry_price":"100"}}}}}}"#
+        ),
+    );
+    assert!(e.store().positions().is_empty());
+    let row = |time, filled| {
+        format!(
+            r#"{{"channel":"account_all_orders:718895","transaction_time":{time},"orders":{{"1":[{{"order_index":"42","market_id":1,"status":"open","initial_base_amount":"2","filled_base_amount":"{filled}","price":"90"}}]}}}}"#
+        )
+    };
+    message(&mut e, s, NOW + 4000.0, &row(newer, 1));
+    message(&mut e, s, NOW + 5000.0, &row(older, 0));
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "42")
+            .unwrap()
+            .filled,
+        1.0
+    );
+}
+#[test]
+fn active_order_stream_does_not_starve_the_serialized_rest_balance() {
+    let (mut e, s) = ready();
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    let snapshot = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/account?"))
+        .unwrap();
+    message(
+        &mut e,
+        s,
+        NOW + 2.0,
+        r#"{"channel":"account_all_orders:718895","orders":{"1":[{"order_index":"42","market_id":1,"status":"open","initial_base_amount":"2","filled_base_amount":"0.5","price":"90"}]}}"#,
+    );
+    reply_at(
+        &mut e,
+        NOW + 3.0,
+        &snapshot,
+        200,
+        &ACCOUNT.replace("\"900\"", "\"850\""),
+    );
+    assert_eq!(e.store().balance().free, 850.0);
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "42")
+            .unwrap()
+            .filled,
+        0.5
+    );
+}
+#[test]
+fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_fields() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let frame = format!(
+        r#"{{"channel":"account_all:718895","data":{{"fills":[{{"fillId":"f99","tradeId":"99","orderId":"42","symbol":"ETH","side":"BUY","price":"90","size":"0.05","timestamp":{}}}]}}}}"#,
+        NOW as u64
+    );
+    for _ in 0..2 {
+        message(&mut e, s, NOW, &frame);
+    }
+    assert_eq!(fill_count(e.take_frame(NOW).unwrap()), 1);
+}
+#[test]
+fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
+    use safe_cex_engine::Engine;
+    use safe_cex_venue_lighter::Lighter;
+    let mut e = Engine::new(Lighter::new(options()));
+    e.start(NOW);
+    let meta = requests(&mut e).pop().unwrap();
+    reply(&mut e, &meta, 200, META);
+    let lookup = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/account?"))
+        .unwrap();
+    reply(&mut e, &lookup, 200, ACCOUNT);
+    for cycle in 0..2 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let socket = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::WsConnect { socket, .. } = a {
+                    Some(*socket)
+                } else {
+                    None
+                }
+            })
+            .expect("private connection");
+        let watchdog = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, at_ms } = a {
+                    (*at_ms == NOW + cycle as f64 * 181_000.0 + 10_000.0).then_some(*timer)
+                } else {
+                    None
+                }
+            })
+            .expect("handshake watchdog");
+        let timeout = NOW + (cycle + 1) as f64 * 180_000.0 + cycle as f64 * 1000.0;
+        e.handle(timeout, Event::TimerFired { timer: watchdog });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
+        );
+        let reconnect = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, .. } = a {
+                    Some(*timer)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        e.handle(timeout + 1000.0, Event::TimerFired { timer: reconnect });
+    }
 }

@@ -262,6 +262,7 @@ export class Tape {
     this.requests.add(key);
     if (this.responses.isWrite(method, url)) this.writes.push(key);
     if (this.responses.isWrite(method, url) && this.venue.compareWriteOrder && this.expectedWrites[0] !== key) {
+      if (process.env.RUST_REQUEST_TRACE) console.error('unexpected write', key, 'expected', this.expectedWrites[0]);
       this.responses.unserved++;
       return { status: 599, body: '' };
     }

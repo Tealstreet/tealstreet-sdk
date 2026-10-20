@@ -1,5 +1,6 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
 mod account;
+mod history;
 pub mod sign;
 mod trading;
 mod wire;
@@ -39,6 +40,7 @@ impl Default for Options {
 }
 pub enum Pending {
     Account(account::Request),
+    History(history::Request),
     Trade(trading::Request),
     Markets {
         fallback: bool,
@@ -61,6 +63,7 @@ pub enum Pending {
         interval: String,
         rows: Vec<Candle>,
         failed: bool,
+        revision: u64,
     },
 }
 #[derive(Clone, Debug, Default)]
@@ -94,6 +97,7 @@ struct DepthState {
 }
 #[derive(Default)]
 struct CandleState {
+    revision: u64,
     subscribers: u32,
     last: Option<Candle>,
     last_received: f64,
@@ -267,6 +271,10 @@ impl Lighter {
         from: Option<f64>,
         to: Option<f64>,
     ) {
+        let revision = self
+            .candles
+            .get(&(symbol.clone(), interval.clone()))
+            .map_or(0, |state| state.revision);
         let result = (|| {
             let duration = interval_ms(&interval)
                 .ok_or("Lighter does not support this raw candle interval")?;
@@ -308,6 +316,7 @@ impl Lighter {
                         interval,
                         rows: vec![],
                         failed: false,
+                        revision,
                     },
                 );
             }
@@ -384,6 +393,26 @@ impl Lighter {
                 t.percentage = v;
             }
         });
+        if !is_stats {
+            let reference = stats
+                .mark_price
+                .or(stats.index_price)
+                .filter(|p| *p > 0.0)
+                .or(stats.last_trade_price.filter(|p| *p > 0.0));
+            if let Some(price) = reference {
+                cx.store.update_positions(|position| {
+                    if position.symbol == symbol && position.contracts != 0.0 {
+                        let sign = if position.side == safe_cex_engine::model::PositionSide::Long {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        position.unrealized_pnl =
+                            sign * position.contracts * (price - position.entry_price);
+                    }
+                });
+            }
+        }
     }
     fn stats_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         #[derive(serde::Deserialize)]
@@ -401,11 +430,11 @@ impl Lighter {
             self.apply_stats(cx, &stats, None, true);
             return;
         }
-        if let Ok(rows) = serde_json::from_str::<HashMap<String, Stats<'_>>>(text) {
-            for (id, stats) in rows {
-                self.apply_stats(cx, &stats, Some(&id), true);
+        let _ = wire::each_stats_map(text, |id, row| {
+            if let Ok(stats) = row {
+                self.apply_stats(cx, &stats, Some(id), true);
             }
-        }
+        });
     }
     fn apply_depth(
         &mut self,
@@ -430,6 +459,7 @@ impl Lighter {
                 || matches!((state.nonce,depth.begin_nonce),(Some(old),Some(begin))if old!=begin)
             {
                 state.waiting = true;
+                state.revision += 1;
                 state.nonce = None;
                 state.book.clear();
                 cx.book_changed(symbol);
@@ -440,23 +470,30 @@ impl Lighter {
             }
         } else {
             state.book.clear();
-            state.waiting = false;
+            state.waiting = depth.nonce.is_none();
         }
         for (side, levels) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {
             if snapshot {
-                for level in levels {
-                    let (p, n) = level.pair();
-                    if p > 0.0 && n > 0.0 {
-                        let old = match side {
-                            BookSide::Bids => state.book.bids(),
-                            BookSide::Asks => state.book.asks(),
-                        }
-                        .iter()
-                        .find(|(v, _)| *v == p)
-                        .map_or(0.0, |(_, n)| *n);
-                        state.book.apply(side, p, old + n);
+                let mut pairs: Vec<(f64, f64)> = levels
+                    .iter()
+                    .map(Level::pair)
+                    .filter(|(p, n)| *p > 0.0 && *n > 0.0)
+                    .collect();
+                pairs.sort_unstable_by(|a, b| match side {
+                    BookSide::Bids => b.0.total_cmp(&a.0),
+                    BookSide::Asks => a.0.total_cmp(&b.0),
+                });
+                let mut count = 0;
+                for i in 0..pairs.len() {
+                    if count > 0 && pairs[count - 1].0 == pairs[i].0 {
+                        pairs[count - 1].1 += pairs[i].1;
+                    } else {
+                        pairs[count] = pairs[i];
+                        count += 1;
                     }
                 }
+                pairs.truncate(count);
+                state.book.load_sorted_owned(side, pairs);
             } else {
                 for level in levels {
                     let (p, n) = level.pair();
@@ -490,6 +527,7 @@ impl Lighter {
                 return;
             }
             state.last_received = cx.now;
+            state.revision += 1;
             if state.last != Some(candle) {
                 state.last = Some(candle);
                 cx.candle(symbol, interval, candle);
@@ -500,6 +538,7 @@ impl Lighter {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets {
                 fallback: false, ..
             } => self.markets(cx, true),
@@ -548,11 +587,18 @@ impl Venue for Lighter {
         for market in cx.store.markets().to_vec() {
             self.topic(cx, "subscribe", &format!("ticker/{}", market.id));
         }
-        for (symbol, s) in &self.books {
-            if s.subscribers > 0 {
-                let id = cx.store.market(symbol).unwrap().id.clone();
-                self.topic(cx, "subscribe", &format!("order_book/{id}"));
-            }
+        let symbols: Vec<_> = self
+            .books
+            .iter()
+            .filter_map(|(symbol, state)| {
+                (state.subscribers > 0 && cx.store.market(symbol).is_some())
+                    .then_some(symbol.clone())
+            })
+            .collect();
+        for symbol in symbols {
+            let id = cx.store.market(&symbol).unwrap().id.clone();
+            self.topic(cx, "subscribe", &format!("order_book/{id}"));
+            self.depth_seed(cx, &symbol);
         }
         for ((symbol, interval), s) in &self.candles {
             if s.subscribers > 0 {
@@ -696,6 +742,7 @@ impl Venue for Lighter {
         }
         for state in self.books.values_mut() {
             state.waiting = true;
+            state.revision += 1;
             state.nonce = None;
         }
         self.public.attempts = self.public.attempts.saturating_add(1);
@@ -707,6 +754,7 @@ impl Venue for Lighter {
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
+            Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets {
                 rows,
                 metadata,
@@ -725,7 +773,13 @@ impl Venue for Lighter {
                         .supported_price_decimals
                         .filter(|n| *n >= 0.0)
                         .unwrap_or(2.0) as u32;
-                    if size > 18 || price > 18 || m.market_id < 0.0 || m.market_id.fract() != 0.0 {
+                    if size > 18
+                        || price > 18
+                        || m.market_id < 0.0
+                        || m.market_id > 32767.0
+                        || m.market_id == 255.0
+                        || m.market_id.fract() != 0.0
+                    {
                         *failed = true;
                         return;
                     }
@@ -871,6 +925,10 @@ impl Venue for Lighter {
                 self.trade_response(cx, request, response);
                 return;
             }
+            Pending::History(request) => {
+                self.history_response(cx, request, response);
+                return;
+            }
             other => other,
         };
         let status = serde_json::from_str::<Status<'_>>(response.body);
@@ -883,7 +941,7 @@ impl Venue for Lighter {
             return;
         }
         match pending {
-            Pending::Account(_) | Pending::Trade(_) => unreachable!(),
+            Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
             Pending::Markets {
                 fallback,
                 rows,
@@ -971,6 +1029,7 @@ impl Venue for Lighter {
                 interval,
                 mut rows,
                 failed,
+                revision,
             } => {
                 if failed {
                     self.public_failed(
@@ -981,6 +1040,7 @@ impl Venue for Lighter {
                             interval,
                             rows,
                             failed,
+                            revision,
                         },
                         "Invalid Lighter candles",
                     );
@@ -992,6 +1052,13 @@ impl Venue for Lighter {
                 } else {
                     if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
                         s.in_flight = false;
+                    }
+                    if self
+                        .candles
+                        .get(&(symbol.clone(), interval.clone()))
+                        .is_some_and(|state| state.revision != revision)
+                    {
+                        return;
                     }
                     if let Some(c) = rows.last() {
                         self.emit_candle(cx, &symbol, &interval, *c);
@@ -1098,25 +1165,28 @@ impl Venue for Lighter {
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
-                let Some(m) = cx.store.market(&symbol) else {
+                if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
+                    cx.log(LogLevel::Error, "Lighter order book market not found");
                     return;
-                };
-                let id = m.id.clone();
+                }
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
                     state.waiting = true;
                     state.last_received = cx.now;
-                    self.topic(cx, "subscribe", &format!("order_book/{id}"));
-                    self.depth_seed(cx, &symbol);
+                    if let Some(market) = cx.store.market(&symbol) {
+                        self.topic(cx, "subscribe", &format!("order_book/{}", market.id));
+                        self.depth_seed(cx, &symbol);
+                    }
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(s) = self.books.get_mut(&symbol) {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
-                        let id = cx.store.market(&symbol).unwrap().id.clone();
-                        self.topic(cx, "unsubscribe", &format!("order_book/{id}"));
+                        if let Some(market) = cx.store.market(&symbol) {
+                            self.topic(cx, "unsubscribe", &format!("order_book/{}", market.id));
+                        }
                         self.books.remove(&symbol);
                     }
                 }
@@ -1164,6 +1234,27 @@ impl Venue for Lighter {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
+            Command::FetchLeverage { command, symbol } => {
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Leverage {
+                    buy_leverage: f64,
+                    sell_leverage: f64,
+                }
+                let result = cx
+                    .store
+                    .setting(&symbol)
+                    .ok_or_else(|| "Lighter leverage is not loaded".to_owned())
+                    .and_then(|setting| {
+                        serde_json::to_string(&Leverage {
+                            buy_leverage: setting.leverage,
+                            sell_leverage: setting.leverage,
+                        })
+                        .map_err(|e| e.to_string())
+                    });
+                cx.done(command, result);
+            }
+            Command::Query { command, query } => self.history_query(cx, command, query),
             other => self.trade_command(cx, other),
         }
     }

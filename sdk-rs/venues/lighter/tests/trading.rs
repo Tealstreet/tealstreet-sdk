@@ -26,7 +26,8 @@ fn place(e: &mut Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
     let actions = e.drain_actions().collect::<Vec<_>>();
     let debug = format!("{actions:?}");
-    actions.into_iter()
+    actions
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains(path) => Some(r),
             _ => None,
@@ -474,4 +475,105 @@ fn approved_attribution_is_present_on_signed_order() {
         wire(&r)["L2TxAttributes"],
         json!({"1":158385,"2":250,"3":0})
     );
+}
+
+#[test]
+fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() {
+    let (mut e, socket) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 8,
+            symbol: "ETH".into(),
+            leverage: 5.0,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let write = http(&mut e, "sendTx");
+    e.handle(NOW + 1.0, Event::WsOpened { socket });
+    let held = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/account?"))
+        .unwrap();
+    ack(&mut e, &write);
+    reply_at(&mut e, NOW + 2.0, &held, 200, ACCOUNT);
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn execution_after_cancel_ack_aborts_replacement_during_notification_suppression() {
+    let (mut e, socket) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let cancel = http(&mut e, "sendTx");
+    ack(&mut e, &cancel);
+    let pace = timer(&mut e);
+    message(
+        &mut e,
+        socket,
+        NOW + 20.0,
+        &format!(
+            r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":1,"market_id":1,"price":"90","size":"0.2","timestamp":{},"bid_account_id":718895,"ask_account_id":2,"bid_id":"42"}}]}}}}"#,
+            NOW as u64 + 20
+        ),
+    );
+    e.handle(NOW + 100.0, Event::TimerFired { timer: pace });
+    assert!(failure(&mut e).contains("filled during amendment"));
+}
+
+#[test]
+fn an_omitted_flat_market_does_not_clear_uncertain_settings_barrier() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 8,
+            symbol: "BTC".into(),
+            leverage: 5.0,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let write = http(&mut e, "sendTx");
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost response",
+        },
+    );
+    let read = http(&mut e, "/account?");
+    reply(&mut e, &read, 200, ACCOUNT);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 9,
+            symbol: "BTC".into(),
+            isolated: true,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
+    assert!(failure(&mut e).contains("awaiting reconciliation"));
+}
+
+#[test]
+fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
+    let (mut e, _) = ready_unattributed();
+    let mut markets = e.store().markets().to_vec();
+    markets.iter_mut().find(|m| m.symbol == "ETH").unwrap().id = "4096".into();
+    e.store_mut().set_markets(markets);
+    let request = begin(&mut e, vec![limit()]);
+    assert_eq!(wire(&request)["MarketIndex"], 4096);
 }

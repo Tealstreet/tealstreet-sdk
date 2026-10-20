@@ -1,6 +1,6 @@
 //! This corpus was captured from the TS adapter and real Go-WASM before this port.
 use safe_cex_crypto::lighter::SchnorrNonce;
-use safe_cex_venue_lighter::sign::{Approval, Builder, Order, Signer, Transaction};
+use safe_cex_venue_lighter::sign::{Builder, Order, Signer, Transaction};
 use serde_json::Value;
 
 const CORPUS: &str =
@@ -70,16 +70,6 @@ fn transaction(method: &str, value: &Value) -> Transaction {
             order: order(value),
             builder: builder(value),
         },
-        "getCreateGroupedOrdersTransaction" => Transaction::Grouped {
-            grouping_type: integer(&value["groupingType"]) as u8,
-            orders: value["orders"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(order)
-                .collect(),
-            builder: builder(value),
-        },
         "getCancelOrderTransaction" => Transaction::Cancel {
             market_id: integer(&value["marketId"]) as u32,
             order_id: integer(&value["orderId"]),
@@ -89,15 +79,6 @@ fn transaction(method: &str, value: &Value) -> Transaction {
             leverage: value["leverage"].as_f64().unwrap(),
             margin_mode: integer(&value["marginMode"]) as u8,
         },
-        "getApproveIntegratorTransaction" => Transaction::ApproveIntegrator(Approval {
-            account_index: integer(&value["integratorAccountIndex"]),
-            max_perps_taker_fee: integer(&value["maxPerpsTakerFee"]) as u32,
-            max_perps_maker_fee: integer(&value["maxPerpsMakerFee"]) as u32,
-            max_spot_taker_fee: integer(&value["maxSpotTakerFee"]) as u32,
-            max_spot_maker_fee: integer(&value["maxSpotMakerFee"]) as u32,
-            expiry: integer(&value["approvalExpiry"]),
-            l1_signature: value["l1Signature"].as_str().map(str::to_owned),
-        }),
         other => panic!("uncaptured transaction method {other}"),
     }
 }
@@ -137,6 +118,9 @@ fn independently_captured_ts_transactions_match_preimages_signatures_and_wire() 
     let mut batches = 0;
     for case in corpus["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
+        if name.contains("create-grouped-") || name.contains("/approve-") {
+            continue;
+        }
         let config = &case["outer"]["adapterConfig"];
         let chain_id = if name.starts_with("lighter-robinhood/livenet/") {
             466_324
@@ -237,7 +221,7 @@ fn independently_captured_ts_transactions_match_preimages_signatures_and_wire() 
             );
         }
     }
-    assert_eq!((transactions, authentications, batches), (88, 4, 4));
+    assert_eq!((transactions, authentications, batches), (64, 4, 4));
 }
 
 fn simple_order() -> Order {
@@ -288,7 +272,7 @@ fn malformed_signer_inputs_and_transaction_bounds_fail_closed() {
                 .is_err()
         );
     }
-    for (market_id, order_id) in [(255, 1), (0, u64::MAX)] {
+    for (market_id, order_id) in [(255, 1), (0, 0), (0, u64::MAX)] {
         assert!(
             signer
                 .sign_with_nonce(
@@ -311,65 +295,6 @@ fn malformed_signer_inputs_and_transaction_bounds_fail_closed() {
                         market_id: 0,
                         leverage,
                         margin_mode: 0
-                    },
-                    7,
-                    1_700_000_000_000,
-                    fixed_nonce()
-                )
-                .is_err()
-        );
-    }
-}
-
-#[test]
-fn malformed_groups_reject_before_any_transaction_can_be_submitted() {
-    let signer = signer();
-    let parent = simple_order();
-    let mut stop = simple_order();
-    stop.order_id = 2;
-    stop.is_buy = false;
-    stop.order_type = 2;
-    stop.amount = 0;
-    let valid = vec![parent.clone(), stop.clone()];
-    assert!(
-        signer
-            .sign_with_nonce(
-                &Transaction::Grouped {
-                    grouping_type: 1,
-                    orders: valid.clone(),
-                    builder: None
-                },
-                7,
-                1_700_000_000_000,
-                fixed_nonce()
-            )
-            .is_ok()
-    );
-    let mut wrong_side = stop.clone();
-    wrong_side.is_buy = true;
-    let mut wrong_market = stop.clone();
-    wrong_market.market_id = 2;
-    let mut duplicate = stop.clone();
-    duplicate.order_id = parent.order_id;
-    let mut wrong_amount = stop;
-    wrong_amount.amount = 10;
-    for (grouping_type, orders) in [
-        (0, valid.clone()),
-        (3, valid),
-        (1, vec![]),
-        (1, vec![parent.clone()]),
-        (1, vec![parent.clone(), wrong_side]),
-        (1, vec![parent.clone(), wrong_market]),
-        (1, vec![parent.clone(), duplicate]),
-        (1, vec![parent, wrong_amount]),
-    ] {
-        assert!(
-            signer
-                .sign_with_nonce(
-                    &Transaction::Grouped {
-                        grouping_type,
-                        orders,
-                        builder: None
                     },
                     7,
                     1_700_000_000_000,
@@ -407,4 +332,204 @@ fn live_signing_draws_fresh_nonce_and_signatures_verify() {
                 .unwrap()
         );
     }
+}
+
+#[test]
+fn current_int16_markets_match_original_sdk_and_independent_wasm_signatures() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/high-market-signing.json")).unwrap();
+    let decode = |text: &str| {
+        text.as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let public_key = decode(fixture["publicKey"].as_str().unwrap());
+    let signer = signer();
+    let mut count = 0;
+    for case in fixture["cases"].as_array().unwrap() {
+        let market_id = case["marketId"].as_u64().unwrap() as u32;
+        let tx = match case["name"].as_str().unwrap() {
+            "create" => {
+                let mut order = simple_order();
+                order.market_id = market_id;
+                order.order_id = 123;
+                order.price = 10_000;
+                order.amount = 250;
+                Transaction::Create {
+                    order,
+                    builder: None,
+                }
+            }
+            "cancel" => Transaction::Cancel {
+                market_id,
+                order_id: 123,
+            },
+            "leverage" => Transaction::Leverage {
+                market_id,
+                leverage: 5.0,
+                margin_mode: 0,
+            },
+            other => panic!("uncaptured transaction {other}"),
+        };
+        let signed = signer
+            .sign_with_nonce(&tx, 7, fixture["now"].as_u64().unwrap(), fixed_nonce())
+            .unwrap();
+        assert_eq!(
+            safe_cex_crypto::hex(&signed.data),
+            case["payload"].as_str().unwrap()
+        );
+        assert!(
+            safe_cex_crypto::lighter::schnorr_verify(
+                &signed.data,
+                &public_key,
+                &decode(case["signature"].as_str().unwrap())
+            )
+            .unwrap()
+        );
+        count += 1;
+    }
+    assert_eq!(count, 6);
+    for market_id in [255, 32768, u32::MAX] {
+        let mut order = simple_order();
+        order.market_id = market_id;
+        for tx in [
+            Transaction::Create {
+                order,
+                builder: None,
+            },
+            Transaction::Cancel {
+                market_id,
+                order_id: 123,
+            },
+            Transaction::Leverage {
+                market_id,
+                leverage: 5.0,
+                margin_mode: 0,
+            },
+        ] {
+            assert!(
+                signer
+                    .sign_with_nonce(&tx, 7, 1_700_000_000_000, fixed_nonce())
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn official_account_order_amount_and_timestamp_bounds_are_enforced() {
+    const MAX_ACCOUNT: u64 = (1 << 48) - 2;
+    const MAX_VALUE: u64 = (1 << 48) - 1;
+    const MAX_INDEX: u64 = (1 << 60) - 1;
+    let key = format!("01{}", "00".repeat(39));
+    assert!(Signer::new(&key, 304, MAX_ACCOUNT, 254).is_ok());
+    assert!(Signer::new(&key, 304, MAX_ACCOUNT + 1, 254).is_err());
+    let signer = signer();
+    let mut valid = simple_order();
+    valid.order_id = MAX_VALUE;
+    valid.amount = MAX_VALUE;
+    valid.order_expiry = Some((1 << 53) - 1);
+    assert!(
+        signer
+            .sign_with_nonce(
+                &Transaction::Create {
+                    order: valid.clone(),
+                    builder: None
+                },
+                7,
+                1_700_000_000_000,
+                fixed_nonce()
+            )
+            .is_ok()
+    );
+    for invalid in [
+        {
+            let mut o = valid.clone();
+            o.order_id = MAX_VALUE + 1;
+            o
+        },
+        {
+            let mut o = valid.clone();
+            o.amount = MAX_VALUE + 1;
+            o
+        },
+        {
+            let mut o = valid.clone();
+            o.order_expiry = Some(1 << 53);
+            o
+        },
+    ] {
+        assert!(
+            signer
+                .sign_with_nonce(
+                    &Transaction::Create {
+                        order: invalid,
+                        builder: None
+                    },
+                    7,
+                    1_700_000_000_000,
+                    fixed_nonce()
+                )
+                .is_err()
+        );
+    }
+    assert!(
+        signer
+            .sign_with_nonce(
+                &Transaction::Cancel {
+                    market_id: 1,
+                    order_id: MAX_INDEX
+                },
+                7,
+                MAX_VALUE - 600_000,
+                fixed_nonce()
+            )
+            .is_ok()
+    );
+    assert!(
+        signer
+            .sign_with_nonce(
+                &Transaction::Cancel {
+                    market_id: 1,
+                    order_id: MAX_INDEX + 1
+                },
+                7,
+                1_700_000_000_000,
+                fixed_nonce()
+            )
+            .is_err()
+    );
+    assert!(
+        signer
+            .sign_with_nonce(
+                &Transaction::Cancel {
+                    market_id: 1,
+                    order_id: 1
+                },
+                7,
+                MAX_VALUE - 600_000 + 1,
+                fixed_nonce()
+            )
+            .is_err()
+    );
+    assert!(
+        signer
+            .sign_with_nonce(
+                &Transaction::Create {
+                    order: simple_order(),
+                    builder: Some(Builder {
+                        account_index: MAX_ACCOUNT + 1,
+                        maker_fee: 0,
+                        taker_fee: 250
+                    })
+                },
+                7,
+                1_700_000_000_000,
+                fixed_nonce()
+            )
+            .is_err()
+    );
 }

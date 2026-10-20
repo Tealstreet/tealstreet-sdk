@@ -9,7 +9,7 @@ import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
 const exchanges: RustEngineExchange[] = [];
-const setup = (options: ExchangeOptions = {}) => {
+const setup = (options: Partial<ExchangeOptions> = {}) => {
   const commands: Array<Record<string, unknown>> = [];
   const noop = () => '[]';
   const engine: WasmEngineLike = {
@@ -22,17 +22,32 @@ const setup = (options: ExchangeOptions = {}) => {
     },
     takeFrame: () => undefined,
     snapshotFrame: () => new Uint8Array(),
-    wsOpen: noop, wsMessage: noop, wsClose: noop,
-    httpStart: noop, httpChunk: noop, httpEnd: noop, httpFailed: noop, timer: noop,
+    wsOpen: noop,
+    wsMessage: noop,
+    wsClose: noop,
+    httpStart: noop,
+    httpChunk: noop,
+    httpEnd: noop,
+    httpFailed: noop,
+    timer: noop,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
+  const construct = vi.fn(function (_venue: string, _options: string) {
+    return engine;
+  });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const exchange = new RustEngineExchange('lighter', options, new DefaultStore());
+  const store = new DefaultStore();
+  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const exchange = new RustEngineExchange('lighter', { key: '', secret: '', ...options }, store);
   exchanges.push(exchange);
   return { exchange, construct, commands };
 };
 const order = (extra: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
-  symbol: 'ETH', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100, ...extra,
+  symbol: 'ETH',
+  side: OrderSide.Buy,
+  type: OrderType.Limit,
+  amount: 1,
+  price: 100,
+  ...extra,
 });
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
@@ -41,31 +56,53 @@ describe('Rust Lighter wrapper contract', () => {
     expect(isRustVenue('lighter')).toBe(true);
     expect(isRustVenue('lighter-robinhood')).toBe(false);
   });
-  it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])('starts public without a complete signer tuple %j', async (options) => {
-    const { exchange, construct } = setup(options);
-    expect(exchange.isPublicDataOnly).toBe(true);
-    await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
-  });
+  it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])(
+    'starts public without a complete signer tuple %j',
+    async (options) => {
+      const { exchange, construct } = setup(options);
+      expect(exchange.isPublicDataOnly).toBe(true);
+      await exchange.start();
+      expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
+    },
+  );
   it('forwards the distinct account and API key indices and fee/slippage options', async () => {
     const { exchange, construct } = setup({
-      secret: 'private', applicationId: '718895', apiKeyIndex: '0',
+      secret: 'private',
+      applicationId: '718895',
+      apiKeyIndex: '0',
       extra: { lighterIntegratorAccountIndex: '158385', lighterStopSlippagePct: 2.5 },
     });
     expect(exchange.isPublicDataOnly).toBe(false);
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('lighter');
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
-      applicationId: '718895', apiKeyIndex: '0', secret: 'private',
-      publicDataOnly: false, lighterIntegratorAccountIndex: 158385, lighterStopSlippagePct: 2.5,
+      applicationId: '718895',
+      apiKeyIndex: '0',
+      secret: 'private',
+      publicDataOnly: false,
+      lighterIntegratorAccountIndex: '158385',
+      lighterStopSlippagePct: 2.5,
     });
   });
-  it.each([OrderType.Limit, OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit, OrderType.Conditional])('rejects caller IDs on %s before any host command', async (type) => {
-    const { exchange, commands } = setup();
+  it('preserves exact integrator indices above the JS safe integer range', async () => {
+    const { exchange, construct } = setup({
+      secret: 'private',
+      applicationId: '718895',
+      apiKeyIndex: '1',
+      extra: { lighterIntegratorAccountIndex: '9007199254740993' },
+    });
     await exchange.start();
-    await expect(exchange.placeOrder(order({ type, clientOrderId: 'caller' }))).rejects.toThrow();
-    expect(commands).toEqual([]);
+    expect(JSON.parse(construct.mock.calls[0][1]).lighterIntegratorAccountIndex).toBe('9007199254740993');
   });
+  it.each([OrderType.Limit, OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit, OrderType.Conditional])(
+    'rejects caller IDs on %s before any host command',
+    async (type) => {
+      const { exchange, commands } = setup();
+      await exchange.start();
+      await expect(exchange.placeOrder(order({ type, clientOrderId: 'caller' }))).rejects.toThrow();
+      expect(commands).toEqual([]);
+    },
+  );
   it('rejects the whole batch and never mints an apparently supported caller ID', async () => {
     const { exchange, commands } = setup();
     await exchange.start();

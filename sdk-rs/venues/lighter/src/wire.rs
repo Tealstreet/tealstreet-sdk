@@ -150,12 +150,14 @@ pub enum BestPrice {
         price: f64,
     },
     Tuple(Vec<Numeric>),
+    Text(String),
 }
 impl BestPrice {
     pub fn price(&self) -> Option<f64> {
         match self {
             Self::Number(p) | Self::Object { price: p } => Some(*p),
             Self::Tuple(v) => v.first().map(|n| n.0),
+            Self::Text(s) => s.parse::<f64>().ok().filter(|n| n.is_finite()),
         }
     }
 }
@@ -315,4 +317,28 @@ pub struct TradeMessage {
     pub trades: Vec<TradeRow>,
     #[serde(default)]
     pub trade: Option<TradeRow>,
+}
+
+// A malformed market must not discard the other rows in an all-market frame.
+pub fn each_stats_map<'de>(
+    text: &'de str,
+    mut each: impl FnMut(&str, serde_json::Result<Stats<'de>>),
+) -> serde_json::Result<()> {
+    struct Rows<'f, F>(&'f mut F);
+    impl<'de, F: FnMut(&str, serde_json::Result<Stats<'de>>)> serde::de::Visitor<'de> for Rows<'_, F> {
+        type Value = ();
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("market statistics keyed by market ID")
+        }
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<(), M::Error> {
+            while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                let raw = map.next_value::<&'de serde_json::value::RawValue>()?;
+                (self.0)(&key, serde_json::from_str(raw.get()));
+            }
+            Ok(())
+        }
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    serde::Deserializer::deserialize_map(&mut deserializer, Rows(&mut each))?;
+    deserializer.end()
 }

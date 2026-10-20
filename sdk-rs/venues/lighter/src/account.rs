@@ -37,7 +37,6 @@ struct Connection {
     socket: Option<SocketId>,
     open: bool,
     last_received: f64,
-    connected_at: f64,
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
     attempts: u32,
@@ -52,13 +51,14 @@ pub struct Account {
     pub account_index: Option<u64>,
     pub api_key_index: Option<u8>,
     pub signer: Option<sign::Signer>,
-    pub settings_epoch: u64,
     setting_epochs: HashMap<String, u64>,
     pub records: HashMap<String, Order>,
     connection: Connection,
     started: bool,
     revision: u64,
     position_revision: HashMap<String, u64>,
+    position_source: HashMap<String, (f64, bool)>,
+    order_source: HashMap<String, f64>,
     order_revision: HashMap<String, u64>,
     settings_revision: HashMap<String, u64>,
     suppressed: HashSet<String>,
@@ -74,6 +74,7 @@ pub struct Account {
 pub struct Snapshot {
     positions: Vec<Position>,
     settings: Vec<(String, f64, MarginType)>,
+    known_settings: HashSet<String>,
     equity: f64,
     free: f64,
 }
@@ -159,7 +160,7 @@ struct PositionWire<'a> {
     #[serde(default, borrow)]
     symbol: Cow<'a, str>,
     #[serde(default, alias = "position", alias = "qty")]
-    size: Num,
+    size: Option<Num>,
     #[serde(default)]
     sign: Num,
     #[serde(default, borrow)]
@@ -192,6 +193,10 @@ struct PositionWire<'a> {
     allocated_margin: Option<Num>,
     #[serde(default, alias = "maintenanceMarginFraction")]
     maintenance_margin_fraction: Option<Num>,
+    #[serde(default, alias = "updatedAt", alias = "timestamp")]
+    updated_at: Option<Num>,
+    #[serde(default)]
+    transaction_time: Option<Num>,
 }
 #[derive(Default, Deserialize)]
 pub(crate) struct OrderWire<'a> {
@@ -231,7 +236,7 @@ pub(crate) struct OrderWire<'a> {
     status: Cow<'a, str>,
     #[serde(default, borrow)]
     side: Cow<'a, str>,
-    #[serde(default)]
+    #[serde(default, alias = "isAsk")]
     is_ask: Option<Bool>,
     #[serde(default, alias = "isBuy")]
     is_buy: Option<Bool>,
@@ -283,18 +288,20 @@ pub(crate) struct OrderWire<'a> {
     quote_amount: Option<Num>,
     #[serde(default, alias = "updatedAt", alias = "timestamp")]
     updated_at: Option<Num>,
+    #[serde(default)]
+    transaction_time: Option<Num>,
 }
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Bool {
-    Bool(bool),
+    Flag(bool),
     Number(i64),
     Text(String),
 }
 impl Bool {
     fn get(&self) -> bool {
         match self {
-            Self::Bool(b) => *b,
+            Self::Flag(b) => *b,
             Self::Number(n) => *n != 0,
             Self::Text(s) => s == "true" || s == "1",
         }
@@ -302,14 +309,12 @@ impl Bool {
 }
 #[derive(Default, Deserialize)]
 struct TradeWire<'a> {
-    #[serde(
-        default,
-        borrow,
-        alias = "tradeId",
-        alias = "fillId",
-        alias = "fill_id"
-    )]
+    #[serde(default, borrow, alias = "tradeId")]
     trade_id: Atom<'a>,
+    #[serde(default, borrow, alias = "fillId")]
+    fill_id: Atom<'a>,
+    #[serde(default, borrow)]
+    trade_id_str: Atom<'a>,
     #[serde(default, borrow, alias = "orderId")]
     order_id: Atom<'a>,
     #[serde(default, borrow)]
@@ -358,8 +363,22 @@ struct Frame<'a> {
     kind: Cow<'a, str>,
     #[serde(default, borrow)]
     data: Option<&'a RawValue>,
-    #[serde(flatten, borrow)]
-    payload: Payload<'a>,
+    #[serde(default)]
+    timestamp: Option<Num>,
+    #[serde(default)]
+    transaction_time: Option<Num>,
+    #[serde(default, borrow)]
+    orders: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    positions: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    trades: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    fills: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    account: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    balances: Option<&'a RawValue>,
 }
 fn each_row<'a, T: Deserialize<'a>>(
     raw: &'a RawValue,
@@ -411,6 +430,22 @@ fn millis(time: f64) -> f64 {
     } else {
         time
     }
+}
+
+fn normalized(text: &str) -> String {
+    text.to_ascii_uppercase().replace(['-', ' '], "_")
+}
+fn event_time(updated: Option<&Num>, transaction: Option<&Num>) -> Option<f64> {
+    transaction
+        .filter(|n| n.0 > 0.0)
+        .map(|n| {
+            if n.0 >= 100_000_000_000_000.0 {
+                n.0 / 1000.0
+            } else {
+                millis(n.0)
+            }
+        })
+        .or_else(|| updated.filter(|n| n.0 > 0.0).map(|n| millis(n.0)))
 }
 
 impl Lighter {
@@ -539,7 +574,7 @@ impl Lighter {
         ) {
             Ok(signer) => {
                 self.account.signer = Some(signer);
-                self.account.connection.socket = Some(cx.connect(self.ws_url()));
+                self.connect_private(cx);
                 self.refresh_account(cx);
                 self.refresh_orders(cx);
                 self.account.sync = Some(cx.set_timer(2_000.0));
@@ -630,6 +665,7 @@ impl Lighter {
             .order_revision
             .insert(id.into(), self.account.revision);
         self.account.suppressed.insert(id.into());
+        self.account.records.remove(id);
     }
     pub(crate) fn record_placement(&mut self, order: Order) {
         self.account.revision += 1;
@@ -656,12 +692,23 @@ impl Lighter {
             self.account.heal = Some(cx.set_timer(500.0));
         }
     }
+    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.connection.open = false;
+        self.account.connection.last_received = cx.now;
+        self.account.connection.socket = Some(cx.connect(self.ws_url()));
+        if let Some(timer) = self.account.connection.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
+    }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
         self.account.connection.open = true;
-        self.account.connection.connected_at = cx.now;
+        if let Some(timer) = self.account.connection.watchdog.take() {
+            cx.clear_timer(timer);
+        }
         self.account.connection.last_received = cx.now;
         self.account.connection.attempts = 0;
         let account = self.account.account_index.unwrap();
@@ -705,7 +752,7 @@ impl Lighter {
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.account.connection.reconnect == Some(timer) {
             self.account.connection.reconnect = None;
-            self.account.connection.socket = Some(cx.connect(self.ws_url()));
+            self.connect_private(cx);
             return true;
         }
         if self.account.connection.watchdog == Some(timer) {
@@ -715,10 +762,12 @@ impl Lighter {
                     cx.close(socket);
                     self.account_close(cx, socket, 1006);
                 } else {
-                    cx.send(
-                        socket,
-                        format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
-                    );
+                    if self.account.connection.open {
+                        cx.send(
+                            socket,
+                            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+                        );
+                    }
                     self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
                 }
             }
@@ -779,14 +828,26 @@ impl Lighter {
             })
             .unwrap_or(market.limits.leverage.max)
             .clamp(market.limits.leverage.min, market.limits.leverage.max);
-        let contracts = wire.size.0.abs();
+        let Some(size) = wire.size else {
+            return Some((
+                cx.store
+                    .positions()
+                    .iter()
+                    .find(|p| p.symbol == symbol)
+                    .cloned(),
+                symbol.into(),
+                leverage,
+                margin_type,
+            ));
+        };
+        let contracts = size.0.abs();
         if contracts == 0.0 {
             return Some((None, symbol.into(), leverage, margin_type));
         }
         let side = if wire.side.eq_ignore_ascii_case("short")
             || wire.side.eq_ignore_ascii_case("sell")
             || wire.sign.0 < 0.0
-            || wire.size.0 < 0.0
+            || size.0 < 0.0
         {
             PositionSide::Short
         } else {
@@ -875,8 +936,17 @@ impl Lighter {
         };
         if let Some(raw) = wire.positions {
             each_row(raw, |row: PositionWire<'_>, hint| {
+                let known = margin(row.margin_mode.as_ref()).is_some()
+                    && (row.leverage.as_ref().is_some_and(|n| n.0 > 0.0)
+                        || row
+                            .initial_margin_fraction
+                            .as_ref()
+                            .is_some_and(|n| n.0 > 0.0));
                 if let Some((position, symbol, leverage, margin)) = self.position_row(cx, row, hint)
                 {
+                    if known {
+                        snapshot.known_settings.insert(symbol.clone());
+                    }
                     snapshot.settings.push((symbol, leverage, margin));
                     if let Some(position) = position {
                         snapshot.positions.push(position);
@@ -931,9 +1001,11 @@ impl Lighter {
             .iter()
             .find(|o| o.id == id)
             .or_else(|| self.account.records.get(&id));
-        let mut kind = match wire.kind.0.to_ascii_uppercase().as_str() {
+        let mut kind = match normalized(&wire.kind.0).as_str() {
             "1" | "MARKET" => OrderType::Market,
-            "2" | "3" | "STOP_LOSS" | "STOP_MARKET" | "STOP_LIMIT" => OrderType::StopLoss,
+            "2" | "3" | "STOP_LOSS" | "STOP_MARKET" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" => {
+                OrderType::StopLoss
+            }
             "4" | "5" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TAKE_PROFIT_LIMIT" => {
                 OrderType::TakeProfit
             }
@@ -948,11 +1020,13 @@ impl Lighter {
         let tif = if wire.post_only.as_ref().is_some_and(Bool::get) {
             Some(TimeInForce::PostOnly)
         } else {
-            match wire.time_in_force.0.to_ascii_uppercase().as_str() {
-                "0" | "IOC" => Some(TimeInForce::ImmediateOrCancel),
+            match normalized(&wire.time_in_force.0).as_str() {
+                "0" | "IOC" | "IMMEDIATE_OR_CANCEL" => Some(TimeInForce::ImmediateOrCancel),
                 "2" | "POST_ONLY" => Some(TimeInForce::PostOnly),
                 "FOK" => Some(TimeInForce::FillOrKill),
-                "1" | "GTC" => Some(TimeInForce::GoodTillCancel),
+                "1" | "GTC" | "GTT" | "GOOD_TILL_TIME" | "GOOD_TILL_CANCEL" => {
+                    Some(TimeInForce::GoodTillCancel)
+                }
                 _ => existing
                     .and_then(|o| o.time_in_force)
                     .or(Some(TimeInForce::GoodTillCancel)),
@@ -1011,10 +1085,23 @@ impl Lighter {
         if price <= 0.0 {
             price = existing.map_or(0.0, |o| o.price);
         }
-        let status = match wire.status.to_ascii_uppercase().as_str() {
+        let native_status = normalized(&wire.status);
+        let status = match native_status.as_str() {
             "FILLED" | "EXPIRED" => OrderStatus::Closed,
             "CANCELLED" | "CANCELED" | "REJECTED" => OrderStatus::Canceled,
+            s if s.starts_with("CANCELED_") || s.starts_with("CANCELLED_") => OrderStatus::Canceled,
             _ => OrderStatus::Open,
+        };
+        let reject_reason = if native_status.contains("POST_ONLY") {
+            Some(RejectReason::PostOnly)
+        } else if native_status.contains("REDUCE_ONLY") {
+            Some(RejectReason::ReduceOnly)
+        } else if native_status.contains("NOT_ENOUGH_BALANCE")
+            || native_status.contains("INSUFFICIENT_BALANCE")
+        {
+            Some(RejectReason::InsufficientBalance)
+        } else {
+            None
         };
         if status == OrderStatus::Open && remaining <= 0.0 && amount > 0.0 {
             remaining = amount;
@@ -1073,13 +1160,15 @@ impl Lighter {
             close: None,
             client_order_id: None,
             time_in_force: tif,
-            last_update: wire.updated_at.map_or(cx.now, |n| millis(n.0)),
+            last_update: event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
+                .unwrap_or(cx.now),
             trigger_type: None,
             take_profit: None,
             stop_loss: None,
             extra: Some(OrderExtra {
                 remaining_native: Some(remaining),
                 remaining_notional: Some(remaining_notional),
+                reject_reason,
                 ..OrderExtra::default()
             }),
         }))
@@ -1179,7 +1268,7 @@ impl Lighter {
                 continue;
             }
             let provided = settings.remove(&m.symbol);
-            if provided.is_some() {
+            if provided.is_some() && snapshot.known_settings.contains(&m.symbol) {
                 let epoch = self
                     .account
                     .setting_epochs
@@ -1199,15 +1288,7 @@ impl Lighter {
                 s.margin_type = Some(margin);
             });
         }
-        if self
-            .account
-            .settings_revision
-            .values()
-            .all(|r| *r <= revision)
         {
-            self.account.settings_epoch = self.account.settings_epoch.wrapping_add(1);
-        }
-        if self.account.revision == revision {
             let upnl = cx
                 .store
                 .positions()
@@ -1228,7 +1309,8 @@ impl Lighter {
                 used: (snapshot.equity - snapshot.free).max(0.0),
                 free: snapshot.free,
             });
-        } else {
+        }
+        if self.account.revision != revision {
             self.schedule_heal(cx);
         }
     }
@@ -1252,6 +1334,10 @@ impl Lighter {
                 })
                 .cloned(),
         );
+        let active = merged.iter().map(|o| o.id.as_str()).collect::<HashSet<_>>();
+        self.account
+            .records
+            .retain(|id, _| active.contains(id.as_str()));
         cx.store.set_orders(merged);
     }
     pub(crate) fn account_response(
@@ -1467,7 +1553,15 @@ impl Lighter {
         let nested = frame
             .data
             .and_then(|data| serde_json::from_str::<Payload<'_>>(data.get()).ok());
-        let payload = nested.as_ref().unwrap_or(&frame.payload);
+        let direct = Payload {
+            orders: frame.orders,
+            positions: frame.positions,
+            trades: frame.trades,
+            fills: frame.fills,
+            account: frame.account,
+            balances: frame.balances,
+        };
+        let payload = nested.as_ref().unwrap_or(&direct);
         let meaningful = payload.orders.is_some()
             || payload.positions.is_some()
             || payload.fills.is_some()
@@ -1481,6 +1575,22 @@ impl Lighter {
         if let Some(raw) = payload.orders {
             let result = each_row(raw, |row: &RawValue, hint| {
                 if let Ok(Some(mut order)) = self.account_map_order(cx, row, hint) {
+                    if let Some(time) =
+                        event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref())
+                    {
+                        order.last_update = time;
+                    }
+                    if self
+                        .account
+                        .order_source
+                        .get(&order.id)
+                        .is_some_and(|t| *t > order.last_update)
+                    {
+                        return;
+                    }
+                    self.account
+                        .order_source
+                        .insert(order.id.clone(), order.last_update);
                     self.trade_order_observed(&order.id, order.filled, order.status);
                     if self.account.suppressed.contains(&order.id) {
                         return;
@@ -1498,6 +1608,7 @@ impl Lighter {
                         .insert(order.id.clone(), self.account.revision);
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
                         self.account.suppressed.insert(order.id.clone());
+                        self.account.records.remove(&order.id);
                         if order.status == OrderStatus::Canceled {
                             cx.store.remove_orders(&[&order.id]);
                         } else {
@@ -1514,9 +1625,28 @@ impl Lighter {
         }
         if let Some(raw) = payload.positions {
             let result = each_row(raw, |wire: PositionWire<'_>, hint| {
+                let time = event_time(wire.updated_at.as_ref(), wire.transaction_time.as_ref())
+                    .or_else(|| {
+                        event_time(frame.timestamp.as_ref(), frame.transaction_time.as_ref())
+                    })
+                    .unwrap_or(cx.now);
+                let explicit_zero = wire.size.as_ref().is_some_and(|n| n.0 == 0.0);
                 if let Some((position, symbol, leverage, margin)) =
                     self.position_row(cx, wire, hint)
                 {
+                    if self
+                        .account
+                        .position_source
+                        .get(&symbol)
+                        .is_some_and(|(old, closed)| {
+                            *old > time || (*old == time && *closed && position.is_some())
+                        })
+                    {
+                        return;
+                    }
+                    self.account
+                        .position_source
+                        .insert(symbol.clone(), (time, explicit_zero));
                     self.account
                         .position_revision
                         .insert(symbol.clone(), self.account.revision);
@@ -1544,7 +1674,14 @@ impl Lighter {
         }
         for raw in [payload.fills, payload.trades].into_iter().flatten() {
             let result = each_row(raw, |trade: TradeWire<'_>, hint| {
-                if trade.trade_id.0.is_empty() {
+                let execution_id = if !trade.trade_id_str.0.is_empty() {
+                    trade.trade_id_str.0.as_ref()
+                } else if !trade.trade_id.0.is_empty() {
+                    trade.trade_id.0.as_ref()
+                } else {
+                    trade.fill_id.0.as_ref()
+                };
+                if execution_id.is_empty() {
                     return;
                 }
                 let market = if trade.market_id.0.is_empty() {
@@ -1599,7 +1736,7 @@ impl Lighter {
                 }
                 let symbol = symbol.to_owned();
                 let market = cx.store.market(&symbol).map_or(market, |m| m.id.as_str());
-                let id = format!("{market}:{}", trade.trade_id.0);
+                let id = format!("{market}:{execution_id}");
                 if !self.account.seen_fills.insert(id.clone()) {
                     return;
                 }
@@ -1613,15 +1750,12 @@ impl Lighter {
                     return;
                 }
                 self.trade_execution_observed(order, timestamp);
-                if cx.now - timestamp > 5000.0
-                    || timestamp > cx.now + 1000.0
-                    || cx.now - self.account.connection.connected_at <= 5000.0
-                {
+                if cx.now - timestamp > 5000.0 || timestamp > cx.now + 1000.0 {
                     return;
                 }
                 cx.fill(Fill {
                     order_id: order.into(),
-                    symbol: symbol.into(),
+                    symbol,
                     side,
                     price: trade.price.0,
                     amount: trade.size.0,
