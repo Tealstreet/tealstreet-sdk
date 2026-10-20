@@ -214,3 +214,27 @@ Rebuilt combined release WASM after the repair: all 22 real-WASM boundary tests
 PASS, including the six formerly failing array cases. No account transaction
 or callback is sent by the rejection regressions. Preserve this stable repair
 before integrating the newer server-adapter landing `c10f7e190a`.
+
+## Reviewed acceptance after server-adapter integration
+
+Runtime `23a4e411c6`, including landing `c10f7e190a` and tier repair
+`0b2786b51e`. Both adversarial repair reviews PASS; findings and resolutions are
+posted on PR #1336. Latest native suite 102/102, real-WASM boundary 22/22,
+full shared harness 558/558, package typecheck/lint, bans/fmt, crate Clippy and
+combined-host WASM Clippy/build PASS. No runtime changes came from the
+server-adapter integration; its factory resolves the exact registered alias.
+
+Three-run public acceptance, identical output:
+
+| Venue | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB | Rust linear MB |
+| --- | --- | --- | --- | --- |
+| lighter | 340.4 / 228.0 | 222.5 / 126.3 | 17.3 / 3.7 | 1.6 |
+| lighter-robinhood | 275.1 / 104.4 | 193.7 / 49.6 | 19.8 / 5.8 | 2.8 |
+| binance | 182.7 / 129.6 | 93.1 / 58.7 | 17.3 / 4.5 | 2.0 |
+
+All three public and five private correctness gates PASS. Private recordings
+have 14 frames each; both Lighter names cover both networks and eight commands.
+Private performance is informational: Rust does not beat TS in every private
+case. No new TS bug or gate exception, no private live account claim, and no TS
+Lighter deletion. The remaining merge condition is green CI on the exact
+reviewed PR head; final merge SHA and fresh branch are reported on the PR.
