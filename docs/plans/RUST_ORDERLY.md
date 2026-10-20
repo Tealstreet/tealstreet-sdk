@@ -355,3 +355,22 @@ the SDK's shared initialization promise still covers import and web init.
 With generated artifacts temporarily absent, all10affected CI files plus the
 loader regression pass (11files/468tests). Artifacts restored; real SDK WASM44
 tests, package typecheck/lint and independent code-correctness review pass.
+
+### Private correctness reviews, rounds2–4
+
+Native STOP and bounded nested BRACKET trees now reconcile all actionable
+orders without blocking initial account readiness. Exact child lifecycle and
+root identity are retained; sparse entry/leaf terminal events cannot close
+live siblings, and a nested container cannot finish its ancestor root.
+Sibling repair requires explicit full-position provenance, preserved across
+partial child updates and POST-ACK ordering. Finite TP_SL, LIMIT, contradictory
+mode/type, and attached bracket protection reject partial repair before any
+write; whole-parent cancellation remains available. Bulk cancellation also
+supersedes affected queued cancel/amend jobs that could recreate protection,
+while unrelated symbols retain their queued commands.
+
+Initial regressions failed before these fixes. Final native82tests and strict
+Clippy pass. Independent read-only code-correctness reviews found and closed
+two follow-up provenance/lifecycle cases; round4 reports no remaining material
+findings. Public and integration re-reviews are also clear. Full acceptance
+replays and CI must run on the refreshed landing branch before merge.

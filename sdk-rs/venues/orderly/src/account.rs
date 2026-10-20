@@ -34,6 +34,71 @@ pub enum Request {
 pub struct Proof {
     pub mode: MarginType,
     pub amend: bool,
+    /// Only an explicit standalone positional CLOSE_POSITION leg may be rebuilt.
+    pub positional_repair: bool,
+    pub close_compatible: bool,
+    pub mode_known: bool,
+}
+struct MappedOrder<'r, 'a> {
+    order: Order,
+    row: &'r OrderRow<'a>,
+    proof: Proof,
+    seq: Option<u64>,
+    timestamp: Option<u64>,
+}
+
+fn order_lineages<'r, 'a>(
+    root: &'r OrderRow<'a>,
+    algo: bool,
+) -> Result<Vec<Vec<&'r OrderRow<'a>>>, String> {
+    fn walk<'r, 'a>(
+        row: &'r OrderRow<'a>,
+        lineage: &mut Vec<&'r OrderRow<'a>>,
+        out: &mut Vec<Vec<&'r OrderRow<'a>>>,
+        nodes: &mut usize,
+        algo: bool,
+    ) -> Result<(), String> {
+        *nodes += 1;
+        if lineage.len() > 8 || *nodes > 1000 {
+            return Err("Orderly algo tree exceeds depth or node limit".into());
+        }
+        // The documented STOP response may carry an empty child_orders placeholder.
+        if algo
+            && row.algo_order_id.0.is_empty()
+            && row.algo_type.is_empty()
+            && row.kind.is_empty()
+            && row.symbol.is_empty()
+            && row.order_id.0.is_empty()
+            && row.root_algo_order_id.0.is_empty()
+            && row.side.is_empty()
+            && row.status.is_empty()
+            && row.algo_status.is_empty()
+            && row.root_algo_status.is_empty()
+            && row.quantity == 0.0
+            && row.price == 0.0
+            && row.trigger_price.is_none()
+            && row.reduce_only.is_none()
+            && row.client_order_id.is_none()
+            && row.margin_mode.is_empty()
+            && row.child_orders.is_empty()
+        {
+            return Ok(());
+        }
+        lineage.push(row);
+        if !algo || !matches!(row.algo_type.as_ref(), "POSITIONAL_TP_SL" | "TP_SL") {
+            out.push(lineage.clone());
+        }
+        if algo {
+            for child in &row.child_orders {
+                walk(child, lineage, out, nodes, true)?;
+            }
+        }
+        lineage.pop();
+        Ok(())
+    }
+    let mut out = vec![];
+    walk(root, &mut vec![], &mut out, &mut 0, algo)?;
+    Ok(out)
 }
 
 pub struct Account {
@@ -47,6 +112,9 @@ pub struct Account {
     pub order_revisions: [u64; 2],
     pub settings_revision: u64,
     pub proofs: HashMap<String, Proof>,
+    // A confirmed POST of our typed full-position payload is also provenance
+    // when a later child-only stream omits immutable parent/type fields.
+    pub created_pairs: HashMap<String, (String, OrderSide, MarginType)>,
     authenticated: bool,
     inflight: [bool; 4],
     loaded: [bool; 2],
@@ -74,6 +142,7 @@ impl Default for Account {
             order_revisions: [0; 2],
             settings_revision: 0,
             proofs: HashMap::new(),
+            created_pairs: HashMap::new(),
             authenticated: false,
             inflight: [false; 4],
             loaded: [false; 2],
@@ -113,6 +182,13 @@ pub fn status(raw: &str) -> Result<OrderStatus, String> {
         "FILLED" => Ok(OrderStatus::Closed),
         "CANCELLED" | "CANCELED" | "REJECTED" | "EXPIRED" => Ok(OrderStatus::Canceled),
         _ => Err(format!("Orderly unknown order status {raw}")),
+    }
+}
+fn raw_order_status<'r>(row: &'r OrderRow<'_>, algo: bool) -> &'r str {
+    if algo && !row.algo_status.is_empty() {
+        &row.algo_status
+    } else {
+        &row.status
     }
 }
 fn stamp_newer(prior: Option<&(Option<u64>, u64)>, seq: Option<u64>, ts: u64) -> bool {
@@ -398,49 +474,77 @@ impl Orderly {
             last_update: Some(cx.now),
         }))
     }
-    pub(crate) fn orders(
+    fn orders<'r, 'a>(
         &self,
         cx: &Cx<'_, Pending>,
-        r: &OrderRow<'_>,
+        r: &'r OrderRow<'a>,
         algo: bool,
-    ) -> Result<Vec<Order>, String> {
-        let Some(symbol) = symbol(&r.symbol).filter(|s| cx.store.market(s).is_some()) else {
-            return Ok(vec![]);
-        };
+    ) -> Result<Vec<MappedOrder<'r, 'a>>, String> {
         let mut out = vec![];
-        let children = if r.child_orders.is_empty() {
-            std::slice::from_ref(r)
-        } else {
-            r.child_orders.as_slice()
-        };
-        for row in children {
+        let mut ids = HashSet::new();
+        for lineage in order_lineages(r, algo)? {
+            let row = *lineage.last().unwrap();
+            let native = lineage
+                .iter()
+                .rev()
+                .find(|r| !r.symbol.is_empty())
+                .map(|r| r.symbol.as_ref())
+                .unwrap_or("");
+            let Some(symbol) = symbol(native).filter(|s| cx.store.market(s).is_some()) else {
+                continue;
+            };
+            if lineage
+                .iter()
+                .any(|r| !r.symbol.is_empty() && r.symbol != native)
+            {
+                return Err("Orderly algo symbol identity mismatch".into());
+            }
             let id = if algo {
                 &row.algo_order_id.0
             } else {
                 &row.order_id.0
             };
-            if algo && row.trigger_price.is_none() && row.algo_type != "TRAILING_STOP" {
-                continue;
+            if id.is_empty() || id == "0" || !ids.insert(id.clone()) {
+                return Err("Orderly missing or duplicate order ID".into());
             }
-            if id.is_empty() || id == "0" {
-                return Err("Orderly missing order ID".into());
-            }
-            let (kind, tif) = match if algo {
-                row.algo_type.as_ref()
-            } else {
+            let protective = matches!(
+                row.algo_type.as_ref(),
+                "STOP_LOSS" | "TAKE_PROFIT" | "TRAILING_STOP"
+            );
+            let reduce_only = row
+                .reduce_only
+                .or_else(|| {
+                    lineage
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .find(|r| r.algo_type != "BRACKET" && r.reduce_only.is_some())
+                        .and_then(|r| r.reduce_only)
+                })
+                .unwrap_or(protective);
+            let raw_kind = if !algo || row.algo_type == "BRACKET" {
                 row.kind.as_ref()
-            } {
+            } else {
+                row.algo_type.as_ref()
+            };
+            let (kind, tif) = match raw_kind {
                 "LIMIT" => (OrderType::Limit, Some(TimeInForce::GoodTillCancel)),
                 "MARKET" => (OrderType::Market, None),
                 "POST_ONLY" => (OrderType::Limit, Some(TimeInForce::PostOnly)),
                 "IOC" => (OrderType::Limit, Some(TimeInForce::ImmediateOrCancel)),
                 "FOK" => (OrderType::Limit, Some(TimeInForce::FillOrKill)),
+                "STOP" if reduce_only => (OrderType::StopLoss, None),
+                "STOP" => (OrderType::Conditional, None),
                 "STOP_LOSS" => (OrderType::StopLoss, None),
                 "TAKE_PROFIT" => (OrderType::TakeProfit, None),
                 "TRAILING_STOP" => (OrderType::TrailingStopLoss, None),
                 _ => return Err("Orderly unsupported order type".into()),
             };
-            if algo
+            let triggered = algo && row.algo_type != "BRACKET";
+            if triggered && row.trigger_price.is_none() && row.algo_type != "TRAILING_STOP" {
+                return Err("Orderly missing algo trigger price".into());
+            }
+            if triggered
                 && !matches!(
                     row.trigger_price_type.as_ref(),
                     "" | "MARK_PRICE" | "USELESS"
@@ -452,61 +556,162 @@ impl Orderly {
                 .total_executed_quantity
                 .or(row.executed)
                 .map_or(0.0, |n| n.0);
-            if row.quantity < 0.0 || filled < 0.0 {
+            // Finite TP_SL quantities may be declared on the container. They must
+            // never be inferred to mean a full-position CLOSE_POSITION leg.
+            let amount = if algo && row.kind != "CLOSE_POSITION" && row.quantity == 0.0 {
+                lineage
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .find(|r| r.algo_type == "TP_SL")
+                    .map_or(row.quantity, |r| r.quantity)
+            } else {
+                row.quantity
+            };
+            if amount < 0.0 || filled < 0.0 {
                 return Err("Orderly invalid quantity".into());
             }
-            let parent = if !r.root_algo_order_id.0.is_empty() {
-                &r.root_algo_order_id.0
-            } else if !row.root_algo_order_id.0.is_empty() {
-                &row.root_algo_order_id.0
-            } else {
-                &r.algo_order_id.0
-            };
-            let raw_status = if !r.root_algo_status.is_empty()
-                && matches!(
-                    r.root_algo_status.as_ref(),
-                    "CANCELLED" | "FILLED" | "REJECTED"
-                ) {
-                r.root_algo_status.as_ref()
-            } else if algo && !row.algo_status.is_empty() {
-                row.algo_status.as_ref()
-            } else if !row.status.is_empty() {
-                row.status.as_ref()
-            } else if algo && !r.algo_status.is_empty() {
-                r.algo_status.as_ref()
-            } else {
-                r.status.as_ref()
-            };
+            let parent = lineage
+                .iter()
+                .rev()
+                .find(|r| !r.root_algo_order_id.0.is_empty() && r.root_algo_order_id.0 != "0")
+                .map(|r| r.root_algo_order_id.0.clone())
+                .unwrap_or_else(|| r.algo_order_id.0.clone());
+            if algo && (parent.is_empty() || parent == "0") {
+                return Err("Orderly missing algo root identity".into());
+            }
+            if algo
+                && lineage.iter().any(|r| {
+                    !r.root_algo_order_id.0.is_empty()
+                        && r.root_algo_order_id.0 != "0"
+                        && r.root_algo_order_id.0 != parent
+                })
+            {
+                return Err("Orderly conflicting algo root identity".into());
+            }
+            let mut raw_status = lineage
+                .iter()
+                .rev()
+                .map(|r| raw_order_status(r, algo))
+                .find(|s| !s.is_empty())
+                .unwrap_or("");
+            if status(raw_status).is_ok_and(|s| s == OrderStatus::Open) {
+                // A final root closes stale NEW children, while explicit child
+                // terminal states (e.g. CANCELLED below FILLED) take precedence.
+                if let Some(final_root) = lineage
+                    .iter()
+                    .rev()
+                    .map(|r| r.root_algo_status.as_ref())
+                    .find(|s| {
+                        status(s)
+                            .is_ok_and(|s| matches!(s, OrderStatus::Closed | OrderStatus::Canceled))
+                    })
+                {
+                    raw_status = final_root;
+                }
+            }
             let tif = match row.time_in_force.as_ref() {
                 "IOC" => Some(TimeInForce::ImmediateOrCancel),
                 "FOK" => Some(TimeInForce::FillOrKill),
                 "POST_ONLY" => Some(TimeInForce::PostOnly),
                 _ => tif,
             };
-            out.push(Order {
-                id: id.clone(),
-                parent_id: algo.then(|| parent.clone()),
-                symbol: symbol.clone(),
-                status: status(raw_status)?,
-                kind,
-                side: side(if row.side.is_empty() {
-                    &r.side
-                } else {
-                    &row.side
-                })?,
-                price: row.trigger_price.map_or(row.price, |n| n.0),
-                amount: row.quantity,
-                filled,
-                remaining: (row.quantity - filled).max(0.0),
-                reduce_only: row.reduce_only.or(r.reduce_only).unwrap_or(algo),
-                close: None,
-                client_order_id: row.client_order_id.as_ref().map(|s| s.to_string()),
-                time_in_force: tif,
-                last_update: cx.now,
-                trigger_type: algo.then_some(StopTriggerType::MarkPrice),
-                take_profit: None,
-                stop_loss: None,
-                extra: None,
+            let raw_mode = lineage
+                .iter()
+                .rev()
+                .find(|r| !r.margin_mode.is_empty())
+                .map(|r| r.margin_mode.as_ref())
+                .unwrap_or("");
+            let side_ = side(
+                lineage
+                    .iter()
+                    .rev()
+                    .find(|r| !r.side.is_empty())
+                    .map(|r| r.side.as_ref())
+                    .unwrap_or(""),
+            )?;
+            let created = self
+                .account
+                .created_pairs
+                .get(&parent)
+                .filter(|(s, side, _)| *s == symbol && *side == side_);
+            let previous = self.account.proofs.get(id).filter(|_| {
+                cx.store.orders().iter().any(|old| {
+                    old.id == *id
+                        && old.parent_id.as_ref() == Some(&parent)
+                        && old.symbol == symbol
+                        && old.side == side_
+                        && old.kind == kind
+                })
+            });
+            let prior = previous.filter(|p| p.positional_repair);
+            let mode = if raw_mode.is_empty() {
+                previous
+                    .filter(|p| p.mode_known)
+                    .map(|p| p.mode)
+                    .or_else(|| created.map(|(_, _, mode)| *mode))
+                    .unwrap_or(MarginType::Cross)
+            } else {
+                margin(raw_mode)?
+            };
+            let mode_known =
+                !raw_mode.is_empty() || created.is_some() || previous.is_some_and(|p| p.mode_known);
+            let rest_positional = row.kind == "CLOSE_POSITION"
+                && row.reduce_only == Some(true)
+                && matches!(raw_mode, "CROSS" | "ISOLATED")
+                && lineage
+                    .iter()
+                    .any(|r| r.algo_type == "POSITIONAL_TP_SL" && r.algo_order_id.0 == parent);
+            let close_compatible = algo
+                && protective
+                && row.algo_type != "TRAILING_STOP"
+                && matches!(row.kind.as_ref(), "" | "CLOSE_POSITION")
+                && row.reduce_only != Some(false)
+                && (rest_positional || previous.is_none_or(|p| p.close_compatible))
+                && lineage.iter().all(|r| {
+                    r.algo_type != "BRACKET"
+                        && r.algo_type != "TP_SL"
+                        && (r.margin_mode.is_empty()
+                            || margin(&r.margin_mode).is_ok_and(|m| m == mode))
+                });
+            let positional_repair = close_compatible
+                && (rest_positional
+                    || created.is_some_and(|(_, _, m)| *m == mode)
+                    || prior.is_some_and(|p| p.mode == mode));
+            let seq = lineage.iter().rev().find_map(|r| r.seq);
+            let timestamp = lineage.iter().rev().find_map(|r| r.timestamp);
+            out.push(MappedOrder {
+                order: Order {
+                    id: id.clone(),
+                    parent_id: algo.then_some(parent),
+                    symbol,
+                    status: status(raw_status)?,
+                    kind,
+                    side: side_,
+                    price: row.trigger_price.map_or(row.price, |n| n.0),
+                    amount,
+                    filled,
+                    remaining: (amount - filled).max(0.0),
+                    reduce_only,
+                    close: None,
+                    client_order_id: row.client_order_id.as_ref().map(|s| s.to_string()),
+                    time_in_force: tif,
+                    last_update: cx.now,
+                    trigger_type: triggered.then_some(StopTriggerType::MarkPrice),
+                    take_profit: None,
+                    stop_loss: None,
+                    extra: None,
+                },
+                row,
+                proof: Proof {
+                    mode,
+                    amend: false,
+                    positional_repair,
+                    close_compatible,
+                    mode_known,
+                },
+                seq,
+                timestamp,
             });
         }
         Ok(out)
@@ -539,6 +744,9 @@ impl Orderly {
             Proof {
                 mode: margin(&r.margin_mode).ok()?,
                 amend: valid,
+                positional_repair: false,
+                close_compatible: false,
+                mode_known: true,
             },
         ))
     }
@@ -588,36 +796,17 @@ impl Orderly {
                         proofs.insert(id, proof);
                     }
                     let mapped = self.orders(cx, &r, *algo)?;
-                    if *algo {
-                        for o in &mapped {
-                            proofs.insert(
-                                o.id.clone(),
-                                Proof {
-                                    mode: margin(
-                                        r.child_orders
-                                            .iter()
-                                            .find(|c| c.algo_order_id.0 == o.id)
-                                            .filter(|c| !c.margin_mode.is_empty())
-                                            .map(|c| c.margin_mode.as_ref())
-                                            .unwrap_or(&r.margin_mode),
-                                    )?,
-                                    amend: false,
-                                },
-                            );
+                    for mapped in mapped {
+                        let o = mapped.order;
+                        if rows.iter().any(|prior| prior.id == o.id) {
+                            return Err("Orderly duplicate order across roots".into());
                         }
+                        if *algo {
+                            proofs.insert(o.id.clone(), mapped.proof);
+                        }
+                        stamps.insert(o.id.clone(), (mapped.seq, mapped.timestamp.unwrap_or(0)));
+                        rows.push(o);
                     }
-                    for o in &mapped {
-                        let source = r
-                            .child_orders
-                            .iter()
-                            .find(|c| c.algo_order_id.0 == o.id)
-                            .unwrap_or(&r);
-                        stamps.insert(
-                            o.id.clone(),
-                            (source.seq, source.timestamp.or(r.timestamp).unwrap_or(0)),
-                        );
-                    }
-                    rows.extend(mapped);
                 }
             }
             Ok(())
@@ -1002,8 +1191,11 @@ impl Orderly {
                 "FILLED" | "CANCELLED" | "REJECTED"
             ) {
                 r.root_algo_status.as_ref()
-            } else if r.algo_type == "POSITIONAL_TP_SL"
-                || (r.child_orders.is_empty() && r.trigger_price.is_none())
+            } else if matches!(r.algo_type.as_ref(), "POSITIONAL_TP_SL" | "TP_SL")
+                && !r.algo_order_id.0.is_empty()
+                && (r.root_algo_order_id.0.is_empty()
+                    || r.root_algo_order_id.0 == "0"
+                    || r.algo_order_id.0 == r.root_algo_order_id.0)
             {
                 if r.algo_status.is_empty() {
                     r.status.as_ref()
@@ -1016,7 +1208,7 @@ impl Orderly {
             if let Ok(final_status @ (OrderStatus::Closed | OrderStatus::Canceled)) =
                 status(raw_status)
             {
-                let parent = if r.root_algo_order_id.0.is_empty() {
+                let parent = if r.root_algo_order_id.0.is_empty() || r.root_algo_order_id.0 == "0" {
                     &r.algo_order_id.0
                 } else {
                     &r.root_algo_order_id.0
@@ -1045,16 +1237,54 @@ impl Orderly {
                 }
             }
         }
+        // A sparse terminal leaf/BRACKET-entry report may omit the trigger and
+        // immutable economic fields. It finalizes only that known native ID;
+        // absence of children/trigger never proves completion of its whole root.
+        if algo
+            && r.trigger_price.is_none()
+            && r.child_orders.is_empty()
+            && !matches!(r.algo_type.as_ref(), "POSITIONAL_TP_SL" | "TP_SL")
+            && let Ok(final_status @ (OrderStatus::Closed | OrderStatus::Canceled)) =
+                status(raw_order_status(r, true))
+            && let Some(mut order) = cx
+                .store
+                .orders()
+                .iter()
+                .find(|o| o.id == r.algo_order_id.0)
+                .cloned()
+        {
+            if (!r.root_algo_order_id.0.is_empty()
+                && r.root_algo_order_id.0 != "0"
+                && order.parent_id.as_ref() != Some(&r.root_algo_order_id.0))
+                || (!r.symbol.is_empty()
+                    && symbol(&r.symbol).as_deref() != Some(order.symbol.as_str()))
+                || (!r.side.is_empty() && side(&r.side)? != order.side)
+            {
+                return Err("Orderly terminal child identity mismatch".into());
+            }
+            let timestamp = r.timestamp.unwrap_or(ts);
+            if stamp_newer(self.account.order_stamps.get(&order.id), r.seq, timestamp) {
+                if let Some(total) = r.total_executed_quantity.or(r.executed) {
+                    order.filled = order.filled.max(total.0);
+                    order.remaining = (order.amount - order.filled).max(0.0);
+                    self.execution(cx, r, &order);
+                }
+                order.status = final_status;
+                order.last_update = cx.now;
+                self.account
+                    .order_stamps
+                    .insert(order.id.clone(), (r.seq, timestamp));
+                self.account.order_revisions[1] += 1;
+                self.terminal_order(&order.id);
+                self.account.proofs.remove(&order.id);
+                cx.store.upsert_order(order);
+            }
+            return Ok(());
+        }
         let orders = self.orders(cx, r, algo)?;
-        for order in orders {
-            let row = if r.child_orders.is_empty() {
-                r
-            } else {
-                r.child_orders
-                    .iter()
-                    .find(|c| c.algo_order_id.0 == order.id)
-                    .unwrap()
-            };
+        for mapped in orders {
+            let order = mapped.order;
+            let row = mapped.row;
             if matches!(
                 if algo && !row.algo_status.is_empty() {
                     row.algo_status.as_ref()
@@ -1065,32 +1295,28 @@ impl Orderly {
             ) {
                 self.execution(cx, row, &order);
             }
-            let timestamp = row.timestamp.unwrap_or(ts);
-            if !stamp_newer(self.account.order_stamps.get(&order.id), row.seq, timestamp)
-                || ((self.account.terminal.contains(&order.id)
-                    || order
-                        .parent_id
-                        .as_ref()
-                        .is_some_and(|p| self.account.terminal.contains(&format!("root:{p}"))))
-                    && order.status == OrderStatus::Open)
+            let timestamp = mapped.timestamp.unwrap_or(ts);
+            if !stamp_newer(
+                self.account.order_stamps.get(&order.id),
+                mapped.seq,
+                timestamp,
+            ) || ((self.account.terminal.contains(&order.id)
+                || order
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|p| self.account.terminal.contains(&format!("root:{p}"))))
+                && order.status == OrderStatus::Open)
             {
                 continue;
             }
             self.account
                 .order_stamps
-                .insert(order.id.clone(), (row.seq, timestamp));
+                .insert(order.id.clone(), (mapped.seq, timestamp));
             self.account.order_revisions[algo as usize] += 1;
             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                 self.terminal_order(&order.id);
             }
-            let mode = margin(if row.margin_mode.is_empty() {
-                &r.margin_mode
-            } else {
-                &row.margin_mode
-            })?;
-            self.account
-                .proofs
-                .insert(order.id.clone(), Proof { mode, amend: false });
+            self.account.proofs.insert(order.id.clone(), mapped.proof);
             cx.store.upsert_order(order);
         }
         Ok(())

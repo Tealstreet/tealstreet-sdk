@@ -19,7 +19,12 @@ struct Step {
 }
 enum Effect {
     Place(Order),
-    Pair(usize),
+    Pair {
+        legs: usize,
+        symbol: String,
+        side: OrderSide,
+        mode: MarginType,
+    },
     Cancel {
         orders: Vec<Order>,
         parent: Option<String>,
@@ -228,7 +233,12 @@ impl Orderly {
                 child_orders: children,
                 broker_id: self.broker_id(),
             })),
-            effect: Effect::Pair(legs),
+            effect: Effect::Pair {
+                legs,
+                symbol: symbol.into(),
+                side,
+                mode: mode_,
+            },
         })
     }
     fn replace_pair(
@@ -255,7 +265,19 @@ impl Orderly {
                 .proofs
                 .get(&o.id)
                 .ok_or("Orderly protective order lacks margin provenance")?;
+            if o.parent_id
+                .as_ref()
+                .and_then(|root| self.account.created_pairs.get(root))
+                .is_some_and(|(_, _, mode)| *mode != proof.mode)
+            {
+                return Err(
+                    "Orderly protective margin provenance conflicts with accepted creation".into(),
+                );
+            }
             if proof.mode == mode_ {
+                if !proof.positional_repair {
+                    return Err("Orderly replacement requires proven full-position CLOSE_POSITION siblings; cancel the whole parent first".into());
+                }
                 siblings.push(o.clone());
             }
         }
@@ -545,7 +567,19 @@ impl Orderly {
                 .store
                 .orders()
                 .iter()
-                .find(|o| &o.id == id)
+                .find(|o| &o.id == id && live(o))
+                .or_else(|| {
+                    cx.store
+                        .orders()
+                        .iter()
+                        .find(|o| o.parent_id.as_ref() == Some(id) && live(o))
+                })
+                .or_else(|| {
+                    cx.store
+                        .orders()
+                        .iter()
+                        .find(|o| &o.id == id || o.parent_id.as_ref() == Some(id))
+                })
                 .ok_or("Orderly cancel requires a reconciled order")?;
             if !live(order) {
                 continue;
@@ -559,10 +593,7 @@ impl Orderly {
                     .orders()
                     .iter()
                     .filter(|o| {
-                        o.parent_id.as_ref() == Some(parent)
-                            && o.symbol == order.symbol
-                            && o.side == order.side
-                            && live(o)
+                        o.parent_id.as_ref() == Some(parent) && o.symbol == order.symbol && live(o)
                     })
                     .cloned()
                     .collect();
@@ -574,7 +605,7 @@ impl Orderly {
                     .mode;
                 let survivors: Vec<_> = siblings
                     .iter()
-                    .filter(|o| !requested.contains(&o.id))
+                    .filter(|o| !requested.contains(parent) && !requested.contains(&o.id))
                     .collect();
                 let mut stop = None;
                 let mut take = None;
@@ -583,9 +614,10 @@ impl Orderly {
                         .account
                         .proofs
                         .get(&o.id)
-                        .is_none_or(|p| p.mode != mode_)
+                        .is_none_or(|p| p.mode != mode_ || !p.positional_repair)
+                        || o.side != order.side
                     {
-                        return Err("Orderly sibling margin mode is ambiguous".into());
+                        return Err("Orderly cannot safely recreate this sibling; cancel the whole parent instead".into());
                     }
                     match o.kind {
                         OrderType::StopLoss => {
@@ -732,7 +764,7 @@ impl Orderly {
                     cx.store
                         .orders()
                         .iter()
-                        .find(|o| o.id == *id)
+                        .find(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
                         .map(|o| o.symbol.clone())
                 })
                 .collect(),
@@ -896,7 +928,9 @@ impl Orderly {
             }
             _ => return Err("Orderly invalid trading command".into()),
         };
-        if steps.iter().any(|s| matches!(s.effect, Effect::Pair(_)))
+        if steps
+            .iter()
+            .any(|s| matches!(s.effect, Effect::Pair { .. }))
             && (self.trading.detached.len() >= 100
                 || self
                     .trading
@@ -941,12 +975,33 @@ impl Orderly {
                     Command::PlaceOrders { orders, .. } => orders
                         .iter()
                         .any(|o| symbol.is_empty() || o.symbol == *symbol),
+                    Command::CancelOrders { ids, .. } => ids.iter().any(|id| {
+                        symbol.is_empty()
+                            || cx
+                                .store
+                                .orders()
+                                .iter()
+                                .find(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+                                .is_none_or(|o| o.symbol == *symbol)
+                    }),
+                    Command::AmendOrder { id, .. } => {
+                        symbol.is_empty()
+                            || cx
+                                .store
+                                .orders()
+                                .iter()
+                                .find(|o| o.id == *id)
+                                .is_none_or(|o| o.symbol == *symbol)
+                    }
                     _ => false,
                 };
                 if affected {
                     cx.done(
                         trade_id(&queued).unwrap(),
-                        Err("Orderly queued placement was superseded by bulk cancellation".into()),
+                        Err(
+                            "Orderly queued order mutation was superseded by bulk cancellation"
+                                .into(),
+                        ),
                     );
                 } else {
                     keep.push_back(queued);
@@ -1047,7 +1102,7 @@ impl Orderly {
                 self.account.order_revisions[0] += 1;
                 self.account.positions_revision += 1;
             }
-            Effect::Pair(_) => {
+            Effect::Pair { .. } => {
                 self.account.order_revisions[1] += 1;
             }
             Effect::Cancel { orders, .. } => {
@@ -1117,7 +1172,12 @@ impl Orderly {
                     self.account.order_revisions[0] += 1;
                     self.trading.active.as_mut().unwrap().ids.push(r.order_id.0);
                 }
-                Effect::Pair(legs) => {
+                Effect::Pair {
+                    legs,
+                    symbol,
+                    side,
+                    mode,
+                } => {
                     #[derive(Deserialize)]
                     struct Row {
                         #[serde(rename = "orderId")]
@@ -1145,6 +1205,29 @@ impl Orderly {
                     }
                     for id in &ids {
                         native_id(id)?;
+                    }
+                    if !parent.is_empty() {
+                        if self.account.created_pairs.len() >= 1000 {
+                            self.account.created_pairs.clear();
+                        }
+                        self.account
+                            .created_pairs
+                            .insert(parent.clone(), (symbol.clone(), *side, *mode));
+                        for order in cx.store.orders().iter().filter(|o| {
+                            o.parent_id.as_ref() == Some(&parent)
+                                && o.symbol == *symbol
+                                && o.side == *side
+                                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        }) {
+                            if let Some(proof) = self.account.proofs.get_mut(&order.id)
+                                && proof.close_compatible
+                                && (!proof.mode_known || proof.mode == *mode)
+                            {
+                                proof.mode = *mode;
+                                proof.mode_known = true;
+                                proof.positional_repair = true;
+                            }
+                        }
                     }
                     self.trading
                         .active
@@ -1203,7 +1286,7 @@ impl Orderly {
                             .unwrap()
                             .steps
                             .front()
-                            .is_some_and(|s| matches!(s.effect, Effect::Pair(_)))
+                            .is_some_and(|s| matches!(s.effect, Effect::Pair { .. }))
                         && !self.root_finished(cx, parent)
                     {
                         let wait = Waiting {
@@ -1361,7 +1444,7 @@ impl Orderly {
                     });
                 }
             }
-            Effect::Pair(legs) => {
+            Effect::Pair { legs, .. } => {
                 if let Some(job) = self
                     .trading
                     .active

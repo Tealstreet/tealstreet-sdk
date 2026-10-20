@@ -444,3 +444,146 @@ fn private_open_replaces_handshake_timer_and_duplicate_open_cannot_resend_auth()
         "duplicate opens must preserve authentication and subscriptions"
     );
 }
+
+#[test]
+fn documented_native_stop_is_visible_with_exact_algo_cancel_identity() {
+    // GET /v1/algo/orders documents STOP as an opening trigger with type MARKET.
+    let stop = r#"[{"algo_order_id":168400010,"root_algo_order_id":168400010,"symbol":"PERP_BTC_USDC","algo_type":"STOP","algo_status":"NEW","side":"BUY","type":"MARKET","trigger_price":51000,"trigger_price_type":"MARK_PRICE","quantity":0.1,"reduce_only":false,"margin_mode":"CROSS"}]"#;
+    let (e, _) = ready_with(ORDER, stop, POSITIONS);
+    assert!(e.store().loaded().orders);
+    let order = e
+        .store()
+        .orders()
+        .iter()
+        .find(|o| o.id == "168400010")
+        .unwrap();
+    assert_eq!(order.kind, safe_cex_engine::model::OrderType::Conditional);
+    assert_eq!(order.parent_id.as_deref(), Some("168400010"));
+    assert_eq!(order.price, 51000.0);
+    assert!(!order.reduce_only);
+}
+
+#[test]
+fn documented_nested_bracket_retains_entry_and_protective_children() {
+    let bracket = r#"[{"algo_order_id":200,"root_algo_order_id":200,"symbol":"PERP_BTC_USDC","algo_type":"BRACKET","algo_status":"NEW","side":"BUY","type":"LIMIT","price":50000,"quantity":0.1,"reduce_only":false,"margin_mode":"CROSS","child_orders":[{"algo_order_id":210,"root_algo_order_id":200,"algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","child_orders":[{"algo_order_id":211,"root_algo_order_id":200,"algo_type":"STOP_LOSS","algo_status":"NEW","type":"CLOSE_POSITION","side":"SELL","trigger_price":49000,"quantity":0,"reduce_only":true},{"algo_order_id":212,"root_algo_order_id":200,"algo_type":"TAKE_PROFIT","algo_status":"NEW","type":"CLOSE_POSITION","side":"SELL","trigger_price":55000,"quantity":0,"reduce_only":true}]}]}]"#;
+    let (mut e, socket) = ready_with(ORDER, bracket, POSITIONS);
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().orders().len(), 4);
+    for (id, kind) in [
+        ("200", safe_cex_engine::model::OrderType::Limit),
+        ("211", safe_cex_engine::model::OrderType::StopLoss),
+        ("212", safe_cex_engine::model::OrderType::TakeProfit),
+    ] {
+        let order = e.store().orders().iter().find(|o| o.id == id).unwrap();
+        assert_eq!(order.kind, kind);
+        assert_eq!(order.parent_id.as_deref(), Some("200"));
+    }
+    // The same nested documented shape must be handled by the stream without a
+    // direct-child lookup panic; each child keeps its own status.
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"topic":"algoexecutionreportv2","ts":3000,"data":{}}}"#,
+            bracket.trim_start_matches('[').trim_end_matches(']')
+        ),
+    );
+    assert_eq!(e.store().orders().len(), 4);
+}
+
+#[test]
+fn native_stop_placeholder_child_does_not_hide_the_working_parent() {
+    let stop = r#"[{"algo_order_id":10,"root_algo_order_id":10,"symbol":"PERP_BTC_USDC","algo_type":"STOP","algo_status":"NEW","side":"BUY","type":"MARKET","trigger_price":51000,"quantity":0.1,"reduce_only":false,"child_orders":[{}]}]"#;
+    let (e, _) = ready_with(ORDER, stop, POSITIONS);
+    assert!(e.store().loaded().orders);
+    assert!(e.store().orders().iter().any(|o| o.id == "10"));
+    let invalid = stop.replace("[{}]", "[{\"algo_order_id\":11,\"algo_type\":\"UNKNOWN_WORKING_ORDER\",\"symbol\":\"PERP_BTC_USDC\"}]");
+    let (e, _) = ready_with(ORDER, &invalid, POSITIONS);
+    assert!(
+        !e.store().loaded().orders,
+        "unknown working descendant must reject the snapshot"
+    );
+}
+
+#[test]
+fn partial_bracket_entry_fill_and_triggerless_leaf_do_not_finalize_live_root_siblings() {
+    use safe_cex_engine::model::OrderStatus;
+    let bracket = r#"[{"algo_order_id":200,"root_algo_order_id":200,"symbol":"PERP_BTC_USDC","algo_type":"BRACKET","algo_status":"NEW","side":"BUY","type":"LIMIT","price":50000,"quantity":1,"reduce_only":false,"margin_mode":"CROSS","child_orders":[{"algo_order_id":210,"root_algo_order_id":200,"algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","child_orders":[{"algo_order_id":101,"root_algo_order_id":200,"algo_type":"STOP_LOSS","algo_status":"NEW","type":"CLOSE_POSITION","side":"SELL","trigger_price":49000,"quantity":0,"reduce_only":true},{"algo_order_id":102,"root_algo_order_id":200,"algo_type":"TAKE_PROFIT","algo_status":"NEW","type":"CLOSE_POSITION","side":"SELL","trigger_price":55000,"quantity":0,"reduce_only":true}]}]}]"#;
+    let (mut e, socket) = ready_with(ORDER, bracket, POSITIONS);
+    requests(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":200,"rootAlgoOrderId":200,"symbol":"PERP_BTC_USDC","algoType":"BRACKET","algoStatus":"FILLED","type":"LIMIT","side":"BUY","price":50000,"quantity":1,"seq":1}}"#,
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "200")
+            .unwrap()
+            .status,
+        OrderStatus::Closed
+    );
+    for id in ["101", "102"] {
+        assert_eq!(
+            e.store()
+                .orders()
+                .iter()
+                .find(|o| o.id == id)
+                .unwrap()
+                .status,
+            OrderStatus::Open,
+            "entry fill finalized a protective sibling"
+        );
+    }
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3001,"data":{"algoOrderId":210,"rootAlgoOrderId":200,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"FILLED","seq":2}}"#,
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "102")
+            .unwrap()
+            .status,
+        OrderStatus::Open,
+        "nested container completion finalized its BRACKET root"
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3001,"data":{"algoOrderId":101,"rootAlgoOrderId":200,"symbol":"PERP_BTC_USDC","algoType":"STOP_LOSS","algoStatus":"FILLED","side":"SELL","seq":2}}"#,
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "101")
+            .unwrap()
+            .status,
+        OrderStatus::Closed
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "102")
+            .unwrap()
+            .status,
+        OrderStatus::Open
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"algoexecutionreportv2","ts":3002,"data":{"algoOrderId":102,"rootAlgoOrderId":200,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","type":"CLOSE_POSITION","side":"SELL","triggerPrice":56000,"quantity":0,"seq":3}}"#,
+    );
+    let take = e.store().orders().iter().find(|o| o.id == "102").unwrap();
+    assert_eq!(take.status, OrderStatus::Open);
+    assert_eq!(
+        take.price, 56000.0,
+        "live child was blocked by an incorrect root tombstone"
+    );
+}
