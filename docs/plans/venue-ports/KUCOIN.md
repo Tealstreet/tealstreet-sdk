@@ -514,3 +514,69 @@ The engine accepts owned feed names without changing their serialized shape.
 The isolated BingX optimization already passed all 12 replay CI jobs at
 55df2945fc. Publish this integrated head and require green native/Wasm/root CI
 and all 29 public/private gates across 13 venues before merging PR #1312.
+
+### Bitget parity landing integration plan
+
+While head 24edca0460's 13-venue/29-replay CI matrix is green and its root
+tests are finishing, landing d172a666b1 adds Bitget inverse, collateral balance
+frames, UTA ledger and trailing parity (#1317), conflicting in the SDK wrapper
+and frame applier. Preserve incoming inverse/native conversions alongside
+KuCoin's native-lot extras, broker options and registration. Merge all new
+Bitget replay and native-contract integration checks without changing budgets
+or comparisons. Existing owned feed identities remain intact.
+
+One worker resolves the two TS conflicts; independent reviewers audit the
+shared harness/host/CI auto-merges and the resolved frame boundary. Verify
+workspace tests/fmt/bans/native+Wasm clippy, harness/combined-Wasm/host-wire and
+root typecheck/lint. Repeat KuCoin/Binance public/private plus Bitget public,
+Classic private, inverse private and four dedicated UTA/Classic native contract
+integrations. Commit results and reviews, push, then require all final-head CI
+checks (13 venue jobs, now 30 public/private replay gates plus four dedicated
+Bitget integrations) before merge and the fresh branch.
+
+### Adversarial R12: main-thread native hydration
+
+Independent merge cross-review found the main BaseExchange.applyWorkerFrame
+constructor still enabled native extras only for MEXC, although the Rust worker
+correctly enabled KuCoin. Worker-to-main binary frame hydration therefore lost
+KuCoin order remainingNative/filledInPlacementUnits and position contractsNative;
+the main copier could send base quantity as a native lot count. Add KuCoin to
+the main receiver's native-placement flag while retaining the incoming separate
+Bitget-inverse flag. The constructor audit finds exactly two production paths,
+both now correct.
+
+Extend the real KuCoin Wasm regression to deliver onFrame buffers to a main
+BaseExchange, assert decimal-safe order extras and ten position lots, then run
+the actual CrossTradeManager against that hydrated main store and assert a
+ten-lot close. Independent cross-review passes. Temporarily removing only the
+KuCoin main-receiver flag proves the regression fails on missing contractsNative;
+restoring it passes the complete 28-test Wasm file. Inverse-frame unit1 passes,
+full combined Wasm integration29 and host/wire35 pass, workspace988 tests and
+fmt/bans/native+Wasm clippy pass. Post-restoration root typecheck44/lint28 pass.
+No temporary source change remains; selective replay gates run next.
+
+### Bitget parity and R12 gate checkpoint
+
+All seven selective gates pass: KuCoin/Binance public+private, Bitget public,
+Classic private and inverse private. All four dedicated UTA USDT/USDC ledger
+and Classic/UTA trailing native-contract integrations pass. Public three-run
+medians TS/Rust:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 522.9 / 297.7 | 341.1 / 174.7 | 7.0 / 3.2 | 745,027 |
+| Binance | 316.2 / 141.3 | 193.5 / 72.8 | 4.2 / 2.2 | 752,009 |
+| Bitget | 611.5 / 590.9 | 411.3 / 393.2 | 5.8 / 2.5 | 928,097 |
+
+Exact output, reads/writes, signatures and socket audits remain enabled. Every
+bundle is within the unchanged 1,258,291-byte budget. KuCoin public remains
+16,157 frames/692 markets/two books and private32frames/17commands.
+
+Independent shared-harness/host and CI/native transport merge reviews pass.
+Independent TS constructor/frame-boundary review found R12, now repaired and
+cross-reviewed, with a failing negative control and restored full positive
+Wasm test. Final workspace988 (97 KuCoin), harness175, actualWasm29, host/wire35,
+inverse-frame unit1, fmt/bans/native+Wasm clippy and root typecheck44/lint28 pass.
+The prior published head24edca0460 reached all23 green checks, but Bitget parity
+then conflicted. Publish this head and require complete new-head CI, including
+all30 replay gates and four dedicated integrations across13 venue jobs.

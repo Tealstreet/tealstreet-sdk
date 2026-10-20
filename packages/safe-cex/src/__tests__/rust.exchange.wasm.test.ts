@@ -928,16 +928,23 @@ describe('RustEngineExchange', () => {
     setRustEngineTransport(() => transport);
     const store = new DefaultStore();
     exchange = new RustEngineExchange('kucoin', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase', extra: { kucoinBroker: { partner: 'partner', brokerKey: 'broker-fixture', brokerName: 'tealstreet' } } }, store);
+    const main = new BaseExchange('kucoin', { key: '', secret: '' }, new DefaultStore());
+    const books: OrderBook[] = [];
+    main.emitter.on('listenOrderBook', ({ orderbook }: { orderbook: OrderBook }) => books.push(orderbook));
+    exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
     await exchange.start();
+    await until(() => main.store.orders.length === 1 && main.store.positions.length === 1);
     expect(store.marketsBySymbol.BTCUSDT.contractSize).toBe(0.1);
     expect(store.positions[0].contracts).toBe(1);
     expect(store.positions[0].extra?.contractsNative).toBe(10);
+    expect(main.store.positions[0]).toMatchObject({ contracts: 1, extra: { contractsNative: 10 } });
+    expect(main.store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
     const { CrossTradeManager } = await import('../crossTrade/runtime/CrossTradeManager');
     const masterStore = new DefaultStore();
-    masterStore.update({ markets: store.markets, tickers: store.tickers });
+    masterStore.update({ markets: main.store.markets, tickers: main.store.tickers });
     const closes: number[] = [];
     const copier = new CrossTradeManager({ getExchange: () => undefined, placeOrder: async (_copier, _market, _price, _account, _side, amount) => { closes.push(amount); } });
-    await (copier as any)._auditCopierPositions({ masterWeight: 1 }, { account: 'copier', weight: 1, symbolMappings: {} }, { name: 'binance', store: masterStore }, exchange);
+    await (copier as any)._auditCopierPositions({ masterWeight: 1 }, { account: 'copier', weight: 1, symbolMappings: {} }, { name: 'binance', store: masterStore }, main);
     expect(closes).toEqual([10]);
     expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
     const ids = await exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 95, amount: 2, clientOrderId: 'caller-id' });
@@ -948,10 +955,10 @@ describe('RustEngineExchange', () => {
     expect(write.headers['KC-API-PASSPHRASE']).toBe(createHmac('sha256', 'fixture-secret').update('fixture-passphrase').digest('base64'));
     expect(write.headers['KC-API-PARTNER-SIGN']).toBe(createHmac('sha256', 'broker-fixture').update(write.headers['KC-API-TIMESTAMP'] + 'partner' + 'fixture-key').digest('base64'));
     await until(() => topics.includes('/contractMarket/tradeOrders'));
-    const books: OrderBook[] = [];
-    exchange.listenOrderBook('BTCUSDT', (book) => books.push(book));
+    exchange.listenOrderBook('BTCUSDT', () => {});
     await until(() => books.length > 0);
     expect(books[0].bids[0].amount).toBe(3);
+    main.dispose();
   });
 
   it('runs Backpack perpetuals and preserves canonical caller IDs through placement and frames', async () => {
