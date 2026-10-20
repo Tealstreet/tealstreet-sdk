@@ -75,7 +75,7 @@ export const positionEnums = (word) => ({
   positionMode: POSITION_MODE[(word >>> 16) & 0xff],
 });
 
-const utf8 = new TextDecoder();
+let utf8;
 const align8 = (n) => (n + 7) & ~7;
 
 class Strings {
@@ -101,7 +101,7 @@ class Strings {
     if (!Number.isInteger(index) || index < 0 || index + 1 >= this.offsets.length) throw new Error('invalid string reference');
     let value = this.cache[index];
     if (value === undefined) {
-      value = utf8.decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
+      value = (utf8 ??= new TextDecoder()).decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
       this.cache[index] = value;
     }
     return value;

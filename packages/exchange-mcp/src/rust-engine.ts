@@ -12,5 +12,13 @@ export const registerBundledRustEngine = () => {
   if (!existsSync(bundled)) return;
   const require = createRequire(import.meta.url);
   let pending: Promise<WasmEngineModule> | undefined;
-  setWasmEngineLoader(() => (pending ??= Promise.resolve().then(() => require(fileURLToPath(bundled)))));
+  setWasmEngineLoader(
+    () =>
+      (pending ??= Promise.resolve()
+        .then(() => require(fileURLToPath(bundled)))
+        .catch((error: unknown) => {
+          pending = undefined;
+          throw error;
+        })),
+  );
 };

@@ -218,10 +218,11 @@ jobs:
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
-      - uses: oven-sh/setup-bun@v2
+      - name: Install pinned Bun for standalone CLI loader proof
         if: matrix.venue == 'binance'
-        with:
-          bun-version: 1.4.3
+        run: |
+          corepack yarn -s global add bun@1.4.3
+          corepack yarn -s global bin >> "$GITHUB_PATH"
       - name: Rust consumer startup and packaged loaders
         if: matrix.venue == 'binance'
         run: |

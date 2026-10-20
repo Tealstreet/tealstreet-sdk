@@ -108,12 +108,9 @@ jobs:
       - name: Test
         run: yarn --cwd "$PACKAGE_DIR" test-ci
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.0
-          targets: wasm32-unknown-unknown
       - name: Build the Rust engine included in the package
         run: |
+          (cd sdk-rs && rustup show)
           cargo install wasm-bindgen-cli --version 0.2.129 --locked
           corepack yarn -s rust:build-wasm
 
@@ -146,6 +143,8 @@ jobs:
             'dist/THIRD_PARTY_LICENSES.md',
             'dist/index.js',
             'dist/wasm/poseidon_crypto.wasm',
+            'dist/wasm/rust/safe_cex_wasm.cjs',
+            'dist/wasm/rust/safe_cex_wasm_bg.wasm',
             'package.json',
           ];
           const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));

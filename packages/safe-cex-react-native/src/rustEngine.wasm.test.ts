@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
@@ -30,7 +31,7 @@ it('loads two saved accounts through the mobile host loader with one native modu
     await module.default({ module_or_path: bytes });
     return module;
   });
-  setReactNativeRustEngineLoader(loader);
+  await setReactNativeRustEngineLoader(loader);
   setDefaultTransport(fixtureAccountTransport);
   const fixtures = [rustConsumerFixture(), rustConsumerFixture()];
   let index = 0;
@@ -54,3 +55,14 @@ it('loads two saved accounts through the mobile host loader with one native modu
   }
   expect(fixtures.flatMap((fixture) => fixture.failures)).toEqual([]);
 }, 15000);
+
+it('resolves the actual native registry and starts its Rust class through the mobile host loader', () => {
+  // Metro's static require resolves TypeScript. Vite's Node require does not;
+  // use a TS-capable runtime for the unchanged native registry, without mocks.
+  const output = execFileSync('bun', ['scripts/native-registry-probe.ts'], {
+    cwd: new URL('..', import.meta.url),
+    timeout: 30000,
+    encoding: 'utf8',
+  });
+  expect(output).toContain('mobile-native-registry: Coinbase aliases loaded a native catalog');
+}, 35000);

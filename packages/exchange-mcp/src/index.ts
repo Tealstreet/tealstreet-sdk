@@ -8,13 +8,13 @@ import { createServer } from './server';
 import { registerBundledRustEngine } from './rust-engine';
 
 registerBundledRustEngine();
-const { server, exchange, ready } = await createServer(readConfig(process.env), pkg.version);
-await server.connect(new StdioServerTransport());
+const instance = await createServer(readConfig(process.env), pkg.version);
+await instance.server.connect(new StdioServerTransport());
 // Warm up so the first tool call does not wait for markets; a failure here is retried on that call.
-ready().catch(() => undefined);
+instance.ready().catch(() => undefined);
 
 const stop = () => {
-  exchange.dispose();
+  instance.exchange.dispose();
   process.exit(0);
 };
 process.stdin.on('close', stop);

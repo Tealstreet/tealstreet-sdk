@@ -47,6 +47,16 @@ starts a real native Coinbase catalog, so workspace resolution cannot mask a
 missing artifact. `EXCHANGE_ENGINE=rust` selects the supported native path;
 unset keeps the registry default. Tests selected by `SAFE_CEX_WASM_TESTS=1`
 exercise real protocol tool calls and account state, using documented inputs.
+Failed native startup is retried with a fresh account on the next tool call;
+concurrent calls share the replacement startup. Keep shutdown reading
+`instance.exchange` at call time, since destructuring would retain the failed
+account. Rust accounts reject `EXCHANGE_SIGNER_HEADER` before issuing requests;
+the native signer cannot invoke that JS HMAC callback.
+The license generator includes the pinned engine's non-dev Cargo dependency
+closure and the existing adapted zkLink notice. Run it after building WASM so
+the offline Cargo source cache contains the crate license files. These notices
+retain existing workspace dependencies; changing Rust dependency licensing
+still needs the repository's usual review.
 
 - **Bundled JS and owned WASM, no runtime dependencies.** `tsup` inlines everything, including
   every `@tealstreet/*` workspace. Those are not on npm, and a runtime

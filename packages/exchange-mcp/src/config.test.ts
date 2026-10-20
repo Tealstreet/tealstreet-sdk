@@ -62,6 +62,7 @@ describe('readConfig', () => {
   it.each([
     [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
     [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
+    [{ EXCHANGE: 'txflow', EXCHANGE_ENGINE: 'rust' }, 'EXCHANGE_ENGINE=rust is not available on txflow'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],

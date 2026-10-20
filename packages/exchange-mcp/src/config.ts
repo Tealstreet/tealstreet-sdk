@@ -2,6 +2,7 @@ import type { ExchangeName, ExchangeOptions, PayloadSigner } from '@tealstreet/s
 
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { getRegisteredExchangeNames } from '@tealstreet/safe-cex/src/exchanges/registry';
+import { isRustVenue } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 
 export type ServerConfig = {
   exchange: ExchangeName;
@@ -39,6 +40,9 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   if (engine !== undefined && engine !== 'rust') {
     throw new Error('EXCHANGE_ENGINE must be rust (or unset for the venue default)');
   }
+  if (engine === 'rust' && !isRustVenue(exchange as ExchangeName)) {
+    throw new Error(`EXCHANGE_ENGINE=rust is not available on ${exchange}`);
+  }
 
   const metadata = getExchangeMetadata(exchange as ExchangeName);
   const toggle = (name: string, offered: boolean | undefined): boolean => {
@@ -71,7 +75,8 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
       enableOptionMarkets: options,
       enableInverseMarkets: inverse,
       payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
-      // Tools fetch on demand, so the adapter's background polling would only add signed requests.
+      // TS tools fetch on demand. Native current-state reads retain the venue's
+      // reconciliation and liveness timers instead of TS adapter polling.
       extra: { tickInterval: Number.POSITIVE_INFINITY },
       tuning: { consoleLogging: false },
     },
