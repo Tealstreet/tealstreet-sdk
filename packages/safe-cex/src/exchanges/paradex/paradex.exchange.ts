@@ -917,8 +917,6 @@ export class ParadexExchange extends BaseExchange {
             ? body
             : [];
 
-        if (rows.length === 0) break;
-
         for (const row of rows) {
           const id = String(row.id ?? '');
           if (id && seen.has(id)) continue;
@@ -992,7 +990,6 @@ export class ParadexExchange extends BaseExchange {
         });
 
         const rows: Array<Record<string, any>> = Array.isArray(data?.results) ? data.results : [];
-        if (rows.length === 0) break;
 
         for (const row of rows) {
           const order = mapParadexHistoricalOrder(row);

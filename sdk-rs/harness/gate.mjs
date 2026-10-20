@@ -129,6 +129,7 @@ const KNOWN_TS_FIXES = {
   // preserve native client IDs and canonical time-in-force; derive account UPnL
   // from positions; support idempotent cross-margin/one-way mode settings;
   // validate public-trade query windows and deduplicate native fill IDs/quantity.
+  // Walk empty history cursor pages and keep polled candle buckets/volume monotonic.
   paradex() {},
   lighter: {
     fills: fixLighterFills,

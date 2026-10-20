@@ -60,6 +60,71 @@ fn fills_use_native_execution_size_and_identity_and_stop_after_limit() {
     assert_ne!(rows[0]["id"], rows[1]["id"]);
     assert!(!h.pending.iter().any(|r| r.url.contains("cursor=")));
 }
+
+#[test]
+fn income_and_orders_follow_empty_cursor_pages_before_real_rows() {
+    for income in [false, true] {
+        let mut h = private();
+        let query = if income {
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            }
+        } else {
+            Query::OrderHistory {
+                symbol: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            }
+        };
+        read(&mut h, 19, query);
+        h.reply(
+            if income {
+                "/fills?"
+            } else {
+                "/orders-history?"
+            },
+            r#"{"results":[],"next":"empty-page"}"#,
+        );
+        h.reply("cursor=empty-page", r#"{"results":[],"next":"real-page"}"#);
+        h.reply(
+            "cursor=real-page",
+            &format!(r#"{{"results":[{}]}}"#, if income { FILL } else { ORDER }),
+        );
+        let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(19).unwrap()).unwrap();
+        assert!(!rows.is_empty());
+        assert_eq!(rows[0]["symbol"], "BTC-USD-PERP");
+        assert!(h.e.store().orders().is_empty());
+        assert!(h.e.store().positions().is_empty());
+    }
+}
+
+#[test]
+fn repeated_empty_history_cursor_fails_instead_of_returning_a_complete_empty_result() {
+    let mut h = private();
+    read(
+        &mut h,
+        20,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    h.reply("/orders-history?", r#"{"results":[],"next":"again"}"#);
+    h.reply("cursor=again", r#"{"results":[],"next":"again"}"#);
+    assert!(h.result(20).is_err());
+    assert!(
+        !h.pending
+            .iter()
+            .any(|request| request.url.contains("/orders-history"))
+    );
+}
 #[test]
 fn empty_fills_use_the_bounded_order_history_fallback() {
     let mut h = private();

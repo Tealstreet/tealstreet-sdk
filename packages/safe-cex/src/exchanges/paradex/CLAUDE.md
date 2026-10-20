@@ -717,6 +717,9 @@ Two shape facts, both verified live and both silent failures if assumed away:
 `results: []`). Worth stating only because four other venues in this epic answered a
 windowed request with their full history and no error.
 
+History and income continue through empty pages when `next` names an unvisited
+cursor; only cursor exhaustion or the existing page cap completes traversal.
+
 ## Known Quirks / Implementation Notes
 
 1. **Native amend is intentionally fail-closed**: `updateOrder()` supports only

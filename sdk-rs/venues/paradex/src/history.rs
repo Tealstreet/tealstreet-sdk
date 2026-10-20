@@ -15,7 +15,6 @@ pub struct Request {
     seen: HashSet<String>,
     page: u32,
     valid: bool,
-    received: usize,
     raw_rows: usize,
     fallback: bool,
     lookup_history: bool,
@@ -299,7 +298,6 @@ impl History {
             seen: HashSet::new(),
             page: 0,
             valid: true,
-            received: 0,
             raw_rows: 0,
             fallback: false,
             lookup_history: false,
@@ -447,7 +445,6 @@ impl History {
         }
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
-        request.received += 1;
         request.raw_rows += 1;
         if let Rows::Lookup(rows) = &mut request.rows {
             let Ok(row) = serde_json::from_str::<crate::account::NativeOrder>(item) else {
@@ -676,14 +673,12 @@ impl History {
                     return;
                 }
                 request.cursor = Some(next.clone());
-                request.received = 0;
                 self.issue(cx, account, request);
                 return;
             }
             request.open_complete = next.is_none();
             request.lookup_history = true;
             request.page = 0;
-            request.received = 0;
             request.cursor = None;
             request.cursors.clear();
             self.issue(cx, account, request);
@@ -713,8 +708,7 @@ impl History {
             _ => 50,
         };
         request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
-        if (request.received > 0 || matches!(request.query, Query::Fills { .. }))
-            && !filled_limit
+        if !filled_limit
             && !request.fallback
             && let Some(next) = next
         {
@@ -724,7 +718,6 @@ impl History {
             }
             if request.page < cap {
                 request.cursor = Some(next);
-                request.received = 0;
                 self.issue(cx, account, request);
                 return;
             }
