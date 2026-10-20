@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 
 const ACCOUNT = {
   accountType: 'UNIFIED',
@@ -47,3 +48,29 @@ it.each<ExchangeName>(['bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybi
     }
   },
 );
+
+it('frame-forwarding workers send balance.info to main when it changes, since frames carry none', () => {
+  const worker = new ExchangeWorker(
+    { postMessage: vi.fn() } as unknown as Worker,
+    'account',
+    'bybit',
+    { key: '', secret: '' },
+    {} as never,
+    {} as never,
+    'session',
+  );
+  const derive = (worker as unknown as { _derivedStorePayload: (data: unknown, force?: boolean) => Record<string, unknown> })
+    ._derivedStorePayload;
+  const store = new DefaultStore();
+  try {
+    expect(derive({ balance: { ...store.balance } })).not.toHaveProperty('balance');
+    const withInfo = { balance: { used: 1, free: 2, total: 3, upnl: 0, info: ACCOUNT } };
+    expect(derive(withInfo).balance).toEqual(withInfo.balance);
+    expect(derive(withInfo)).not.toHaveProperty('balance');
+    expect(derive(withInfo, true).balance).toEqual(withInfo.balance);
+    const changed = { balance: { ...withInfo.balance, info: { ...ACCOUNT, accountType: 'CONTRACT' } } };
+    expect(derive(changed).balance).toEqual(changed.balance);
+  } finally {
+    worker.dispose();
+  }
+});
