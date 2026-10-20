@@ -274,3 +274,11 @@ Merged-state checks: all-feature native Wasm check, TxFlow-only check, all
 TxFlow tests, full safe-cex typecheck, and 323/323 harness tests pass. Independent
 integration review accepted. Release rebuild and final replay/whole-workspace
 checks follow this commit; the interrupted pre-merge build is not gate evidence.
+
+Root typecheck (44 tasks), lint (28 tasks), bans, workspace formatting and
+workspace Clippy pass. Root tests exposed the old scaffold's mainnet/default
+transport snapshot; updated only the TxFlow entry to its testnet endpoints and
+installed account/public transport adapters. The focused characterization now
+passes. The full root suite and Rust workspace tests are running again.
+`KNOWN_TS_FIXES.txflow` documents paired fixes without normalizing replay output.
+The committed feature range passes the credential scan.

@@ -2179,40 +2179,52 @@ exports[`transport adapter selection per exchange > tealstreet-dex 1`] = `
 exports[`transport adapter selection per exchange > txflow 1`] = `
 {
   "private direct": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "private proxy+tunnel-JA": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "private proxy+tunnel-SG": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
   },
   "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
   },
   "private tunnel-only": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "public direct": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "public proxy+tunnel-JA": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "public proxy+tunnel-SG": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
   "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
   },
   "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
   },
   "public tunnel-only": {
-    "xhr": "default https://rpc.txflow.com",
+    "publicXhr": "how https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow-testnet.xyz",
+    "xhr": "how https://rpc.txflow-testnet.xyz",
   },
 }
 `;

@@ -151,6 +151,11 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // TxFlow previously rejected start as a scaffold. Its new TS reference and
+  // Rust implementation both fence stale reads, deduplicate executions, reject
+  // uncertain write acknowledgements and revalidate queued amendments. Compare
+  // both outputs directly; no TxFlow-specific normalization is permitted.
+  txflow: [],
   // Paired production fixes, compared without rewriting either replay result:
   // preserve full-depth incremental books; verify subscription acknowledgements;
   // fence polled candles against newer trades and reject older trade buckets;
