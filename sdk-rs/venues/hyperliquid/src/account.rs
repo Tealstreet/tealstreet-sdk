@@ -56,6 +56,12 @@ struct SettingBarrier {
     confirmed: bool,
 }
 
+struct PendingSpotCollateral {
+    balances: Vec<(String, f64, f64)>,
+    available: Option<f64>,
+    ws: bool,
+}
+
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
@@ -76,8 +82,10 @@ pub struct Account {
     spot_revision: u64,
     spot_authoritative_ws: bool,
     core_value: f64,
+    core_loaded: bool,
     core_used: f64,
     spot: Option<(f64, f64)>,
+    pending_spot: Option<PendingSpotCollateral>,
     authoritative: Option<(f64, f64, f64)>,
     state_revision: HashMap<String, u64>,
     settings_revision: u64,
@@ -106,6 +114,7 @@ pub struct Account {
     pub preplacements: VecDeque<Placement>,
     pub pending: HashMap<String, Placement>,
     pub builder_approved: Option<bool>,
+    valuation_warned: bool,
 }
 #[derive(Default, PartialEq, Eq)]
 enum Mode {
@@ -288,9 +297,14 @@ impl Hyperliquid {
                 );
             }
         }
-        cx.store.set_orders(Vec::new());
-        cx.store.set_positions(Vec::new());
-        cx.store.set_balance(Balance::default());
+        // Partial discovery may start real account reads, not an empty snapshot.
+        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
+            cx.store.set_orders(Vec::new());
+            cx.store.set_positions(Vec::new());
+        }
+        if self.options.public_data_only {
+            cx.store.set_balance(Balance::default());
+        }
         cx.store.set_hedged(false);
         let settings = cx
             .store
@@ -298,8 +312,9 @@ impl Hyperliquid {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                // HIP-3 assets get no activeAssetData, so this seed is what writes start from.
-                let isolated = self.isolated_only.contains(&m.symbol);
+                // HIP-3 assets get no activeAssetData, so this seed is what writes start from;
+                // TS writes every HIP-3 asset isolated.
+                let isolated = self.isolated_only.contains(&m.symbol) || m.id.contains(':');
                 (
                     i as u32,
                     MarketSetting {
@@ -515,6 +530,7 @@ impl Hyperliquid {
         if self.account.mode != Mode::Standard {
             self.refresh_spot(cx, true);
         }
+        self.live_balance(cx);
     }
     pub(crate) fn private_subscribe(&self, cx: &mut Cx<'_, Pending>) {
         if self.options.public_data_only || !self.account.mode_resolved || !self.connection.open {
@@ -813,6 +829,10 @@ impl Hyperliquid {
                     }
                     if let Some(order) = self.map_order(cx, &row) {
                         orders.push(order);
+                    } else if !self.excluded_coin(&row.coin) {
+                        *valid = false;
+                        cx.log(LogLevel::Warning,
+                            "Hyperliquid owned order has unavailable market metadata; preserving previous orders");
                     }
                 }
                 Err(_) => *valid = false,
@@ -1004,6 +1024,18 @@ impl Hyperliquid {
         authoritative: bool,
         settings_revision: Option<u64>,
     ) {
+        // Context discovery may be retrying. Unknown nonzero native ownership
+        // cannot become a successful empty/partial authoritative account scope.
+        // Rows TS hides by design (delisted, unquoted) are skipped, as in TS.
+        if state.asset_positions.iter().any(|row| {
+            row.position.szi != 0.0
+                && self.symbol(&row.position.coin).is_none()
+                && !self.excluded_coin(&row.position.coin)
+        }) {
+            cx.log(LogLevel::Error,
+                "Hyperliquid owned position has unavailable market metadata; preserving previous account snapshot");
+            return;
+        }
         let source_time = state.server_time.or(state.time);
         if (authoritative || !dex.is_empty())
             && let Some(time) = source_time
@@ -1130,6 +1162,7 @@ impl Hyperliquid {
                 .as_ref()
                 .or(state.cross_margin_summary.as_ref())
         {
+            self.account.core_loaded = true;
             self.account.core_value = summary.account_value
                 - cx.store
                     .positions()
@@ -1140,12 +1173,57 @@ impl Hyperliquid {
         }
         self.live_balance(cx);
     }
-    pub(crate) fn live_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.spot || self.user().is_none() || self.options.public_data_only {
-            return;
+    pub(crate) fn account_prices(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.store.loaded().balance || self.account.pending_spot.is_some() {
+            self.live_balance(cx);
         }
-        let upnl = cx
-            .store
+    }
+    fn collateral_values<'a>(
+        &self,
+        cx: &Cx<'_, Pending>,
+        balances: impl Iterator<Item = (&'a str, f64, f64)>,
+    ) -> Option<(f64, f64, bool)> {
+        let mut equity = 0.0;
+        let mut hold = 0.0;
+        let mut unvalued = false;
+        for (coin, total, held) in balances {
+            let price = if total == 0.0 && held == 0.0
+                || ["USDC", "USDT", "USD", "USDH"]
+                    .iter()
+                    .any(|stable| coin.eq_ignore_ascii_case(stable))
+            {
+                1.0
+            } else if let Some(symbol) = self.symbol(coin) {
+                let ticker = cx.store.ticker(symbol)?;
+                [ticker.mark, ticker.last]
+                    .into_iter()
+                    .find(|price| price.is_finite() && *price > 0.0)?
+            } else if self.core_discovery_incomplete {
+                return None;
+            } else {
+                // Perp mode has no spot meta: tokens like UBTC have no valuation market.
+                unvalued = true;
+                continue;
+            };
+            equity += total * price;
+            hold += held * price;
+            if !equity.is_finite() || !hold.is_finite() {
+                return None;
+            }
+        }
+        Some((equity, hold, unvalued))
+    }
+    fn warn_unvalued(&mut self, cx: &mut Cx<'_, Pending>, unvalued: bool) {
+        if unvalued && !self.account.valuation_warned {
+            self.account.valuation_warned = true;
+            cx.log(
+                LogLevel::Warning,
+                "Hyperliquid collateral token has no valuation market; excluded from USD balance",
+            );
+        }
+    }
+    fn current_upnl(&self, cx: &Cx<'_, Pending>) -> f64 {
+        cx.store
             .positions()
             .iter()
             .map(|p| {
@@ -1162,7 +1240,54 @@ impl Hyperliquid {
                             }
                     })
             })
-            .sum();
+            .sum()
+    }
+    fn commit_collateral(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        equity: f64,
+        hold: f64,
+        available: Option<f64>,
+        ws: bool,
+    ) {
+        self.account.spot = Some((equity, hold));
+        if let Some(free) = available {
+            self.account.authoritative =
+                Some((equity - self.current_upnl(cx), equity - free, free));
+            if ws {
+                self.account.spot_authoritative_ws = true;
+            }
+        }
+    }
+    pub(crate) fn live_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot
+            || self.user().is_none()
+            || self.options.public_data_only
+            || !self.account.mode_resolved
+            || !self.account.core_loaded
+        {
+            return;
+        }
+        if let Some(pending) = self.account.pending_spot.as_ref() {
+            let Some((equity, hold, unvalued)) = self.collateral_values(
+                cx,
+                pending
+                    .balances
+                    .iter()
+                    .map(|(coin, total, hold)| (coin.as_str(), *total, *hold)),
+            ) else {
+                return;
+            };
+            let available = pending.available;
+            let ws = pending.ws;
+            self.account.pending_spot = None;
+            self.warn_unvalued(cx, unvalued);
+            self.commit_collateral(cx, equity, hold, available, ws);
+        }
+        if self.account.mode != Mode::Standard && self.account.spot.is_none() {
+            return;
+        }
+        let upnl = self.current_upnl(cx);
         let balance = if self.account.mode != Mode::Standard
             && let Some((equity, hold)) = self.account.spot
         {
@@ -1244,6 +1369,14 @@ impl Hyperliquid {
                     .and_then(|symbol| cx.store.market(symbol))
                     .map_or(b.coin.as_ref(), |m| m.base.as_str());
                 let price = self.spot_price(cx, coin, &mut valuation_path);
+                if self.core_discovery_incomplete
+                    && (b.total != 0.0 || b.hold != 0.0)
+                    && (!price.is_finite() || price <= 0.0)
+                {
+                    cx.log(LogLevel::Error,
+                        "Hyperliquid owned spot balance has unavailable valuation; preserving previous account snapshot");
+                    return;
+                }
                 let free = (b.total - b.hold).max(0.0);
                 balance.total += b.total * price;
                 balance.used += b.hold * price;
@@ -1277,28 +1410,45 @@ impl Hyperliquid {
         if self.account.spot_authoritative_ws && (!ws || available.is_none()) {
             return;
         }
-        let mut equity = 0.0;
-        let mut hold = 0.0;
-        for b in &state.balances {
-            let price = if ["USDC", "USDT", "USD", "USDH"].contains(&b.coin.as_ref()) {
-                1.0
-            } else {
-                self.symbol(&b.coin)
-                    .and_then(|s| cx.store.ticker(s))
-                    .map_or(0.0, |t| if t.mark > 0.0 { t.mark } else { t.last })
-            };
-            equity += b.total * price;
-            hold += b.hold * price;
-        }
-        self.account.spot = Some((equity, hold));
         self.account.spot_revision += 1;
-        if let Some(free) = available {
-            self.account.authoritative =
-                Some((equity - cx.store.balance().upnl, equity - free, free));
-            if ws {
+        let values = self
+            .account
+            .core_loaded
+            .then(|| {
+                self.collateral_values(
+                    cx,
+                    state
+                        .balances
+                        .iter()
+                        .map(|balance| (balance.coin.as_ref(), balance.total, balance.hold)),
+                )
+            })
+            .flatten();
+        let Some((equity, hold, unvalued)) = values else {
+            if self.account.pending_spot.is_none() {
+                cx.log(
+                    LogLevel::Warning,
+                    "Hyperliquid collateral valuation unavailable; retaining previous USD balance",
+                );
+            }
+            self.account.pending_spot = Some(PendingSpotCollateral {
+                balances: state
+                    .balances
+                    .iter()
+                    .map(|balance| (balance.coin.to_string(), balance.total, balance.hold))
+                    .collect(),
+                available,
+                ws,
+            });
+            // An unpriced live snapshot still supersedes an older REST read.
+            if ws && available.is_some() {
                 self.account.spot_authoritative_ws = true;
             }
-        }
+            return;
+        };
+        self.account.pending_spot = None;
+        self.warn_unvalued(cx, unvalued);
+        self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
     }
     pub(crate) fn map_order(&self, cx: &Cx<'_, Pending>, row: &OrderRow<'_>) -> Option<Order> {

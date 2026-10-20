@@ -142,7 +142,7 @@ pub struct Lighter {
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
-    ticker_retry_at: f64,
+    startup: safe_cex_engine::startup::Backoff<bool>,
     poll: Option<TimerId>,
 }
 pub fn interval_ms(interval: &str) -> Option<f64> {
@@ -176,7 +176,7 @@ impl Lighter {
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
-            ticker_retry_at: 0.0,
+            startup: Default::default(),
             poll: None,
         }
     }
@@ -254,7 +254,7 @@ impl Lighter {
         }
     }
     fn ticker_seed(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.ticker_in_flight || cx.now < self.ticker_retry_at {
+        if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
         self.ticker_in_flight = true;
@@ -585,9 +585,10 @@ impl Lighter {
             Pending::Markets {
                 fallback: false, ..
             } => self.markets(cx, true),
+            Pending::Markets { fallback: true, .. } => self.startup.failed(cx, true),
             Pending::Tickers { .. } => {
                 self.ticker_in_flight = false;
-                self.ticker_retry_at = cx.now + 3_000.0;
+                self.startup.failed(cx, false);
             }
             Pending::Depth {
                 symbol, generation, ..
@@ -618,7 +619,6 @@ impl Lighter {
                     s.in_flight = false;
                 }
             }
-            _ => cx.log(LogLevel::Error, error),
         }
     }
 }
@@ -846,104 +846,102 @@ impl Venue for Lighter {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Markets {
-                rows,
-                metadata,
-                failed,
-                ..
-            } => match serde_json::from_str::<Instrument<'_>>(item) {
-                Ok(m) => {
-                    if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
-                        return;
-                    }
-                    let size = m
-                        .supported_size_decimals
-                        .filter(|n| *n >= 0.0)
-                        .unwrap_or(3.0) as u32;
-                    let price = m
-                        .supported_price_decimals
-                        .filter(|n| *n >= 0.0)
-                        .unwrap_or(2.0) as u32;
-                    if size > 18
-                        || price > 18
-                        || m.market_id < 0.0
-                        || m.market_id > 32767.0
-                        || m.market_id == 255.0
-                        || m.market_id.fract() != 0.0
-                    {
-                        *failed = true;
-                        return;
-                    }
-                    let fraction = m
-                        .min_initial_margin_fraction
-                        .or(m.default_initial_margin_fraction)
-                        .unwrap_or(0.0);
-                    let (base, quote) = if let Some((b, q)) = m.symbol.split_once('/') {
-                        (
-                            b,
-                            q.split('/')
-                                .next()
-                                .filter(|q| !q.is_empty())
-                                .unwrap_or(self.quote()),
-                        )
-                    } else if let Some(q) = ["USDT", "USDC", "USDG"]
-                        .into_iter()
-                        .find(|q| m.symbol.ends_with(q))
-                    {
-                        (&m.symbol[..m.symbol.len() - q.len()], q)
-                    } else {
-                        (m.symbol.as_ref(), self.quote())
-                    };
-                    let symbol = m.symbol.to_string();
-                    metadata.insert(
-                        symbol.clone(),
-                        MarketMeta {
-                            size_decimals: size,
-                            price_decimals: price,
-                            min_quote: m.min_quote_amount,
-                            margin_mode: m.market_config.map_or(0, |m| m.market_margin_mode),
-                            initial_margin_fraction: fraction / 10000.0,
-                            maintenance_margin_fraction: m.maintenance_margin_fraction / 10000.0,
-                        },
-                    );
-                    rows.push(Market {
-                        id: format!("{:.0}", m.market_id),
-                        symbol: symbol.clone(),
-                        base: base.into(),
-                        quote: quote.into(),
-                        pretty_symbol: None,
-                        active: true,
-                        precision: Precision {
-                            amount: 10_f64.powi(-(size as i32)),
-                            price: 10_f64.powi(-(price as i32)),
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.min_base_amount,
-                                max: m.order_quote_limit.unwrap_or(1_000_000.0),
+            Pending::Markets { rows, metadata, .. } => {
+                match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(m) => {
+                        if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
+                            return;
+                        }
+                        let size = m
+                            .supported_size_decimals
+                            .filter(|n| *n >= 0.0)
+                            .unwrap_or(3.0) as u32;
+                        let price = m
+                            .supported_price_decimals
+                            .filter(|n| *n >= 0.0)
+                            .unwrap_or(2.0) as u32;
+                        if size > 18
+                            || price > 18
+                            || m.market_id < 0.0
+                            || m.market_id > 32767.0
+                            || m.market_id == 255.0
+                            || m.market_id.fract() != 0.0
+                        {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            return;
+                        }
+                        let fraction = m
+                            .min_initial_margin_fraction
+                            .or(m.default_initial_margin_fraction)
+                            .unwrap_or(0.0);
+                        let (base, quote) = if let Some((b, q)) = m.symbol.split_once('/') {
+                            (
+                                b,
+                                q.split('/')
+                                    .next()
+                                    .filter(|q| !q.is_empty())
+                                    .unwrap_or(self.quote()),
+                            )
+                        } else if let Some(q) = ["USDT", "USDC", "USDG"]
+                            .into_iter()
+                            .find(|q| m.symbol.ends_with(q))
+                        {
+                            (&m.symbol[..m.symbol.len() - q.len()], q)
+                        } else {
+                            (m.symbol.as_ref(), self.quote())
+                        };
+                        let symbol = m.symbol.to_string();
+                        metadata.insert(
+                            symbol.clone(),
+                            MarketMeta {
+                                size_decimals: size,
+                                price_decimals: price,
+                                min_quote: m.min_quote_amount,
+                                margin_mode: m.market_config.map_or(0, |m| m.market_margin_mode),
+                                initial_margin_fraction: fraction / 10000.0,
+                                maintenance_margin_fraction: m.maintenance_margin_fraction
+                                    / 10000.0,
                             },
-                            leverage: MinMax {
-                                min: 1.0,
-                                max: if fraction > 0.0 {
-                                    10_000.0 / fraction
-                                } else {
-                                    50.0
+                        );
+                        rows.push(Market {
+                            id: format!("{:.0}", m.market_id),
+                            symbol: symbol.clone(),
+                            base: base.into(),
+                            quote: quote.into(),
+                            pretty_symbol: None,
+                            active: true,
+                            precision: Precision {
+                                amount: 10_f64.powi(-(size as i32)),
+                                price: 10_f64.powi(-(price as i32)),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: m.min_base_amount,
+                                    max: m.order_quote_limit.unwrap_or(1_000_000.0),
                                 },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: if fraction > 0.0 {
+                                        10_000.0 / fraction
+                                    } else {
+                                        50.0
+                                    },
+                                },
+                                price: None,
                             },
-                            price: None,
-                        },
-                        contract_size: None,
-                        is_expiring: Some(false),
-                        is_inverse: None,
-                        is_spot: Some(false),
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    });
+                            contract_size: None,
+                            is_expiring: Some(false),
+                            is_inverse: None,
+                            is_spot: Some(false),
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
+                    }
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
-                Err(_) => *failed = true,
-            },
+            }
             Pending::Tickers { rows, failed, .. } => {
                 match serde_json::from_str::<Stats<'_>>(item) {
                     Ok(stats) => {
@@ -998,9 +996,15 @@ impl Venue for Lighter {
                                 ticker.percentage = v;
                             }
                             rows.push((symbol.into(), ticker));
+                        } else {
+                            *failed = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                         }
                     }
-                    Err(_) => *failed = true,
+                    Err(_) => {
+                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
             }
             Pending::Candles { rows, failed, .. } => {
@@ -1058,6 +1062,7 @@ impl Venue for Lighter {
                     );
                     return;
                 }
+                self.startup.succeeded(cx, &true);
                 self.symbols = rows
                     .iter()
                     .map(|m| (m.id.clone(), m.symbol.clone()))
@@ -1083,12 +1088,14 @@ impl Venue for Lighter {
                 revision,
             } => {
                 self.ticker_in_flight = false;
-                self.ticker_retry_at = cx.now + 3_000.0;
-                if !failed {
-                    for (symbol, ticker) in rows {
-                        if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
-                            cx.store.update_ticker(&symbol, |t| *t = ticker);
-                        }
+                if failed && rows.is_empty() {
+                    self.startup.failed(cx, false);
+                    return;
+                }
+                self.startup.succeeded(cx, &false);
+                for (symbol, ticker) in rows {
+                    if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
+                        cx.store.update_ticker(&symbol, |t| *t = ticker);
                     }
                 }
             }
@@ -1203,6 +1210,14 @@ impl Venue for Lighter {
         self.public_failed(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(markets) = self.startup.on_timer(timer) {
+            if markets {
+                self.markets(cx, false);
+            } else {
+                self.ticker_seed(cx);
+            }
+            return;
+        }
         if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
             return;
         }

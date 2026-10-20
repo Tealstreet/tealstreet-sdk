@@ -9,6 +9,7 @@ import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 const running: RustEngineExchange[] = [];
 
@@ -52,7 +53,10 @@ const fixture = (capabilities: Partial<EngineCapabilities>) => {
       return engine;
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
-  const exchange = new RustEngineExchange('woo', { key: 'key', secret: 'secret' }, new DefaultStore());
+  const store = new DefaultStore();
+  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  installNativeStartupFrames(engine, store);
+  const exchange = new RustEngineExchange('woo', { key: 'key', secret: 'secret' }, store);
   running.push(exchange);
   return { exchange, commands, started };
 };

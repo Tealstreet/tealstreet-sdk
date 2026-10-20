@@ -120,7 +120,10 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(
       consumerFrame(data, undefined, events, symbols),
     );
-  const ready = (privateReady = false) => deliver({ markets, tickers, loaded: flags(true, privateReady) });
+  // Private readiness needs decoded account sections as well as STATUS flags.
+  const account = { balance: { used: 0, free: 0, total: 0, upnl: 0 }, orders: [], positions: [] };
+  const ready = (privateReady = false) =>
+    deliver({ markets, tickers, ...(privateReady ? account : {}), loaded: flags(true, privateReady) });
   return {
     exchange,
     commands,

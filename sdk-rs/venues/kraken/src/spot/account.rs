@@ -49,6 +49,8 @@ pub struct Account {
     poll: Option<TimerId>,
     orders_throttle: Option<TimerId>,
     started: bool,
+    wallet_valuation_pending: bool,
+    wallet_valuation_warnings: u8,
 }
 #[derive(Deserialize)]
 struct RestOrder<'a> {
@@ -370,6 +372,86 @@ impl KrakenSpot {
         ));
         true
     }
+    // Private balances can arrive before the first public quote seed. Revalue
+    // those retained native holdings once, without changing later poll cadence.
+    pub(super) fn revalue_pending_balances(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.wallet_valuation_pending {
+            return;
+        }
+        let Some(currencies) = cx.store.currency_balances() else {
+            return;
+        };
+        let mut total = 0.0;
+        let mut missing = false;
+        let mut unsupported = false;
+        let mut wanted = Vec::new();
+        for holding in currencies {
+            let rate = if matches!(holding.currency.as_str(), "USD" | "USDT" | "USDC") {
+                Some(1.0)
+            } else {
+                let mut supported = false;
+                let rate = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .filter_map(|market| {
+                        if market.base != holding.currency
+                            || !matches!(market.quote.as_str(), "USD" | "USDT" | "USDC")
+                        {
+                            return None;
+                        }
+                        supported = true;
+                        cx.store
+                            .ticker(&market.symbol)
+                            .map(|ticker| ticker.last)
+                            .filter(|last| last.is_finite() && *last > 0.0)
+                    })
+                    .next();
+                if rate.is_none() {
+                    if supported || self.catalogue_incomplete {
+                        // A rejected catalogue peer may be this funded asset's
+                        // missing conversion route; absence is not dust proof.
+                        missing = true;
+                        wanted.push(holding.currency.clone());
+                    } else {
+                        unsupported = true;
+                    }
+                }
+                rate
+            };
+            if let Some(rate) = rate {
+                total += holding.balance.total * rate;
+            }
+        }
+        for base in &wanted {
+            cx.store.want_ticker_for_base(base);
+        }
+        // Each warning repeats only after its condition has cleared.
+        if !unsupported {
+            self.account.wallet_valuation_warnings &= !2;
+        }
+        if unsupported && self.account.wallet_valuation_warnings & 2 == 0 {
+            self.account.wallet_valuation_warnings |= 2;
+            cx.log(LogLevel::Warning,
+                "Kraken Spot wallet retains unpriced native currency without a supported USD market");
+        }
+        if missing || !total.is_finite() {
+            if self.account.wallet_valuation_warnings & 1 == 0 {
+                self.account.wallet_valuation_warnings |= 1;
+                cx.log(LogLevel::Warning,
+                    "Kraken Spot USD wallet valuation awaits a valid quote; retaining native quantities and prior USD balance");
+            }
+            return;
+        }
+        self.account.wallet_valuation_pending = false;
+        self.account.wallet_valuation_warnings &= !1;
+        cx.store.set_balance(Balance {
+            total,
+            free: total,
+            used: 0.0,
+            upnl: 0.0,
+        });
+    }
     fn balance_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -377,49 +459,26 @@ impl KrakenSpot {
         revision: u64,
     ) -> Result<(), String> {
         let mut currencies = vec![];
-        let mut total = 0.;
         map_each::<Amount>(text, |raw, amount| {
             let amount = amount.0;
             if amount <= 0. || raw.contains('.') {
                 return;
             }
-            let asset = asset(&raw);
-            let rate = if matches!(asset, "USD" | "USDT" | "USDC") {
-                1.
-            } else {
-                cx.store
-                    .tickers()
-                    .iter()
-                    .find(|t| {
-                        cx.store.market(&t.symbol).is_some_and(|m| {
-                            m.base == asset && matches!(m.quote.as_str(), "USD" | "USDT")
-                        })
-                    })
-                    .map_or(0., |t| t.last.max(0.))
-            };
-            total += amount * rate;
             currencies.push(CurrencyBalance {
-                currency: asset.into(),
+                currency: asset(&raw).into(),
                 balance: Balance {
                     total: amount,
                     free: amount,
-                    used: 0.,
-                    upnl: 0.,
+                    used: 0.0,
+                    upnl: 0.0,
                 },
             });
         })
         .map_err(|_| "Kraken Spot invalid balance")?;
-        if !total.is_finite() {
-            return Err("Kraken Spot invalid balance total".into());
-        }
         if revision == self.account.balance_revision {
-            cx.store.set_balance(Balance {
-                total,
-                free: total,
-                used: 0.,
-                upnl: 0.,
-            });
             cx.store.set_currency_balances(currencies);
+            self.account.wallet_valuation_pending = true;
+            self.revalue_pending_balances(cx);
         }
         Ok(())
     }

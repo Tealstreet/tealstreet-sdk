@@ -13,6 +13,7 @@ import { DefaultStore } from '../../store/store.base';
 import { LogSeverity, OrderSide, OrderType } from '../../types';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 type NativeCommand = { op: string; command?: number; [field: string]: unknown };
 type Action = { op: string; [field: string]: unknown };
@@ -61,12 +62,14 @@ async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOp
       commands.push(command);
       return JSON.stringify(handler(command));
     },
-    takeFrame: () =>
-      new Uint8Array(
-        consumerFrame({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } }),
-      ),
+    takeFrame: () => undefined,
     snapshotFrame: () => new Uint8Array(consumerFrame({ markets: [], tickers: [] })),
   };
+  const store = new DefaultStore();
+  // Startup readiness needs decoded native market/ticker sections, not bare STATUS flags.
+  installNativeStartupFrames(native, store, () => ({
+    loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+  }));
   setWasmEngineLoader(async () => ({
     WasmEngine: function () {
       return native;
@@ -87,7 +90,7 @@ async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOp
   const exchange = new RustEngineExchange(
     name,
     { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging: false }, ...options },
-    new DefaultStore(),
+    store,
   );
   accounts.push(exchange);
   const errors = vi.fn();

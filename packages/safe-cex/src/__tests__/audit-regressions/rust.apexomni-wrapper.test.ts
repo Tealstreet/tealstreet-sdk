@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
@@ -60,6 +61,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new DefaultStore();
+  installNativeStartupFrames(engine, store, () => ({ loaded: nativeLoaded }));
   store.update({
     markets: [MARKET],
     loaded: { ...nativeLoaded },
