@@ -523,3 +523,31 @@ Hyperliquid/GRVT/OKX's full account, so resync remains a separate completion-awa
 venue operation. Phase 6b must add classified native credential evidence;
 reflecting manual Base auth-streak mutations alone would not establish actual
 credential backoff. No body/log regex or signed-header inference is planned.
+
+## Phase 6a scheduling foundation plan and audit
+
+- Engine owns an explicit periodic-poll timer registry. `Cx::set_poll_timer`
+  keeps the logical TimerId expected by venue handlers; a bounded variant keeps
+  explicit retry/rate floors. Physical host IDs change on policy replacement so
+  queued stale callbacks cannot execute the newly scheduled logical timer.
+- Apply valid TickIntervalChanged policy centrally before the legacy venue
+  hook. Finite positive values replace fallback cadence; Infinity retains
+  logical registrations while removing physical timers. Invalid updates leave
+  policy unchanged. `clear_timer` removes paused and active registrations.
+  Consume a registration before dispatching its logical callback; asynchronous
+  completion rearms against current policy. Ordinary timers remain unchanged.
+- Enable the existing polling-control decoder for every WASM venue selection.
+  Preserve distinct fallback cadence, absolute cooldown and minimum-backoff
+  floors. Do not treat every native default as a minimum (which would ignore a
+  faster policy), or overwrite backoff with a faster configured cadence.
+- This first slice touches core/host feature plumbing and deterministic core
+  regressions. Venue registration and SDK initialization/update propagation
+  follow after independent review; it does not yet claim all venue polling is
+  fixed. Retain heartbeats, socket recovery, metadata periods, post-write repair,
+  valuation and in-flight deadlines. OKX's valuation/GC timer is not REST
+  polling. Breakout's public-only poll must register even when initially paused.
+- Verify pause at registration, update/resume with fresh physical ID, queued old
+  callbacks, clear while paused, multiple polls, floor preservation, in-flight
+  completion after policy change and unaffected ordinary timers. Run core/native
+  and wasm32 strict checks, parser feature tests and independent review before
+  the foundation commit. No resync/network-completion claim in this slice.
