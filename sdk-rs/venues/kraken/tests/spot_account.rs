@@ -339,3 +339,22 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
         })
     )));
 }
+
+#[test]
+fn both_legacy_dogecoin_balance_codes_value_against_the_canonical_market_asset() {
+    for asset in ["XDG", "XXDG"] {
+        let balance = format!(r#"{{"error":[],"result":{{"ZUSD":"50","{asset}":"100"}}}}"#);
+        let (e, _, _) = ready_with_payloads(false, DOGE_META, DOGE_TICKERS, &balance);
+        assert_eq!(e.store().balance().total, 65.);
+        let currency = e
+            .store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == "DOGE")
+            .unwrap();
+        assert_eq!(currency.balance.total, 100.);
+        assert_eq!(currency.balance.free, 100.);
+        assert_eq!(e.store().market("XDG/USD").unwrap().base, "DOGE");
+    }
+}

@@ -207,3 +207,56 @@ fn missing_credentials_automatically_select_public_only_like_ts() {
         e.store().loaded().balance && e.store().loaded().orders && e.store().loaded().positions
     );
 }
+
+#[test]
+fn dogecoin_rest_identity_is_preserved_while_v2_ticker_and_book_use_doge() {
+    let (mut e, s, _) = ready_with_payloads(true, DOGE_META, DOGE_TICKERS, BALANCE);
+    for quote in ["USD", "USDT", "USDC"] {
+        let symbol = format!("XDG/{quote}");
+        let market = e.store().market(&symbol).unwrap();
+        assert_eq!(market.base, "DOGE");
+        assert_eq!(market.id, format!("DOGE/{quote}"));
+        assert!(e.store().market(&format!("DOGE/{quote}")).is_none());
+    }
+    e.handle(NOW, Event::WsOpened { socket: s });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let subscription = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("ticker") => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    for quote in ["USD", "USDT", "USDC"] {
+        assert!(subscription.contains(&format!("DOGE/{quote}")));
+        assert!(!subscription.contains(&format!("XDG/{quote}")));
+    }
+    e.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "XDG/USD".into(),
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a|matches!(a,Action::WsSend{text,..}if text.contains("book")&&text.contains("DOGE/USD")&&!text.contains("XDG/USD"))));
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"ticker","type":"update","data":[{"symbol":"DOGE/USD","last":0.16,"bid":0.159},{"symbol":"DOGE/USDT","last":0.161},{"symbol":"DOGE/USDC","last":0.162}]}"#,
+    );
+    assert_eq!(e.store().ticker("XDG/USD").unwrap().mark, 0.16);
+    assert_eq!(e.store().ticker("XDG/USDT").unwrap().last, 0.161);
+    assert_eq!(e.store().ticker("XDG/USDC").unwrap().last, 0.162);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"book","type":"snapshot","data":[{"symbol":"DOGE/USD","bids":[{"price":0.159,"qty":100}],"asks":[{"price":0.161,"qty":200}]}]}"#,
+    );
+    assert_eq!(e.venue().book("XDG/USD").unwrap().best_bid(), Some(0.159));
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"book","type":"update","data":[{"symbol":"DOGE/USD","bids":[{"price":0.159,"qty":0},{"price":0.16,"qty":120}]}]}"#,
+    );
+    assert_eq!(e.venue().book("XDG/USD").unwrap().bids(), &[(0.16, 120.)]);
+}

@@ -42,6 +42,14 @@ pub fn message(e: &mut Engine<KrakenSpot>, s: SocketId, text: &str) {
     e.handle(NOW, Event::WsMessage { socket: s, text });
 }
 pub fn ready(public: bool) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
+    ready_with_payloads(public, META, TICKERS, BALANCE)
+}
+pub fn ready_with_payloads(
+    public: bool,
+    meta: &str,
+    tickers: &str,
+    balance: &str,
+) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
     let mut opts = options();
     opts.public_data_only = public;
     let mut e = Engine::new(KrakenSpot::new(opts));
@@ -57,11 +65,11 @@ pub fn ready(public: bool) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
             match a {
                 Action::Http(r) => {
                     let body = if r.url.ends_with("AssetPairs") {
-                        META
+                        meta
                     } else if r.url.ends_with("Ticker") {
-                        TICKERS
+                        tickers
                     } else if r.url.ends_with("Balance") {
-                        BALANCE
+                        balance
                     } else if r.url.ends_with("OpenOrders") {
                         OPEN
                     } else if r.url.ends_with("GetWebSocketsToken") {
@@ -87,3 +95,7 @@ pub fn ready(public: bool) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
     }
     (e, pubsocket.unwrap(), private)
 }
+
+// AssetPairs REST identities are legacy XDG; WS v2 uses DOGE in every quote currency.
+pub const DOGE_META: &str = r#"{"error":[],"result":{"XXDGZUSD":{"altname":"XDGUSD","wsname":"XDG/USD","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"},"XDGUSDT":{"altname":"XDGUSDT","wsname":"XDG/USDT","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"},"XDGUSDC":{"altname":"XDGUSDC","wsname":"XDG/USDC","pair_decimals":5,"lot_decimals":8,"ordermin":"13","status":"online"}}}"#;
+pub const DOGE_TICKERS: &str = r#"{"error":[],"result":{"XXDGZUSD":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"},"XDGUSDT":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"},"XDGUSDC":{"a":["0.151","100","100"],"b":["0.149","100","100"],"c":["0.15","100"],"v":["1000","2000"],"o":"0.14"}}}"#;

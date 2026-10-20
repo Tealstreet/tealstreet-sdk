@@ -149,6 +149,7 @@ pub fn interval(tf: &str) -> Option<u32> {
 pub fn asset(a: &str) -> &str {
     match a {
         "XBT" | "XXBT" => "BTC",
+        "XDG" | "XXDG" => "DOGE",
         "XETH" => "ETH",
         "XXRP" => "XRP",
         "XLTC" => "LTC",
