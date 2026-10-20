@@ -584,3 +584,30 @@ fn all_undecodable_ticker_rows_retry_startup() {
     reply(&mut e, &request, &envelope(TICKER), 1_003.0);
     assert!(e.store().loaded().tickers);
 }
+
+#[test]
+fn null_live_price_fields_keep_the_last_good_values() {
+    let (mut e, socket, _) = public(Options::default());
+    for message in [
+        r#"{"arg":{"channel":"index-tickers"},"data":[{"instId":"BTC-USDT","idxPx":"16"}]}"#,
+        r#"{"arg":{"channel":"funding-rate"},"data":[{"instId":"BTC-USDT-SWAP","fundingRate":"0.002","fundingTime":"1800"}]}"#,
+        r#"{"arg":{"channel":"open-interest"},"data":[{"instId":"BTC-USDT-SWAP","oiCcy":"17"}]}"#,
+        r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":null}]}"#,
+        r#"{"arg":{"channel":"index-tickers"},"data":[{"instId":"BTC-USDT","idxPx":null}]}"#,
+        r#"{"arg":{"channel":"funding-rate"},"data":[{"instId":"BTC-USDT-SWAP","fundingRate":null,"fundingTime":null}]}"#,
+        r#"{"arg":{"channel":"open-interest"},"data":[{"instId":"BTC-USDT-SWAP","oiCcy":null}]}"#,
+    ] {
+        ws(&mut e, socket, message);
+    }
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(
+        (
+            t.mark,
+            t.index,
+            t.funding_rate,
+            t.funding_time,
+            t.open_interest
+        ),
+        (40000.0, 16.0, 0.002, 1800.0, 17.0)
+    );
+}

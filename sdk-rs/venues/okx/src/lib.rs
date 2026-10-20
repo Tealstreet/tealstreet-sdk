@@ -603,12 +603,19 @@ impl Okx {
                         t.volume = num::parse(p.vol_ccy24h);
                         t.quote_volume = num::parse(p.vol24h);
                     }
-                    "mark-price" => t.mark = num::parse(p.mark_px),
-                    "index-tickers" => t.index = num::parse(p.idx_px),
-                    "open-interest" => t.open_interest = num::parse(p.oi_ccy),
+                    // A blank or null live value keeps the last good one.
+                    "mark-price" if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                    "index-tickers" if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                    "open-interest" if !p.oi_ccy.is_empty() => {
+                        t.open_interest = num::parse(p.oi_ccy)
+                    }
                     "funding-rate" => {
-                        t.funding_rate = num::parse(p.funding_rate);
-                        t.funding_time = num::parse(p.funding_time);
+                        if !p.funding_rate.is_empty() {
+                            t.funding_rate = num::parse(p.funding_rate);
+                        }
+                        if !p.funding_time.is_empty() {
+                            t.funding_time = num::parse(p.funding_time);
+                        }
                     }
                     _ => {}
                 });
@@ -738,13 +745,19 @@ impl Venue for Okx {
                 skipped,
             } => match serde_json::from_str::<wire::Instrument<'_>>(item) {
                 Ok(m) => {
-                    if !matches!(m.ct_type, "linear" | "inverse")
+                    if (!m.ct_type.is_empty() && !matches!(m.ct_type, "linear" | "inverse"))
                         || (!m.inst_type.is_empty() && m.inst_type != kind.as_str())
-                        || (*kind == InstrumentType::Futures && m.rule_type != "xperp")
+                        || (*kind == InstrumentType::Futures
+                            && !m.rule_type.is_empty()
+                            && m.rule_type != "xperp")
                     {
                         return;
                     }
-                    if m.inst_type.is_empty() {
+                    // A blank or null classifier is malformed, not a different product.
+                    if m.inst_type.is_empty()
+                        || m.ct_type.is_empty()
+                        || (*kind == InstrumentType::Futures && m.rule_type.is_empty())
+                    {
                         *skipped += 1;
                         self.skipped_instruments.insert(m.inst_id.into());
                         return;

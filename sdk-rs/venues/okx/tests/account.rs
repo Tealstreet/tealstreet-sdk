@@ -553,6 +553,15 @@ fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
 
 #[test]
 fn undecodable_instrument_row_still_reports_its_exposure() {
+    for bad in [
+        r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":1}"#,
+        r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":null,"ctVal":"1"}"#,
+    ] {
+        reports_exposure_on_malformed_instrument(bad);
+    }
+}
+
+fn reports_exposure_on_malformed_instrument(bad: &str) {
     let mut e = Engine::new(Okx::new(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
@@ -561,7 +570,6 @@ fn undecodable_instrument_row_still_reports_its_exposure() {
     }));
     e.start(0.0);
     let a = actions(&mut e).remove(0);
-    let bad = r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":1}"#;
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     let a = actions(&mut e)
         .into_iter()
