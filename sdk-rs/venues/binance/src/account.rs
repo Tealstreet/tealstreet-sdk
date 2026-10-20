@@ -11,7 +11,7 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
@@ -27,6 +27,8 @@ const POSITION_REPAIR_THROTTLE_MS: f64 = 10_000.0;
 /// Order events trigger a full REST order snapshot this long after the last one.
 const ORDERS_REFRESH_DEBOUNCE_MS: f64 = 10_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
+/// Retain execution identities across reconnects without an unbounded event log.
+const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
 
 pub enum Request {
@@ -68,6 +70,7 @@ struct OrdersJoin {
     generation: u32,
     version: u32,
     native_orders: Vec<(String, String, u64, f64)>,
+    native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
     failed: bool,
@@ -88,6 +91,12 @@ pub struct AccountState {
     account_version: u32,
     spot_balances: HashMap<String, (f64, f64)>,
     native_executed: HashMap<(String, u64), (f64, bool)>,
+    derivative_trades: HashSet<(String, u64, i64)>,
+    derivative_trade_order: VecDeque<(String, u64, i64)>,
+    derivative_fill_watermarks: HashMap<(String, u64), f64>,
+    terminal_algo_ids: HashSet<String>,
+    strategy_client_native: HashMap<(String, String), u64>,
+    terminal_strategies: HashSet<(String, u64)>,
     unquantified_cancels: HashSet<(String, u64)>,
     spot_client_native: HashMap<(String, String), u64>,
     spot_subscribe_id: Option<String>,
@@ -333,6 +342,7 @@ impl BinanceFutures {
             generation,
             version: self.account.order_version,
             native_orders: Vec::new(),
+            native_strategies: Vec::new(),
             regular: None,
             algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
             failed: false,
@@ -788,9 +798,7 @@ impl BinanceFutures {
                         (Some(client), true) => client.to_string(),
                         _ => o.order_id.to_string(),
                     };
-                    if self.is_spot() || self.is_inverse() {
-                        native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
-                    }
+                    native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
                     orders.push(Order {
                         id,
                         parent_id: None,
@@ -845,12 +853,20 @@ impl BinanceFutures {
             Request::OpenAlgoOrders { generation } if self.options.portfolio_margin => {
                 let now = cx.now;
                 let mut orders = Vec::new();
+                let mut native_strategies = Vec::new();
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let Some(kind) = order_type(&o.strategy_type) else {
                         return;
                     };
                     let price = opt(&o.price);
                     let amount = opt(&o.orig_qty);
+                    if let Some(native) = o.strategy_id {
+                        native_strategies.push((
+                            o.symbol.to_string(),
+                            o.new_client_strategy_id.to_string(),
+                            native,
+                        ));
+                    }
                     orders.push(Order {
                         id: o.new_client_strategy_id.into_owned(),
                         parent_id: None,
@@ -881,7 +897,10 @@ impl BinanceFutures {
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => join.algo = Some(orders),
+                        Ok(()) => {
+                            join.algo = Some(orders);
+                            join.native_strategies = native_strategies;
+                        }
                         Err(_) => join.failed = true,
                     }
                 }
@@ -986,6 +1005,33 @@ impl BinanceFutures {
         }
     }
 
+    pub(crate) fn client_order_row_is_foreign(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        client: &str,
+    ) -> bool {
+        cx.store
+            .order(client)
+            .is_some_and(|order| order.symbol != symbol)
+    }
+
+    fn known_client_binding_is_foreign(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        client: &str,
+        native: u64,
+        strategy: bool,
+    ) -> bool {
+        let known = if strategy {
+            self.pm_strategy_native_order_id(symbol, client)
+        } else {
+            self.spot_native_order_id(symbol, client)
+        };
+        known == Some(native) && self.client_order_row_is_foreign(cx, symbol, client)
+    }
+
     /// Commit the orders snapshot once both halves are in. A failed half is
     /// not authoritative: the store keeps its orders and the tick retries.
     fn finish_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1005,22 +1051,37 @@ impl BinanceFutures {
             self.schedule_orders_refresh(cx);
             return;
         }
-        if (self.is_spot() || self.is_inverse())
-            && join
-                .native_orders
+        if join
+            .native_orders
+            .iter()
+            .any(|(symbol, client, native, filled)| {
+                self.account
+                    .native_executed
+                    .get(&(symbol.clone(), *native))
+                    .is_some_and(|(seen, terminal)| *terminal || *seen > *filled)
+                    || ((self.is_spot() || self.options.portfolio_margin)
+                        && self.known_client_binding_is_foreign(cx, symbol, client, *native, false))
+                    || (self.is_spot()
+                        && self
+                            .account
+                            .spot_client_native
+                            .get(&(symbol.clone(), client.clone()))
+                            .is_some_and(|current| *current > *native))
+            })
+            || join
+                .native_strategies
                 .iter()
-                .any(|(symbol, client, native, filled)| {
+                .any(|(symbol, client, native)| {
                     self.account
-                        .native_executed
-                        .get(&(symbol.clone(), *native))
-                        .is_some_and(|(seen, terminal)| *terminal || *seen > *filled)
-                        || (self.is_spot()
-                            && self
-                                .account
-                                .spot_client_native
-                                .get(&(symbol.clone(), client.clone()))
-                                .is_some_and(|current| *current > *native))
+                        .terminal_strategies
+                        .contains(&(symbol.clone(), *native))
+                        || self.known_client_binding_is_foreign(cx, symbol, client, *native, true)
                 })
+            || join
+                .algo
+                .iter()
+                .flatten()
+                .any(|order| self.account.terminal_algo_ids.contains(&order.id))
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
@@ -1036,11 +1097,12 @@ impl BinanceFutures {
                 .entry((symbol.clone(), native))
                 .or_default();
             entry.0 = entry.0.max(filled);
-            if self.is_spot() {
-                self.account
-                    .spot_client_native
-                    .insert((symbol, client), native);
+            if self.is_spot() || self.options.portfolio_margin {
+                self.bind_regular_native(&symbol, &client, native);
             }
+        }
+        for (symbol, client, native) in join.native_strategies {
+            self.bind_strategy_native(&symbol, &client, native);
         }
         cx.store.set_orders(orders);
     }
@@ -1163,74 +1225,130 @@ impl BinanceFutures {
             _ => o.i.to_string(),
         };
         let status = o.status.as_ref();
-        let amount = num::parse(&o.q);
-        let filled = num::parse(&o.z);
-        let inverse = self.is_inverse();
-        let fresh_execution = if inverse {
-            let key = (o.s.to_string(), o.i);
-            let (previous, terminal) = self
-                .account
-                .native_executed
-                .get(&key)
-                .copied()
-                .unwrap_or_default();
-            let unquantified = self.account.unquantified_cancels.contains(&key);
-            if (terminal
-                && !(unquantified
-                    && filled > previous
-                    && opt(&o.l) > 0.0
-                    && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
-                || filled < previous
-            {
-                return;
-            }
-            let terminal = terminal
-                || matches!(
-                    status,
-                    "FILLED"
-                        | "CANCELED"
-                        | "CANCELLED"
-                        | "EXPIRED"
-                        | "EXPIRED_IN_MATCH"
-                        | "REJECTED"
-                );
-            self.account.native_executed.insert(key, (filled, terminal));
-            filled > previous && opt(&o.l) > 0.0
-        } else {
-            true
+        let Some(amount) =
+            o.q.parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value >= 0.0)
+        else {
+            return;
         };
-        if matches!(status, "PARTIALLY_FILLED" | "FILLED") && fresh_execution {
-            // One execution: its own quantity at its own price.
-            let price = o
-                .last_price
-                .as_deref()
-                .map(num::parse)
-                .filter(|p| *p > 0.0)
-                .unwrap_or_else(|| opt(&o.ap));
+        let Some(filled) =
+            o.z.parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value >= 0.0)
+        else {
+            return;
+        };
+        let inverse = self.is_inverse();
+        let key = (o.s.to_string(), o.i);
+        let (previous, native_terminal) = self
+            .account
+            .native_executed
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let foreign_row = self.client_order_row_is_foreign(cx, &o.s, &id);
+        let stale_incarnation = self.options.portfolio_margin
+            && ((native_terminal
+                && self
+                    .account
+                    .spot_client_native
+                    .get(&(o.s.to_string(), id.clone()))
+                    .is_some_and(|native| *native != o.i))
+                || (foreign_row
+                    && (status != "NEW"
+                        || self
+                            .account
+                            .spot_client_native
+                            .get(&(o.s.to_string(), id.clone()))
+                            == Some(&o.i))));
+        if self.options.portfolio_margin && !stale_incarnation {
+            self.bind_regular_native(&o.s, &id, o.i);
+        }
+        let terminal = native_terminal;
+        let current_filled = previous.max(filled);
+        let last_quantity = opt(&o.l);
+        let price = o.last_price.as_deref().map_or(0.0, num::parse);
+        // Execution identity is independent of lifecycle ordering: a cancellation
+        // or stop-trigger EXPIRED can arrive before its final TRADE.
+        let fresh_execution = if o.x.as_deref() == Some("TRADE")
+            && last_quantity.is_finite()
+            && last_quantity > 0.0
+            && price.is_finite()
+            && price > 0.0
+        {
+            match o.t {
+                Some(trade) if trade >= 0 => {
+                    let execution = (o.s.to_string(), o.i, trade);
+                    let fresh = self.account.derivative_trades.insert(execution.clone());
+                    if fresh {
+                        self.account.derivative_trade_order.push_back(execution);
+                        if self.account.derivative_trade_order.len() > DERIVATIVE_EXECUTION_WINDOW
+                            && let Some(oldest) = self.account.derivative_trade_order.pop_front()
+                        {
+                            self.account.derivative_trades.remove(&oldest);
+                        }
+                    }
+                    fresh
+                }
+                Some(_) => false,
+                None => {
+                    filled
+                        > self
+                            .account
+                            .derivative_fill_watermarks
+                            .get(&key)
+                            .copied()
+                            .unwrap_or(previous)
+                }
+            }
+        } else {
+            false
+        };
+        if fresh_execution {
+            self.account
+                .derivative_fill_watermarks
+                .entry(key.clone())
+                .and_modify(|seen| *seen = seen.max(filled))
+                .or_insert(filled);
             cx.fill(Fill {
                 order_id: id.clone(),
                 symbol: o.s.to_string(),
                 side: order_side(&o.side),
                 price,
-                amount: opt(&o.l),
+                amount: last_quantity,
             });
+        }
+        let is_terminal = matches!(
+            status,
+            "FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED"
+        );
+        self.account
+            .native_executed
+            .insert(key, (current_filled, terminal || is_terminal));
+        if stale_incarnation {
+            return;
+        }
+        if matches!(status, "PARTIALLY_FILLED" | "FILLED") && filled >= previous {
             let now = cx.now;
             cx.store.update_order(&id, |order| {
-                order.filled = filled;
-                order.remaining = amount - filled;
+                order.filled = current_filled;
+                order.remaining = (amount - current_filled).max(0.0);
                 if inverse {
                     order
                         .extra
                         .get_or_insert_with(OrderExtra::default)
-                        .remaining_native = Some((amount - filled).max(0.0));
+                        .remaining_native = Some(order.remaining);
                 }
                 order.last_update = now;
             });
         }
-        if (status == "NEW"
-            || (inverse
-                && cx.store.order(&id).is_none()
-                && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
+        if !terminal
+            && filled >= previous
+            && (status == "NEW"
+                || (inverse
+                    && cx.store.order(&id).is_none()
+                    && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
             && let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type)
         {
             let price = num::parse(&o.p);
@@ -1259,8 +1377,13 @@ impl BinanceFutures {
                 }),
             });
         }
-        if matches!(status, "CANCELED" | "CANCELLED" | "EXPIRED")
-            || (inverse && matches!(status, "EXPIRED_IN_MATCH" | "REJECTED"))
+        if matches!(
+            status,
+            "CANCELED" | "CANCELLED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED"
+        ) && cx
+            .store
+            .order(&id)
+            .is_none_or(|order| order.status != OrderStatus::Closed)
         {
             let code = o.r.as_deref().unwrap_or_default().to_ascii_uppercase();
             let post_only =
@@ -1284,7 +1407,7 @@ impl BinanceFutures {
         {
             cx.store.set_order_status(&id, OrderStatus::Canceled);
         }
-        if status == "FILLED" {
+        if status == "FILLED" && filled >= previous {
             cx.store.set_order_status(&id, OrderStatus::Closed);
             if inverse {
                 self.account
@@ -1297,6 +1420,32 @@ impl BinanceFutures {
     /// Portfolio margin's stop, take-profit and trailing orders.
     fn on_conditional_update(&mut self, cx: &mut Cx<'_, Pending>, o: ConditionalUpdate<'_>) {
         let id = o.c.to_string();
+        self.account.order_version += 1;
+        let is_terminal = matches!(
+            o.os.as_ref(),
+            "TRIGGERED" | "FINISHED" | "FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED"
+        );
+        if let Some(native) = o.si {
+            let key = (o.s.to_string(), native);
+            let terminal = self.account.terminal_strategies.contains(&key);
+            let current = self
+                .account
+                .strategy_client_native
+                .get(&(o.s.to_string(), id.clone()))
+                .copied();
+            if is_terminal {
+                self.account.terminal_strategies.insert(key);
+            }
+            if (terminal && (o.os == "NEW" || current.is_some_and(|current| current != native)))
+                || (self.client_order_row_is_foreign(cx, &o.s, &id)
+                    && (o.os != "NEW" || current == Some(native)))
+            {
+                return;
+            }
+            self.bind_strategy_native(&o.s, &id, native);
+        } else if is_terminal {
+            self.observe_strategy_terminal(&o.s, &id);
+        }
         match o.os.as_ref() {
             "TRIGGERED" | "FINISHED" | "FILLED" => {
                 cx.store.set_order_status(&id, OrderStatus::Closed);
@@ -1338,6 +1487,21 @@ impl BinanceFutures {
 
     fn on_algo_update(&mut self, cx: &mut Cx<'_, Pending>, o: AlgoUpdate<'_>) {
         let id = o.aid.to_string();
+        self.account.order_version += 1;
+        if matches!(
+            o.status.as_ref(),
+            "TRIGGERED"
+                | "TRIGGERING"
+                | "FINISHED"
+                | "CANCELED"
+                | "CANCELLED"
+                | "EXPIRED"
+                | "REJECTED"
+        ) {
+            self.account.terminal_algo_ids.insert(id.clone());
+        } else if o.status == "NEW" && self.account.terminal_algo_ids.contains(&id) {
+            return;
+        }
         match o.status.as_ref() {
             "TRIGGERED" | "TRIGGERING" | "FINISHED" => {
                 cx.store.set_order_status(&id, OrderStatus::Closed);
@@ -1912,20 +2076,25 @@ impl BinanceFutures {
             .spot_client_native
             .get(&client_key)
             .is_some_and(|current| *current > native)
+            || (self.client_order_row_is_foreign(cx, &event.s, &id)
+                && (event.status != "NEW"
+                    || self.account.spot_client_native.get(&client_key) == Some(&native)))
         {
             // An unquantified cancel-all can precede the old order's final fill,
             // even after its caller ID has been reused for another native order.
-            let previous = self
+            let (previous, terminal) = self
                 .account
                 .native_executed
                 .get(&key)
-                .map_or(0.0, |(filled, _)| *filled);
+                .copied()
+                .unwrap_or_default();
             let filled = num::parse(&event.z);
-            if self.account.unquantified_cancels.contains(&key)
-                && event.x == "TRADE"
-                && filled > previous
-                && num::parse(&event.l) > 0.0
-            {
+            let terminal = terminal
+                || matches!(
+                    event.status.as_ref(),
+                    "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+                );
+            if event.x == "TRADE" && filled > previous && num::parse(&event.l) > 0.0 {
                 cx.fill(Fill {
                     order_id: id,
                     symbol: event.s.to_string(),
@@ -1935,11 +2104,17 @@ impl BinanceFutures {
                 });
                 self.account
                     .native_executed
-                    .insert(key.clone(), (filled, true));
+                    .insert(key.clone(), (filled.max(previous), terminal));
                 if event.status == "FILLED" {
                     self.account.unquantified_cancels.remove(&key);
                 }
             }
+            // Lifecycle totals do not prove that their trades were delivered.
+            self.account
+                .native_executed
+                .entry(key)
+                .and_modify(|seen| seen.1 |= terminal)
+                .or_insert((previous, terminal));
             return;
         }
         let amount = num::parse(&event.q);
@@ -2041,6 +2216,57 @@ impl BinanceFutures {
 }
 
 impl BinanceFutures {
+    fn bind_regular_native(&mut self, symbol: &str, client: &str, native: u64) {
+        if let Some(previous) = self
+            .account
+            .spot_client_native
+            .insert((symbol.to_owned(), client.to_owned()), native)
+            && previous != native
+        {
+            self.account
+                .native_executed
+                .entry((symbol.to_owned(), previous))
+                .or_default()
+                .1 = true;
+        }
+    }
+
+    fn bind_strategy_native(&mut self, symbol: &str, client: &str, native: u64) {
+        if let Some(previous) = self
+            .account
+            .strategy_client_native
+            .insert((symbol.to_owned(), client.to_owned()), native)
+            && previous != native
+        {
+            self.account
+                .terminal_strategies
+                .insert((symbol.to_owned(), previous));
+        }
+    }
+
+    pub(crate) fn observe_native_strategy_terminal(&mut self, symbol: &str, native: u64) {
+        self.account
+            .terminal_strategies
+            .insert((symbol.to_owned(), native));
+        self.account.order_version += 1;
+    }
+
+    pub(crate) fn observe_strategy_terminal(&mut self, symbol: &str, client: &str) {
+        if let Some(native) = self.pm_strategy_native_order_id(symbol, client) {
+            self.observe_native_strategy_terminal(symbol, native);
+        } else if !self.options.portfolio_margin {
+            self.account.terminal_algo_ids.insert(client.to_owned());
+            self.account.order_version += 1;
+        }
+    }
+
+    pub(crate) fn pm_strategy_native_order_id(&self, symbol: &str, client: &str) -> Option<u64> {
+        self.account
+            .strategy_client_native
+            .get(&(symbol.to_owned(), client.to_owned()))
+            .copied()
+    }
+
     pub(crate) fn spot_native_order_id(&self, symbol: &str, client: &str) -> Option<u64> {
         self.account
             .spot_client_native
