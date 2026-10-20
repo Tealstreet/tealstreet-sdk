@@ -106,7 +106,7 @@ Native feed ownership and public-factory lifecycle are implemented on
 | Saved-account CLI | Actual saved CFM config/factory/start and CLI account formatter run on native state; compiled Bun executable embeds real WASM and starts outside the repository. Offline routing fixture is not a proxy/live-auth claim. |
 | MCP | Actual protocol reads native catalog, balance, positions and orders; explicit `EXCHANGE_ENGINE=rust`; packaged isolated Node artifact owns its CJS/WASM bytes and Rust dependency notices. No fallback on an explicit unsupported engine selection. |
 | Native host | Trusted host-only typed public ingress; loopback frame-server proof and command-client rejection prevent private sections entering the public seam. No deployment change. |
-| Mobile | Explicit `setReactNativeRustEngineLoader` caches host initialization; real browser-module bytes drive two saved account stores under Node. Hermes/JSI bridge implementation, mobile binary packaging and device verification remain open. |
+| Mobile | Awaited `setReactNativeRustEngineLoader` caches host initialization; real browser-module bytes drive two saved account stores under Node. A Bun subprocess loads the actual native registry and Rust class without global WebAssembly/TextEncoder/TextDecoder during import, then initializes real bytes and reads the native catalog. Frame/host I/O still requires codec globals. Hermes/JSI bridge implementation, mobile binary packaging and device verification remain open. |
 
 The shared policy retains each native venue's own metadata/account overlays and
 private reconciliation. It does not generalize product coverage, signing modes,

@@ -83,3 +83,30 @@ publish an empty snapshot or dispose the previous good engine.
   Root lint: 28 tasks PASS. Initial root typecheck: 43/44 tasks PASS; the SDK
   failure was two new fixture typing errors (old diagnostic listener and wrong
   balance property), corrected before rerun. Do not classify this as final green.
+
+- Consumer phase reviewed PASS and committed `9ec311e98f`: CLI 2 WASM tests,
+  MCP 2 protocol-WASM + 29 unit tests, RN 2 WASM/native-registry tests, host 70,
+  package build/isolated smoke and scoped typechecks/lints PASS. RN registration
+  is awaited and import-neutral; actual frame I/O requires codec globals.
+- Factory phase final verification: 37 unit and 9 native WASM tests PASS,
+  including held metadata transport deadlines, cached lazy transactions and
+  shared-port option rejection. Shared SDK suite: 6 WASM cases PASS; catalog
+  invalidation uses an explicitly independent binary SDK-boundary fixture.
+
+- Resume validation: SDK unit rerun 7,328/7,328 in 505 files; combined-WASM
+  suite 382/382 in 12 files, plus the real AsterDEX canonical candle alias
+  regression (1/1). Root typecheck 44 tasks and lint 28 tasks PASS; other
+  workspace unit suites 25 tasks PASS. Independent review also caught MCP quote
+  freshness: Rust must keep native public feeds because its read methods return
+  engine state; the TS-only socket-disable hook remains on TS accounts.
+- Factory recovery review added transactional stale-fallback/current-cache
+  revival after timed-out cold starts and metadata revision fences for delayed
+  reads. Current focused verification: 38 unit + 10 native WASM cases PASS.
+- Native broad verification: 2,379 tests across 192 result suites, harness
+  533/533 and JS host 70/70 PASS. A Direct-mode SocketId(0) fixture compatibility
+  regression was caught and fixed by limiting sentinel suppression to non-direct
+  modes. Hyperliquid shared quotes revalue an already seeded private balance;
+  they cannot fabricate private startup readiness.
+- Landing advanced to TxFlow PR #1329 during verification; commit checkpoints
+  precede integration, then mixed-socket ownership and combined artifact gates
+  are repeated against the integrated tree.
