@@ -425,6 +425,30 @@ publish an empty snapshot or dispose the previous good engine.
   remains unchanged. Rebuild and reverify the merged source before acceptance;
   earlier artifact measurements below retain their pinned historical scope.
 
+- Resumed after the parity integration at `09bea51420`; origin landing is still
+  `df2d6a4a03`. The rebuilt combined browser/Node/package artifact is
+  11,948,691 bytes, SHA
+  `013c969ceb18b3b6e59e0e96d6737b23d77b9a3693578ef2d99f3dea3f11b038`.
+  Verification passes: 2,713 native tests; 7,671 SDK unit tests and 433 SDK
+  WASM tests; server 143 unit and 11 WASM tests; nine CLI/MCP/mobile WASM
+  consumer tests; 579 harness, 70 host and 16 product CLI controls. Root
+  typecheck (44 tasks), lint (28 tasks), native/WASM strict Clippy, bans and
+  formatting pass. MCP packaged smoke resolves 17 tools and native Coinbase
+  outside the checkout, with the same packaged bytes and dependency notices.
+- Diagnostic workflow 39403226573 on pinned `a92116597d` completed green,
+  including canonical Bybit/Hyro. Its uninstrumented Hyro gate reports
+  main CPU TS 35.0 → Rust 31.7 ms, steady 8.1 → 6.8 ms, retained memory
+  13.3 → 0.8 MB. This records the observed variation alongside the earlier
+  failures; it does not turn those failures into passing trials.
+  The separate inspector replay yields only 44 Rust steady sample points
+  versus 75 TS points, with most Rust time in unchanged replay delivery,
+  URL handling, GC and final capture. It does not reproduce the relative
+  failure or establish a new native regression. Independent reviewers inspect
+  these samples before choosing any additional change; instrumented numbers
+  are never acceptance metrics. Remove the temporary profiler and workflow
+  upload steps before final landing. The current merged source still requires
+  its own exact-head CI, separate from this diagnostic tree.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
