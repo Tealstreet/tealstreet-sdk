@@ -615,3 +615,21 @@ tasks; safe-cex 7,396 tests in each run). Harness 455, host 65, real-Wasm wrappe
 110 pass. All independent reviews and accepted fixes are posted on PR #1329.
 Only exact-head CI, normal merge into feat/rust-rewrite, and a fresh branch
 remain. Existing testnet and measurement-gated feature limits still apply.
+
+### Frame server and consumer-readiness integration
+
+Merge landing a7caec9314, preserving the incoming shared command decoder,
+native frame server, optional book deltas and consumer-readiness suites. Keep
+TxFlow's dependency/feature/constructor union; no venue behavior changes.
+The real-venue fixture now explicitly selects TxFlow testnet and provides a
+test-only public CORS route. Only the captured-input adapter unwraps that exact
+route after production routing; real socket delivery, native ticker frames and
+late-store equality remain required. Update the current cutover inventory to
+44 registered Rust names, nine defaults, 35 opt-in names and five absent names.
+
+Independent code-correctness review accepts the union and bounded fixture/docs
+changes. Targeted combined-Wasm TxFlow consumers pass six tests in two files;
+the full 68-test host suite passes. Engine 75, TxFlow 73, native server/transport,
+cross-language frame-wire, harness 455, bans, workspace formatting and combined
+Wasm Clippy pass. Full root and consumer suites, release replay/size gates and
+exact-head CI are being repeated on this integration before merge.

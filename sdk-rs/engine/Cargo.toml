@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+command-tracking = []
+book-deltas = []
+command-asterdex = []
+command-apexomni = []
+command-polymarket = []
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
