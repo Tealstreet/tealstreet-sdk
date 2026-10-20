@@ -56,6 +56,18 @@
       "ciHead": "b1140e392d55766dba54f73557b3b2e4848dbff0",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39434565069",
       "note": "Eighteen independently reviewed literal paths under unchanged CFM ES256/EdDSA and base-coinbase Spot EdDSA tape identities. Stale open status, row alignment/terminal retention, and missing TS live client IDs. All prior observations retained; no comparison, timing threshold or integrity protection changed. Private polling counts can vary; no private performance exemption or claim."
+    },
+    "paradexCheckpointNineRefresh": {
+      "ciRun": 39439275804,
+      "ciHead": "24802ce5a593f9a65dca19b0ba028afca2769af6",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39439275804",
+      "note": "Twelve independently reviewed literal checkpoint-9 row-alignment paths. Same tape, successful commands, writes, boundaries and per-engine receipts as certified run39436814801. Incoming partial-batch error branches are not exercised; account repair code is unchanged. All historical declarations retained; no comparator, threshold or integrity protection changed."
+    },
+    "coinbaseRetainedRowRefresh": {
+      "ciRun": 39439275804,
+      "ciHead": "24802ce5a593f9a65dca19b0ba028afca2769af6",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39439275804",
+      "note": "Eight independently reviewed literal paths in unchanged base-coinbase INTX EdDSA and Spot ES256 cases. Native closed-order retention shifts stop 50 to row5; INTX TS still contains that stop at row3, Spot compares its missing TS client ID. Command results, writes and boundaries match prior evidence; private Spot metadata polls vary. No comparison/threshold/integrity relaxation; all previous observations retained."
     }
   },
   "failures": [
@@ -10717,6 +10729,15 @@
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
           ]
+        },
+        {
+          "divergence": "At checkpoints 7\u201310, the same stop order 50 appears at row 5: TS omits its client ID while native preserves tealstreet-stop. Native retention of closed order 40 shifts the stop from row 4. This is the base coinbase Spot ES256 profile, independently pinned from coinbasespot and EdDSA.",
+          "keys": [
+            "checkpoint 10 account.orders[5].clientOrderId",
+            "checkpoint 7 account.orders[5].clientOrderId",
+            "checkpoint 8 account.orders[5].clientOrderId",
+            "checkpoint 9 account.orders[5].clientOrderId"
+          ]
         }
       ]
     },
@@ -16676,6 +16697,15 @@
           "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
           "keys": [
             "checkpoint 0 account.balance.upnl"
+          ]
+        },
+        {
+          "divergence": "At checkpoints 7\u201310, TS retains stop 50 at row 3 while native retention of closed order 40 shifts that same stop to row 5. The four whole-row paths expose sorted-row alignment/terminal retention, not absence of the stop by ID. Tape, boundaries and full per-engine receipts match certified run 39436814801.",
+          "keys": [
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders[5]"
           ]
         }
       ]
@@ -42728,6 +42758,23 @@
           "divergence": "At checkpoint 9 after cancelSymbolOrders, TS retains open existing order 1000 while native applies the taped empty orders response. Commands and checkpoint boundaries are unchanged; per-engine receipts match run 39426820375. This is interim acknowledged-cancel reconciliation visibility.",
           "keys": [
             "checkpoint 9 account.orders[0]"
+          ]
+        },
+        {
+          "divergence": "At checkpoint 9, TS retains canceled caller order 1001 while native retains only the batch terminal rows 2001/2002 beside existing 1000. Sorted rows therefore compare different IDs and their associated client IDs/geometry. This repeats the independently observed checkpoint-8 reconciliation timing family; tape, commands, boundaries and per-engine receipts match run 39436814801.",
+          "keys": [
+            "checkpoint 9 account.orders[1].amount",
+            "checkpoint 9 account.orders[1].clientOrderId",
+            "checkpoint 9 account.orders[1].id",
+            "checkpoint 9 account.orders[1].price",
+            "checkpoint 9 account.orders[1].remaining",
+            "checkpoint 9 account.orders[2].amount",
+            "checkpoint 9 account.orders[2].clientOrderId",
+            "checkpoint 9 account.orders[2].id",
+            "checkpoint 9 account.orders[2].price",
+            "checkpoint 9 account.orders[2].remaining",
+            "checkpoint 9 account.orders[2].side",
+            "checkpoint 9 account.orders[2].symbol"
           ]
         }
       ]

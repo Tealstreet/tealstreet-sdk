@@ -444,3 +444,33 @@ never retry an unchanged failed performance measurement to obtain a pass.
   leverage and valid SBE inputs retain the same input/hash contract. Partial
   rejection/SBE repairs require no new fixer. Local verification is running;
   publish the reviewed integration so independent CI can run concurrently.
+- Integrated run `39439275804` exposes twelve additional literal Paradex
+  checkpoint-9 row-shift paths: TS retains canceled caller 1001, native retains
+  only batch terminal rows 2001/2002 beside existing 1000. This repeats the
+  checkpoint-8 reconciliation family. Independent raw/source review PASS:
+  same tape, 33 events, fifteen successful commands, nine writes, checkpoint
+  identities and per-engine receipts as certified run `39436814801`; all
+  protocol/completion counters zero. The incoming partial-batch error paths
+  are not exercised, successful placement behavior and account repair code
+  are unchanged. Add only these twelve observed paths, preserve all history,
+  and require another green exact-head CI. No comparator/threshold relaxation.
+- Completed integrated collection `39439275804`: all 31 suites / 107 cases,
+  27 strict PASS / 80 strict FAIL. Both repository CI runs are green; only
+  newly undeclared Paradex/Coinbase paths make the replay verifier red.
+  Coinbase adds eight exact paths: INTX EdDSA retains stop 50 in TS at row 3
+  versus native row 5 after closed-40 retention (not missing by ID), and base
+  Spot ES256 compares the same stop's missing TS client ID at row 5.
+  Independent raw/source review PASS: unchanged tape hashes, boundaries,
+  commands/results and writes; all protocol/completion counters zero. Private
+  metadata poll counts vary as already documented. Combined web/Node each
+  12,262,898 bytes under 12,582,912, SHA256
+  `e0fbbd617e4f7df444db8da269a433cee6fe5ff7ac089325437cbac953fe29e7`.
+  Local harness 767/767, typecheck 44/44 and lint 28/28 PASS; tests still running.
+  Declare only the eight paths alongside reviewed Paradex twelve; keep every
+  historical observation and all strict protections. Require fresh green CI.
+- Final refresh review PASS: exactly twenty evidenced keys, every historical
+  identity/key/rationale preserved. All 107 reports assess clean; fifteen
+  neighbor/hash/protected-integrity probes reject and policy controls 9/9 PASS.
+  All 49 result rows and combined size/hash match the complete integrated run.
+  Publish this stable declarations-only checkpoint; fresh full exact-head green
+  CI and completed local checks are required before final merge and wind-down.
