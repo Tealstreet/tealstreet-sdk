@@ -3831,6 +3831,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-polymarket"
+version = "0.1.0"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-primitives",
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-txflow"
 version = "0.1.0"
 dependencies = [
@@ -3888,6 +3902,7 @@ dependencies = [
  "safe-cex-venue-orderly",
  "safe-cex-venue-paradex",
  "safe-cex-venue-phemex",
+ "safe-cex-venue-polymarket",
  "safe-cex-venue-txflow",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",

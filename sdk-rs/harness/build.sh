@@ -5,14 +5,14 @@ set -euo pipefail
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue asterdex|binance|kucoin|bybit|hyperliquid|txflow|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|orderly|paradex|coinbase]" >&2
+    echo "Usage: $0 [--venue asterdex|binance|kucoin|bybit|hyperliquid|txflow|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|orderly|paradex|coinbase|polymarket]" >&2
     exit 2
   fi
   case "$2" in
-    asterdex|binance|kucoin|bybit|hyperliquid|txflow|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex) build_args+=(--no-default-features --features "$2") ;;
+    asterdex|binance|kucoin|bybit|hyperliquid|txflow|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket) build_args+=(--no-default-features --features "$2") ;;
     coinbase|coinbasespot) build_args+=(--no-default-features --features coinbase) ;;
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
-    *) echo "Unsupported venue: $2 (expected asterdex, binance, kucoin, bybit, hyperliquid, txflow, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, apexomni, kraken, paradex, coinbase or orderly)" >&2; exit 2 ;;
+    *) echo "Unsupported venue: $2 (expected asterdex, binance, kucoin, bybit, hyperliquid, txflow, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, apexomni, kraken, paradex, coinbase, orderly or polymarket)" >&2; exit 2 ;;
   esac
 fi
 cd "$(dirname "$0")/.."

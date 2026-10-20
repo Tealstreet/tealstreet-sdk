@@ -40,6 +40,7 @@
     "rust:private-tape:blofin": "node sdk-rs/harness/private-tape-blofin.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
+    "rust:private-tape-polymarket": "node sdk-rs/harness/private-tape-polymarket.mjs",
     "rust:private-tape-kucoin": "node sdk-rs/harness/private-tape-kucoin.mjs",
     "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
     "rust:private-tape:phemex": "node sdk-rs/harness/private-tape-phemex.mjs",

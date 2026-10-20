@@ -394,3 +394,16 @@ Mainnet/preview remain disabled. Unmeasured reduce-only, conditional/bracket,
 notional-margin and protective semantics remain rejected, and undocumented REST
 public-trade history remains explicitly unavailable. These limits are documented
 in the venue CLAUDE and are not enabled by this port.
+
+### PR integration and final correctness review
+
+[PR #1329](https://github.com/Tealstreet/tealstreet-sdk/pull/1329) targets
+`feat/rust-rewrite`. Its initial head passed every local gate above. A new
+Polymarket landing `a0c11afd87` conflicted with shared registration rows;
+resolved the complete union, retaining prediction sections/types and both
+venues' authentication, Cargo/features, CI and harness behavior. Independent
+integration code-correctness review accepted the resolved index against both
+parents. Locked metadata, workspace formatting and isolated TxFlow constructor
+checks pass. Core TxFlow production code is unchanged. Fresh independent PR
+reviews cover public/signing/auth, private/trading, and history/harness; rerun
+merged-artifact gates, post findings/fixes, then require green exact-head CI.
