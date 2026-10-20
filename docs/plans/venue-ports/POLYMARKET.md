@@ -140,3 +140,48 @@ for the following trading phase without emitting cumulative fills. Verification:
 15 account + 8 public + 6 signing tests PASS, native crate clippy PASS. No
 remaining P1/P2 findings in reviewed private scope. Trading implementation is
 prepared in separate uncommitted files and is integrated after this checkpoint.
+
+### Trading and queries checkpoints
+
+Trading: exact V2 GTC payloads, all4 account signature types, full-batch
+preflight, secure random salt, exact signed bodies, sequenced writes, reported
+partial-success IDs, scoped and proven cancellations, and locked cancel-replace
+jobs. Fresh terminal read must cover every known cumulative/execution lower
+bound before replacing; fractional remaining shares round DOWN to avoid
+exceeding caller total. No ambiguous write is retried. Financial precision
+uses shared engine helpers; JavaScript binary formatting is not emulated.
+
+Independent trading review found3P1+2P2: losing prior accepted batch IDs,
+treating matched ACK as fully terminal, ignoring trade-only final-fill evidence,
+rounding fractional replacement leaves up, and late live ACKs publishing zero
+filled after an execution. All fixed; reviewer authored5 reproductions outside
+the implementation, verified they fail before repairs and pass afterward.
+
+Queries: price history uses interval fidelity in minutes and exact caller ms
+bounds, sorted/deduplicated points and limits. Four unimplemented history
+contracts reject explicitly; client-ID lookup remains nondefinitive because
+caller IDs are unsupported. Account setters acknowledge without writes and
+leverage reads return1 on both rails. Independent query review PASS.
+
+Verification:57 native venue tests PASS (10 primitive/account-unit,19 account,
+18 trading,8 public,2 queries), native all-target clippy PASS. Both small phases
+share the stable checkpoint commit after their separate reviews passed.
+
+### Harness preparation / live discovery evidence
+
+Wasm feature/default dispatch and SDK wallet-only options are registered. Real
+Wasm SDK8 tests cover public metadata/books in both receivers, supplied proxy
+credentials vs derived EOA auth, pUSD/funder holdings, and batch ID rejection.
+Actual TS public/private reference defects are repaired with regression tests;
+there is no rewriting of Rust answers into the TS oracle. Independent harness
+checks authenticate exact HMAC bytes and V2 economic order fields before
+normalizing entropy. Generic nested-client discovery includes all3 HTTP APIs.
+251 harness tests PASS.
+
+A genuine20second public capture initially produced10 frames and2 books but
+revealed Gamma silently caps legacy responses at100 despite limit500.
+Offset100 returns the next100; offset10000 explicitly rejects and directs
+clients to /markets/keyset. Official keyset docs confirm max100, markets array,
+next_cursor -> after_cursor, and no offset parameter. The capture will be
+replaced after complete keyset discovery is implemented in Rust and reference
+TS; this avoids claiming a truncated market universe passed.

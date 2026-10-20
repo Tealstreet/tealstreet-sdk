@@ -1,6 +1,8 @@
 //! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
 mod account;
+mod history;
 pub mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -14,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 pub(crate) const REST: &str = "https://clob.polymarket.com";
+const GAMMA_PAGE: usize = 100;
 const GAMMA: &str = "https://gamma-api.polymarket.com";
 pub const DATA: &str = "https://data-api.polymarket.com";
 const SOCKETS: [&str; 2] = [
@@ -39,6 +42,7 @@ pub struct Options {
 }
 pub enum Pending {
     Account(account::Request),
+    Trade(trading::Request),
     Markets {
         offset: usize,
         count: usize,
@@ -82,6 +86,7 @@ struct CandleSubscription {
 pub struct Polymarket {
     pub(crate) options: Options,
     pub(crate) account: account::Account,
+    pub(crate) trading: trading::Trading,
     pub(crate) credentials: Option<sign::Credentials>,
     pub(crate) address: Option<String>,
     pub(crate) connections: [Connection; 2],
@@ -137,6 +142,7 @@ impl Polymarket {
             address,
             credentials: None,
             account: Default::default(),
+            trading: Default::default(),
             market_ids: Default::default(),
             market_symbols: Default::default(),
             connections: Default::default(),
@@ -161,7 +167,7 @@ impl Polymarket {
     ) {
         cx.request_streamed(
             Method::Get,
-            format!("{GAMMA}/markets?active=true&closed=false&limit=500&offset={offset}"),
+            format!("{GAMMA}/markets?active=true&closed=false&limit={GAMMA_PAGE}&offset={offset}"),
             vec![],
             ArrayAt::Root,
             Pending::Markets {
@@ -607,12 +613,16 @@ impl Venue for Polymarket {
             self.account_response(cx, request, response);
             return;
         }
+        if let Pending::Trade(request) = pending {
+            self.trading_response(cx, request, response);
+            return;
+        }
         if let Err(e) = success(response) {
             self.on_request_failed(cx, pending, &e);
             return;
         }
         match pending {
-            Pending::Account(_) => unreachable!(),
+            Pending::Account(_) | Pending::Trade(_) => unreachable!(),
             Pending::Markets {
                 offset,
                 count,
@@ -627,12 +637,12 @@ impl Venue for Polymarket {
                     );
                     return;
                 }
-                if count > 500 {
+                if count > GAMMA_PAGE {
                     cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
                     return;
                 }
-                if count == 500 {
-                    self.markets(cx, offset + 500, rows, metadata);
+                if count == GAMMA_PAGE {
+                    self.markets(cx, offset + GAMMA_PAGE, rows, metadata);
                     return;
                 }
                 cx.store.set_markets(rows);
@@ -827,6 +837,10 @@ impl Venue for Polymarket {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let retry = match pending {
+            Pending::Trade(request) => {
+                self.trading_failed(cx, request, error);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_failed(cx, request);
                 return;
@@ -968,18 +982,15 @@ impl Venue for Polymarket {
                     cx.clear_timer(t);
                 }
             }
-            Command::Query { command, .. }
-            | Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchLeverage { command, .. } => cx.done(
-                command,
-                Err("Polymarket operation unavailable during public phase".into()),
-            ),
+            command @ (Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::CancelSymbolOrders { .. }) => self.trading_command(cx, command),
+            command @ (Command::Query { .. }
+            | Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. }
+            | Command::FetchLeverage { .. }) => self.read_command(cx, command),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

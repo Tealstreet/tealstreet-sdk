@@ -58,6 +58,7 @@ pub(crate) struct Account {
     terminal: HashSet<String>,
     fills: HashMap<String, f64>,
     executions: HashSet<String>,
+    execution_totals: HashMap<String, f64>,
 }
 
 #[derive(Deserialize)]
@@ -747,15 +748,16 @@ impl Polymarket {
                     }
                     let filled = self.account.fills.entry(row.id.clone()).or_default();
                     *filled = filled.max(row.filled);
-                    row.filled = *filled;
-                    row.remaining = (row.amount - row.filled).max(0.0);
                     if let Some(old) = cx.store.order(&row.id)
                         && old.last_update > row.last_update
                     {
                         row = old.clone();
                     }
+                    self.account_normalize(&mut row);
                     if row.remaining > 0.0 {
                         rows.push(row);
+                    } else {
+                        self.account_terminal(cx, &row.id);
                     }
                 }
                 cx.store.set_orders(rows);
@@ -797,14 +799,26 @@ impl Polymarket {
         }
         self.account_finished(cx);
     }
-    pub(crate) fn account_placed(&mut self, cx: &mut Cx<'_, Pending>, order: Order) {
+    fn account_normalize(&mut self, order: &mut Order) {
+        let filled = self.account.fills.entry(order.id.clone()).or_default();
+        *filled = filled.max(order.filled);
+        order.filled = self.account_filled(&order.id);
+        order.remaining = (order.amount - order.filled).max(0.0);
+    }
+    pub(crate) fn account_placed(&mut self, cx: &mut Cx<'_, Pending>, mut order: Order) {
+        self.account_normalize(&mut order);
+        if self.account.terminal.contains(&order.id) {
+            return;
+        }
+        if order.remaining == 0.0 || order.status != OrderStatus::Open {
+            self.account_terminal(cx, &order.id);
+            return;
+        }
         self.account.revision += 1;
         self.account
             .versions
             .insert(order.id.clone(), self.account.revision);
-        if !self.account.terminal.contains(&order.id) {
-            cx.store.upsert_order(order);
-        }
+        cx.store.upsert_order(order);
     }
     pub(crate) fn account_terminal(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
         self.account.revision += 1;
@@ -814,10 +828,16 @@ impl Polymarket {
         self.account.terminal.insert(id.into());
         cx.store.remove_orders(&[id]);
     }
-    // Trading's final cancel proof uses this in the following phase.
-    #[allow(dead_code)]
     pub(crate) fn account_filled(&self, id: &str) -> f64 {
-        self.account.fills.get(id).copied().unwrap_or(0.0)
+        // These are overlapping observations, not disjoint amounts: an order's
+        // cumulative notification may already include every observed trade.
+        self.account.fills.get(id).copied().unwrap_or(0.0).max(
+            self.account
+                .execution_totals
+                .get(id)
+                .copied()
+                .unwrap_or(0.0),
+        )
     }
     pub(crate) fn private_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         #[derive(Deserialize)]
@@ -854,7 +874,14 @@ impl Polymarket {
                     row.timestamp
                         .is_none_or(|time| old.last_update <= stamp(time.0))
                 }) {
-                    if let Some(matched) = row.size_matched.filter(|n| n.0 >= 0.0) {
+                    let original = row
+                        .original_size
+                        .map(|n| n.0)
+                        .or_else(|| cx.store.order(row.id).map(|order| order.amount));
+                    if let Some(matched) = row
+                        .size_matched
+                        .filter(|n| n.0 >= 0.0 && original.is_none_or(|amount| n.0 <= amount))
+                    {
                         let filled = self.account.fills.entry(row.id.to_owned()).or_default();
                         *filled = filled.max(matched.0);
                     }
@@ -862,7 +889,7 @@ impl Polymarket {
                 }
                 return;
             }
-            let Some(mut order) = row.order(cx.store, cx.now) else {
+            let Some(order) = row.order(cx.store, cx.now) else {
                 self.account.dirty = true;
                 return;
             };
@@ -878,15 +905,7 @@ impl Polymarket {
             {
                 return;
             }
-            let filled = self.account.fills.entry(order.id.clone()).or_default();
-            *filled = filled.max(order.filled);
-            order.filled = *filled;
-            order.remaining = (order.amount - *filled).max(0.0);
-            if order.status != OrderStatus::Open || order.remaining == 0.0 {
-                self.account_terminal(cx, &order.id);
-            } else {
-                self.account_placed(cx, order);
-            }
+            self.account_placed(cx, order);
         } else if kind == "trade" {
             let Ok(trade) = serde_json::from_str::<Trade>(text) else {
                 return;
@@ -988,6 +1007,21 @@ impl Polymarket {
             return;
         };
         if self.account.executions.insert(format!("{trade}:{order}")) {
+            let total = self
+                .account
+                .execution_totals
+                .entry(order.into())
+                .or_default();
+            // Outcome tokens settle at six decimal places. Trim binary addition
+            // noise so a final proof of 0.3 can cover executions of 0.1 and 0.2.
+            let next = safe_cex_engine::num::adjust(*total + amount, 0.000001);
+            if !next.is_finite() {
+                // An impossible aggregate cannot authorize a replacement.
+                *total = f64::INFINITY;
+                cx.log(LogLevel::Error, "Polymarket execution total overflow");
+                return;
+            }
+            *total = next;
             cx.fill(Fill {
                 order_id: order.into(),
                 symbol: market.symbol.clone(),
@@ -995,6 +1029,129 @@ impl Polymarket {
                 price,
                 amount,
             });
+            if let Some(live) = cx.store.order(order).cloned() {
+                // A trade can precede its cumulative order notification. Bump
+                // the version too, so an in-flight snapshot cannot erase it.
+                self.account_placed(cx, live);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod execution_bounds {
+    use super::*;
+    use crate::{Options, PolymarketOptions};
+    use safe_cex_engine::{Engine, Event, SocketId};
+
+    fn engine() -> Engine<Polymarket> {
+        let mut venue = Polymarket::new(Options {
+            key: Some("0000000000000000000000000000000000000000000000000000000000000001".into()),
+            polymarket: Some(PolymarketOptions::default()),
+            ..Default::default()
+        });
+        venue.credentials = Some(sign::Credentials {
+            api_key: "ours".into(),
+            secret: "c2VjcmV0".into(),
+            passphrase: "pass".into(),
+        });
+        venue.connections[1].socket = Some(SocketId(77));
+        venue.connections[1].open = true;
+        let mut engine = Engine::new(venue);
+        engine.store_mut().set_markets(vec![Market {
+            id: "1".into(),
+            symbol: "event-Yes".into(),
+            pretty_symbol: None,
+            base: "event".into(),
+            quote: "pUSD".into(),
+            active: true,
+            precision: Precision {
+                amount: 2.0,
+                price: 2.0,
+            },
+            limits: Limits {
+                amount: MinMax { min: 5.0, max: 1e9 },
+                leverage: MinMax { min: 1.0, max: 1.0 },
+                price: None,
+            },
+            contract_size: Some(1.0),
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: Some(true),
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }]);
+        engine
+    }
+    fn send(engine: &mut Engine<Polymarket>, text: &str) {
+        engine.handle(
+            1700000000000.0,
+            Event::WsMessage {
+                socket: SocketId(77),
+                text,
+            },
+        );
+    }
+    fn trade(engine: &mut Engine<Polymarket>, id: &str, amount: &str, status: &str) {
+        send(
+            engine,
+            &format!(
+                r#"{{"event_type":"trade","id":"{id}","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"{amount}","price":"0.5","status":"{status}","trader_side":"TAKER"}}"#
+            ),
+        );
+    }
+    fn cumulative(engine: &mut Engine<Polymarket>, filled: &str) {
+        send(
+            engine,
+            &format!(
+                r#"{{"event_type":"order","id":"o1","asset_id":"1","side":"BUY","price":"0.5","original_size":"10","size_matched":"{filled}","status":"LIVE","timestamp":"1700000000000"}}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn unique_trades_advance_a_bound_without_cumulative_order_notifications() {
+        let mut engine = engine();
+        for status in ["MATCHED", "MINED", "CONFIRMED"] {
+            trade(&mut engine, "t1", "3", status);
+        }
+        assert_eq!(engine.venue().account_filled("o1"), 3.0);
+        trade(&mut engine, "t2", "2", "MATCHED");
+        assert_eq!(engine.venue().account_filled("o1"), 5.0);
+    }
+    #[test]
+    fn cumulative_and_execution_observations_overlap_without_double_counting() {
+        let mut engine = engine();
+        cumulative(&mut engine, "3");
+        trade(&mut engine, "t1", "3", "MATCHED");
+        assert_eq!(engine.venue().account_filled("o1"), 3.0);
+        cumulative(&mut engine, "5");
+        trade(&mut engine, "t2", "2", "MATCHED");
+        assert_eq!(engine.venue().account_filled("o1"), 5.0);
+        cumulative(&mut engine, "4");
+        assert_eq!(engine.venue().account_filled("o1"), 5.0);
+    }
+    #[test]
+    fn terminal_removal_retains_the_bound_and_accepts_later_trade_evidence() {
+        let mut engine = engine();
+        cumulative(&mut engine, "2");
+        send(
+            &mut engine,
+            r#"{"event_type":"order","type":"CANCELLATION","id":"o1","size_matched":"3","timestamp":"1700000001000"}"#,
+        );
+        assert!(engine.store().orders().is_empty());
+        assert_eq!(engine.venue().account_filled("o1"), 3.0);
+        trade(&mut engine, "t1", "4", "MATCHED");
+        assert_eq!(engine.venue().account_filled("o1"), 4.0);
+        assert!(engine.store().orders().is_empty());
+    }
+    #[test]
+    fn execution_addition_preserves_six_decimal_token_units() {
+        let mut engine = engine();
+        trade(&mut engine, "t1", "0.1", "MATCHED");
+        trade(&mut engine, "t2", "0.2", "MATCHED");
+        assert_eq!(engine.venue().account_filled("o1"), 0.3);
     }
 }

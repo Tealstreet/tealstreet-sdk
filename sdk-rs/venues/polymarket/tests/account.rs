@@ -422,3 +422,85 @@ fn aggregate_upnl_tracks_successful_holdings_for_either_read_order_and_survives_
         assert_eq!(h.e.store().balance().upnl, -5.0);
     }
 }
+
+#[test]
+fn trade_only_progress_updates_visible_order_and_late_cumulative_cannot_regress_it() {
+    let mut h = H::new();
+    h.initial();
+    h.ws(r#"{"event_type":"trade","id":"trade-only","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"5","price":"0.5","status":"MATCHED","trader_side":"TAKER"}"#);
+    assert_eq!(
+        (
+            h.e.store().orders()[0].filled,
+            h.e.store().orders()[0].remaining
+        ),
+        (5.0, 5.0)
+    );
+    h.ws(&format!(
+        r#"{{"event_type":"order","timestamp":"1700000001000",{}}}"#,
+        &ORDER[1..ORDER.len() - 1]
+    ));
+    assert_eq!(
+        (
+            h.e.store().orders()[0].filled,
+            h.e.store().orders()[0].remaining
+        ),
+        (5.0, 5.0)
+    );
+    assert_eq!(h.fills(), vec![(0, OrderSide::Buy as u32, 0.5, 5.0)]);
+}
+
+#[test]
+fn unique_trade_progress_survives_inflight_empty_or_stale_order_snapshots() {
+    for rows in ["[]".to_string(), format!("[{ORDER}]")] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.ws(r#"{"event_type":"trade","id":"trade-before-snapshot","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"5","price":"0.5","status":"MATCHED","trader_side":"TAKER"}"#);
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":{rows},"next_cursor":"LTE="}}"#),
+        );
+        assert_eq!(
+            (
+                h.e.store().orders()[0].filled,
+                h.e.store().orders()[0].remaining
+            ),
+            (5.0, 5.0)
+        );
+    }
+}
+
+#[test]
+fn full_trade_execution_removes_order_and_fences_later_snapshots() {
+    let mut h = H::new();
+    h.initial();
+    h.poll();
+    h.ws(r#"{"event_type":"trade","id":"complete","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"10","price":"0.5","status":"MATCHED","trader_side":"TAKER"}"#);
+    assert!(h.e.store().orders().is_empty());
+    h.response(
+        "/data/orders",
+        200,
+        &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+    );
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&format!(
+        r#"{{"event_type":"order","timestamp":"1700000001000",{}}}"#,
+        &ORDER[1..ORDER.len() - 1]
+    ));
+    assert!(h.e.store().orders().is_empty());
+}
+
+#[test]
+fn first_snapshot_normalizes_prior_trade_evidence_without_order_details() {
+    let mut h = H::new();
+    h.ws(r#"{"event_type":"trade","id":"before-first-order","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"5","price":"0.5","status":"MATCHED","trader_side":"TAKER"}"#);
+    h.initial();
+    assert_eq!(
+        (
+            h.e.store().orders()[0].filled,
+            h.e.store().orders()[0].remaining
+        ),
+        (5.0, 5.0)
+    );
+}
