@@ -4,8 +4,8 @@ Declared before collecting this cohort. Retain the initial eleven-family cohort
 in `RUST_PERF_INITIAL11.json`, all 54 method profiles, the sampled CPU diagnosis,
 and the aborted QoS pilot; this cohort does not erase or reclassify them.
 
-Freeze candidate production Rust at the reviewed merge of 922b5fdc89 into 21292265f1. Control Rust is exactly
-922b5fdc89 (full commit SHA recorded in the input manifest), with its original default aggregate
+Freeze candidate production Rust at merge ecca589fb3334332fb0563b116f96f0086cb7de9. Control Rust is exactly
+922b5fdc894e0641a05abe9f63d732dc9dddd104, with its original default aggregate
 build profiles, bindings, immediate-message host and aggregate loader. Use the
 same final shared replay/helper import closure, wire decoder, fixture bytes,
 TS sources, dependency lockfile and Node executable on both sides. Hash these

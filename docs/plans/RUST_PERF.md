@@ -800,3 +800,13 @@ settled-memory exclusions; tighten exactclassifier beforeanynew measurements.
 Next: frozen15release+exact922control, allworkspace/repository checks,36private
 gates andBitgetparity, fourfixedoptionalprofiles, then19official3-run public
 gates+balanced10-pairbefore/after cohort. Performancewidening stillunproven.
+
+
+Frozen Bybit integration checks: all44typecheck/28lint/27repository test tasks
+pass (full tests package-serialized with unchanged assertions/timeouts).
+All36private tapes generated. Optional OKX/Bybit probe binaries built from
+ecca in isolatedtarget; no timings collected. Original922control6254257bytes,
+SHA256 2d388bdd68c187aae86931971dbbb1d983a4af53ee551620d42962b71c13941f;
+238originalRustfiles and17protectedhost/buildpaths verify byte-exact. Shared
+helpers/TS/dependencies/19fixtures are pinned consistently; production15
+family build and allworkspace checks still pending before sampling.
