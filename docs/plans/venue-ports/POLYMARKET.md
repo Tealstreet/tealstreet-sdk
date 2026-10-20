@@ -305,3 +305,8 @@ build+bothprivategatesPASS. Binancepublic3runsPASS CPU294.3/140.1ms,
 steady166.2/55.6ms, retained19.2/3.3MB. No thresholds orprotocolchecksweakened.
 Next: pushPRintofeat/rust-rewrite, freshadversarialcorrectnessreviews/comments,
 addressfindings, waitallCIgreenbeforemerge andfreshfollowupbranch.
+
+
+PR#1327 openedintofeat/rust-rewrite. Three freshadversarialreviews cover
+signing/trading, public/private/query state, andengine/SDK/harness integration.
+ReviewfindingswillbepostedonthePR; CI mustbegreenbeforemerge.

@@ -338,7 +338,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Polymarket CLOB V2 | implemented (`feat/rust-polymarket`); all local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
+| Polymarket CLOB V2 | implemented; [PR #1327](https://github.com/Tealstreet/tealstreet-sdk/pull/1327) into `feat/rust-rewrite`; local gates and phased reviews pass; prediction mapping, scoped benchmark and progress in `venue-ports/POLYMARKET.md` |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | GRVT, Coinbase, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
