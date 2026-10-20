@@ -543,3 +543,34 @@ fn market_entry_with_zero_brackets_places_only_the_entry() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: Ok(ids) }) if ids == r#"["ENTRY"]"#)));
 }
+
+#[test]
+fn trigger_price_is_refused_unless_it_repeats_the_stop_price() {
+    for (kind, trigger) in [("stop_market", 98.), ("limit", 99.)] {
+        let (mut e, _, _) = ready(false);
+        let mut o = opts(kind, 99.);
+        o.trigger_price = Some(trigger);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 46,
+                orders: vec![o],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 46, result: Err(m) }) if m.contains("triggerPrice"))));
+    }
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("stop_market", 99.);
+    o.trigger_price = Some(99.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 47,
+            orders: vec![o],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.body.as_ref().unwrap().contains("ordertype=stop-loss"));
+}

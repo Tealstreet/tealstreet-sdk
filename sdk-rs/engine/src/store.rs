@@ -10,7 +10,7 @@ use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, 
 #[cfg(feature = "prediction")]
 use crate::model::{PredictionHolding, PredictionMarket};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct Store {
@@ -47,6 +47,8 @@ pub struct Store {
     ticker_masks: Vec<u16>,
     dirty_tickers: Vec<u32>,
     ticker_deltas_spare: Vec<(u32, u16)>,
+    /// Funded base assets awaiting valuation; live data may add their rows after the seed.
+    wanted_ticker_bases: HashSet<String>,
 }
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
@@ -325,9 +327,53 @@ impl Store {
             .map(|slot| self.ticker_by_symbol[slot])
     }
 
+    /// Recover a catalogue ticker omitted by a malformed seed when live data arrives.
+    /// This does not claim that the REST ticker seed succeeded.
+    pub fn ensure_ticker(&mut self, symbol: &str) -> Option<u32> {
+        if let Some(index) = self.ticker_index(symbol) {
+            return Some(index);
+        }
+        let market = self.market(symbol)?;
+        let ticker = Ticker {
+            id: market.id.clone(),
+            symbol: market.symbol.clone(),
+            ..Ticker::default()
+        };
+        let slot = self
+            .ticker_by_symbol
+            .binary_search_by(|&index| self.tickers[index as usize].symbol.as_str().cmp(symbol))
+            .unwrap_err();
+        let index = self.tickers.len() as u32;
+        self.tickers.push(ticker);
+        self.ticker_masks.push(0);
+        self.ticker_by_symbol.insert(slot, index);
+        self.changes.tickers_replaced = true;
+        Some(index)
+    }
+
+    /// Let live data add tickers for markets on this base after the seed, so a
+    /// funded asset the seed omitted can still be valued.
+    pub fn want_ticker_for_base(&mut self, base: &str) {
+        if !self.wanted_ticker_bases.contains(base) {
+            self.wanted_ticker_bases.insert(base.to_owned());
+        }
+    }
+
     /// Mutate ticker values, keeping its symbol identity; changed fields go out as deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(index) = self.ticker_index(symbol) else {
+        // Before the seed, live data may recover a catalogue row; afterwards the
+        // seed decides which markets have tickers (as TS does), except for a
+        // funded asset a venue still needs to value.
+        let recover = !self.loaded.tickers
+            || self
+                .market(symbol)
+                .is_some_and(|market| self.wanted_ticker_bases.contains(&market.base));
+        let index = if recover {
+            self.ensure_ticker(symbol)
+        } else {
+            self.ticker_index(symbol)
+        };
+        let Some(index) = index else {
             return;
         };
         self.update_ticker_at(index, update);
@@ -511,7 +557,7 @@ impl Store {
     }
 
     pub fn set_balance(&mut self, balance: Balance) {
-        if balance != self.balance {
+        if !self.loaded.balance || balance != self.balance {
             self.balance = balance;
             self.changes.balance = true;
         }
@@ -1269,6 +1315,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn live_ticker_after_the_seed_never_creates_a_row_the_seed_omitted() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("AAA"), market("DELISTED")]);
+        store.set_tickers(vec![ticker("AAA")]);
+        store.update_ticker("DELISTED", |ticker| ticker.mark = 0.15);
+        assert!(store.ticker("DELISTED").is_none());
+        store.update_ticker("AAA", |ticker| ticker.mark = 2.0);
+        assert_eq!(store.ticker("AAA").unwrap().mark, 2.0);
+        // Test markets share the base "LIVE".
+        store.want_ticker_for_base("LIVE");
+        store.update_ticker("DELISTED", |ticker| ticker.mark = 0.15);
+        assert_eq!(store.ticker("DELISTED").unwrap().mark, 0.15);
+    }
+
+    #[test]
+    fn live_ticker_recovers_a_skipped_seed_row_without_claiming_seed_success() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("BBB"), market("AAA")]);
+        assert!(!store.loaded().tickers);
+        store.update_ticker("BBB", |ticker| ticker.last = 12.0);
+        assert!(!store.loaded().tickers);
+        assert_eq!(store.ticker("BBB").unwrap().last, 12.0);
+        assert!(store.changes.tickers_replaced);
+        let index = store.ensure_ticker("BBB").unwrap();
+        assert_eq!(index, store.ensure_ticker("BBB").unwrap());
+        store.update_ticker("AAA", |ticker| ticker.bid = 11.0);
+        assert_eq!(store.ticker("AAA").unwrap().bid, 11.0);
+        assert_eq!(store.ticker("BBB").unwrap().last, 12.0);
+        store.update_ticker("UNKNOWN", |ticker| ticker.last = 100.0);
+        assert!(store.ticker("UNKNOWN").is_none());
+        assert_eq!(store.tickers().len(), 2);
+    }
+
     fn market(symbol: &str) -> Market {
         Market {
             id: symbol.into(),
@@ -1508,6 +1588,31 @@ mod tests {
         let mut writer = FrameWriter::new(vec![], 0.0);
         store.write(&pending, &mut writer);
         writer.finish()
+    }
+
+    #[test]
+    fn first_validated_zero_balance_is_published_once_with_loaded_status() {
+        let mut store = Store::default();
+        assert!(!store.loaded().balance);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        store.set_balance(Balance::default());
+        assert!(store.loaded().balance);
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .expect("the first validated balance needs numeric evidence even when zero");
+        assert_eq!(&payload[..32], &[0_u8; 32]);
+        assert!(crate::wire::sections(&frame).any(|(kind, _)| kind == section::STATUS));
+        store.set_balance(Balance::default());
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
     }
 
     #[test]

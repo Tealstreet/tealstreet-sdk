@@ -165,8 +165,10 @@ is not the Chaser limit-order loop.
 
 `tryPlaceOrders` mints a client order id (`exchange.mintClientOrderId`; none on
 venues that refuse caller ids, which keep the old behaviour). A throw that may
-still have placed the order (`utils/unknownSendOutcome.isUnknownOutcome`: no
-venue answer, a 5xx, Binance -1007) is looked up by that id at 1/2/4/8s:
+still have placed the order (`utils/unknownSendOutcome.isUnknownOutcome`: a
+Rust `ExchangeError` with `outcome: 'unknown'`; for unclassified errors, no
+venue answer, a 5xx, Binance -1007) is looked up by that id at 1/2/4/8s. A Rust
+`outcome` of `notSent` or `rejected` is definitive and never looked up:
 
 - found **open** → the chase adopts it;
 - found **filled** or **cancelled** (a post-only reject) → its fill is counted,

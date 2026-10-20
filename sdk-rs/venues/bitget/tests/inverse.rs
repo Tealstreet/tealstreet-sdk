@@ -240,18 +240,39 @@ fn inverse_balance_aggregates_coins_with_explicit_usd_and_ticker_fallback() {
 }
 
 #[test]
-fn inverse_balance_without_usd_price_retains_native_values_and_zero_equity_is_finite() {
+fn inverse_balance_without_usd_price_never_publishes_coin_amounts_as_usd() {
     let mut h = started(TICKERS);
     h.respond("/account/accounts", 200, r#"{"code":"00000","data":[{"marginCoin":"SOL","accountEquity":"4","available":"3","unrealizedPL":"1"},{"marginCoin":"BTC","accountEquity":"0","available":"0","unrealizedPL":"0","usdtEquity":"10"}]}"#);
-    let b = h.engine.store().balance();
-    assert!(b.total.is_finite() && b.upnl.is_finite() && b.used.is_finite() && b.free.is_finite());
-    assert_eq!((b.total, b.upnl, b.used, b.free), (3.0, 1.0, 1.0, 3.0));
+    assert!(!h.engine.store().loaded().balance);
+    assert_eq!(h.engine.store().balance().total, 0.0);
     let coins = h.engine.store().coin_balances().unwrap();
     assert_eq!(
         (&*coins[0].base, coins[0].amount, coins[0].notional),
-        ("SOL", 4.0, 4.0)
+        ("SOL", 4.0, 0.0)
     );
     assert_eq!(coins[1].amount, 0.0);
+    assert!(h.logs.iter().any(|m| m.contains("USD price unavailable")));
+
+    h.login();
+    h.private_message(r#"{"arg":{"channel":"account"},"action":"update","data":[{"marginCoin":"SOL","accountEquity":"4","available":"3","unrealizedPL":"1","usdtEquity":"400"}]}"#);
+    let b = h.engine.store().balance().clone();
+    assert_eq!(
+        (b.total, b.upnl, b.used, b.free),
+        (300.0, 100.0, 100.0, 300.0)
+    );
+    // An unpriced later amount keeps the last real USD valuation.
+    h.private_message(r#"{"arg":{"channel":"account"},"action":"update","data":[{"marginCoin":"SOL","accountEquity":"5","available":"4","unrealizedPL":"1"}]}"#);
+    assert_eq!(*h.engine.store().balance(), b);
+    let sol = h
+        .engine
+        .store()
+        .coin_balances()
+        .unwrap()
+        .iter()
+        .find(|coin| coin.base == "SOL")
+        .unwrap()
+        .clone();
+    assert_eq!((sol.amount, sol.notional), (5.0, 400.0));
 }
 
 #[test]

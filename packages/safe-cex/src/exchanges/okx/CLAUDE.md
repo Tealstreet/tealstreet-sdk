@@ -1176,14 +1176,33 @@ or stale later-product reads retain the proven whole-account snapshot. Public
 index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
 Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
 unavailable REST seeds start at finite zero. An explicitly empty live last/open
-quote retains the last proven trade/change. Blank or malformed bid/ask/volume/last
-seed values start at zero with a warning, so the market keeps a ticker row that
-live updates can patch (they never create one).
+quote retains the last proven trade/change. Blank bid/ask/volume/last seed
+values are zero; malformed nonempty ones also start at zero with one counted
+warning, so the market keeps a ticker row that live updates can patch (they
+never create one). A ticker row that does not parse at all, or names an unknown
+instrument, is skipped with "Skipped malformed public discovery row".
 
-Rust startup is fail-open per row and retried per read: a malformed instrument
-row is skipped (warning with the count); a failed, malformed or wholly unusable
-catalog/ticker read restarts that product chain after 1, 2, 4 … 30 s backoff,
-never publishing a partial product union. `fetchLeverage` reads cross
-`leverage-info` for one symbol (flat symbols have no position row to carry it).
-Account config is re-read every 30 s; a posMode or acctLv changed in the OKX app
-updates the hedged flag and reconciles positions instead of rejecting orders.
+Rust startup is fail-open per row and retried per read through the shared
+engine `startup::Backoff` (1, 2, 4 … 30 s, separately for the catalogue and the
+ticker seed). A malformed instrument row is skipped with a warning and its
+instId remembered, so a position or working order on it logs an error and keeps
+the previous account snapshot instead of disappearing. A failed or malformed
+read restarts its whole product chain without publishing a partial union; when
+a product scope yields no usable rows, valid rows from the other product merge
+into the existing catalogue and that read is retried. Private startup begins
+once the catalogue loads, independent of the ticker seed. `fetchLeverage` reads
+cross `leverage-info` for one symbol (flat symbols have no position row to
+carry it). Account config is guarded by an in-flight flag: a failed startup
+read clears it and the account retry timer reads again; once configured it is
+re-read every 30 s (a failed poll waits for the next interval), and a posMode
+or acctLv changed in the OKX app updates the hedged flag and reconciles
+positions instead of rejecting orders.
+
+Rust account startup preserves native currency balances when collateral FX is
+unavailable; it retains the previous USD aggregate or waits to publish the first
+one. Stable currencies use one; other currencies need a finite positive public
+quote or the native position mark. Entry prices and discounted `disEq`/`adjEq`
+are not raw equity conversion rates. Native `totalEq` remains authoritative.
+The first real public price supersedes a startup native mark and converts inverse
+exposure, native IMR and native PnL consistently. Missing-market currencies remain
+visible and require native aggregate equity rather than a one-dollar fallback.

@@ -61,7 +61,8 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
         );
     }
     assert!(e.store().loaded().markets);
-    let a = actions(&mut e).remove(0);
+    let mut out = actions(&mut e);
+    let a = out.remove(0);
     assert!(is_get(&a, "tickers?instType=SWAP"));
     reply(&mut e, &a, &rows(&[TICKER, &ticker("BTC-USD-SWAP")]), 3.0);
     if eea {
@@ -75,7 +76,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
             4.0,
         );
     }
-    let out = actions(&mut e);
+    out.extend(actions(&mut e));
     (e, out)
 }
 fn private_catalog() -> (Engine<Okx>, SocketId, Vec<Action>) {
@@ -395,6 +396,30 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
 }
 
 #[test]
+fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &a,
+        &envelope(
+            r#"{"instType":"FUTURES","ruleType":"xperp","ctType":"inverse","instId":"BTC-USD-261225"}"#,
+        ),
+        2.0,
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    assert!(e.store().market("BTCUSDT").is_some());
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+}
+
+#[test]
 fn failed_later_product_position_refresh_keeps_both_previous_products() {
     let (mut e, _, out) = private_catalog();
     complete(out, &mut e);
@@ -492,7 +517,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
     assert!(out.iter().any(|a|matches!(a,Action::Http(r) if r.headers.iter().any(|(k,v)|*k=="OK-ACCESS-KEY"&&v=="primary"))));
 }
 #[test]
-fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_back() {
+fn collateral_uses_exact_swap_mark_not_xperp_basis() {
     let (mut e, _, out) = private_catalog();
     let timer = out
         .iter()
@@ -501,12 +526,11 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_ba
             _ => None,
         })
         .unwrap();
-    // Keep a second equity currency with no corresponding USD swap.
     let mut pending = out;
     while let Some(a) = pending.pop() {
         if let Action::Http(r) = &a {
             let body = if r.url.contains("account-position-risk") {
-                envelope(r#"{"balData":[{"ccy":"BTC","eq":"1"},{"ccy":"UNKNOWN","eq":"7"}]}"#)
+                envelope(r#"{"balData":[{"ccy":"BTC","eq":"1"}]}"#)
             } else {
                 envelope("")
             };
@@ -525,8 +549,8 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis_and_unknown_currency_falls_ba
     }
     e.store_mut().set_tickers(tickers);
     e.handle(7000.0, Event::TimerFired { timer });
-    assert_eq!(e.store().balance().total, 42007.0);
-    assert_eq!(e.store().balance().free, 42007.0);
+    assert_eq!(e.store().balance().total, 42000.0);
+    assert_eq!(e.store().balance().free, 42000.0);
 }
 #[test]
 fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
@@ -586,12 +610,47 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         assert!(e.store().loaded().tickers, "{bad}");
         assert_eq!(e.store().tickers().len(), 2, "{bad}");
         assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
-        assert!(
-            actions(&mut e)
-                .iter()
-                .any(|a| matches!(a, Action::WsConnect { .. }))
+        let seeded = e.store().ticker("BTCUSD261225").unwrap();
+        assert_eq!(
+            if bad.contains("bidPx") {
+                seeded.bid
+            } else {
+                seeded.last
+            },
+            0.0,
+            "{bad}"
         );
+        let out = actions(&mut e);
+        assert!(out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "OKX seeded 1 malformed ticker rows as zero")), "{bad}");
     }
+}
+
+#[test]
+fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(&future()), 2.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(TICKER), 3.0);
+    let a = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &a,
+        // A null quote now seeds zero; a non-string quote is still undecodable.
+        &envelope(&ticker("BTC-USD-261225").replace(r#""last":"40000""#, r#""last":40000"#)),
+        4.0,
+    );
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
 }
 
 #[test]
@@ -929,7 +988,8 @@ mod product_semantics {
                 1.5,
             );
         }
-        let request = actions(&mut e).remove(0);
+        let mut initial = actions(&mut e);
+        let request = initial.remove(0);
         reply(
             &mut e,
             &request,
@@ -941,7 +1001,7 @@ mod product_semantics {
             let request = actions(&mut e).remove(0);
             reply(&mut e, &request, &envelope(&ticker("BTC-USD-UM")), 2.5);
         }
-        let initial = actions(&mut e);
+        initial.extend(actions(&mut e));
         (e, initial)
     }
     fn socket(initial: &[Action], suffix: &str) -> SocketId {
@@ -1502,6 +1562,7 @@ mod product_semantics {
             assert!(e.store().loaded().markets, "{value}");
             assert_eq!(e.store().markets().len(), 1, "{value}");
             assert!(e.store().market("CRMLUSDT").is_none(), "{value}");
+            assert_eq!(e.store().markets()[0].id, "BTC-USD-SWAP", "{value}");
         }
         let mut row = native;
         for key in [
@@ -2250,12 +2311,14 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
     let a = actions(&mut e).remove(0);
     let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;
     reply(&mut e, &a, &envelope(&format!("{MARKET},{broken}")), 1.0);
-    let a = actions(&mut e)
-        .into_iter()
-        .find(|a| matches!(a, Action::Http(_)))
+    // Private startup begins with the catalogue, alongside the ticker seed.
+    let out = actions(&mut e);
+    let tickers = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
         .unwrap();
-    reply(&mut e, &a, &envelope(TICKER), 2.0);
-    let a = actions(&mut e)
+    reply(&mut e, tickers, &envelope(TICKER), 2.0);
+    let a = out
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .unwrap();

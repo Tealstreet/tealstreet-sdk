@@ -413,14 +413,20 @@ fn ticker_indexes_follow_reordered_market_and_ticker_seeds_and_last_duplicates()
         r#"{"code":"00000","data":[{"symbol":"BTCUSDT","lastPr":"300"}]}"#,
     );
     engine.drain_actions();
+    assert_eq!(
+        engine.store().ticker("BTCUSDT").unwrap().last,
+        112.0,
+        "late REST must preserve the intervening native quote"
+    );
     message(
         &mut engine,
         socket,
         r#"{"arg":{"channel":"ticker"},"data":[{"instId":"ETHUSDT","lastPr":"999"},{"instId":"UNKNOWN","lastPr":"999"},{"symbol":"BTCUSDT","lastPr":"301"}]}"#,
     );
-    assert_eq!(engine.store().tickers().len(), 1);
-    assert_eq!(engine.store().tickers()[0].symbol, "BTCUSDT");
-    assert_eq!(engine.store().tickers()[0].last, 301.0);
+    assert_eq!(engine.store().tickers().len(), 2);
+    assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 301.0);
+    assert_eq!(engine.store().ticker("ETHUSDT").unwrap().last, 999.0);
+    assert!(engine.store().ticker("UNKNOWN").is_none());
 }
 
 #[test]
