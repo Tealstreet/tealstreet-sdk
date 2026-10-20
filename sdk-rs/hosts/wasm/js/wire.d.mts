@@ -18,6 +18,7 @@ export const SECTION: {
   INSTRUMENT_CLASSIFICATIONS: 16;
   DERIVATIVE_PRODUCTS: 17;
   POSITION_GREEKS: 18;
+  CAPABILITIES: 19;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -31,6 +32,31 @@ export const MARKET_COLUMNS: readonly [
 ];
 export type MarketColumn = (typeof MARKET_COLUMNS)[number];
 export const MARKET_FLAG: { ACTIVE: 1; INVERSE: 2; SPOT: 4; PERPETUAL: 8; EXPIRING: 16; READ_ONLY: 32 };
+export type QuantityUnits = 'base' | 'nativePlacement' | 'inverseNative' | 'contractCount' | 'inverseContractSized';
+export const QUANTITY_UNITS: readonly QuantityUnits[];
+/** A market's quantity convention, from its MARKETS flags. */
+export function marketQuantityUnits(flags: number): QuantityUnits;
+/** What a venue answers beyond the common commands (`safe_cex_engine::Capabilities`). */
+export interface EngineCapabilities {
+  account: 'unsupported' | 'query' | 'afterLoad';
+  clientOrderLookup: boolean;
+  fillHistory: boolean;
+  orderHistory: boolean;
+  incomeHistory: boolean;
+  fillsByOrderId: boolean;
+  cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
+  leverageQuery: 'settings' | 'onRead' | 'onMetadata';
+  maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
+  accountLeverage: boolean;
+  accountMarginType: boolean;
+  cancelWithSymbols: boolean;
+  amendWithSymbol: boolean;
+  orderBookQuery: boolean;
+  options: boolean;
+  quantityUnits: QuantityUnits;
+  accountTier: boolean;
+  closedPositions: boolean;
+}
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
@@ -221,6 +247,7 @@ export class Frame {
   positions(): PositionTable | undefined;
   balance(): Balance | undefined;
   status(): Status | undefined;
+  capabilities(): EngineCapabilities | undefined;
   settings(): SettingTable | undefined;
   fills(): FillRows | undefined;
 }

@@ -353,7 +353,7 @@ fn fetched_candles_use_minutes_and_milliseconds_on_wire() {
         Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "BTCUSDT".into(),
-            interval: "1h".into(),
+            interval: safe_cex_engine::model::Interval::H1,
             limit: Some(1),
             from_ms: None,
             to_ms: Some(7200000.0),
@@ -732,7 +732,7 @@ fn subscriptions_and_data_wait_for_welcome_and_duplicate_welcome_is_ignored() {
         2.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.handle(

@@ -57,7 +57,7 @@ impl Harness {
         }));
         h.event(Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }));
         h
     }
