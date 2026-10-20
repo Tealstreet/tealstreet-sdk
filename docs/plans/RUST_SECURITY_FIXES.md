@@ -439,3 +439,18 @@ live trading, weakened parity oracle, or performance threshold changes.
   unstaged paths, since aggregate `git diff HEAD` can hide canceled index/work
   tree changes. Current status and both diffs were independently confirmed
   clean during accepted checks. This guard improvement changes no SDK input.
+
+### Public timing moved to CI by overseer
+
+- Explicit instruction in Aimux thread `thread-dmam1oibxrui`: the machine is
+  shared by 11 lanes; do not wait for local CPU admission. Open the PR now,
+  let CI run the 30-venue public timing gates, and merge only on green CI.
+- Stopped local admission with zero final-source public timing attempts and
+  restored/reverified the combined bindings. Local public receipt explicitly
+  says delegated to CI; it does not claim PASS. All local quality, 30 primary
+  private/size gates, combined consumers, smoke/harness and scanner evidence
+  above remain accepted checkpoints. CI supplies final public measurements.
+- Fresh fetch advances landing to `c44f22bd8e` (61 commits after the last
+  integration). Open the requested PR and integrate/resolve the latest landing
+  structure, review the resulting security boundaries and rely on current
+  green merge-result CI before landing. No TS venue deletion.
