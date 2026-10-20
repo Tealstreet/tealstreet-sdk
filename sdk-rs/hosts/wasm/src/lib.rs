@@ -109,6 +109,7 @@ trait AnyEngine {
         &mut self,
         policy: safe_cex_engine::PublicFeedPolicy,
     ) -> Result<(), &'static str>;
+    fn set_account_startup(&mut self, account: bool);
     fn apply_public_feed(
         &mut self,
         now: f64,
@@ -130,6 +131,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
         policy: safe_cex_engine::PublicFeedPolicy,
     ) -> Result<(), &'static str> {
         Engine::set_public_feed_policy(self, policy)
+    }
+    fn set_account_startup(&mut self, account: bool) {
+        Engine::set_account_startup(self, account)
     }
     fn apply_public_feed(
         &mut self,
@@ -211,6 +215,9 @@ struct KucoinExtra {
 struct EngineOptions {
     #[serde(default)]
     private_only: bool,
+    /// The SDK sets this when the account can sign (not public-data-only).
+    #[serde(default)]
+    account_startup: bool,
     #[serde(default)]
     public_feed: Option<PublicFeedOptions>,
     #[serde(default)]
@@ -1065,6 +1072,7 @@ impl WasmEngine {
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
         inner.set_public_feed_policy(policy).map_err(JsError::new)?;
+        inner.set_account_startup(options.account_startup);
         Ok(Self { inner })
     }
 
@@ -1606,6 +1614,7 @@ mod tests {
             ) -> Result<(), &'static str> {
                 Err("command-only test engine")
             }
+            fn set_account_startup(&mut self, _: bool) {}
             fn apply_public_feed(
                 &mut self,
                 now: f64,
@@ -1846,6 +1855,7 @@ mod tests {
         ) -> Result<(), &'static str> {
             Err("message-only test engine")
         }
+        fn set_account_startup(&mut self, _: bool) {}
         fn apply_public_feed(
             &mut self,
             _now: f64,
