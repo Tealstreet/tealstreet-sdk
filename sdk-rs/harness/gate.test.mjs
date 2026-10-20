@@ -120,6 +120,7 @@ const gate = (venue, isPrivate = false, defect) => {
         // Orderly and Coinbase require exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
+        checkpoints: [{ ordinal: 0, recordIndex: -1, t: 0, markets: [], tickers: [], books: {} }],
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
           balance: { used: 0, free: 100, total: 100, upnl: 0 },
@@ -138,6 +139,9 @@ const gate = (venue, isPrivate = false, defect) => {
         output.books.BTCUSDT.bids[0][1] = 2;
         output.commands[0].ok.ids.reverse();
       }
+      if (defect === 'duplicate-symbols') output.markets.push({ ...output.markets[0] });
+      if (defect === 'filtered-duplicates') output.duplicateSymbols = ['duplicate markets symbol SPOT at rows 0 and 1'];
+      if (rust && defect === 'checkpoint-transient') output.checkpoints[0].tickers.push({ symbol: 'BTCUSDT', last: 999 });
       if (defect?.startsWith('impl-plans')) {
         output.writes = (rust ? ['Order', 'StopOrder', 'tpslOrder'] : [undefined]).map((orderFilter) =>
           'POST https://api.bybit.com/v5/order/cancel-all? ' + JSON.stringify({ category: 'spot', ...(orderFilter && { orderFilter }) }));
@@ -195,6 +199,14 @@ test('gate CLI rejects independent market, ticker, book and ordered command mism
   for (const difference of ['market BTCUSDT:', 'ticker BTCUSDT:', 'book BTCUSDT differs', 'command results:'])
     assert.ok(result.stdout.includes(difference), `${difference}\n${result.stdout}`);
   assert.doesNotMatch(result.stderr, /ReferenceError/);
+});
+
+test('gate CLI rejects duplicates and transient checkpoint divergences', () => {
+  for (const [defect, message] of [['duplicate-symbols', /duplicate symbol BTCUSDT/], ['filtered-duplicates', /duplicate markets symbol SPOT/], ['checkpoint-transient', /checkpoint 0 tickers/]]) {
+    const result = gate('bybitinverse', false, defect);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, message);
+  }
 });
 
 test('gate CLI retains the strict Orderly command count oracle', () => {

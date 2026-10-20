@@ -178,8 +178,18 @@ export class ReplayClock {
   }
 }
 
+// Fixed tape ordinals, never wall-time or implementation progress, select the
+// same intermediate financial states in both replays. Command boundaries are
+// always included so a later final snapshot cannot hide a wrong mutation.
+export const checkpointOrdinals = (frames) => new Set([
+  0,
+  ...[1, 2, 3, 4].map((quarter) => Math.ceil(frames.length * quarter / 4)),
+  ...frames.flatMap((frame, index) => frame.type === 'command' ? [index + 1] : []),
+]);
+
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options) {
+    const originalIndices = new Map(records.map((record, index) => [record, index]));
     if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
     records = records.filter((record) => {
       if (record.impl === undefined) return true;
@@ -193,6 +203,7 @@ export class Tape {
             record.tsRequestBody === undefined ? record : { ...record, requestBody: record.tsRequestBody },
           )
         : records;
+    this.recordIndices = new Map(this.records.map((record, index) => [record, originalIndices.get(records[index])]));
     this.venue = venue;
     this.liveSmoke = records.some((record) => record.type === 'meta' && record.liveSmoke === true);
     this.bootstrapFrame = (frame) => venue.bootstrapFrame?.(frame) || (this.liveSmoke && ['open', 'close', 'ws'].includes(frame.type) && frame.bootstrap === true);
@@ -844,7 +855,7 @@ export class Tape {
    * Commands are awaited where they fall. A private tape is paced: each record
    * waits until its time after the account is ready.
    */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
+  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}, checkpoint) {
     const first = this.frames.find((frame) => frame.url && frame.type !== 'wait' && frame.type !== 'http');
     const startupDeadline = performance.now() + this.timeoutMs;
     await within((async () => {
@@ -869,7 +880,10 @@ export class Tape {
     this.replayClock = clock;
     const start = performance.now();
     let delivered = 0;
-    const warm = Math.floor(this.frames.reduce((count, frame) => count + (this.bootstrapFrame(frame) ? 0 : 1), 0) / 4);
+    const replayFrames = this.frames.filter((frame) => !this.bootstrapFrame(frame));
+    const checkpoints = checkpointOrdinals(replayFrames);
+    await checkpoint?.({ ordinal: 0, recordIndex: -1, t: 0 });
+    const warm = Math.floor(replayFrames.length / 4);
     for (const frame of this.frames) {
       if (this.bootstrapFrame(frame)) continue;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
@@ -907,6 +921,8 @@ export class Tape {
       delivered++;
       onTick?.(frame.t);
       await new Promise(setImmediate);
+      if (checkpoints.has(delivered))
+        await checkpoint?.({ ordinal: delivered, recordIndex: this.recordIndices.get(frame), t: frame.t ?? 0 });
     }
     if (this.selectedPollingResponses) await this.finishPolling(clock);
     return delivered;

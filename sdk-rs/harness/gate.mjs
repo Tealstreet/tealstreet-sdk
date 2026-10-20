@@ -17,6 +17,7 @@ import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
+import { duplicateSymbols, compareCheckpoints, valueDifferences } from './snapshot-compare.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -175,6 +176,15 @@ for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
 
+  // Inspect original arrays before a fixer or Map can erase duplicate rows.
+  for (const [impl, output] of [['ts', ts], ['rust', rust]])
+    {
+      for (const field of ['markets', 'tickers']) differences.push(...duplicateSymbols(output[field], `${impl} ${field}`));
+      differences.push(...(output.duplicateSymbols ?? []).map((error) => `${impl}: ${error}`));
+    }
+  // Checkpoints compare the actual receiver output without final-state fixers.
+  differences.push(...compareCheckpoints(ts.checkpoints, rust.checkpoints));
+
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -259,9 +269,7 @@ for (let run = 0; run < runs; run++) {
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(stable(ts.account[field]));
-      const right = JSON.stringify(stable(rust.account[field]));
-      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+      differences.push(...valueDifferences(ts.account[field], rust.account[field], `account ${field}`));
     }
   }
   // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The

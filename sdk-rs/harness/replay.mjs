@@ -14,10 +14,12 @@ import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 import { deterministicReplay, replayTransportReady } from './polling.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, duplicateSymbolErrors } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
     impl: { type: 'string' },
+    performance: { type: 'boolean', default: false },
     venue: { type: 'string', default: 'binance' },
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
@@ -301,31 +303,7 @@ async function runRust() {
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
   const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
-  const frames = await tape.play(
-    (t) => {
-      if (t - lastFlush >= 250) {
-        host.flush();
-        lastFlush = t;
-      }
-    },
-    async (accountReady) => {
-      await until(() => {
-        host.flush();
-        return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && (!tape.audit || tape.audit.ready(accountReady));
-      }, 'Rust startup');
-      await until(() => replayTransportReady(venue, tape.open.size), 'Rust initial transport');
-    },
-    (record) => {
-      const { op, ...rest } = record;
-      return host.command({ op, ...commandArgs(rest) });
-    },
-    clock,
-  );
-  await settle();
-  tape.assertWritesConsumed();
-  clearInterval(flushTimer);
-  host.flush();
-  const result = await finalizeReplay(() => {
+  const capture = (frames = 0) => {
     const marketRows = [];
     for (let i = 0; i < (markets?.count ?? 0); i++) {
       marketRows.push({
@@ -395,7 +373,38 @@ async function runRust() {
       account,
       commands: tape.results,
     };
-  }, () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark));
+  };
+  const checkpoints = [];
+  const frames = await tape.play(
+    (t) => {
+      if (t - lastFlush >= 250) {
+        host.flush();
+        lastFlush = t;
+      }
+    },
+    async (accountReady) => {
+      await until(() => {
+        host.flush();
+        return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && (!tape.audit || tape.audit.ready(accountReady));
+      }, 'Rust startup');
+      await until(() => replayTransportReady(venue, tape.open.size), 'Rust initial transport');
+    },
+    (record) => {
+      const { op, ...rest } = record;
+      return host.command({ op, ...commandArgs(rest) });
+    },
+    clock,
+    undefined,
+    values.performance ? undefined : (point) => {
+      host.flush();
+      checkpoints.push(captureCheckpoint(point, () => comparisonSnapshot(capture(point.ordinal))));
+    },
+  );
+  await settle();
+  tape.assertWritesConsumed();
+  clearInterval(flushTimer);
+  host.flush();
+  const result = await finalizeReplay(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark));
   host.dispose();
   clock?.restore();
   return result;
@@ -482,7 +491,9 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   for (let i = 0; i < (orders?.count ?? 0); i++) {
     const row = {
       id: orders.id(i),
-      ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
+      ...(comparesField(values.venue, 'clientOrderId') ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
+      parentId: orders.parentId(i) ?? null,
+      conditionalOrderPrice: null,
       symbol: symbol(orders.market[i]),
       ...orderEnums(orders.enums[i]),
     };
@@ -515,7 +526,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   }
   return {
     hedged: status?.hedged ?? false,
-    balance: {
+    balance: balance ? {
       used: balance.used,
       free: balance.free,
       total: balance.total,
@@ -523,7 +534,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
       ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.currencyBalances && balance.currencies !== undefined ? { currencies: balance.currencies } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: currencyBalances(balance.currencies) } : {}),
-    },
+    } : null,
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
@@ -532,7 +543,10 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
       symbol: symbol(f.market),
       side: f.side === 0 ? 'buy' : 'sell',
       amount: f.amount,
-      ...(venue.compareFillPrices ? { price: f.price } : {}),
+      price: f.price,
+      executionId: f.executionId ?? null,
+      fee: f.fee ?? null,
+      timestamp: f.timestamp ?? null,
     })),
   };
 }
@@ -700,6 +714,74 @@ async function runTs() {
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
   const mainBooks = {};
+  const capture = (frames = 0) => {
+    const receiver = values['no-egress'] ? store : mainStore;
+    const snapshot = {
+      markets: receiver.markets.map((m) => ({ ...m })),
+      tickers: receiver.tickers.map((t) => ({ ...t })),
+    };
+    const bookCopies = Object.fromEntries(
+      Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [
+        symbol,
+        JSON.parse(JSON.stringify(book)),
+      ]),
+    );
+    const account = isPrivate
+      ? {
+          hedged: Boolean(receiver.options.isHedged),
+          balance: {
+            used: receiver.balance.used,
+            free: receiver.balance.free,
+            total: receiver.balance.total,
+            upnl: receiver.balance.upnl,
+            ...(venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins ? { coins: receiver.balance.coins ?? {} } : {}),
+            ...(venue.currencyBalances && receiver.balance.currencies !== undefined
+              ? { currencies: receiver.balance.currencies }
+              : {}),
+            ...(venue.compareBalanceCurrencies ? {
+              currencies: currencyBalances(venue.tsBalanceCurrencies?.(receiver.balance.currencies ?? {}) ?? receiver.balance.currencies),
+            } : {}),
+          },
+          orders: receiver.orders.map((o) => ({ ...o })),
+          // Zero-size placeholders carry each market's leverage and margin type.
+          positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
+          settings: venue.tsSettings?.(exchange, store) ?? [
+            ...new Map(
+              receiver.positions
+                .filter((p) => p.leverage > 0)
+                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
+            ).values(),
+          ],
+          fills: executions.map((f) => ({
+            id: f.orderId ?? f.id,
+            symbol: f.symbol,
+            side: f.side,
+            amount: f.amount,
+            price: f.price,
+            executionId: f.executionId ?? null,
+            fee: f.fee ?? null,
+            timestamp: f.timestamp ?? null,
+          })),
+        }
+      : undefined;
+    return {
+      frames,
+      unserved: tape.unserved,
+      missingWrites: tape.missingWrites,
+      invalidSignatures: tape.invalidSignatures,
+      requests: [...tape.requests].sort(),
+      writes: tape.writes,
+      subscriptions: [...tape.subscriptions].sort(),
+      unusedWrites: tape.unusedWrites(),
+      protocolErrors: tape.audit?.errors() ?? [],
+      wsRequests: [...tape.sentRequests].sort(),
+      store: snapshot,
+      books: bookCopies,
+      account,
+      commands: tape.results,
+    };
+  };
+  const checkpoints = [];
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
@@ -722,6 +804,13 @@ async function runTs() {
     },
     (record) => tsCommand(exchange, store, record),
     clock,
+    undefined,
+    values.performance ? undefined : (point) => {
+      postStore();
+      if (!values['no-egress'])
+        for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
+      checkpoints.push(captureCheckpoint(point, () => comparisonSnapshot(capture(point.ordinal))));
+    },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   if (venue.tsReplaySettled)
@@ -732,126 +821,27 @@ async function runTs() {
   postStore();
   if (!values['no-egress'])
     for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
-  const result = await finalizeReplay(() => {
-    const snapshot = {
-      markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
-      tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
-    };
-    const bookCopies = Object.fromEntries(
-      Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [
-        symbol,
-        JSON.parse(JSON.stringify(book)),
-      ]),
-    );
-    const account = isPrivate
-      ? {
-          hedged: Boolean(store.options.isHedged),
-          balance: {
-            used: store.balance.used,
-            free: store.balance.free,
-            total: store.balance.total,
-            upnl: store.balance.upnl,
-            ...(venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins ? { coins: store.balance.coins ?? {} } : {}),
-            ...(venue.currencyBalances && store.balance.currencies !== undefined
-              ? { currencies: store.balance.currencies }
-              : {}),
-            ...(venue.compareBalanceCurrencies ? {
-              currencies: currencyBalances(venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies),
-            } : {}),
-          },
-          orders: store.orders.map((o) => ({ ...o })),
-          // Zero-size placeholders carry each market's leverage and margin type.
-          positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-          settings: venue.tsSettings?.(exchange, store) ?? [
-            ...new Map(
-              store.positions
-                .filter((p) => p.leverage > 0)
-                .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
-            ).values(),
-          ],
-          fills: executions.map((f) => ({
-            id: f.orderId ?? f.id,
-            symbol: f.symbol,
-            side: f.side,
-            amount: f.amount,
-            ...(venue.compareFillPrices ? { price: f.price } : {}),
-          })),
-        }
-      : undefined;
-    return {
-      frames,
-      unserved: tape.unserved,
-      missingWrites: tape.missingWrites,
-      invalidSignatures: tape.invalidSignatures,
-      requests: [...tape.requests].sort(),
-      writes: tape.writes,
-      subscriptions: [...tape.subscriptions].sort(),
-      unusedWrites: tape.unusedWrites(),
-      protocolErrors: tape.audit?.errors() ?? [],
-      wsRequests: [...tape.sentRequests].sort(),
-      store: snapshot,
-      books: bookCopies,
-      account,
-      commands: tape.results,
-    };
-  }, () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark));
+  const result = await finalizeReplay(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark));
   exchange.dispose();
   clock?.restore();
   return result;
 }
 
-/** The fields both implementations carry, in one shape. */
-function normalizeAccount(account) {
-  const order = (o) => ({
-    id: String(o.id),
-    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
-    symbol: o.symbol,
-    status: o.status,
-    type: o.type,
-    side: o.side,
-    price: o.price,
-    amount: o.amount,
-    filled: o.filled,
-    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { remainingNative: o.extra?.remainingNative ?? (venue.coinNativeAmounts && values.impl === 'ts' ? o.remaining : undefined) } : {}),
-    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
-    remaining: o.remaining,
-    reduceOnly: Boolean(o.reduceOnly),
-    close: Boolean(o.close),
-    trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
-    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
-  });
-  const position = (p) => ({
-    symbol: p.symbol,
-    side: p.side,
-    entryPrice: p.entryPrice,
-    contracts: p.contracts,
-    notional: p.notional,
-    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { contractsNative: p.extra?.contractsNative ?? p.info?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative ?? (venue.coinNativeAmounts ? p.unrealizedPnl : undefined) } : {}),
-    leverage: p.leverage,
-    unrealizedPnl: p.unrealizedPnl,
-    liquidationPrice: p.liquidationPrice,
-    marginType: p.marginType ?? null,
-    positionMode: p.positionMode ?? null,
-    marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,
-    ...(venue.compareOptionTerms ? { option: p.option?.greeks ? { greeks: p.option.greeks } : null } : {}),
-  });
-  const bySymbol = (a, b) => a.symbol.localeCompare(b.symbol) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+
+function comparisonSnapshot(result) {
   return {
-    hedged: account.hedged,
-    balance: account.balance,
-    orders: account.orders.map(order).sort(bySymbol),
-    // Binance zero-size rows are compared through settings, as in its TS view.
-    positions: (venue.rust.startsWith('binance') ? account.positions.filter((p) => p.contracts > 0) : account.positions).map(position).sort(bySymbol),
-    settings: account.settings
-      .map((s) => ({
-        symbol: s.symbol,
-        marginType: s.marginType,
-        ...(venue.independentLeverage
-          ? { buyLeverage: s.buyLeverage, sellLeverage: s.sellLeverage }
-          : { leverage: s.leverage }),
-      }))
-      .sort(bySymbol),
-    fills: account.fills,
+    duplicateSymbols: duplicateSymbolErrors(result.store),
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers
+      .filter(venue.marketFilter ?? (() => true))
+      .map((t) =>
+        Object.fromEntries([
+          ['symbol', t.symbol],
+          ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),
+        ]),
+      ),
+    books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
+    account: result.account && normalizeAccount(result.account, venue, values.impl, values.venue),
   };
 }
 
@@ -873,17 +863,8 @@ writeFileSync(
     protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
-    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
-    tickers: result.store.tickers
-      .filter(venue.marketFilter ?? (() => true))
-      .map((t) =>
-        Object.fromEntries([
-          ['symbol', t.symbol],
-          ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),
-        ]),
-      ),
-    books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
-    account: result.account && normalizeAccount(result.account),
+    ...comparisonSnapshot(result),
+    checkpoints: result.checkpoints,
     commands: result.commands.map((result, index) => {
       const command = records.filter((record) => record.type === 'command')[index];
       return lookupResult(venue.commandResult?.(result, command, index + 1) ?? result, command);

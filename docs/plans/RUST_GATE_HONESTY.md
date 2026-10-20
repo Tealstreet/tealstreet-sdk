@@ -39,3 +39,15 @@ never retry an unchanged failed performance measurement to obtain a pass.
   renamed candidate parameters, computed Rust access and captured aliases.
   Independent review found the first lint bypass, now corrected; re-review PASS
   with 2/2 targeted regressions. Full harness verification recorded below.
+  Full harness suite: 588/588 PASS (`/tmp/gate-honesty-phase1-reviewed-tests.log`).
+- Phase 2: protective/conditional order fields and parent IDs, realized PnL,
+  fill price/fee/time/execution identity and client IDs are compared by default;
+  the explicit exclusions map starts empty. Startup, tape-quarter, command and
+  terminal snapshots use production receiver state, without final-state fixers.
+  Duplicate diagnostics are checked before venue filtering and normalization.
+  Independent review found filtered duplicates were initially ignored; fixed
+  and adversarial re-review PASS. Real Bitrue TS/Rust private replays completed
+  23 frames each with 11 identical checkpoint identities.
+  Ordinary production fill events/frame rows lack timestamps and execution IDs:
+  null/null equality is absence of evidence, not proof of those capabilities.
+  Conditional execution price also stays null when the production wire lacks it.
