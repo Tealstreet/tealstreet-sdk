@@ -317,7 +317,7 @@ impl PhemexPerpetuals {
         match pending {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Late),
+            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
@@ -351,6 +351,11 @@ impl Venue for PhemexPerpetuals {
 
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+
+    // A panic close must always go out; late landings are canceled after the read.
+    fn fence_uncertain_cancel_all(&self) -> bool {
+        false
     }
 
     type Pending = Pending;

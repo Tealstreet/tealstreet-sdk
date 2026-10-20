@@ -92,7 +92,9 @@ High:
 Medium:
 - ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
   Verification found the uncertain-placement fence never cleared on Phemex (cancel-all
-  failed for the session); a post-failure `activeList` read now reconciles it.
+  failed for the session). Owner decision: Phemex cancel-all is never refused for an
+  uncertain placement; it cancels every known order at once, and after the lost write's
+  signed expiry an `activeList` read cancels any late-landed order from it.
 - ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
 - ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
 - ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
@@ -759,8 +761,8 @@ Normal inputs send the same requests as TS; the risk is resilience.
   Bad public and account rows are skipped (stored copies kept, exact hedge ids);
   ticker failure no longer blocks private start; `planType` fallback added.
 - Medium: ~~failed config read backs off all polling to ~60 s (`account.rs:518`);~~
-  balance stops updating during active trading (revision discard,
-  `account.rs:408`) — resilience lane; ~~accepted conditional reported failed if
+  ~~balance stops updating during active trading (revision discard,
+  `account.rs:408`)~~ (balance reads commit; the next cycle corrects a raced read); ~~accepted conditional reported failed if
   the venue echoes `clientAlgoId` (`trading.rs:1303`; verify live); imported limit
   with TP/SL can't be amended (`trading.rs:343`); missing passphrase looks like a
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
@@ -860,7 +862,7 @@ Mostly matches TS.
   without blocking the usable initial sweep; both collateral balances and
   authenticated native bracket caps are exposed without silent leverage clamps.
 - Low: one bad contract row blocks startup; stream stops misclassified;
-  snapshot starvation under load (revision discard, `account.rs:581,1310`);
+  ~~snapshot starvation under load (revision discard, `account.rs:581,1310`)~~;
   malformed snapshot never sets loaded.
 - Confirm (TS bugs Rust fixed): TS prices a position at the all-zero placeholder
   ticker before the first quote (private tape: -12000 on a 0.2 BTC long whose
@@ -870,8 +872,12 @@ Mostly matches TS.
 - Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
   ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
   balances TS publishes and now set them; ApeX and Backpack publish none in TS.
-- Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
-  check every venue that fences REST snapshots by stream revision.
+- ~~Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
+  check every venue that fences REST snapshots by stream revision.~~ Fixed with
+  `engine::fence::StaleGuard` (commit after two consecutive discards, then re-read)
+  on Bitrue, Backpack, BingX (balance, position mode), Kraken Spot, KuCoin Spot,
+  Orderly (balance only), Polymarket and WOO; WEEX balance reads no longer fence.
+  Bybit Hyro is fixed by its owning lane.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
