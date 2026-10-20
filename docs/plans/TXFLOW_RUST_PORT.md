@@ -557,3 +557,20 @@ variant was included. No fixture, threshold or reference change in this phase.
 Root tests on the merged source pass 7,388 tests in each safe-cex run; typecheck,
 lint, harness 437, host 65 and real-Wasm wrapper 105 pass. Final combined artifact
 regressions and green exact-head CI remain before merge.
+
+### Binance variants landing integration
+
+Merged landing `e391337054` (Binance variants and GRVT profiling handoff).
+Retain incoming coin-native balance projections inside the detached TS snapshot,
+including `tsBalanceCurrencies`, while preserving both snapshot/measurement
+boundaries. All registration, unit-conversion and session audit changes survive;
+inverse conversion is inactive for TxFlow/Phemex. Independent integration review
+accepts the union. Merged harness 455/455 passes. No TxFlow fixture or runtime
+behavior changes in the merge.
+
+The isolated decoder gate passes, but the subsequent default-feature public gate
+missed steady CPU (TS/Rust 28.1/29.4 ms), with total CPU and memory passing.
+Do not treat earlier passing timings as proof of this combined artifact.
+Profiling one canonical replay is underway before choosing another optimization;
+keep every comparison, audit and threshold intact. Final landing still requires
+both applicable local gates and green exact-head CI.

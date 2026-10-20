@@ -54,6 +54,7 @@ else if (options.endpoints) write({ type: 'config', options });
 
 const live = nativeTransport();
 const ordinals = new Map();
+const tickerSymbols = new Set();
 const recording = {
   ...live,
   connect(url, handlers) {
@@ -69,6 +70,7 @@ const recording = {
       },
       onMessage: (text) => {
         frames++;
+        for (const symbol of venue.recordTickerSymbols?.(text) ?? []) tickerSymbols.add(symbol);
         write({ type: 'ws', url, socket, text });
         handlers.onMessage(text);
       },
@@ -178,10 +180,13 @@ function finish() {
   host.flush();
   host.dispose();
   tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size }));
-    process.exit(!recordingFailed && recordingReady(venue, {
-      frames, httpResponses, loaded, books: seenBooks.size,
-      requestedBooks: values.books.split(',').filter(Boolean).length,
+    console.log(
+      JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size, ...(venue.recordTickerSymbols ? { tickerSymbols: tickerSymbols.size } : {}) }),
+    );
+    const requested = values.books.split(',').filter(Boolean);
+    const tickersReady = !venue.recordTickerSymbols || requested.every((symbol) => tickerSymbols.has(symbol));
+    process.exit(!recordingFailed && tickersReady && recordingReady(venue, {
+      frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: requested.length,
     }) ? 0 : 1);
   });
 }

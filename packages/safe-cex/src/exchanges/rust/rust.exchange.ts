@@ -65,6 +65,8 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   asterdex: 'asterdex',
   breakoutprop: 'breakoutprop',
   binance: 'binance',
+  binancespot: 'binancespot',
+  binanceinverse: 'binanceinverse',
   backpack: 'backpack',
   'tealstreet-dex': 'tealstreet-dex',
   kodiakfi: 'kodiakfi',
@@ -113,14 +115,16 @@ const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode'
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
-const mintBinanceClientOrderId = () => 'x-s3vFFRQp' + uuid();
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   coinbase: coinbaseClientOrderIdRule,
   coinbasespot: coinbaseClientOrderIdRule,
-  binance: patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: mintBinanceClientOrderId }),
-  binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, { mint: mintBinanceClientOrderId }),
   phemex: patternClientOrderIdRule('Phemex', /^.{1,40}$/, { mint: () => `${PHEMEX_BROKER_ID}_${uuid()}` }),
   apexomni: patternClientOrderIdRule('ApeX Omni', /^\S+$/),
+  binance: patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `x-s3vFFRQp${uuid()}` }),
+  binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, {
+    mint: () => `x-s3vFFRQp${uuid()}`.slice(0, 32),
+  }),
+  binancespot: patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/, { mint: () => `x-s3vFFRQp${uuid()}` }),
   'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,
   mode: orderlyClientOrderIdRule,
@@ -242,7 +246,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = exchangeName === 'bybitspot' || exchangeName === 'coinbasespot';
+    this.isSpot = exchangeName === 'bybitspot' || exchangeName === 'binancespot' || exchangeName === 'coinbasespot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
@@ -283,6 +287,7 @@ export class RustEngineExchange extends BaseExchange {
       store,
       ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
       this.name === 'bitgetinverse',
+      this.name === 'binanceinverse',
     );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
@@ -661,6 +666,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    if (this.name !== 'asterdex' && orders.some((order) => order.stpMode !== undefined)) {
+      this.rejectPreflight(`${this.name} does not support AsterDEX stpMode`);
+    }
     const isBybit = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name);
     if (!isBybit && orders.some((order) => 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
       this.rejectPreflight(`${this.name} does not support Bybit BBO or TickSize controls`);
