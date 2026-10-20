@@ -11,6 +11,9 @@ fn boot() -> Engine<Grvt> {
     boot_with_socket().0
 }
 fn boot_with_socket() -> (Engine<Grvt>, SocketId) {
+    boot_with_catalog(CATALOG)
+}
+fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId) {
     let mut private_socket = None;
     let mut e = Engine::new(Grvt::new(Options {
         key: Some("grvt-test-key".into()),
@@ -35,7 +38,7 @@ fn boot_with_socket() -> (Engine<Grvt>, SocketId) {
             break;
         };
         let (headers, body) = if request.url.ends_with("all_instruments") {
-            ("", CATALOG)
+            ("", catalog)
         } else if request.url.ends_with("auth/api_key/login") {
             (
                 "Set-Cookie: gravity=test-session; Path=/\nX-Grvt-Account-Id: test-account",
@@ -339,6 +342,82 @@ fn entire_batch_preflight_prevents_partial_writes() {
         );
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(done(&actions, 3).unwrap().is_err());
+    }
+}
+
+#[test]
+fn retired_product_identities_reject_every_symbol_write_without_touching_perpetuals() {
+    for (kind, instrument) in [
+        ("FUTURE", "BTC_USDT_30DEC26_Future"),
+        ("CALL", "BTC_USDT_30DEC26_100000_Call"),
+        ("PUT", "BTC_USDT_30DEC26_100000_Put"),
+    ] {
+        let catalog = format!(
+            r#"{},{{"i":"{instrument}","ih":"0x030502","b":"BTC","q":"USDT","k":"{kind}","ts":"0.1","ms":"0.001","bd":9,"qd":6}}]}}"#,
+            CATALOG.strip_suffix("]}").unwrap()
+        );
+        let (mut e, _) = boot_with_catalog(&catalog);
+        assert!(e.store().market_by_id(instrument).is_none());
+        for symbol in [instrument.to_owned(), instrument.to_ascii_uppercase()] {
+            let mut unsupported = opts();
+            unsupported.symbol = symbol.clone();
+            unsupported.client_order_id = Some("43".into());
+            for request in [
+                Command::PlaceOrders {
+                    command: 35,
+                    orders: vec![opts(), unsupported],
+                },
+                Command::CancelSymbolOrders {
+                    command: 35,
+                    symbol: symbol.clone(),
+                },
+                Command::SetLeverage {
+                    command: 35,
+                    symbol,
+                    leverage: 5.,
+                },
+            ] {
+                let actions = command(&mut e, request);
+                assert!(done(&actions, 35).unwrap().is_err());
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|action| matches!(action, Action::Http(_)))
+                );
+                assert_eq!(e.store().order("42").unwrap().status, OrderStatus::Open);
+            }
+        }
+        for request in [
+            Command::CancelOrders {
+                command: 36,
+                ids: vec!["42".into(), instrument.into()],
+            },
+            Command::AmendOrder {
+                command: 36,
+                id: instrument.into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ] {
+            let actions = command(&mut e, request);
+            assert!(done(&actions, 36).unwrap().is_err());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+        }
+        let request = http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 37,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+        assert_eq!(body(&request).o.l[0].i, "BTC_USDT_Perp");
     }
 }
 #[test]

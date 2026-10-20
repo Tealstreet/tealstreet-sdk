@@ -14,6 +14,7 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
+    waiting_limits: bool,
     next_nonce: Option<u64>,
     next_id: u64,
     timer: Option<TimerId>,
@@ -47,7 +48,6 @@ struct Prepared {
     order: Order,
 }
 pub enum Request {
-    Tier,
     Approval,
     Nonce,
     Submit(Submission),
@@ -96,37 +96,6 @@ impl Number {
             Self::Text(s) => s.parse().ok(),
             Self::Integer(n) => Some(*n),
         }
-    }
-}
-#[derive(Deserialize, Default)]
-struct Tier {
-    #[serde(default)]
-    code: Option<Number>,
-    #[serde(default, alias = "userTierName")]
-    user_tier_name: Option<String>,
-    #[serde(default, alias = "userTier")]
-    user_tier: Option<Number>,
-    #[serde(default, alias = "accountTypeName")]
-    account_type_name: Option<String>,
-    #[serde(default, alias = "accountType")]
-    account_type: Option<String>,
-    #[serde(default)]
-    data: Option<Box<Tier>>,
-    #[serde(default)]
-    account: Option<Box<Tier>>,
-}
-impl Tier {
-    fn name(&self) -> Option<&str> {
-        self.user_tier_name
-            .as_deref()
-            .or(match self.user_tier.as_ref() {
-                Some(Number::Text(s)) => Some(s.as_str()),
-                _ => None,
-            })
-            .or(self.account_type_name.as_deref())
-            .or(self.account_type.as_deref())
-            .or_else(|| self.data.as_ref().and_then(|t| t.name()))
-            .or_else(|| self.account.as_ref().and_then(|t| t.name()))
     }
 }
 #[derive(Deserialize, Default)]
@@ -364,7 +333,7 @@ impl Lighter {
     fn builder(&self) -> Option<sign::Builder> {
         self.options
             .integrator_account_index
-            .or(if self.options.testnet {
+            .or(if self.options.testnet || self.options.robinhood {
                 None
             } else {
                 Some(158_385)
@@ -444,38 +413,28 @@ impl Lighter {
             && job.steps.iter().any(|s| matches!(s, Step::Place(_)))
             && job.builder_stage < 2
         {
-            let stage = job.builder_stage;
-            let account = self.account.account_index.unwrap();
-            let result = if stage == 0 {
-                self.account
-                    .signer
-                    .as_ref()
-                    .unwrap()
-                    .auth_token((cx.now / 1000.0) as u64 + 60)
-                    .map(|auth| {
-                        (
-                            format!(
-                                "{}/api/v1/accountLimits?account_index={account}",
-                                self.host()
-                            ),
-                            vec![("authorization", auth)],
-                            Request::Tier,
-                        )
-                    })
-            } else {
-                Ok((
-                    format!("{}/api/v1/account?by=index&value={account}", self.host()),
-                    vec![],
-                    Request::Approval,
-                ))
-            };
-            match result {
-                Ok((url, headers, request)) => {
-                    self.trading.inflight = true;
-                    cx.request(Method::Get, url, headers, None, Pending::Trade(request));
+            if job.builder_stage == 0 {
+                if !self.refresh_limits(cx) {
+                    self.trading.waiting_limits = true;
+                    return;
                 }
-                Err(error) => self.trade_finish(cx, error),
+                if self.limits_standard() {
+                    self.trade_finish(cx, TIER_MESSAGE.into());
+                    return;
+                }
+                self.trading.active.as_mut().unwrap().builder_stage = 1;
+                self.trade_kick(cx);
+                return;
             }
+            let account = self.account.account_index.unwrap();
+            self.trading.inflight = true;
+            cx.request(
+                Method::Get,
+                format!("{}/api/v1/account?by=index&value={account}", self.host()),
+                vec![],
+                None,
+                Pending::Trade(Request::Approval),
+            );
             return;
         }
         if self.trading.next_nonce.is_none() {
@@ -651,24 +610,6 @@ impl Lighter {
     ) {
         self.trading.inflight = false;
         match request {
-            Request::Tier => {
-                if response.status < 300
-                    && let Ok(tier) = serde_json::from_str::<Tier>(response.body)
-                    && tier
-                        .code
-                        .as_ref()
-                        .and_then(Number::integer)
-                        .is_none_or(|code| code == 200)
-                    && tier.name().is_some_and(|s| {
-                        matches!(s.trim().to_ascii_lowercase().as_str(), "standard" | "std")
-                    })
-                {
-                    self.trade_finish(cx, TIER_MESSAGE.into());
-                    return;
-                }
-                self.trading.active.as_mut().unwrap().builder_stage = 1;
-                self.trade_kick(cx);
-            }
             Request::Approval => {
                 if response.status < 300
                     && let Ok(approval) = serde_json::from_str::<ApprovalReply>(response.body)
@@ -861,10 +802,6 @@ impl Lighter {
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         self.trading.inflight = false;
         match request {
-            Request::Tier => {
-                self.trading.active.as_mut().unwrap().builder_stage = 1;
-                self.trade_kick(cx);
-            }
             Request::Approval => {
                 self.trading.active.as_mut().unwrap().builder_stage = 2;
                 self.trade_kick(cx);
@@ -889,7 +826,21 @@ impl Lighter {
         self.refresh_orders(cx);
     }
 
+    pub(crate) fn trade_limits_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        if std::mem::take(&mut self.trading.waiting_limits) {
+            if self.limits_standard() {
+                self.trade_finish(cx, TIER_MESSAGE.into());
+                return;
+            }
+            if let Some(job) = self.trading.active.as_mut() {
+                job.builder_stage = 1;
+            }
+        }
+        self.trade_kick(cx);
+    }
+
     fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: String) {
+        self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
             let partial = if job.ids.is_empty() {
                 String::new()
