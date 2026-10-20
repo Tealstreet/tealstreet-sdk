@@ -3808,7 +3808,7 @@ mod startup_tests {
         assert_eq!(delays, [120_000.0, 1_000.0]);
         // A later ban pushes back a read that was already waiting on its own schedule.
         retry.failed_after(&mut cx, "premium", 90_000.0);
-        let actions: Vec<_> = cx.io.actions.drain(..).collect();
+        let actions = std::mem::take(&mut cx.io.actions);
         assert!(
             actions
                 .iter()
