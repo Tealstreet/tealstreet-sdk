@@ -199,3 +199,34 @@ pipeline was canceled before accepting its evidence because its source base
 was superseded. Full quality checks, combined WASM/SDK/consumer checks and all
 seven paired public/private gates are running again on the merged code. Three
 independent source reviews also audit this integration; no PR opened yet.
+
+### Final wire-integrated local gates — PASS
+
+Final local checks pass on landing `c44f22bd8e` plus this PR:
+
+- Banned-pattern checks, workspace formatting, strict workspace all-target clippy and WASM clippy.
+- Native: **2,950 tests / 228 suites**. Touched venue totals: MEXC 75, Bitrue 83, BloFin 84.
+- Root: **44 typecheck tasks, 28 lint tasks, 27 test tasks**; safe-cex **7,847 tests / 530 files per runner**.
+- Compiled SDK **445**, host JS/Workers **89**, frame-wire **7**, native session adapter **1**, product semantics **16**, harness **593**, scripted lifecycle **9** tests.
+- Compiled consumer checks: safe-cex-server **11**, exchange-mcp **5**, CLI **2**, React Native **2**; MCP build and packaged smoke pass.
+- **7 public profiles** (three runs each), **7 private profiles**, plus **4 primary combined-build private replays**, all PASS. Binance Spot/COIN-M/PM included.
+- Isolated WASM sizes: MEXC **881,318 B**, Bitrue **890,914 B**, BloFin **872,350 B**, Binance **1,007,175 B**; each below unchanged **1,258,291 B** budget.
+- Fresh MEXC public capture also replays on the final combined Rust build. No live private/trading evidence.
+
+| Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (MB) | Process CPU TS / Rust (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| mexc | 973.3 / 664.0 | 639.2 / 423.1 | 27.7 / 5.2 | 1209.0 / 898.7 |
+| bitrue | 260.9 / 198.6 | 180.3 / 116.5 | 17.1 / 3.4 | 367.9 / 355.4 |
+| blofin | 249.7 / 221.0 | 161.2 / 126.1 | 16.7 / 3.1 | 342.5 / 364.9 |
+| binance | 277.7 / 130.4 | 155.0 / 57.0 | 18.2 / 4.1 | 316.7 / 213.6 |
+| binancespot | 703.8 / 440.3 | 282.5 / 146.7 | 27.7 / 11.2 | 1035.8 / 655.1 |
+| binanceinverse | 170.8 / 64.7 | 112.1 / 34.9 | 14.0 / 1.9 | 203.8 / 94.5 |
+| binancepm | 191.0 / 90.8 | 106.0 / 37.2 | 18.0 / 4.1 | 242.8 / 155.7 |
+
+Main-thread CPU, steady CPU and retained-memory gates pass for every profile. Process CPU is informational: BloFin is slower there (364.9 vs 342.5 ms); no claim of a win on every metric. Frozen public fixtures remain unchanged.
+
+Final combined WASM SHA-256: `a6f1ac97d38ee6809753571a5925984a3a9b9b0ee1b2f5fad9372c1a65f65668`. Its dependency info points at current sources and includes the new command; stale archived-baseline evidence was discarded before these checks.
+
+Three fresh integration source reviews PASS with no new findings. All scoped phase findings are fixed and independently re-reviewed. The final source is the merge at `8110defe6a` (venue changes through `9dd1e171a3`); later changes are progress documentation only. Landing remains `c44f22bd8e` after fetch. PR correctness reviews and green CI are the remaining landing gates.
+
+Wind-down instruction received: finish this PR, write the local handoff, then stop without starting a follow-up assignment.
