@@ -221,6 +221,63 @@ fn public_ticker_all_uses_subject_and_preserves_absent_fields() {
     assert_eq!(t.volume, 10.0);
 }
 #[test]
+fn ticker_envelopes_preserve_field_order_aliases_and_symbol_precedence() {
+    let mut h = H::new(false);
+    h.event(Event::WsMessage {
+        socket: h.public,
+        text: r#"{"data":{"symbol":"ETH-USDT","bestBidPrice":"12","bestAskPrice":"14","lastPrice":"13"},"subject":"BTC-USDT","topic":"/market/ticker:all","type":"message"}"#,
+    });
+    assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 100.0);
+    let eth = h.e.store().ticker("ETH-USDT").unwrap();
+    assert_eq!((eth.bid, eth.ask, eth.last), (12.0, 14.0, 13.0));
+    h.event(Event::WsMessage {
+        socket: h.public,
+        text: r#"{"data":{"price":"103"},"topic":"/market/ticker:BTC-USDT","type":"message"}"#,
+    });
+    assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 103.0);
+    h.event(Event::WsMessage {
+        socket: h.public,
+        text: r#"{"data":{"price":"104","bestBid":"invalid"},"subject":"BTC-USDT","topic":"/market/ticker:all","type":"message"}"#,
+    });
+    assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 103.0);
+}
+#[test]
+fn ticker_envelopes_cannot_bypass_control_kind_or_public_socket_readiness() {
+    let mut h = H::new(false);
+    for kind in ["ack", "pong"] {
+        let text = json!({"data":{"price":"103"},"subject":"BTC-USDT","topic":"/market/ticker:all","type":kind}).to_string();
+        h.event(Event::WsMessage {
+            socket: h.public,
+            text: &text,
+        });
+        assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 100.0);
+    }
+    h.event(Event::WsClosed {
+        socket: h.public,
+        code: 1006,
+    });
+    h.timer(1000.0);
+    h.reply("/bullet-public",r#"{"code":"200000","data":{"token":"fresh-public","instanceServers":[{"endpoint":"wss://spot.example.test/public","pingInterval":18000,"pingTimeout":10000}]}}"#);
+    let socket = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let text = r#"{"data":{"price":"103"},"subject":"BTC-USDT","topic":"/market/ticker:all","type":"message"}"#;
+    h.event(Event::WsMessage { socket, text });
+    assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 100.0);
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"type":"welcome"}"#,
+    });
+    h.event(Event::WsMessage { socket, text });
+    assert_eq!(h.e.store().ticker("BTC-USDT").unwrap().last, 103.0);
+}
+#[test]
 fn book_snapshots_replace_sort_and_refcount_subscriptions() {
     let mut h = H::new(false);
     h.command(Command::SubscribeOrderBook {

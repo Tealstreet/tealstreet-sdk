@@ -481,20 +481,23 @@ impl KucoinSpot {
             cx.store.upsert_order(order);
         }
     }
+    fn price(cx: &mut Cx<'_, Pending>, topic: &str, subject: &str, p: Price<'_>) {
+        let symbol = if !p.symbol.is_empty() {
+            p.symbol
+        } else if !subject.is_empty() {
+            subject
+        } else {
+            topic.split_once(':').map_or("", |(_, s)| s)
+        };
+        cx.store.update_ticker(symbol, |t| p.apply(t));
+    }
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
         let Some(data) = m.data else {
             return;
         };
         if m.topic.starts_with("/market/ticker") {
             if let Ok(p) = serde_json::from_str::<Price>(data.get()) {
-                let symbol = if !p.symbol.is_empty() {
-                    p.symbol
-                } else if !m.subject.is_empty() {
-                    m.subject
-                } else {
-                    m.topic.split_once(':').map_or("", |(_, s)| s)
-                };
-                cx.store.update_ticker(symbol, |t| p.apply(t));
+                Self::price(cx, m.topic, m.subject, p);
             }
         } else if let Some(symbol) = m.topic.strip_prefix("/spotMarket/level2Depth50:") {
             #[derive(Deserialize)]
@@ -645,6 +648,16 @@ impl Venue for KucoinSpot {
         let Some(channel) = self.sockets.iter().position(|c| c.socket == Some(socket)) else {
             return;
         };
+        // Decode high-volume ticker envelopes and prices together, without a raw-data rescan.
+        if channel == 0
+            && self.sockets[channel].ready
+            && let Ok(m) = serde_json::from_str::<PriceMessage>(text)
+            && m.kind == "message"
+            && m.topic.starts_with("/market/ticker")
+        {
+            Self::price(cx, m.topic, m.subject, m.data);
+            return;
+        }
         let Ok(m) = serde_json::from_str::<Message>(text) else {
             return;
         };

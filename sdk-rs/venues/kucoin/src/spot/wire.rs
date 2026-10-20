@@ -101,6 +101,16 @@ impl Price<'_> {
     }
 }
 #[derive(Deserialize)]
+pub struct PriceMessage<'a> {
+    #[serde(rename = "type")]
+    pub kind: &'a str,
+    pub topic: &'a str,
+    #[serde(default)]
+    pub subject: &'a str,
+    #[serde(borrow)]
+    pub data: Price<'a>,
+}
+#[derive(Deserialize)]
 pub struct Message<'a> {
     #[serde(default, rename = "type")]
     pub kind: &'a str,
