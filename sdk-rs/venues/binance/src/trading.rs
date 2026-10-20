@@ -96,6 +96,10 @@ enum CancelProof {
         targets: Vec<CancelTarget>,
     },
     CoinAll(Vec<CancelTarget>),
+    PmAll {
+        targets: Vec<CancelTarget>,
+        strategy: bool,
+    },
 }
 
 #[derive(Default)]
@@ -269,8 +273,14 @@ impl BinanceFutures {
                         path: self.paths.cancel_all,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel {
+                            proof: self.options.portfolio_margin.then(|| CancelProof::PmAll {
+                                targets: regular
+                                    .iter()
+                                    .map(|order| self.cancel_target(order))
+                                    .collect(),
+                                strategy: false,
+                            }),
                             ids: ids(regular),
-                            proof: None,
                         },
                     },
                     Planned {
@@ -278,8 +288,14 @@ impl BinanceFutures {
                         path: self.paths.cancel_all_conditional,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel {
+                            proof: self.options.portfolio_margin.then(|| CancelProof::PmAll {
+                                targets: algo
+                                    .iter()
+                                    .map(|order| self.cancel_target(order))
+                                    .collect(),
+                                strategy: true,
+                            }),
                             ids: ids(algo),
-                            proof: None,
                         },
                     },
                 ];
@@ -565,6 +581,9 @@ impl BinanceFutures {
                         UNKNOWN_ORDER,
                         format!("Cancellation was not confirmed: {message}"),
                     ))
+                } else if let Some(CancelProof::PmAll { targets, strategy }) = proof {
+                    self.mark_pm_captured_canceled(cx, &targets, strategy);
+                    None
                 } else {
                     let unchanged = match &proof {
                         Some(CancelProof::One(target))
@@ -1708,6 +1727,32 @@ impl BinanceFutures {
         self.fence_order_snapshots();
     }
 
+    fn mark_pm_captured_canceled(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelTarget],
+        strategy: bool,
+    ) {
+        // Client IDs can name a new native order by the time the bulk reply arrives.
+        let unchanged: Vec<String> = targets
+            .iter()
+            .filter(|target| {
+                let current = if strategy {
+                    self.pm_strategy_native_order_id(&target.symbol, &target.id)
+                } else {
+                    self.spot_native_order_id(&target.symbol, &target.id)
+                };
+                target.native.is_some()
+                    && current == target.native
+                    && cx.store.order(&target.id).is_some_and(|order| {
+                        order.symbol == target.symbol && is_algo(order.kind) == strategy
+                    })
+            })
+            .map(|target| target.id.clone())
+            .collect();
+        self.mark_canceled(cx, &unchanged);
+    }
+
     fn cancel_target(&self, order: &Order) -> CancelTarget {
         CancelTarget {
             id: order.id.clone(),
@@ -1923,6 +1968,16 @@ impl BinanceFutures {
                 }
                 mark_canceled_preserving_closed(cx, &unchanged);
                 self.fence_order_snapshots();
+            }
+            CancelProof::PmAll { targets, strategy } => {
+                #[derive(serde::Deserialize)]
+                struct Success {
+                    code: CancelCode,
+                }
+                if !matches!(serde_json::from_str::<Success>(body), Ok(ack) if ack.code.success()) {
+                    return invalid();
+                }
+                self.mark_pm_captured_canceled(cx, &targets, strategy);
             }
             CancelProof::CoinAll(targets) => {
                 #[derive(serde::Deserialize)]

@@ -392,3 +392,78 @@ fn pm_reused_strategy_id_is_not_changed_by_an_old_cancellation() {
         }
     }
 }
+
+#[test]
+fn pm_symbol_cancel_applies_only_to_captured_native_incarnations() {
+    let variant = Variant::PortfolioMargin;
+    for (reuse_regular, reuse_strategy) in
+        [(true, false), (false, true), (true, true), (false, false)]
+    {
+        for unknown in [false, true] {
+            let mut h = ready_orders(variant, Some(false));
+            h.event(Event::Command(Command::CancelSymbolOrders {
+                command: 94,
+                symbol: "BTCUSDT".into(),
+            }));
+            let regular = h.take("/papi/v1/um/allOpenOrders");
+            let strategy = h.take("/papi/v1/um/conditional/allOpenOrders");
+            if reuse_regular {
+                h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"maker","i":13,"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+            }
+            if reuse_strategy {
+                h.message("/pm/ws", r#"{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","fs":"UM","so":{"s":"BTCUSDT","c":"stop","si":43,"S":"SELL","st":"STOP_MARKET","q":"9","p":"0","sp":"89","os":"NEW","R":true,"wt":"MARK_PRICE","ps":"BOTH","cp":false,"i":0}}"#);
+            }
+            h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"new-client","i":99,"S":"BUY","o":"LIMIT","f":"GTC","q":"5","p":"102","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+            let new_regular = h.engine.store().order("maker").unwrap().clone();
+            let new_strategy = h.engine.store().order("stop").unwrap().clone();
+            let later = h.engine.store().order("new-client").unwrap().clone();
+            let reply = if unknown {
+                r#"{"code":-2011,"msg":"Unknown order sent."}"#
+            } else {
+                r#"{"code":200,"msg":"The operation of cancel all open order is done."}"#
+            };
+            h.reply(regular.id, if unknown { 400 } else { 200 }, "", reply);
+            h.reply(strategy.id, if unknown { 400 } else { 200 }, "", reply);
+            assert!(h.result(94).unwrap().is_ok());
+            for (id, reused, before) in [
+                ("maker", reuse_regular, new_regular),
+                ("stop", reuse_strategy, new_strategy),
+            ] {
+                let current = h.engine.store().order(id).unwrap();
+                if reused {
+                    assert_eq!(current, &before, "{id} unknown={unknown}");
+                } else {
+                    assert_eq!(current.status, OrderStatus::Canceled);
+                }
+            }
+            assert_eq!(h.engine.store().order("new-client"), Some(&later));
+            // A later successful replica must be able to retain the new native rows.
+            h.advance(10_000.0);
+            let mut regular_rows = vec![
+                r#"{"symbol":"BTCUSDT","orderId":99,"clientOrderId":"new-client","price":"102","origQty":"5","executedQty":"0","type":"LIMIT","side":"BUY","status":"NEW"}"#,
+            ];
+            if reuse_regular {
+                regular_rows.push(r#"{"symbol":"BTCUSDT","orderId":13,"clientOrderId":"maker","price":"101","origQty":"9","executedQty":"0","type":"LIMIT","side":"BUY","status":"NEW"}"#);
+            }
+            h.respond(
+                "/papi/v1/um/openOrders",
+                200,
+                &format!("[{}]", regular_rows.join(",")),
+            );
+            h.respond("/papi/v1/um/conditional/openOrders", 200, if reuse_strategy {
+                r#"[{"newClientStrategyId":"stop","strategyId":43,"strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"9","price":"0","side":"SELL","stopPrice":"89","symbol":"BTCUSDT","workingType":"MARK_PRICE"}]"#
+            } else {"[]"});
+            assert_eq!(
+                h.engine.store().orders().len(),
+                1 + usize::from(reuse_regular) + usize::from(reuse_strategy)
+            );
+            assert!(
+                h.engine
+                    .store()
+                    .orders()
+                    .iter()
+                    .all(|order| order.status == OrderStatus::Open)
+            );
+        }
+    }
+}

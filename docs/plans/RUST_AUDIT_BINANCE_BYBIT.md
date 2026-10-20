@@ -148,3 +148,45 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   with independent rerun, TypeScript typecheck and scoped ESLint passing.
 - Resolved requested audit bullets are struck in `RUST_AUDITS.md`; M10 is marked
   dropped after reverification, not claimed as a production fix.
+
+### Landing integration and bulk-cancel review checkpoint
+
+- Merged landing `1b8592dbd2` cleanly at `3bff1e155e`, preserving its shared
+  engine feature/signing changes, Bybit decimal decoder, KuCoin Spot and all
+  unrelated venue work. Merged-source root typecheck (44 tasks), lint (28),
+  tests (27) and harness (586 tests) pass; strict native/WASM checks pass.
+- Fresh independent merge review found a PM bulk-cancel incarnation race beyond
+  the individual cancel cases: a delayed symbol-cancel acknowledgement could
+  retire a newer regular/strategy order that reused the captured client ID.
+  Each bulk family now captures native identities and applies success/unknown
+  acknowledgement only to the matching current incarnation. Unknown native
+  identities cannot create canonical client-ID tombstones.
+- New regression matrix covers regular/strategy reuse, success/unknown replies,
+  unrelated new arrivals and a later replica proving the new native order was
+  not tombstoned. All 133 Binance tests and strict Clippy pass; independent
+  reviewer reran 10 audit trading tests and closed the finding.
+- Earlier selected replay gates all passed, including fresh Binance/Bybit live
+  public captures. Shared-engine landing changes require final selected builds
+  and complete family replay gates again; earlier timings are not final claims.
+
+## Authorized addendum (second PR after this large patch lands)
+
+User authorized splitting the new `Port reviews → Binance family` findings
+because this first patch already exceeds 2,300 lines with regressions. Read the
+new landing audit after fetch. PM amend `-2011` is already covered by this first
+patch's USD-M/PM failure and racing-fill matrix. Reverify the remaining addendum
+against the freshly merged base before implementing on a fresh follow-up branch:
+
+- PM `fs:CM` rows must not create phantom positions.
+- REST candles `from` + `limit`: compute start like TS and cap requests at 1,500.
+- COIN-M partial batch rejection preserves placed IDs alongside the error.
+- PM `close:true` respects an explicit nonzero amount.
+- Unknown `CancelOrders` IDs fail instead of reporting success without I/O.
+- History maps `EXPIRED_IN_MATCH` as canceled.
+- Spot/COIN-M history reports unsupported rather than plain empty lists.
+- Sign with `recvWindow` from options.
+
+Leave every `Confirm`/owner-decision item untouched. Repeat phased independent
+reviews, regression tests, all touched-family gates, PR reviews posted to the
+PR, green CI and merge for the second PR; no TS venue deletion. Read-only
+reverification has begun while this first patch completes its gates.
