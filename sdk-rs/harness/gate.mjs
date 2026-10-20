@@ -11,6 +11,7 @@ import { memoryMetricErrors } from './memory.mjs';
 import { fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -448,6 +449,9 @@ for (let run = 0; run < runs; run++) {
   const { ts, rust } = result;
   if (ts.frames !== rust.frames) differences.push(`run ${run} frames: ts=${ts.frames} rust=${rust.frames}`);
   if (values.venue === 'backpack') fixBackpack(ts);
+  if (venue.family === 'orderly') fixOrderly(ts, tape);
+  if (venue.family === 'orderly' && !equal(ts.requests, rust.requests))
+    differences.push(`requests differ: ts=${JSON.stringify(ts.requests)} rust=${JSON.stringify(rust.requests)}`);
   if (isPrivate && ts.account && rust.account) {
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     KNOWN_TS_FIXES(ts.account, rust.account);
@@ -564,6 +568,7 @@ row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 row('sampled peak', t.peakMB, r.peakMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

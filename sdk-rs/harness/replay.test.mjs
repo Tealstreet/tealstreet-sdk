@@ -153,3 +153,28 @@ test('production WOO audit keeps parallel subscriptions and heartbeat replies on
   tape.send(second, '{"event":"pong"}');
   assert(tape.audit.errors().some((error) => error.includes('server ping was not answered')));
 });
+
+
+test('production Orderly send correlates a taped snapshot before its sole consumer delivery', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('  send(socket, text) {');
+  const end = source.indexOf('\n  verifySignature(', start);
+  const venue = venueOf('orderly');
+  const ProductionTape = new Function('Tape', 'values', 'venue', 'subscriptionKeys', 'canonicalObject',
+    `return class extends Tape { ${source.slice(start, end)} }`)(Tape, { venue: 'orderly' }, venue, subscriptionKeys, stable);
+  const url = 'wss://ws-evm.orderly.org/ws/stream/public';
+  const params = { type: 'orderbook', symbol: 'PERP_BTC_USDC' };
+  const recorded = { type: 'ws-send', url, socket: 0, text: JSON.stringify({ event: 'request', id: 'taped-id', params }) };
+  const tape = new ProductionTape([recorded], venue);
+  const received = [];
+  const socket = tape.connect(url, () => {}, (text) => received.push(JSON.parse(text)));
+  tape.send(socket, JSON.stringify({ event: 'request', id: 'runtime-id', params }));
+  const payload = { event: 'request', id: 'taped-id', success: true, data: { symbol: params.symbol, bids: [[100, 2]], asks: [[101, 3]] } };
+  socket.onMessage(JSON.stringify(payload));
+  assert.deepEqual(received, [{ ...payload, id: 'runtime-id' }]);
+  assert.equal(tape.sentRequests.size, 1);
+  assert(tape.fullSubscriptions.size > 0, 'the production wrapper retains canonical outgoing identity');
+  assert.throws(() => socket.onMessage(JSON.stringify(payload)), /duplicate/);
+  const next = tape.connect(url, () => {}, () => {});
+  assert.throws(() => tape.send(next, JSON.stringify({ event: 'request', id: 'replacement-id', params })), /unrecorded/);
+});

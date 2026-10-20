@@ -21,6 +21,7 @@ const { values } = parseArgs({
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
+const venue = venueOf(values.venue);
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
@@ -64,7 +65,15 @@ const recording = {
         handlers.onClose(code);
       },
     });
-    return { send: (text) => socket.send(text), close: () => { closeRecord(1000, true); socket.close(); } };
+    return {
+      send(text) {
+        let message;
+        try { message = JSON.parse(text); } catch { /* Non-JSON heartbeat. */ }
+        if (message && venue.socketRequest?.(message)) write({ type: 'ws-send', url, connection, socket: connection, text });
+        socket.send(text);
+      },
+      close: () => { closeRecord(1000, true); socket.close(); },
+    };
   },
   async request(request) {
     const response = await live.request(request);
@@ -89,14 +98,25 @@ const recording = {
   },
 };
 
-const { WasmEngine } = await loadEngine();
+const options = { ...venue.options, ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
+const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;
 const seenBooks = new Set();
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true, ...venueOf(values.venue).options, ...venueOf(values.venue).recordOptions })), recording, {
-  onFrame: (buffer) => { updates++; for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
-  onLog: (level, message) => console.error(`[${level}] ${message}`),
-});
+const host = new EngineHost(
+  new WasmEngine(
+    venue.rust,
+    JSON.stringify(options),
+  ),
+  recording,
+  {
+    onFrame: (buffer) => {
+      updates++;
+      for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+    },
+    onLog: (level, message) => console.error(`[${level}] ${message}`),
+  },
+);
 host.start();
 for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });

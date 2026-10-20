@@ -792,3 +792,28 @@ review PASS. Native WASM compilation PASS; complete public/private replays and
 exact-head CI follow this reviewable checkpoint. Full prior workspace/WASM
 checks PASS; local root rerun encountered import deadlines on the busy host,
 with no deadline/assertion changes. Final CI must be entirely green to merge.
+
+### Orderly landing integration plan
+
+All25checks pass on502f6e6337 (including both root CI runs,15public venues,
+19private variants and4Bitget parity cases). Before merging, Orderly landed
+atf66bdc26f9 and introduced conflicts. Merge the16thvenue while preserving
+BitunixPNL/throughput and every reviewed harness correction, including Lighter
+decimal snapshot arithmetic. Review harness/workflow, WASM/SDK and engine
+compatibility in disjoint scopes. The new optional position-ID frame tail must
+retain legacy layout by default and fully reserve strings/bytes when enabled;
+deactivation and HTTP abort hooks must preserve existing host lifecycle guards.
+Verify focused regressions and helpers, checkpoint, then require fresh entirely
+green CI before merge. No stash, force push, master changes or lowered gates.
+
+Orderly merge review fixes optional position-ID tail alignment and ID-string
+preallocation. The63/64-row regression fails before/passes after; engine62
+and Bitunix58tests PASS with legacy opt-out layout preserved. Host/SDK review
+passes83SDK and43host/socket/wire checks; root typecheck44/lint28 PASS.
+Harness286helpers PASS (all256prior plus Orderly protocol/production guards).
+WS request correlation remains scoped by socket/symbol/generation, validated
+before consumers; recorded sends retain lifecycle/channel/context metadata.
+Strict timing/hash/memory/signature/write controls and Lighter arithmetic stay
+intact. Final CI covers16public venues,33private variants (14Orderly broker/
+network variants) and4Bitget native cases. Independent final review and full
+workspace/merged-head CI continue before merge.

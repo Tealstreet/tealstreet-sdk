@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
-import { isRead, subscriptionKeys, requestKey as typedRequestKey } from './requests.mjs';
+import { isRead, subscriptionKeys, requestKey as typedRequestKey, subscriptionMessage } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
@@ -357,6 +357,19 @@ export class Tape {
     this.commandIndex = 0;
     this.time = 0;
     this.generations = new Map();
+    this.recordedSocketRequests = new Map();
+    this.recordedSocketQueues = new Map();
+    for (const record of records.filter((r) => r.type === 'ws-send')) {
+      const request = venue.socketRequest?.(JSON.parse(record.text));
+      if (!request) continue;
+      const scope = `${this.canonicalize(record.url)} ${record.connection ?? record.socket ?? 0}`;
+      const key = `${scope} ${request.id}`;
+      if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
+      this.recordedSocketRequests.set(key, request.key);
+      const queueKey = `${scope} ${request.key}`;
+      if (!this.recordedSocketQueues.has(queueKey)) this.recordedSocketQueues.set(queueKey, []);
+      this.recordedSocketQueues.get(queueKey).push(request.id);
+    }
     this.startupSubscriptions = new Map(
       Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
     );
@@ -528,8 +541,16 @@ export class Tape {
       this.venue.validateMatchedRequest ? validateMatch : undefined);
     const now = this.responseTime;
     if (this.responseStore) {
+      if (this.venue.compareWriteOrder && this.isWrite(method, url)) {
+        const first = this.writeOrder[0];
+        if (!first || this.responseStore.key(method, url, body) !== this.responseStore.key(first.method, first.url, first.requestBody)) {
+          this.responseStore.unserved++;
+          this._unserved = this.responseStore.unserved;
+          return { status: 599, body: '' };
+        }
+      }
       const response = this.responseStore.respond(method, url, body, this.commandIndex, now,
-        this.contract || this.venue.validateMatchedRequest ? validateMatch : undefined);
+        this.contract || this.venue.validateMatchedRequest || this.venue.compareWriteOrder ? validateMatch : undefined);
       this._unserved = this.responseStore.unserved;
       return response;
     }
@@ -587,6 +608,11 @@ export class Tape {
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
     const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
+    if (this.venue.socketRequest || this.venue.socketResponse) {
+      Object.assign(socket, { requests: new Map(), requestIds: new Set(), requestCounts: new Map(), mappedRequests: new Map(), responseIds: new Set() });
+      const deliver = socket.onMessage;
+      socket.onMessage = (text) => deliver(this.correlateSocketResponse(socket, text));
+    }
     this.audit?.connected?.(rawUrl, socket);
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
@@ -612,6 +638,7 @@ export class Tape {
   close(socket, code = 1000, local = false) {
     if (socket.closed) return;
     socket.closed = true;
+    this.audit?.closed?.(socket.rawUrl ?? socket.url, socket);
     if (!local) socket.onClose?.(code);
   }
 
@@ -622,6 +649,31 @@ export class Tape {
     if (parsed && this.isPrivate && this.venue.verifySubscribe) {
       try { if (!this.venue.verifySubscribe(parsed)) throw new Error('invalid replay websocket signature'); }
       catch (error) { this.invalidSignatures++; throw error; }
+    }
+    if (parsed) {
+      const request = this.venue.socketRequest?.(parsed);
+      if (request) {
+        if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
+        if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
+          const queueKey = `${socket.url} ${socket.ordinal} ${request.key}`;
+          const count = socket.requestCounts.get(request.key) ?? 0;
+          const recordedId = this.recordedSocketQueues.get(queueKey)?.[count];
+          if (recordedId === undefined) throw new Error(`unrecorded websocket request ${request.key}`);
+          socket.requestCounts.set(request.key, count + 1);
+          socket.mappedRequests.set(recordedId, request.id);
+        }
+        socket.requests.set(request.id, request.key);
+        socket.requestIds.add(request.id);
+        this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
+      }
+      if (this.venue.socketResponse && parsed.event) {
+        const subscription = subscriptionMessage(parsed);
+        for (const topic of subscription?.topics ?? []) {
+          if (typeof topic !== 'string' || !topic) throw new Error('invalid websocket subscription topic');
+          if (subscription.op === 'subscribe') socket.subscriptions.add(topic);
+          else socket.subscriptions.delete(topic);
+        }
+      }
     }
     for (const key of subscriptionKeys(socket.rawUrl ?? socket.url, text, this.callerIds, { ...this.venue, fullSocketIdentity: true })) {
       this.fullSubscriptions.add(this.venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
@@ -738,6 +790,36 @@ export class Tape {
     if (this.missingWrites) throw new Error(`${this.missingWrites} taped write(s) were not sent`);
   }
 
+  correlateSocketResponse(socket, text) {
+    if (!this.venue.socketResponse) return text;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    const response = this.venue.socketResponse(message);
+    if (!response) return text;
+    if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
+    const scope = `${socket.url} ${socket.ordinal}`;
+    const recordedKey = `${scope} ${response.id}`;
+    const recorded = this.recordedSocketRequests.get(recordedKey);
+    if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
+      throw new Error('websocket response has no taped request');
+    if (recorded !== undefined && response.key !== undefined && recorded !== response.key)
+      throw new Error('websocket response symbol differs from taped request');
+    const key = recorded ?? response.key;
+    const id = this.recordedSocketRequests.size
+      ? socket.mappedRequests.get(response.id)
+      : [...socket.requests].find(([, requestKey]) => requestKey === key)?.[0];
+    if (id === undefined) throw new Error(`unsolicited websocket response ${key ?? response.id}`);
+    if (socket.requests.get(id) !== key) throw new Error('websocket response differs from pending request');
+    socket.requests.delete(id);
+    socket.mappedRequests.delete(response.id);
+    socket.responseIds.add(response.id);
+    return JSON.stringify({ ...message, id });
+  }
+
   async socketFor(frame, textOrOrdinal, ordinal) {
     if (typeof frame === 'string') frame = { url: this.canonicalize(frame),
       text: typeof textOrOrdinal === 'string' ? textOrOrdinal : undefined,
@@ -780,6 +862,7 @@ export class Tape {
       if (frame.local && !socket.closed) throw new Error(`recorded local close was not requested: ${frame.url}:${frame.connection}`);
       if (!frame.local && socket.closed) throw new Error('socket closed before recorded remote close');
       socket.closed = true;
+      this.audit?.closed?.(socket.rawUrl ?? socket.url, socket);
       if (!frame.local) socket.onClose?.(frame.code ?? 1006);
     }
   }

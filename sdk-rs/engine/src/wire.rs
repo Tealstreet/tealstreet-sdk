@@ -462,6 +462,60 @@ mod tests {
     }
 
     #[test]
+    fn position_identity_reservation_includes_optional_tail_and_strings() {
+        for retained in [false, true] {
+            for count in [63, 64] {
+                let mut store = Store::default();
+                if retained {
+                    store.retain_position_ids();
+                }
+                store.set_positions(
+                    (0..count)
+                        .map(|index| crate::model::Position {
+                            id: format!("BTCUSDT:Isolated:{index}"),
+                            symbol: "BTCUSDT".into(),
+                            side: PositionSide::Long,
+                            entry_price: 100.0,
+                            notional: 100.0,
+                            leverage: 10.0,
+                            margin_type: Some(MarginType::Isolated),
+                            position_mode: Some(PositionMode::Oneway),
+                            unrealized_pnl: 0.0,
+                            realized_pnl: None,
+                            contracts: 1.0,
+                            liquidation_price: 90.0,
+                            margin_size: Some(10.0),
+                            last_update: None,
+                        })
+                        .collect(),
+                );
+                let pending = store.everything();
+                let mut writer = FrameWriter::new(Vec::new(), 1.0);
+                store.write(&pending, &mut writer);
+                let capacity = writer.buf.capacity();
+                assert_eq!(writer.strings.capacity(), if retained { count } else { 0 });
+                let pointer = writer.buf.as_ptr();
+                let frame = writer.finish();
+                assert_eq!(frame.as_ptr(), pointer, "position strings must fit");
+                assert!(capacity < frame.len() + 16, "reserve the position ID tail");
+                let payload = sections(&frame)
+                    .find(|(kind, _)| *kind == section::POSITIONS)
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    payload.len(),
+                    8 + count * 80
+                        + if retained {
+                            (count * 4).next_multiple_of(8)
+                        } else {
+                            0
+                        }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn interning_resolves_hash_collisions_by_full_string_equality() {
         let mut w = FrameWriter::new(Vec::new(), 0.);
         assert_eq!(w.intern("one", 7), 0);
