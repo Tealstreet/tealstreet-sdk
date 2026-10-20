@@ -129,6 +129,9 @@ const KNOWN_TS_FIXES = {
   // even when delivered in an HTTP-200 error envelope.
   // Orders use exact EIP-712 integers, distinct reducing bracket children,
   // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // Conditional replacement retains native execution price separately from
+  // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
+  // agree with proxy-session headers and reconnect the private socket.
   // The private server ping receives pong rather than being ignored.
   grvt() {},
   // WOO repairs live in the TS reference itself; no result normalization:
