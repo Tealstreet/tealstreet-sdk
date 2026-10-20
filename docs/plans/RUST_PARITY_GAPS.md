@@ -858,3 +858,38 @@ TS capability skips remain documented above. The credentialed Spot lifecycle
 profile remains unreviewed and fails before credential access; scripted lifecycle
 coverage passes. Current complete measurements and historical checkpoints are
 in the three adjacent proof files.
+
+## Round 6 public-only credential correction
+
+At published `722c976271`, the KuCoin reviewer found a new inherited P2:
+futures `signed` and `signed_streamed` could restore secondary authentication
+without a primary authenticated context. A public-only account's public-trades
+query could therefore carry API/signature/passphrase/broker headers, unlike TS.
+Both selectors now require an authenticated context, as Spot already does.
+Unsigned public GETs keep ordinary secondary read routing; no Direct/Primary
+hint is added. Private queries still reject with their original command IDs.
+
+Two new regressions deliberately fail on the old guards, then pass after the
+fix: both signing helpers and actual `Query::PublicTrades` cover unsigned
+headers, original-ID completion and no private I/O. Existing authenticated read
+and primary mutation HMAC controls remain and now exercise streamed GET too.
+Scoped native **151** (including **46 Spot**) and Clippy pass. Independent
+closure review passes. The production patch changes only two predicates in
+KuCoin futures; tests are confined to its secondary-read module.
+
+Both independent plan audits approve bounded reverification: refresh committed
+futures public/private gates, native checks and the rebuilt combined SDK/frame
+consumers. Canonically rebuild all six other standard artifacts and prove web/Node
+byte identity to the F920 tested binaries, with TS/harness/tapes/build flags
+unchanged, before retaining their **20** old gates under their original source
+attribution. Spot shares the crate, so rebuild it and rerun SDK2. Any changed
+artifact requires fresh gates for every profile it serves. Do not relabel F920
+measurements as the new source.
+
+Separately, the 722 Bybit CI job missed Hyro steady CPU: rounded TS/Rust
+**7.2/7.6 ms**, with parity/main CPU/memory passing. Preserve that failed job
+and run a fresh local Hyro comparison after byte identity checks. The required
+security-fix head will run all CI again; no unchanged manual retry is requested
+and no Bybit performance improvement is attributed to this credential fix.
+If the strict timing failure recurs, investigate and measure a real performance
+change before continuing. Exact new-head green CI and final review remain required.

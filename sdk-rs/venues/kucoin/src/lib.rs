@@ -240,7 +240,7 @@ impl Kucoin {
             .options
             .read_credentials
             .as_ref()
-            .filter(|_| method == Method::Get)
+            .filter(|_| method == Method::Get && self.credentials.is_some())
             .map(|read| sign::Credentials {
                 key: read.key.clone(),
                 secret: read.secret.clone(),
@@ -278,7 +278,7 @@ impl Kucoin {
             .options
             .read_credentials
             .as_ref()
-            .filter(|_| method == Method::Get)
+            .filter(|_| method == Method::Get && self.credentials.is_some())
             .map(|read| sign::Credentials {
                 key: read.key.clone(),
                 secret: read.secret.clone(),
