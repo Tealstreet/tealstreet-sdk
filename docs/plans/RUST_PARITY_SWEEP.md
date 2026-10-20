@@ -523,3 +523,21 @@ than treating the original port boundary as a waiver.
   are unchanged. Four new event-driven controls cover these invariants.
   OKX94/94, strict Clippy/fmt PASS; independent source review PASS. Rebuilt
   public/private gates must establish actual performance; no speedup is inferred.
+
+### Final checkpoint and landed spot-product union
+
+- Source d61c7d5187 final checks PASS:2566native+3doctests, native/WASM
+  Clippy/fmt/bans,409compiledSDK cases and68host cases. Combined GRVT private
+  and all4OKXprivate profiles PASS. Selected OKX node/web819500bytes each,
+  under unchanged1258291ceiling. Three-run public linear/inverse/EEA PASS;
+  inverse mainTS2033.6/Rust1913.1ms,steady1480.3/1317.0ms,memory19.4/5.4MB;
+  EEA main1709.4/1518.5ms,steady1297.7/1152.0ms,memory22.3/7.3MB.
+  These receipts precede the new landing union and are not its final proof.
+- Latest requested fetch/merge brings f4ea9e06ab/PR1339 Hyperliquid spot and
+  Kraken spot into this branch cleanly, preserving landing structure.
+  Rebuild combined bindings and repeat affected compiled/native/root checks;
+  extend the frozen serial replay manifest with their public/private and
+  integration controls. Review merge seams independently before final landing.
+- Source remains frozen during final verification. Persistent PR comments/body
+  will carry actual final aggregate receipts; no old gate numbers are relabeled
+  as current. Merge remains gated on exact-head green CI and review convergence.
