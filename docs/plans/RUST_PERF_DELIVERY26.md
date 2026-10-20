@@ -636,3 +636,42 @@ the completed 26-package artifacts before rebuilding. Keep operational failures
 visible and do not adjust collector limits or retry numerical outcomes. Draft
 PR publication may precede final measurements to make the implementation
 reviewable; readiness and merge still require the outstanding checks.
+
+## PR 1344 review repairs and current checks
+
+Draft PR https://github.com/Tealstreet/tealstreet-sdk/pull/1344 targets
+`feat/rust-rewrite`. Three independent adversarial source reviews are posted.
+The native reviewer found P2: a signing result captured at 18s but consumed at
+25s could bypass its 20s deadline. Fix native and JS signing completion to read
+the actual dispatch clock after earlier FIFO socket work. Websocket arrival
+times remain recorded. This supersedes the merge plan's captured signing-clock
+claim and the first JS review's no-findings result for that case. Independent
+fix review passes. The actual native-engine regression fails with stale time
+and passes with the fix: 19.5s permits only 500ms HTTP time, 20s/25s emit one
+signing failure and no HTTP, duplicates do nothing. All three JS variants
+likewise fail stale-clock assertions and all 80 host tests pass after repair.
+
+Current merged-source harness665, typecheck44, lint28 and repository27 tasks
+pass. Preserve initial typecheck failure: update incoming test loader calls to
+select Paradex and mock the new host interfaces without changing assertions.
+Formatting, bans and full native Clippy passed before the deadline repair;
+intentionally interrupt the subsequent workspace test compile to fix reviewed
+source coherently. Preserve its SIGINT and reason, then rerun fixed source.
+`RUST_PERF_DELIVERY27_REVIEW_CHECKPOINT.json.gz` retains this evidence.
+
+Initial CI is not green: size breaches include Bitrue 850,462/805,888,
+Hyperliquid 1,095,063/1,090,560 (also Spot), and provisional KuCoin Spot
+720,853/708,608. Hyro steady CPU is 4.3ms versus TS 3.8ms; retain this failure.
+Before any cap exception, remove the two delegated signing exports from the
+26 packages that cannot request them: only Paradex calls `Cx::sign_request`.
+Make declarations optional and assert actual method presence only in Paradex
+builds. Independent source review passes; one fresh 27-package build must
+establish actual exports and remaining sizes. No compiler profile trials,
+threshold changes or CPU improvement claims accompany this capability gate.
+
+The current CI roster is 40 public/64 private, fixed 20 AB/20 BA. Preserve old
+39/63 IDs/order and append KuCoin Spot. Content checks require changed Bitrue
+and new KuCoin Spot private generators; reuse 62 verified tapes. Public tapes
+changed for Bitrue, KuCoin and Paradex, plus new Spot. Source-bound old numbers
+remain historical. Final real-WASM checks, measurements, wider margins and
+green CI remain pending.

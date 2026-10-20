@@ -1365,7 +1365,7 @@ test('delegated header names and CR/LF fail before encoding or making HTTP reque
 });
 
 for (const outcome of ['success', 'rejection', 'timeout']) {
-  test(`delegated signing ${outcome} waits behind raw input and preserves its completion clock`, async () => {
+  test(`delegated signing ${outcome} waits behind raw input and uses the current dispatch clock for deadlines`, async () => {
     const f = fixture();
     let now = 23;
     f.host.transport.now = () => now;
@@ -1388,8 +1388,8 @@ for (const outcome of ['success', 'rejection', 'timeout']) {
     f.tick();
     assert.deepEqual(f.calls[0], ['single', [[1, 17, 'earlier']]]);
     assert.deepEqual(f.calls[1], outcome === 'success'
-      ? ['signed', 7, 'answer', '', 23]
-      : ['signFailed', 7, outcome === 'timeout' ? 'Payload signing timed out' : 'fixture denied', 23]);
+      ? ['signed', 7, 'answer', '', 99]
+      : ['signFailed', 7, outcome === 'timeout' ? 'Payload signing timed out' : 'fixture denied', 99]);
     f.host.dispose();
   });
 }

@@ -455,10 +455,11 @@ export class EngineHost {
       this.signings.delete(id);
       this.transport.clearTimeout(pending.timer);
       if (error) controller.abort();
-      const now = this.transport.now();
       this.ordered(() => {
         this.drainMessages();
         if (this.disposed) return;
+        // Signing and its HTTP continuation share a wall-clock deadline.
+        const now = this.transport.now();
         this.run(error
           ? this.engine.payloadSignFailed(id, String(error?.message ?? error), now)
           : this.engine.payloadSigned(id, result.signature, result.headers, now));

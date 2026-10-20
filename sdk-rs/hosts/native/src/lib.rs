@@ -372,7 +372,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn dispatch_received(&mut self, queued: ReceivedEvent) {
-        let now = queued.received_at;
+        // Signing and HTTP share a wall-clock deadline. Waiting behind earlier
+        // socket work must not extend that budget; WS messages keep arrival time.
+        let now = match &queued.event {
+            HostEvent::PayloadSigned(..) | HostEvent::PayloadSignFailed(..) => (self.clock)(),
+            _ => queued.received_at,
+        };
         self.last_dispatched_at = now;
         let engine = &mut self.engine;
         match queued.event {

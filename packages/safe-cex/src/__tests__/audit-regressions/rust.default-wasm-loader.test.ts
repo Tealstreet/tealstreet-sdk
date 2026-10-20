@@ -45,6 +45,8 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
       httpChunk = () => '';
       httpEnd = () => '';
       httpFailed = () => '';
+      payloadSigned = () => '';
+      payloadSignFailed = () => '';
       timer = () => '';
       free = () => {};
     },

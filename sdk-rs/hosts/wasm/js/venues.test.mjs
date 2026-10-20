@@ -38,6 +38,9 @@ const aliases = {
 for (const [family, names] of Object.entries(aliases)) {
   test(`${family} package accepts its aliases and excludes other venues`, () => {
     const { WasmEngine } = require(`../pkg/node/${family}/safe_cex_wasm.js`);
+    for (const method of ['payloadSigned', 'payloadSignFailed'])
+      assert.equal(typeof WasmEngine.prototype[method], family === 'paradex' ? 'function' : 'undefined',
+        `${family} delegated signing ABI: ${method}`);
     for (const venue of names) {
       assert.equal(venueFamily(venue), family);
       const options = venue === 'hyrotrader'

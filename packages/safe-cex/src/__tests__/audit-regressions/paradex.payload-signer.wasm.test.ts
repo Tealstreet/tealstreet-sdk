@@ -71,7 +71,7 @@ it.each([false, true])(
       },
     };
     setWasmEngineLoader(async () => {
-      const module = await loadNodeEngine();
+      const module = await loadNodeEngine('paradex');
       expect(typeof module.WasmEngine.prototype.payloadSigned).toBe('function');
       return {
         ...module,

@@ -22,9 +22,9 @@ export class WasmEngine implements WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
-  /** Headers are name:value lines, with no added whitespace. */
-  payloadSigned(request: number, signature: string, headers: string, now: number): string;
-  payloadSignFailed(request: number, error: string, now: number): string;
+  /** Paradex delegated signing only. Headers are name:value lines with no added whitespace. */
+  payloadSigned?(request: number, signature: string, headers: string, now: number): string;
+  payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
   free(): void;
 }

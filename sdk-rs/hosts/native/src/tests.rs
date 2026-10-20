@@ -585,3 +585,133 @@ fn locally_canceled_decoded_pending_input_is_skipped_without_decoding_twice() {
         ]
     );
 }
+
+#[derive(Default)]
+struct SigningDeadlineVenue {
+    message_times: Vec<f64>,
+    failures: Vec<(f64, String)>,
+}
+
+impl Venue for SigningDeadlineVenue {
+    type Pending = ();
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        let id = cx.request(
+            safe_cex_engine::Method::Post,
+            "https://venue.invalid/orders".into(),
+            vec![("SIGNATURE", "placeholder".into())],
+            None,
+            (),
+        );
+        cx.sign_request(
+            id,
+            safe_cex_engine::PayloadSignRequest {
+                exchange_name: "paradex",
+                key: "public-key".into(),
+                payload: "0x123".into(),
+                scheme: "stark",
+                encoding: "felt-pair",
+            },
+            safe_cex_engine::SignatureTarget::Header("SIGNATURE"),
+        )
+        .unwrap();
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, _: &str) {
+        self.message_times.push(cx.now);
+        cx.log(LogLevel::Info, "prior WS action");
+    }
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {
+        panic!("signing failure must use on_sign_failed");
+    }
+    fn on_sign_failed(&mut self, cx: &mut Cx<'_, ()>, _: (), error: &str) {
+        self.failures.push((cx.now, error.into()));
+    }
+    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+#[test]
+fn signing_dispatch_charges_queue_delay_after_prior_ws_actions() {
+    static TIME: AtomicU64 = AtomicU64::new(0);
+    fn clock() -> f64 {
+        TIME.load(Ordering::Relaxed) as f64
+    }
+    for dispatched_at in [19_500, 20_000, 25_000] {
+        let mut host = Host::new(Engine::new(SigningDeadlineVenue::default()), NoTransport);
+        host.clock = clock;
+        host.events.clock = clock;
+        host.engine.start(0.0);
+        let actions = host.engine.drain_actions().collect::<Vec<_>>();
+        let request = match actions.as_slice() {
+            [
+                Action::SignPayload {
+                    request,
+                    timeout_ms: 20_000,
+                    ..
+                },
+            ] => *request,
+            _ => panic!("startup must hold the HTTP request for signing"),
+        };
+        host.events
+            .send_at(HostEvent::WsMessage(SocketId(1), "prior".into()), 17_000.0)
+            .unwrap();
+        let signed = || {
+            HostEvent::PayloadSigned(
+                request,
+                PayloadSignerResult {
+                    signature: "signed".into(),
+                    headers: vec![],
+                },
+            )
+        };
+        host.events.send_at(signed(), 18_000.0).unwrap();
+        TIME.store(18_000, Ordering::Relaxed);
+        let first = host.inbox.try_recv().unwrap();
+        host.dispatch_ready(first, MAX_BATCH_MESSAGES);
+        assert_eq!(host.engine.venue().message_times, [17_000.0]);
+        assert!(
+            host.pending.is_some(),
+            "signing is a barrier after the WS burst"
+        );
+        let mut notices = 0;
+        host.execute(&mut |_| {
+            notices += 1;
+            TIME.store(dispatched_at, Ordering::Relaxed);
+        });
+        assert_eq!(notices, 1);
+        let completion = host.pending.take().unwrap();
+        host.dispatch_ready(completion, MAX_BATCH_MESSAGES);
+        let actions = host.engine.drain_actions().collect::<Vec<_>>();
+        if dispatched_at < 20_000 {
+            assert!(host.engine.venue().failures.is_empty());
+            assert!(matches!(actions.as_slice(), [Action::Http(http)]
+                if http.id == request && http.timeout_ms == Some(500)
+                && http.headers.as_slice() == [("SIGNATURE", String::from("signed"))]));
+        } else {
+            assert!(actions.is_empty(), "expired signing must never emit HTTP");
+            assert_eq!(
+                host.engine.venue().failures,
+                [(dispatched_at as f64, "Payload signing timed out".into())]
+            );
+        }
+        host.events.send_at(signed(), 18_000.0).unwrap();
+        let duplicate = host.inbox.try_recv().unwrap();
+        host.dispatch_ready(duplicate, MAX_BATCH_MESSAGES);
+        assert!(
+            !host.engine.has_actions(),
+            "duplicate completion cannot resume HTTP"
+        );
+        assert_eq!(
+            host.engine.venue().failures.len(),
+            usize::from(dispatched_at >= 20_000)
+        );
+    }
+}

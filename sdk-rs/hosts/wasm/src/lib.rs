@@ -1190,6 +1190,7 @@ impl WasmEngine {
         self.flush()
     }
 
+    #[cfg(feature = "venue-paradex")]
     #[wasm_bindgen(js_name = payloadSigned)]
     pub fn payload_signed(
         &mut self,
@@ -1219,6 +1220,7 @@ impl WasmEngine {
         self.flush()
     }
 
+    #[cfg(feature = "venue-paradex")]
     #[wasm_bindgen(js_name = payloadSignFailed)]
     pub fn payload_sign_failed(&mut self, request: u32, error: &str, now: f64) -> String {
         self.inner.handle(
@@ -1307,6 +1309,7 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+#[cfg(any(test, feature = "venue-paradex"))]
 fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
     let mut headers = Vec::new();
     if !text.is_empty() {
