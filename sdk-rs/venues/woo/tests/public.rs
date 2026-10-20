@@ -675,6 +675,72 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
     snapshot(&mut e, &r, 26030.0, 200);
     assert!(e.venue().book("BTCUSDT").is_some());
 }
+#[test]
+fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
+    let mut e = Engine::new(Woo::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &r,
+        10.0,
+        &MARKETS.replace(
+            "]}",
+            r#",{"symbol":"PERP_ETH_USDT","base_tick":0,"quote_tick":0.01,"base_min":0.01,"base_max":100},{"symbol":"PERP_SOL_USDT","base_tick":"x"},{"symbol":"PERP_XRP_USDT","base_tick":0.1,"quote_tick":0.0001,"base_min":1,"base_max":1000,"base_imr":0.1}]}"#,
+        ),
+    );
+    assert_eq!(e.store().markets().len(), 2);
+    assert!(e.store().market("ETHUSDT").is_none());
+    let r = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &r,
+        20.0,
+        &TICKERS.replace("]}", r#",{"symbol":"PERP_XRP_USDT","24h_open":"bad"}]}"#),
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000.0);
+    assert!(e.store().ticker("XRPUSDT").is_none());
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let warnings: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|m| m.contains("WOO tickers") && m.contains("PERP_XRP_USDT"))
+    );
+}
+#[test]
+fn ticker_without_open_keeps_last_price_with_zero_percentage() {
+    let mut e = Engine::new(Woo::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, 10.0, MARKETS);
+    let r = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &r,
+        20.0,
+        &TICKERS.replace("\"24h_open\":50000", "\"24h_open\":0"),
+    );
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!((t.last, t.percentage), (60000.0, 0.0));
+}
 
 fn empty_book_frame(frame: &[u8]) -> bool {
     safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {

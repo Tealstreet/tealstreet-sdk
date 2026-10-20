@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response};
+use safe_cex_engine::{Action, Command, Engine, Event, LogLevel, Notice, Query, Response};
 use safe_cex_venue_woo::{Options, Woo};
 use serde::Deserialize;
 use support::*;
@@ -396,7 +396,7 @@ fn ledger_pages_obey_ten_requests_per_minute_and_failure_is_not_empty() {
     assert!(result(&mut e).is_err());
 }
 #[test]
-fn malformed_history_page_rejects_valid_prefix() {
+fn malformed_history_row_is_skipped_with_a_warning_and_valid_rows_return() {
     let mut e = ready();
     let r = query(&mut e, fills(Some(5)));
     response(
@@ -407,6 +407,62 @@ fn malformed_history_page_rejects_valid_prefix() {
             r#"{{"success":true,"data":{{"rows":[{},{{"id":2}}]}}}}"#,
             fill(1, NOW, "BUY")
         ),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Log { level: LogLevel::Warning, message })
+            if message.contains("WOO fills history: skipped 1")
+    )));
+    let json = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: 99,
+                result,
+            }) => Some(result),
+            _ => None,
+        })
+        .unwrap()
+        .unwrap();
+    assert!(json.contains(r#""id":"1""#), "{json}");
+    assert!(!json.contains(r#""id":"2""#));
+}
+#[test]
+fn malformed_order_history_and_ledger_rows_are_skipped_not_fatal() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(NOW - 1000.0),
+            to_ms: Some(NOW + 1000.0),
+            limit: Some(5),
+        },
+    );
+    let bad = ORDER
+        .replace("9007199254740993", "7")
+        .replace(r#""type":"IOC""#, r#""type":"UNKNOWN""#);
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        &format!(
+            r#"{{"success":true,"rows":[{bad},{ORDER}],"meta":{{"total":2,"records_per_page":100,"current_page":1}}}}"#
+        ),
+    );
+    let json = result(&mut e).unwrap();
+    assert!(json.contains("9007199254740993"));
+    assert!(!json.contains(r#""id":"7""#));
+}
+#[test]
+fn wholly_malformed_history_page_still_fails_visibly() {
+    let mut e = ready();
+    let r = query(&mut e, fills(Some(5)));
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        r#"{"success":true,"data":{"rows":[{"id":2},{"id":3}]}}"#,
     );
     assert!(result(&mut e).is_err());
 }
@@ -1012,4 +1068,54 @@ fn fill_identifier_precedence_preserves_nullish_and_explicit_empty_boundaries() 
             expected_order
         );
     }
+}
+#[test]
+fn full_walk_page_with_malformed_rows_is_not_mistaken_for_the_last_page() {
+    let mut e = ready();
+    let from = NOW - 4000.0;
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(from),
+            to_ms: Some(NOW),
+            limit: Some(3),
+        },
+    );
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        &format!(
+            r#"{{"success":true,"data":{{"rows":[{},{}]}}}}"#,
+            fill(1, from + 1000.0, "BUY"),
+            fill(2, from + 2000.0, "BUY")
+        ),
+    );
+    let r = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &r,
+        NOW + 2.0,
+        &format!(
+            r#"{{"success":true,"data":{{"rows":[{},{{"id":8}},{{"id":9}}]}}}}"#,
+            fill(2, from + 2000.0, "BUY")
+        ),
+    );
+    let r = requests(&mut e)
+        .into_iter()
+        .next()
+        .expect("a full page must keep walking");
+    assert!(r.url.contains(&format!("startTime={}", from + 2001.0)));
+    response(
+        &mut e,
+        &r,
+        NOW + 3.0,
+        &format!(
+            r#"{{"success":true,"data":{{"rows":[{}]}}}}"#,
+            fill(3, from + 3000.0, "SELL")
+        ),
+    );
+    assert_eq!(result(&mut e).unwrap().matches("timestamp").count(), 3);
 }

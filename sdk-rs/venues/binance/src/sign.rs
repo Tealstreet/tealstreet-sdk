@@ -48,6 +48,10 @@ impl Query {
         }
     }
 
+    pub fn unsigned(self) -> String {
+        self.0
+    }
+
     #[cfg(test)]
     pub fn as_str(&self) -> &str {
         &self.0
