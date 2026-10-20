@@ -60,9 +60,10 @@ http('POST', '/fapi/v2/order', { code: '-1022', msg: 'Signature for this request
 http('POST', '/fapi/v2/order', ok({ orderId: '300' }), payload({ clientOrderId: 'caller-bitrue-1' }));
 http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('300', { clientOrderId: 'caller-bitrue-1' })]), undefined, 1);
 orderEvent('300', 0, 59000, 'NEW', { q: '0.004', p: '59000', c: 'caller-bitrue-1', x: 'NEW' });
+command({ op: 'findOrderByClientOrderId', symbol: 'E-BTC-USDT', clientOrderId: 'caller-bitrue-1' });
 command({ op: 'cancelOrders', ids: ['300'] });
 http('POST', '/fapi/v2/cancel', ok({ orderId: '300' }), { orderId: '300', contractName: 'E-BTC-USDT', conditionOrder: false });
-http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100')]), undefined, 2);
+http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100')]), undefined, 3);
 orderEvent('300', 0, 59000, 'CANCELED', { q: '0.004', p: '59000', c: 'caller-bitrue-1', x: 'CANCEL' });
 command({ op: 'placeOrders', orders: [{ symbol: 'E-BTC-USDT', type: 'limit', side: 'buy', amount: 0.004, price: 59000, stopLoss: 55000, takeProfit: 65000 }] });
 http('POST', '/fapi/v2/order', ok({ orderId: '301' }), payload({ triggerOrderCreateParams: [
@@ -70,14 +71,14 @@ http('POST', '/fapi/v2/order', ok({ orderId: '301' }), payload({ triggerOrderCre
   { clientOrderId: 'generated-child-tp', triggerType: 2, triggerPriceType: 1, triggerPrice: 65000, type: 'MARKET', price: 0 },
 ] }));
 // New order snapshots become authoritative only after their placement command.
-http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('301')]), undefined, 3);
+http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('301')]), undefined, 4);
 command({ op: 'placeOrders', orders: [{ symbol: 'E-BTC-USDT', type: 'stop_market', side: 'sell', amount: 0.004, price: 55000, reduceOnly: true }] });
 http('POST', '/fapi/v2/order', ok({ orderId: 'unreliable-stop-id' }), payload({ price: 0, triggerPrice: 55000,
   volume: '0.004', type: 'MARKET', side: 'SELL', open: 'CLOSE', conditionOrder: true,
   triggerType: 1, triggerPriceType: 2 }));
 const stop = { orderId: '700', clientOrderId: 'stop-server-id', price: 0, origAmount: 240, executedQty: 0.004,
   status: 'INIT', side: 'SELL', action: 'CLOSE', transactTime: 1700000000000, triggerPrice: 55000, triggerType: 1, conditionOrder: true };
-http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('301'), stop]), undefined, 4);
+http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('301'), stop]), undefined, 5);
 command({ op: 'fetchFills', symbol: 'E-BTC-USDT', from: 1700000000000, to: 1700000100000, limit: 10 });
 http('GET', '/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=10&startTime=1700000000000&endTime=1700000100000', ok([
   { tradeId: '9001', bidId: fillId, askId: '400', side: 'BUY', price: 60000, qty: 3, amount: 180,
@@ -85,6 +86,9 @@ http('GET', '/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=10&startTime=170000
   { tradeId: '9000', bidId: fillId, askId: '400', side: 'BUY', price: 60000, qty: 3, amount: 180,
     contractName: 'E-BTC-USDT', fee: '-0.1', isMaker: true, ctime: 1699999999000 },
 ]));
+// The inherited TS lookup only sees open orders; absence is never definitive.
+command({ op: 'findOrderByClientOrderId', symbol: 'E-BTC-USDT', clientOrderId: 'missing-caller' });
+command({ op: 'findOrderByClientOrderId', symbol: 'E-ETH-USDT', clientOrderId: 'missing-caller' });
 ws(PRIVATE, { event: 'ACCOUNT_UPDATE' });
 ws(PRIVATE, { event: 'ping', ts: '1700000005000' });
 mkdirSync(dirname(values.out), { recursive: true });

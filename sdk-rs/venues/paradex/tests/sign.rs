@@ -19,6 +19,7 @@ struct Case {
 #[derive(Deserialize)]
 struct Signed {
     signature: String,
+    hash: String,
 }
 
 #[derive(Deserialize)]
@@ -32,6 +33,56 @@ struct Order {
     price: Option<String>,
     id: Option<String>,
     signature: String,
+    hash: String,
+}
+
+#[test]
+fn delegated_hashes_match_independent_starknet_js_without_a_private_key() {
+    for case in corpus() {
+        let credentials = Credentials::delegated(
+            "opaque-public-key",
+            &case.address,
+            &case.subkey,
+            &config(&case),
+        )
+        .unwrap();
+        assert!(credentials.is_delegated());
+        let auth = credentials.auth(case.now).unwrap();
+        assert_eq!(auth.signature, case.auth.hash);
+        let request = credentials.payload_request(&auth.signature).unwrap();
+        assert_eq!(request.key, "opaque-public-key");
+        assert_eq!(request.exchange_name, "paradex");
+        assert_eq!(request.scheme, "stark");
+        assert_eq!(request.encoding, "felt-pair");
+        for order in case.orders {
+            let signed = if let Some(id) = &order.id {
+                credentials.modify(
+                    case.now,
+                    &order.market,
+                    &order.side,
+                    &order.kind,
+                    &order.size,
+                    order.price.as_deref().unwrap(),
+                    id,
+                )
+            } else {
+                credentials.order(
+                    case.now,
+                    &order.market,
+                    &order.side,
+                    &order.kind,
+                    &order.size,
+                    order.price.as_deref(),
+                )
+            }
+            .unwrap();
+            assert_eq!(
+                signed.signature, order.hash,
+                "{} {}",
+                case.chain, order.name
+            );
+        }
+    }
 }
 
 #[derive(Deserialize)]

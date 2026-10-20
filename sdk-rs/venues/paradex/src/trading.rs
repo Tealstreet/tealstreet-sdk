@@ -52,6 +52,7 @@ enum Kind {
     },
 }
 struct Operation {
+    hash: Option<String>,
     method: Method,
     path: String,
     body: Option<String>,
@@ -79,10 +80,14 @@ struct Quote {
     fair: Option<f64>,
 }
 pub struct Request {
+    hash: Option<String>,
     job: u64,
     kind: Kind,
 }
 impl Request {
+    pub(crate) fn take_signing_hash(&mut self) -> Option<String> {
+        self.hash.take()
+    }
     pub(crate) fn amend_id(&self) -> Option<&str> {
         if let Kind::Amend { id, .. } = &self.kind {
             Some(id)
@@ -262,11 +267,15 @@ fn place_operations(
     let signer = account
         .credentials()
         .ok_or("Paradex signer is not initialized")?;
+    if signer.is_delegated() && orders.len() > 1 {
+        return Err("Paradex batch orders are not supported with payloadSigner, which signs one order per request".into());
+    }
     let mut operations = VecDeque::new();
     let mut chunk = Vec::new();
     fn flush(
         chunk: &mut Vec<Placement>,
         operations: &mut VecDeque<Operation>,
+        delegated: bool,
     ) -> Result<(), String> {
         if chunk.is_empty() {
             return Ok(());
@@ -274,6 +283,7 @@ fn place_operations(
         let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
         let body = serde_json::to_string(&*chunk).map_err(|e| e.to_string())?;
         operations.push_back(Operation {
+            hash: delegated.then(|| chunk[0].signature.clone()),
             method: Method::Post,
             path: "/orders/batch".into(),
             body: Some(body),
@@ -309,14 +319,15 @@ fn place_operations(
         if native_batch(o) {
             chunk.push(prepare(o, signer, cx.now as u64, false, execution)?);
             if chunk.len() == 10 {
-                flush(&mut chunk, &mut operations)?;
+                flush(&mut chunk, &mut operations, signer.is_delegated())?;
             }
             continue;
         }
-        flush(&mut chunk, &mut operations)?;
+        flush(&mut chunk, &mut operations, signer.is_delegated())?;
         let payload = prepare(o, signer, cx.now as u64, false, execution)?;
         let expected = vec![payload.client_id.clone()];
         operations.push_back(Operation {
+            hash: signer.is_delegated().then(|| payload.signature.clone()),
             method: Method::Post,
             path: "/orders".into(),
             body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
@@ -370,6 +381,7 @@ fn place_operations(
                     payload.signature_timestamp = signed.signature_timestamp;
                 }
                 operations.push_back(Operation {
+                    hash: signer.is_delegated().then(|| payload.signature.clone()),
                     method: Method::Post,
                     path: "/orders".into(),
                     body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
@@ -382,7 +394,7 @@ fn place_operations(
             }
         }
     }
-    flush(&mut chunk, &mut operations)?;
+    flush(&mut chunk, &mut operations, signer.is_delegated())?;
     Ok(operations)
 }
 
@@ -461,6 +473,7 @@ impl Trading {
                     let mut operations = VecDeque::new();
                     for chunk in ids.chunks(2) {
                         operations.push_back(Operation {
+                            hash: None,
                             method: Method::Delete,
                             path: if chunk.len() == 2 {
                                 "/orders/batch".into()
@@ -490,6 +503,7 @@ impl Trading {
                     .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
                     .map(|market| {
                         VecDeque::from([Operation {
+                            hash: None,
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
                             body: None,
@@ -502,6 +516,7 @@ impl Trading {
             Command::FetchLeverage { command, symbol } => (
                 command,
                 Ok(VecDeque::from([Operation {
+                    hash: None,
                     method: Method::Get,
                     path: "/account/margin".into(),
                     body: None,
@@ -529,6 +544,7 @@ impl Trading {
                         margin_type: &'static str,
                     }
                     Ok(VecDeque::from([Operation {
+                        hash: None,
                         method: Method::Post,
                         path: format!("/account/margin/{}", encode(&symbol)),
                         body: Some(
@@ -622,6 +638,7 @@ impl Trading {
                     Vec::new(),
                     None,
                     Pending::Trade(Request {
+                        hash: None,
                         job,
                         kind: Kind::Quotes(symbol),
                     }),
@@ -672,6 +689,7 @@ impl Trading {
                 operation.body,
                 None,
                 Pending::Trade(Request {
+                    hash: operation.hash,
                     job,
                     kind: operation.kind,
                 }),
@@ -801,6 +819,15 @@ impl Trading {
         error: &str,
     ) {
         self.complete(cx, account, request, Err(error.into()), false);
+    }
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        request: Request,
+        error: &str,
+    ) {
+        self.complete(cx, account, request, Err(error.into()), true);
     }
     fn complete(
         &mut self,
@@ -977,6 +1004,10 @@ impl Trading {
             signature_timestamp: u64,
         }
         Ok(VecDeque::from([Operation {
+            hash: account
+                .credentials()
+                .filter(|c| c.is_delegated())
+                .map(|_| signed.signature.clone()),
             method: Method::Put,
             path: format!("/orders/{}", encode(id)),
             body: Some(

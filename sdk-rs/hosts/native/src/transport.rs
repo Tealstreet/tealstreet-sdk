@@ -5,8 +5,10 @@ use crate::routing::{
 };
 use crate::{Events, HostEvent};
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{HttpRequest, Method, SocketId};
+use safe_cex_engine::{HttpRequest, Method, PayloadSignRequest, RequestId, SocketId};
+use std::future::Future;
 use std::io::Read;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -16,7 +18,35 @@ use tokio_tungstenite::tungstenite::{
     http::{HeaderName, HeaderValue},
 };
 
+pub struct PayloadSignerResult {
+    pub signature: String,
+    pub headers: Vec<(String, String)>,
+}
+impl std::fmt::Debug for PayloadSignerResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignerResult")
+            .field("signature", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .finish()
+    }
+}
+pub type PayloadSignerFuture =
+    Pin<Box<dyn Future<Output = Result<PayloadSignerResult, String>> + Send>>;
+pub type PayloadSigner = Arc<dyn Fn(PayloadSignRequest) -> PayloadSignerFuture + Send + Sync>;
+
 pub trait Transport {
+    fn sign_payload(
+        &self,
+        request: RequestId,
+        _payload: PayloadSignRequest,
+        _timeout_ms: u32,
+        events: Events,
+    ) {
+        let _ = events.send(HostEvent::PayloadSignFailed(
+            request,
+            "Payload signing is not configured".into(),
+        ));
+    }
     /// Open a socket; report it on `events` and return where to send text.
     /// Dropping the returned sender closes the socket.
     fn connect(
@@ -92,6 +122,7 @@ pub trait Transport {
 pub struct NetworkTransport {
     http: reqwest::Client,
     routing: Option<Arc<RoutingState>>,
+    signer: Option<PayloadSigner>,
 }
 
 impl NetworkTransport {
@@ -104,6 +135,7 @@ impl NetworkTransport {
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
+            signer: None,
         }
     }
 
@@ -113,6 +145,10 @@ impl NetworkTransport {
             routing: Some(Arc::new(RoutingState::new(plan, tokens))),
             ..Self::new()
         }
+    }
+    pub fn with_payload_signer(mut self, signer: PayloadSigner) -> Self {
+        self.signer = Some(signer);
+        self
     }
 }
 
@@ -163,6 +199,35 @@ fn decode_message(bytes: &[u8]) -> std::io::Result<String> {
 }
 
 impl Transport for NetworkTransport {
+    fn sign_payload(
+        &self,
+        request: RequestId,
+        payload: PayloadSignRequest,
+        timeout_ms: u32,
+        events: Events,
+    ) {
+        let signer = self.signer.clone();
+        tokio::spawn(async move {
+            let operation = async {
+                let signer =
+                    signer.ok_or_else(|| "Payload signing is not configured".to_owned())?;
+                signer(payload)
+                    .await
+                    .map_err(|_| "Payload signing failed".to_owned())
+            };
+            let result = tokio::select! {
+                biased;
+                _ = events.closed() => return,
+                result = tokio::time::timeout(Duration::from_millis(u64::from(timeout_ms.max(1))), operation) => result,
+            };
+            let event = match result {
+                Ok(Ok(result)) => HostEvent::PayloadSigned(request, result),
+                Ok(Err(error)) => HostEvent::PayloadSignFailed(request, error),
+                Err(_) => HostEvent::PayloadSignFailed(request, "Payload signing timed out".into()),
+            };
+            let _ = events.send(event);
+        });
+    }
     fn connect(
         &self,
         socket: SocketId,
@@ -340,6 +405,7 @@ impl Transport for NetworkTransport {
                     .headers
                     .iter()
                     .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                    .chain(request.signer_headers.iter().cloned())
                     .collect();
                 if let Some(route) = &route {
                     if !route.prefix.is_empty() {
@@ -451,6 +517,17 @@ impl Transport for NetworkTransport {
 mod security_tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn delegated_signer_result_debug_redacts_signatures_and_headers() {
+        let result = PayloadSignerResult {
+            signature: "private-signature-sentinel".into(),
+            headers: vec![("Authorization".into(), "private-token-sentinel".into())],
+        };
+        let debug = format!("{result:?}");
+        assert!(!debug.contains("private-signature-sentinel"));
+        assert!(!debug.contains("private-token-sentinel"));
+    }
 
     #[test]
     fn compressed_messages_cannot_expand_past_limit() {

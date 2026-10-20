@@ -66,6 +66,7 @@ if (values['tealstreet-ws-route']) {
   }, live);
 }
 const ordinals = new Map();
+let requestOrdinal = 0;
 const tickerSymbols = new Set();
 const recording = {
   ...live,
@@ -110,6 +111,8 @@ const recording = {
     };
   },
   async request(request) {
+    // Concurrent equal requests can finish out of order (e.g. socket tokens).
+    const ordinal = requestOrdinal++;
     // A native recorder may explicitly declare direct egress for public CORS
     // reads. Browser/account hosts still require their configured route.
     const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect
@@ -119,6 +122,7 @@ const recording = {
     const recorded = (body) => {
       write({
         type: 'http',
+        requestOrdinal: ordinal,
         method: request.method,
         url: request.url,
         ...(request.body === undefined ? {} : { requestBody: request.body }),

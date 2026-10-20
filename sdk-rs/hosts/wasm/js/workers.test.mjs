@@ -452,3 +452,16 @@ test('Workers HTTP requests and upgrade requests forbid redirects with private h
   assert.deepEqual(requests.map((init) => init.redirect), ['error', 'error']);
   socket.close();
 });
+
+
+test('Workers retain actionable venue command errors for connected clients', async () => {
+  const messages = [];
+  const Object = createEngineObject({ accountToken: () => 'fixture-token', loadEngine });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const client = { send: (text) => messages.push(JSON.parse(text)) };
+  object.clients.add(client);
+  object.host = { command: async () => { throw new Error('Insufficient balance for this order'); }, dispose() {} };
+  await object.receive(client, '{"op":"command","id":22,"command":{}}');
+  assert.deepEqual(messages, [{ op: 'done', id: 22, error: 'Insufficient balance for this order' }]);
+  object.leave(client);
+});

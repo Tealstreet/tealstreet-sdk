@@ -63,7 +63,18 @@ impl Venue for Probe {
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(Probe(Kraken::new(options())));
+    let options = options();
+    let mut primary_signer = sign::Signer::new(options.secret.as_deref().unwrap()).unwrap();
+    let mut read_signer =
+        sign::Signer::new(&options.read_credentials.as_ref().unwrap().secret).unwrap();
+    // Reserve bounds before dispatch: creating a signer must not reset its shared counter.
+    let primary_bound: u64 = primary_signer
+        .nonce(1700000000000.0)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let read_bound: u64 = read_signer.nonce(1700000000000.0).unwrap().parse().unwrap();
+    let mut engine = Engine::new(Probe(Kraken::new(options)));
     engine.start(1700000000000.0);
     let requests: Vec<_> = engine
         .drain_actions()
@@ -77,19 +88,18 @@ fn secondary_get_keeps_primary_mutations() {
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);
+    let mut previous = [read_bound, primary_bound];
     for request in requests {
         let expected = if request.method == Method::Get {
             "read-key"
         } else {
             "primary-key"
         };
-        let opts = options();
-        let secret = if request.method == Method::Get {
-            opts.read_credentials.as_ref().unwrap().secret.as_str()
+        let (signer, bound) = if request.method == Method::Get {
+            (&read_signer, read_bound)
         } else {
-            opts.secret.as_deref().unwrap()
+            (&primary_signer, primary_bound)
         };
-        let mut signer = sign::Signer::new(secret).unwrap();
         let nonce = request
             .headers
             .iter()
@@ -97,14 +107,14 @@ fn secondary_get_keeps_primary_mutations() {
             .unwrap()
             .1
             .as_str();
+        let nonce_number = nonce.parse::<u64>().unwrap();
+        assert!(nonce_number > bound);
+        let index = usize::from(request.method != Method::Get);
         assert!(
-            nonce.parse::<u64>().unwrap()
-                >= signer
-                    .nonce(1700000000000.0)
-                    .unwrap()
-                    .parse::<u64>()
-                    .unwrap()
+            nonce_number > previous[index],
+            "same signer nonce must increase for each request"
         );
+        previous[index] = nonce_number;
         assert_eq!(
             request
                 .headers

@@ -94,7 +94,7 @@ fn time_ms(value: f64) -> f64 {
     if value < 1e12 { value * 1000.0 } else { value }
 }
 
-fn query_component(value: &str) -> String {
+pub(crate) fn query_component(value: &str) -> String {
     let mut out = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
@@ -141,7 +141,7 @@ impl Bitrue {
         } = query
         else {
             match query {
-                Query::OrderByClientId { .. } => cx.done(command, Err("Bitrue client-order-ID lookup is unsupported".into())),
+                Query::OrderByClientId { symbol, client_order_id } => self.lookup_order(cx, command, symbol, client_order_id),
                 Query::PublicTrades { symbol, limit } => self.public_trades(cx, command, symbol, limit),
                 Query::OrderHistory { .. } => cx.done(command, Err("Bitrue v2 has only single-order lookup, not complete order history".into())),
                 Query::Income { .. } => cx.done(command, Err("Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger".into())),

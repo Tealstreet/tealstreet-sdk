@@ -48,10 +48,11 @@ test('generic API key exemptions require the exact public vector and fixture tog
   const publicHash = '99291b039f7ecd9952d7fc8fda105c5ca631b597cfbc5a4de4a7f95d435e4470';
   const vector = 'sdk-rs/venues/paradex/tests/sign-vectors.json';
   const provenance = 'sdk-rs/crypto/tests/fixtures/lighter/venue-signing-preimages.json';
+  assert.equal(exempt('sdk-rs/harness/venues.mjs', Buffer.from('replay-secret').toString('base64')), true);
   assert.equal(exempt(vector, publicKey), true);
   assert.equal(exempt(provenance, publicHash), true);
   for (const path of [vector, provenance, 'sdk-rs/crypto/tests/new-credential.rs',
-    'sdk-rs/engine/tests/secret.rs', 'sdk-rs/venues/binance/src/sign.rs', 'sdk-rs/venues/paradex/tests/sign-vectors.json.bak'])
+    'sdk-rs/engine/tests/secret.rs', 'sdk-rs/venues/binance/src/sign.rs', 'sdk-rs/harness/venues.mjs', 'sdk-rs/venues/paradex/tests/sign-vectors.json.bak'])
     assert.equal(exempt(path, 'new-live-api-key-not-a-public-vector'), false, path);
   assert.equal(exempt('sdk-rs/crypto/tests/new-credential.rs', publicHash), false);
   assert.equal(exempt(vector, publicHash), false);

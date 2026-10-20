@@ -67,6 +67,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
+                Action::SignPayload { .. } => {
+                    panic!("delegated signing is unsupported in the binance test harness")
+                }
                 Action::Http(request) => self.requests.push(request),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsConnectWithHeaders { .. } => {

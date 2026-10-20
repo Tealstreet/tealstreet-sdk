@@ -13,7 +13,7 @@ pub mod wire;
 pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
-    Query, RequestId, RequestRoute, Response, SocketChannel, SocketContext, SocketId, TimerId,
-    Venue,
+    PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
+    SocketContext, SocketId, TimerId, Venue,
 };
 pub use store::Store;

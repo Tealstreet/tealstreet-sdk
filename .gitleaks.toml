@@ -70,3 +70,11 @@ condition = "AND"
 paths = ["^sdk-rs/venues/binance/src/sign\\.rs$"]
 regexTarget = "secret"
 regexes = ["^2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9$"]
+
+# Kraken requires a base64 secret; this is exactly base64("replay-secret").
+[[rules.allowlists]]
+description = "Public deterministic Kraken replay secret in the venue registry."
+condition = "AND"
+paths = ["^sdk-rs/harness/venues\\.mjs$"]
+regexTarget = "secret"
+regexes = ["^cmVwbGF5LXNlY3JldA==$"]

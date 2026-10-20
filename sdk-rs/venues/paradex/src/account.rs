@@ -10,7 +10,8 @@ use safe_cex_engine::model::{
     PositionSide, TimeInForce,
 };
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, json::ArrayAt,
+    Cx, Fill, LogLevel, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId,
+    json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -405,7 +406,23 @@ impl Account {
         self.queue.push_back(request);
         self.refresh(cx);
     }
-    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, request: Queued) {
+    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        let signing = if let Pending::Trade(trade) = &mut request.pending {
+            trade.take_signing_hash().and_then(|signature| {
+                self.credentials
+                    .as_ref()?
+                    .payload_request(&signature)
+                    .map(|payload| {
+                        let field = format!(
+                            "\"signature\":{}",
+                            serde_json::to_string(&signature).expect("string serializable")
+                        );
+                        (payload, SignatureTarget::JsonField(field))
+                    })
+            })
+        } else {
+            None
+        };
         if let Pending::Trade(trade) = &request.pending
             && let Some(id) = trade.amend_id()
             && let Some(fence) = self.amend_fences.get_mut(id)
@@ -424,7 +441,7 @@ impl Account {
             headers.push(("PARADEX-PARTNER", "TEALSTREET".into()));
         }
         let url = format!("{}{}", self.rest(), request.path);
-        if let Some(at) = request.at {
+        let id = if let Some(at) = request.at {
             cx.request_streamed_body(
                 request.method,
                 url,
@@ -432,9 +449,21 @@ impl Account {
                 request.body,
                 at,
                 request.pending,
-            );
+            )
         } else {
-            cx.request(request.method, url, headers, request.body, request.pending);
+            cx.request(request.method, url, headers, request.body, request.pending)
+        };
+        if let Some((payload, target)) = signing
+            && let Err(pending) = cx.sign_request(id, payload, target)
+        {
+            if let Pending::Trade(trade) = &pending
+                && let Some(id) = trade.amend_id()
+                && let Some(fence) = self.amend_fences.get_mut(id)
+            {
+                fence.sent = false;
+            }
+            self.failed
+                .push((pending, "Paradex signing queue is full".into()));
         }
     }
     fn refresh(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -452,13 +481,25 @@ impl Account {
             }
         };
         self.auth_in_flight = true;
-        cx.request(
+        let payload = credentials.payload_request(&signature.signature);
+        let id = cx.request(
             Method::Post,
             format!("{}/auth/{}", self.rest(), credentials.subkey()),
             signature.headers(credentials.address()),
             None,
             Pending::Account(Request::Auth { started: cx.now }),
         );
+        cx.route_request(id, safe_cex_engine::RequestRoute::Direct);
+        if let Some(payload) = payload
+            && let Err(pending) = cx.sign_request(
+                id,
+                payload,
+                SignatureTarget::Header("PARADEX-STARKNET-SIGNATURE"),
+            )
+        {
+            self.failed
+                .push((pending, "Paradex signing queue is full".into()));
+        }
     }
     fn auth_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         self.auth_in_flight = false;
@@ -1084,7 +1125,12 @@ impl Account {
                 let credentials = serde_json::from_str::<SystemConfig>(response.body)
                     .map_err(|_| "Invalid Paradex system config".to_owned())
                     .and_then(|config| {
-                        Credentials::new(
+                        let constructor = if self.options.payload_signer {
+                            Credentials::delegated
+                        } else {
+                            Credentials::new
+                        };
+                        constructor(
                             self.options.key.as_deref().unwrap_or_default(),
                             self.options.paradex_address.as_deref().unwrap_or_default(),
                             self.options.subkey_address.as_deref().unwrap_or_default(),

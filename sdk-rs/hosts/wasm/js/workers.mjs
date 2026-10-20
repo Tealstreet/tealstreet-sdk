@@ -275,8 +275,8 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         try {
           const result = await host.command(message.command);
           if (this.host === host) this.reply(client, { op: 'done', id: message.id, result });
-        } catch {
-          if (this.host === host) this.reply(client, { op: 'done', id: message.id, error: 'Engine command failed' });
+        } catch (error) {
+          if (this.host === host) this.reply(client, { op: 'done', id: message.id, error: String(error?.message ?? error) });
         }
       }
     }

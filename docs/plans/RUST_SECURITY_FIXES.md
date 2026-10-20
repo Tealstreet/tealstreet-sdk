@@ -131,3 +131,31 @@ live trading, weakened parity oracle, or performance threshold changes.
   before integration; merge the landing structure and re-audit newly introduced
   signing/credential paths before final tests and all replay gates. Pre-merge
   checks remain checkpoint evidence, not final merged-source gate claims.
+
+### Landing integration checkpoint
+
+- Resolved six merge conflicts against landing `1b8592dbd2`, retaining incoming
+  feature gates, delegated signing and KuCoin Spot. Extended credential cleanup
+  to the new Spot owner and retained the short Paradex lifetime in delegated
+  signatures. Native and Wasm constructors preserve incoming public-only guards.
+- New incoming signer/request Debug implementations exposed authenticators and
+  callback failures could echo credential-bearing URLs. Added redacted Debug
+  and generic external callback failures with regressions; kept actionable
+  Workers venue command errors and connection/lifecycle fences.
+- Native/engine merged checks pass: 91 engine, 71 native host, 86 standalone
+  engine without default features; JS host 41/41. Full JS 87/88 currently has
+  only the stale pre-rebuild options diagnostic. The three focused signer
+  venue suites pass after fixing a test which reserved its nonce comparison
+  bound after the request (it now reserves first and asserts strict monotonicity).
+- Integrated fixture proof checks all 39 captures / 304201 records. The incoming
+  futures and Spot KuCoin data are preserved, removing only 32 Set-Cookie
+  headers across 18 HTTP records. Scanner export: 103 changed files, zero leaks.
+- Integrated harness 596/597: existing Phemex delayed-auth 225ms replay deadline
+  expired during compilation contention. Preserve this first failure and rerun
+  after heavy checks; no protocol assertion, deadline or performance threshold
+  has been relaxed.
+- Apply Sam's production-impact rule: no audit is judged by TS lifecycle shape.
+  Every retained security change addresses account isolation, credential
+  exposure, replay/collision risk or uncontrolled financial writes. Default
+  receive windows that already matched supported TS policy were not treated as
+  bugs. No lifecycle-only parity item is being repaired in this lane.
