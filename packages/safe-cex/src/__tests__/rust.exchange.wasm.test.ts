@@ -348,6 +348,15 @@ describe('RustEngineExchange', () => {
     vi.restoreAllMocks();
   });
 
+  it('rejects malformed Kraken signing credentials before account startup can hang', async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    const tape = recordedTransport();
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'invalid base64!' }, new DefaultStore());
+    await expect(exchange.start()).rejects.toThrow(/base64/);
+    expect(tape.requests).toEqual([]);
+  });
+
   it('skips private WOO metadata for implicit public-only credentials', async () => {
     exchange = new RustEngineExchange('woo', { key: '', secret: '' }, new DefaultStore());
     await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();

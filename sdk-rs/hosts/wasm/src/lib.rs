@@ -648,6 +648,15 @@ impl WasmEngine {
         {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
+        #[cfg(feature = "kraken")]
+        if venue == "kraken"
+            && !options.public_data_only
+            && options.key.as_deref().is_some_and(|key| !key.is_empty())
+            && let Some(secret) = options.secret.as_deref()
+        {
+            safe_cex_venue_kraken::sign::Signer::new(secret)
+                .map_err(|error| JsError::new(&error))?;
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {

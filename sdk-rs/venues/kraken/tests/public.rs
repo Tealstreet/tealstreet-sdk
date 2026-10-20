@@ -255,3 +255,13 @@ fn live_instrument_aliases_and_negative_precision_are_valid() {
         1000.0
     );
 }
+#[test]
+fn malformed_credentials_report_a_signing_error_before_private_activation() {
+    let mut e = Engine::new(Kraken::new(Options {
+        key: Some("fixture".into()),
+        secret: Some("invalid base64!".into()),
+        ..Default::default()
+    }));
+    e.start(NOW);
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("base64"))));
+}

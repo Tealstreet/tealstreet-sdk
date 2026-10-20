@@ -137,3 +137,12 @@ hooks. Five conflict files resolved: harness build, venues, gate, Wasm Cargo and
 constructor. Shared Tape retains both correlation/generation audits and sticky
 Kraken authentication failures. Independent code-correctness review accepted the
 union; 215 harness tests pass. Full landing-source gates are being rerun.
+
+### Startup validation hardening
+
+Code-correctness review accepted fail-fast malformed base64 credentials at the
+Wasm constructor, before engine/host/network creation. Native startup also emits
+a clear signing error without exposing credentials. Added native and real Wasm
+boundary regressions so account startup cannot hang silently on malformed keys.
+Quiet-account watchdog semantics and bounded execution/tombstone retention are
+being audited before final acceptance.

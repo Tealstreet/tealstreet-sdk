@@ -387,6 +387,20 @@ fn interval_spec(interval: &str) -> (&str, f64) {
 impl Venue for Kraken {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.options.public_data_only
+            && self
+                .options
+                .key
+                .as_deref()
+                .is_some_and(|key| !key.is_empty())
+            && self.options.secret.is_some()
+            && self.signer.is_none()
+        {
+            cx.log(
+                LogLevel::Error,
+                "Kraken secret must be nonempty valid base64",
+            );
+        }
         self.markets_request(cx);
         self.poll = Some(cx.set_timer(5_000.0));
     }
