@@ -165,6 +165,12 @@ jobs:
           - venue: phemex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:phemex
+          - venue: krakenspot
+            books: XBT/USD,ETH/USD
+            private_script: rust:private-tape-krakenspot
+          - venue: hyperliquidspot
+            books: PURR/USDC,HYPE/USDC
+            private_script: rust:private-tape-hyperliquidspot
           - venue: kraken
             books: PF_XBTUSD,PF_ETHUSD
             private_script: rust:private-tape-kraken

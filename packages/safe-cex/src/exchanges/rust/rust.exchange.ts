@@ -92,8 +92,10 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   kucoin: 'kucoin',
   polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
+  hyperliquidspot: 'hyperliquidspot',
   paradex: 'paradex',
   kraken: 'kraken',
+  krakenspot: 'krakenspot',
   lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
@@ -145,6 +147,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
   },
   hyperliquid: hyperliquidClientOrderIdRule,
+  hyperliquidspot: hyperliquidClientOrderIdRule,
   paradex: patternClientOrderIdRule('Paradex', /^.{1,64}$/, {
     mint: () => `ts_${uuid()}`,
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -243,7 +246,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = exchangeName === 'bybitspot' || exchangeName === 'binancespot' || exchangeName === 'coinbasespot';
+    this.isSpot = ['bybitspot', 'binancespot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
@@ -301,6 +304,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
+    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
     if (this.name === 'woo' || this.name === 'grvt') {
       this.cancelAllOrders = async () => {

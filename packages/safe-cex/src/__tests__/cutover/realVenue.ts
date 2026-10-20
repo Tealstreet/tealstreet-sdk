@@ -36,6 +36,13 @@ type PredictionInput = {
 
 type GrvtInstrumentInput = { i: string; b: string; q: string; k: string; ms: string; ts: string };
 
+type SpotMarketIdentity = { id: string; symbol: string; base: string; quote: string };
+type HyperSpotMetaInput = {
+  universe: { name: string; tokens: number[] }[];
+  tokens: { name: string; index: number }[];
+};
+type KrakenSpotPairInput = { wsname?: string };
+
 type BreakoutQuote = { symbol: string; bid: number; ask: number };
 
 type BinanceInstrumentInput = {
@@ -196,6 +203,39 @@ export const realVenue = (name: ExchangeName) => {
               })),
           )
       : [];
+  const spotMarkets: SpotMarketIdentity[] = [];
+  if (name === 'hyperliquidspot') {
+    const row = records.find((record) => record.type === 'http' && record.method === 'POST' &&
+      (record.requestBody as string | undefined)?.includes('spotMetaAndAssetCtxs'));
+    if (!row) throw new Error('Hyperliquid spot fixture lacks native spot metadata');
+    const [meta, contexts] = JSON.parse(row.body!) as [HyperSpotMetaInput, { coin?: string; midPx?: string }[]];
+    for (const [index, instrument] of meta.universe.entries()) {
+      const base = meta.tokens.find((token) => token.index === instrument.tokens[0])?.name;
+      const context = contexts.find((context) => context.coin === instrument.name) ??
+        (contexts[index]?.coin === undefined ? contexts[index] : undefined);
+      if (base && context?.midPx)
+        spotMarkets.push({ id: instrument.name, symbol: `${base}/USDC`, base, quote: 'USDC' });
+    }
+  }
+  if (name === 'krakenspot') {
+    const row = records.find((record) => record.type === 'http' && new URL(record.url!).pathname === '/0/public/AssetPairs');
+    if (!row) throw new Error('Kraken spot fixture lacks native AssetPairs');
+    const pairs = (JSON.parse(row.body!) as { result: Record<string, KrakenSpotPairInput> }).result;
+    const aliases: Record<string, string> = {
+      XBT: 'BTC', XXBT: 'BTC', XETH: 'ETH', XXRP: 'XRP', XLTC: 'LTC', XXLM: 'XLM',
+      XXMR: 'XMR', XZEC: 'ZEC', XREP: 'REP', XETC: 'ETC', XDAO: 'DAO', XMLN: 'MLN',
+      ZUSD: 'USD', ZEUR: 'EUR', ZGBP: 'GBP', ZJPY: 'JPY', ZCAD: 'CAD', ZAUD: 'AUD',
+    };
+    const asset = (code: string) => aliases[code] ?? code;
+    for (const [native, pair] of Object.entries(pairs)) {
+      if (native.endsWith('.d') || !pair.wsname) continue;
+      const [rawBase, rawQuote] = pair.wsname.split('/');
+      const base = asset(rawBase);
+      const quote = asset(rawQuote);
+      if (['USD', 'USDT', 'USDC'].includes(quote))
+        spotMarkets.push({ id: `${base}/${quote}`, symbol: pair.wsname, base, quote });
+    }
+  }
   // GRVT's Lite REST instruments retain their native mixed-case ID while
   // the SDK symbol is uppercase. Keep the precision oracle in raw API units.
   const grvtMarkets =
@@ -319,6 +359,7 @@ export const realVenue = (name: ExchangeName) => {
     publicPollResponses,
     breakoutQuotes,
     binanceMarkets,
+    spotMarkets,
     predictionMarkets,
     grvtMarkets,
     publicBookSymbols,

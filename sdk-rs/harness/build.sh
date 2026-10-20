@@ -10,6 +10,8 @@ if [[ $# -gt 0 ]]; then
   fi
   case "$2" in
     breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|grvt|lighter|apexomni|kraken|paradex|polymarket) build_args+=(--no-default-features --features "$2") ;;
+    hyperliquidspot) build_args+=(--no-default-features --features hyperliquid) ;;
+    krakenspot) build_args+=(--no-default-features --features kraken) ;;
     coinbase|coinbasespot) build_args+=(--no-default-features --features coinbase) ;;
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
     *) echo "Unsupported venue: $2 (expected breakoutprop, asterdex, binance, kucoin, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, grvt, lighter, apexomni, kraken, paradex, coinbase, polymarket or orderly)" >&2; exit 2 ;;

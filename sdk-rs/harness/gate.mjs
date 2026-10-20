@@ -160,6 +160,33 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  hyperliquidspot: {
+    // Paired reference fixes retain native spot IDs for coinless contexts and
+    // return string IDs for both resting and filled placement ACKs. Native
+    // tests additionally pin spot-only safety paths without rewriting economics.
+    notes: [
+      'Join documented spotMetaAndAssetCtxs contexts by universe position when coin is omitted.',
+      'Return the SDK string-array contract for resting and immediately filled orders.',
+      'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
+      'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',
+      'Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.',
+      'Deduplicate native live executions and suppress historical fill snapshots.',
+      'Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.',
+    ],
+  },
+  krakenspot: {
+    // Public fixes are paired in TS; independent native tests cover stricter
+    // execution, retry and amendment paths. Replay output stays unmodified.
+    notes: [
+      'Translate AssetPairs XBT wsname to WS v2 BTC wire symbols while preserving canonical store symbols.',
+      'Trim subscribed book depth after each update and clear reconnect book caches.',
+      'Fan supported native OHLC updates out to every requested fallback timeframe.',
+      'Sign exact form bytes and enforce monotonic nonce, including retries and reconnect token reads.',
+      'Refresh the authenticated WS token for each socket generation.',
+      'Emit exact per-execution last_qty/last_price once per native execution identity.',
+      'Preserve native order txid across atomic amendments and reject ambiguous edits before a write.',
+    ],
+  },
   breakoutprop: {
     // Public polling, duplicate quote levels and the cancellation precondition
     // are fixed in the TS reference. Native tests pin safety corrections; no

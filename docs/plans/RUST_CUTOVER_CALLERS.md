@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **43**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **45**.
 The two registries currently default **8 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`. They default the other **41 names** to TypeScript,
-including **35 names with an available Rust adapter**. Registration in
+including **37 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -44,9 +44,9 @@ of saved accounts.
 | `kucoin` | Yes | TS default; futures adapter, native contract-unit and broker configuration gates. |
 | `kucoinspot` | No | TS required; futures coverage cannot substitute for saved spot accounts. |
 | `hyperliquid` | Yes | TS default; perps/HIP-3 adapter. Public builder/agent utilities and `hyperliquid.cloid` still have callers. |
-| `hyperliquidspot` | No | TS required; perps coverage cannot substitute for saved spot accounts. |
+| `hyperliquidspot` | Yes | TS default; distinct spot product in the existing Hyperliquid crate. Native spot identities, balances, signing and consumer gates tracked in [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md); no combined perps/spot account claim. Preserve wallet/builder/agent and cloid helper callers before deletion. |
 | `kraken` | Yes | TS default; futures adapter. |
-| `krakenspot` | No | TS required; Kraken futures signing/protocol does not cover Kraken spot. |
+| `krakenspot` | Yes | TS default; distinct spot state machine in the existing Kraken crate, including Spot form signing, WS v2 token authentication and atomic txid amend. Exact scope/reviews/live-public versus documented-private evidence tracked in [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md); preserve futures regression and consumer/default migration prerequisites. |
 | `lighter` | Yes | TS default; keep wallet approval/account-tier helpers and prove all current credential/remote-signing modes. |
 | `lighter-robinhood` | No | TS required; it loads `LighterExchange`, but the Rust alias/config is not registered. Must prove broker config and add an explicit alias before cutover. |
 | `mexc` | Yes | TS default; conditional/trailing and native-unit proofs still required when removing reference coverage. |
@@ -59,8 +59,8 @@ of saved accounts.
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix`, `txflow` | None | TS required. Bitunix roster work-in-progress is not a registered Rust adapter. TxFlow is explicitly a Phase-0 scaffold, not a completed venue. Each needs an explicit port or an explicit supported-product retirement decision. |
 
-The 6 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
-`krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow`.
+The 4 names absent from `RUST_VENUES` are exactly `bitunix`, `kucoinspot`,
+`lighter-robinhood`, `txflow`.
 Do not silently route them through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
@@ -766,7 +766,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts; the runtime registration totals remain 49 names / 43 Rust aliases.
+source counts; the runtime registration totals are 49 names / 45 Rust aliases.
 
 The complete frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review

@@ -40,7 +40,6 @@ import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFro
 import { validateWalletAndPrivateKey } from '../../utils/ethereum/validateWalletAndPrivateKey';
 import { v } from '../../utils/get-key';
 import { loop } from '../../utils/loop';
-import { omitUndefined } from '../../utils/omitUndefined';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { createAPI } from './hyperliquid.api';
@@ -230,7 +229,9 @@ export class HyperliquidSpotExchange extends BaseExchange {
 
     for (let i = 0; i < meta.universe.length; i++) {
       const sourceMarket = meta.universe[i];
-      const sourceTicker = assets.find((asset: any) => asset.coin === sourceMarket.name);
+      // The documented contexts array is positional and may omit `coin`.
+      const sourceTicker = assets.find((asset: any) => asset.coin === sourceMarket.name) ??
+        (!assets[i]?.coin ? assets[i] : undefined);
       const token = meta.tokens.find((token) => token.index === meta.universe[i].tokens[0]);
 
       if (!token) {
@@ -787,7 +788,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
       });
       this.requestSpotBalanceRefresh(true);
-      return omitUndefined(data.response.data.statuses.map((status: any) => status?.resting?.oid));
+      return data.response.data.statuses.flatMap((status: any) => {
+        const oid = status?.resting?.oid ?? status?.filled?.oid;
+        return oid === undefined || oid === null ? [] : [String(oid)];
+      });
     } else if (opts.type === OrderType.Limit) {
       // Limit with TP & SL
       //   {
@@ -1010,7 +1014,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
         },
       });
       this.requestSpotBalanceRefresh(true);
-      return omitUndefined(data.response.data.statuses.map((status: any) => status?.resting?.oid));
+      return data.response.data.statuses.flatMap((status: any) => {
+        const oid = status?.resting?.oid ?? status?.filled?.oid;
+        return oid === undefined || oid === null ? [] : [String(oid)];
+      });
     } else if (opts.type === OrderType.TakeProfit || opts.type === OrderType.StopLoss) {
       // Position TP/SL
       //   {

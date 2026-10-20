@@ -574,7 +574,8 @@ export class KrakenSpotExchange extends BaseExchange {
       for (const [asset, info] of Object.entries(currencies)) {
         if (['USD', 'USDT', 'USDC'].includes(asset)) continue;
 
-        const ticker = this.store.tickers.find((t) => t.symbol === `${asset}/USD` || t.symbol === `${asset}/USDT`);
+        const market = this.store.markets.find((market) => market.base === asset && ['USD', 'USDT'].includes(market.quote));
+        const ticker = market ? this.store.tickersBySymbol[market.symbol] : undefined;
 
         if (ticker && ticker.last > 0) {
           const usdValue = info.total * ticker.last;

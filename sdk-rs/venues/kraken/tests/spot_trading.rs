@@ -1,0 +1,339 @@
+mod spot_support;
+use safe_cex_engine::{Action, Command, Event, Notice, Query, model::PlaceOrderOpts};
+use spot_support::*;
+fn opts(kind: &str, price: f64) -> PlaceOrderOpts {
+    serde_json::from_str(&format!(
+        r#"{{"symbol":"XBT/USD","type":"{kind}","side":"buy","amount":1,"price":{price}}}"#
+    ))
+    .unwrap()
+}
+fn done(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+    command: u32,
+) -> Result<String, String> {
+    e.drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
+                Some(result)
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+#[test]
+fn native_place_types_exact_client_id_and_trailing_distance() {
+    for (kind, raw, expected) in [
+        ("limit", "limit", "price=98"),
+        ("market", "market", "volume=1"),
+        ("stop_market", "stop-loss", "price=98"),
+        ("take_profit_market", "take-profit", "price=98"),
+        ("trailing_stop_market", "trailing-stop", "price=%2B2"),
+    ] {
+        let (mut e, _, _) = ready(false);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts(kind, 98.)],
+            }),
+        );
+        let r = requests(&mut e).pop().unwrap();
+        let body = r.body.as_ref().unwrap();
+        assert!(body.contains("pair=XXBTZUSD"));
+        assert!(body.contains(&format!("ordertype={raw}")));
+        assert!(body.contains(expected));
+        assert!(!body.contains("userref") && !body.contains("reduce_only"));
+        let id = body
+            .split('&')
+            .find_map(|p| p.strip_prefix("cl_ord_id="))
+            .unwrap();
+        assert_eq!(id.len(), 32);
+        assert!(
+            id.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+        reply(
+            &mut e,
+            &r,
+            r#"{"error":[],"result":{"txid":["KRAKEN-TXID"]}}"#,
+        );
+        assert_eq!(done(&mut e, 1).unwrap(), r#"["KRAKEN-TXID"]"#);
+    }
+}
+#[test]
+fn caller_ids_bad_brackets_and_zero_trailing_fail_before_any_write() {
+    let (mut e, _, _) = ready(false);
+    for (mut bad, id) in [
+        (opts("limit", 99.), Some("")),
+        (opts("limit", 99.), Some("caller")),
+        (opts("trailing_stop_market", 100.), None),
+    ] {
+        bad.client_order_id = id.map(str::to_owned);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 2,
+                orders: vec![opts("limit", 99.), bad],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 2,
+                result: Err(_)
+            })
+        )));
+    }
+    let mut bad = opts("limit", 99.);
+    bad.stop_loss = Some(-1.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 3,
+            orders: vec![bad],
+        }),
+    );
+    assert!(done(&mut e, 3).is_err());
+}
+#[test]
+fn native_amend_preserves_txid_and_uses_total_amount_postonly_price() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 4,
+            id: "O-100".into(),
+            amount: Some(3.),
+            price: Some(98.5),
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.url.ends_with("/AmendOrder"));
+    let body = r.body.as_ref().unwrap();
+    assert!(
+        body.contains("txid=O-100")
+            && body.contains("order_qty=3")
+            && body.contains("limit_price=98.5")
+            && body.contains("post_only=true")
+    );
+    assert!(!body.contains("volume=") && !body.contains("trigger_price"));
+    reply(
+        &mut e,
+        &r,
+        r#"{"error":[],"result":{"amend_id":"AMEND-OTHER-ID"}}"#,
+    );
+    assert_eq!(done(&mut e, 4).unwrap(), r#"["O-100"]"#);
+}
+#[test]
+fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
+    for raw in [
+        "stop-loss",
+        "take-profit",
+        "trailing-stop",
+        "stop-loss-limit",
+        "take-profit-limit",
+        "market",
+    ] {
+        let (mut e, _, private) = ready(false);
+        let s = private.unwrap();
+        message(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"channel":"executions","type":"snapshot","data":[{{"order_id":"TRIGGER","symbol":"BTC/USD","side":"sell","order_type":"{raw}","order_qty":2,"cum_qty":0,"trigger_price":99}}]}}"#
+            ),
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW,
+            Event::Command(Command::AmendOrder {
+                command: 5,
+                id: "TRIGGER".into(),
+                price: Some(97.),
+                amount: None,
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if matches!(raw, "stop-loss" | "take-profit") {
+            let r = actions
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(r.url.ends_with("AmendOrder"));
+            assert!(r.body.unwrap().contains("trigger_price=97"));
+        } else {
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )));
+        }
+    }
+}
+#[test]
+fn queues_serialize_brackets_and_independent_commands() {
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("limit", 99.);
+    o.stop_loss = Some(95.);
+    o.take_profit = Some(105.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 6,
+            orders: vec![o],
+        }),
+    );
+    let first = requests(&mut e).pop().unwrap();
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["O-100".into()],
+        }),
+    );
+    assert!(requests(&mut e).is_empty());
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":[],"result":{"txid":["ENTRY"]}}"#,
+    );
+    let stop = requests(&mut e).pop().unwrap();
+    assert!(stop.body.as_ref().unwrap().contains("ordertype=stop-loss"));
+    reply(&mut e, &stop, r#"{"error":[],"result":{"txid":["STOP"]}}"#);
+    let tp = requests(&mut e).pop().unwrap();
+    assert!(tp.body.as_ref().unwrap().contains("ordertype=take-profit"));
+    reply(&mut e, &tp, r#"{"error":[],"result":{"txid":["TP"]}}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:6,result:Ok(ids)})if ids.contains("ENTRY")&&ids.contains("STOP")&&ids.contains("TP"))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("CancelOrder")))
+    );
+}
+#[test]
+fn uncertain_write_is_never_replayed_but_signature_rejection_resigns_once() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 8,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let first = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let second = requests(&mut e).pop().unwrap();
+    assert_ne!(first.body, second.body);
+    let id = |r: &safe_cex_engine::HttpRequest| {
+        r.body
+            .as_ref()
+            .unwrap()
+            .split('&')
+            .find(|v| v.starts_with("cl_ord_id="))
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(id(&first), id(&second));
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: second.id,
+            error: "timeout after send",
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+    );
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 8,
+            result: Err(_)
+        })
+    )));
+}
+#[test]
+fn failed_cancel_stops_batch_and_does_not_remove_store_orders() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelOrders {
+            command: 9,
+            ids: vec!["O-100".into(), "O-200".into()],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        r#"{"error":["EOrder:Unknown order"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(e.store().order("O-100").is_some());
+}
+#[test]
+fn inherited_history_lookup_and_settings_settle_explicitly() {
+    let (mut e, _, _) = ready(false);
+    for query in [
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    ] {
+        e.handle(NOW, Event::Command(Command::Query { command: 10, query }));
+        assert_eq!(done(&mut e, 10).unwrap(), "[]");
+    }
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 11,
+            query: Query::OrderByClientId {
+                symbol: "XBT/USD".into(),
+                client_order_id: "internal".into(),
+            },
+        }),
+    );
+    assert_eq!(
+        done(&mut e, 11).unwrap(),
+        r#"{"found":false,"definitive":false}"#
+    );
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 12,
+            symbol: "XBT/USD".into(),
+            leverage: 2.,
+        }),
+    );
+    assert!(done(&mut e, 12).is_err());
+}

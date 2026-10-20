@@ -425,9 +425,9 @@ work with its frames. The implementation/checkpoints are in
 each direct `BaseExchange`/venue/registry importer across `packages/` and
 `apps/`, including type-only callers, tests and dynamic reference loaders.
 
-The SDK has 49 registered names: 43 in `RUST_VENUES`, eight already defaulting
-to Rust (Coinbase's two and Orderly's six), 35 with opt-in Rust adapters but
-TS defaults, and six without a Rust registration. `createExchange` now honors
+The SDK has 49 registered names: 45 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 37 with opt-in Rust adapters but
+TS defaults, and four without a Rust registration. `createExchange` now honors
 explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
 registries remains a separate cutover decision.
 
@@ -492,8 +492,10 @@ ported. The linked inventory records exact callers and product constraints.
 | `bitrue` | Opt-in; futures, no implicit spot coverage. |
 | `cryptocom` | Opt-in; preserve account/product option and routing gates. |
 | `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
-| `hyperliquid` | Opt-in perps/HIP-3; spot absent, wallet/builder/agent and caller-ID helpers still imported. |
-| `kraken` | Opt-in futures; spot remains TS. |
+| `hyperliquid` | Opt-in perps/HIP-3; preserve wallet/builder/agent and caller-ID helpers. The separate spot alias does not enable combined `enableSpotMarkets` accounts. |
+| `hyperliquidspot` | Opt-in spot product in the Hyperliquid crate; implementation/review and live public/documented private gates tracked in [spot plan](RUST_SPOT_PRODUCTS.md). TS/default migration and wallet/helper consumers remain deletion prerequisites. |
+| `kraken` | Opt-in futures; preserve futures authentication and protocol gates alongside the distinct spot product. |
+| `krakenspot` | Opt-in spot product in the Kraken crate, with separate REST authentication and WS v2 token state; implementation/review and live public/documented private gates tracked in [spot plan](RUST_SPOT_PRODUCTS.md). TS/default migration remains a deletion prerequisite. |
 | `lighter` | Opt-in; retain wallet/account-tier exports; broker alias and remote-signing modes unresolved. |
 | `mexc` | Opt-in; preserve native sizing and conditional/trailing evidence. |
 | `paradex` | Opt-in; retain binary feed, native signing and routing evidence. |
@@ -503,7 +505,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
-| `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `bitunix`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
 

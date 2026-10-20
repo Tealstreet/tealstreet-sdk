@@ -33,6 +33,14 @@ pub struct Builder {
 }
 
 pub enum Pending {
+    SpotMeta {
+        attempt: u8,
+        meta: Option<SpotMeta>,
+        markets: Vec<Market>,
+        tickers: Vec<Ticker>,
+        valid: bool,
+        stage: u8,
+    },
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
@@ -70,11 +78,14 @@ struct Ladder {
     subscribers: usize,
     depth: [Vec<Level>; 2],
     depth_time: Option<f64>,
+    spot_depth: [Option<[Vec<Level>; 2]>; 7],
     bbo: Option<(f64, [Option<Level>; 2])>,
     book: Book,
 }
 pub struct Hyperliquid {
     options: Options,
+    spot: bool,
+    spot_tokens: HashMap<u32, String>,
     account: account::Account,
     trading: trading::Trading,
     connection: Connection,
@@ -90,6 +101,8 @@ impl Hyperliquid {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            spot: false,
+            spot_tokens: HashMap::new(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
             connection: Connection::default(),
@@ -101,6 +114,30 @@ impl Hyperliquid {
             dex_names: Vec::new(),
             meta_retries: HashMap::new(),
         }
+    }
+    pub fn new_spot(options: Options) -> Self {
+        Self {
+            spot: true,
+            ..Self::new(options)
+        }
+    }
+    fn spot_meta(&self, cx: &mut Cx<'_, Pending>) {
+        self.spot_meta_attempt(cx, 0);
+    }
+    fn spot_meta_attempt(&self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+        self.info(
+            cx,
+            "{\"type\":\"spotMetaAndAssetCtxs\"}".into(),
+            ArrayAt::Root,
+            Pending::SpotMeta {
+                attempt,
+                meta: None,
+                markets: Vec::new(),
+                tickers: Vec::new(),
+                valid: true,
+                stage: 0,
+            },
+        );
     }
     fn rest(&self) -> &'static str {
         if self.options.testnet {
@@ -213,6 +250,44 @@ impl Hyperliquid {
             );
         }
     }
+    fn book_subscription(&self, cx: &mut Cx<'_, Pending>, method: &str, coin: &str) {
+        if !self.spot {
+            for kind in ["l2Book", "bbo"] {
+                self.subscription(cx, method, kind, Some(coin), None, None);
+            }
+            return;
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Sub<'a> {
+            r#type: &'static str,
+            coin: &'a str,
+            n_sig_figs: Option<u8>,
+        }
+        #[derive(Serialize)]
+        struct Send<'a> {
+            method: &'a str,
+            subscription: Sub<'a>,
+        }
+        if self.connection.open
+            && let Some(socket) = self.connection.socket
+        {
+            for n in 0..=6 {
+                cx.send(
+                    socket,
+                    serde_json::to_string(&Send {
+                        method,
+                        subscription: Sub {
+                            r#type: "l2Book",
+                            coin,
+                            n_sig_figs: (n > 0).then_some(n),
+                        },
+                    })
+                    .unwrap(),
+                );
+            }
+        }
+    }
     fn coin<'a>(&'a self, cx: &'a Cx<'_, Pending>, symbol: &str) -> Option<&'a str> {
         cx.store.market(symbol).map(|m| m.id.as_str())
     }
@@ -273,6 +348,45 @@ impl Hyperliquid {
                     && let Some(symbol) = self.symbol(&depth.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                 {
+                    if self.spot {
+                        let Some(market) = cx.store.market(&symbol) else {
+                            return;
+                        };
+                        let Some((a, b)) = depth.levels[0].first().zip(depth.levels[0].get(1))
+                        else {
+                            return;
+                        };
+                        let gap = safe_cex_engine::num::adjust(
+                            (a.px - b.px).abs(),
+                            market.precision.price,
+                        );
+                        let multiple = (gap / market.precision.price).floor();
+                        let group = multiple.log10().round();
+                        if !group.is_finite() || !(0.0..=6.0).contains(&group) {
+                            return;
+                        }
+                        ladder.spot_depth[group as usize] = Some(depth.levels);
+                        ladder.depth_time = Some(depth.time);
+                        for (side, index) in [(BookSide::Bids, 0), (BookSide::Asks, 1)] {
+                            let mut levels = Vec::new();
+                            let mut last = if index == 0 {
+                                f64::INFINITY
+                            } else {
+                                f64::NEG_INFINITY
+                            };
+                            for tier in ladder.spot_depth.iter().flatten() {
+                                for l in &tier[index] {
+                                    if if index == 0 { l.px < last } else { l.px > last } {
+                                        levels.push((l.px, l.sz));
+                                        last = l.px;
+                                    }
+                                }
+                            }
+                            ladder.book.load_sorted(side, levels);
+                        }
+                        cx.book_changed(&symbol);
+                        return;
+                    }
                     ladder.depth = depth.levels;
                     ladder.depth_time = Some(depth.time);
                     Self::combine(ladder);
@@ -359,16 +473,7 @@ impl Hyperliquid {
             self.books.remove(&symbol);
         }
         if let Some(coin) = self.coin(cx, &symbol).map(str::to_owned) {
-            for kind in ["l2Book", "bbo"] {
-                self.subscription(
-                    cx,
-                    if add { "subscribe" } else { "unsubscribe" },
-                    kind,
-                    Some(&coin),
-                    None,
-                    None,
-                );
-            }
+            self.book_subscription(cx, if add { "subscribe" } else { "unsubscribe" }, &coin);
         }
     }
 }
@@ -479,10 +584,109 @@ fn market_rows(
     .is_ok()
         && i == instruments.len()
 }
+
+fn spot_rows(
+    meta: &SpotMeta,
+    raw: &str,
+    markets: &mut Vec<Market>,
+    tickers: &mut Vec<Ticker>,
+) -> bool {
+    let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
+        return false;
+    };
+    for (position, native) in meta.universe.iter().enumerate() {
+        let Some(ctx) = contexts
+            .iter()
+            .find(|c| c.coin == native.name)
+            .or_else(|| contexts.get(position).filter(|c| c.coin.is_empty()))
+        else {
+            continue;
+        };
+        let Some(token) = meta
+            .tokens
+            .iter()
+            .find(|t| Some(&t.index) == native.tokens.first())
+        else {
+            continue;
+        };
+        let Some(price) = ctx.context.mid_px.filter(|p| *p > 0.0) else {
+            continue;
+        };
+        let id = native.name.clone();
+        let symbol = format!("{}/USDC", token.name);
+        let step = 10f64.powi(-token.sz_decimals);
+        let mark = if ctx.context.mark_px > 0.0 {
+            ctx.context.mark_px
+        } else {
+            price
+        };
+        markets.push(Market {
+            id: id.clone(),
+            symbol: symbol.clone(),
+            pretty_symbol: None,
+            base: token.name.clone(),
+            quote: "USDC".into(),
+            active: true,
+            precision: Precision {
+                amount: step,
+                price: 10f64.powi(
+                    -((8 - token.sz_decimals).min((4 - price.log10().floor() as i32).max(0))),
+                ),
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: step,
+                    max: 9_007_199_254_740_991.0,
+                },
+                leverage: MinMax { min: 1.0, max: 1.0 },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: Some(true),
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        });
+        let c = &ctx.context;
+        tickers.push(Ticker {
+            id,
+            symbol,
+            bid: 0.0,
+            ask: 0.0,
+            last: price,
+            mark,
+            index: c.oracle_px,
+            mid_price: Some(price),
+            percentage: if c.prev_day_px > 0.0 {
+                (mark - c.prev_day_px) / c.prev_day_px * 100.0
+            } else {
+                0.0
+            },
+            open_interest: 0.0,
+            funding_rate: c.funding,
+            funding_time: 0.0,
+            volume: if c.day_base_vlm > 0.0 {
+                c.day_base_vlm
+            } else {
+                c.day_ntl_vlm / price
+            },
+            quote_volume: c.day_ntl_vlm,
+        });
+    }
+    true
+}
+
 impl Venue for Hyperliquid {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.meta(cx, String::new(), 0);
+        if self.spot {
+            self.spot_meta(cx);
+        } else {
+            self.meta(cx, String::new(), 0);
+        }
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.connection.socket != Some(socket) {
@@ -497,7 +701,9 @@ impl Venue for Hyperliquid {
             self.refresh_account(cx);
         }
         self.subscription(cx, "subscribe", "allMids", None, None, None);
-        self.subscription(cx, "subscribe", "fastAssetCtxs", None, None, None);
+        if !self.spot {
+            self.subscription(cx, "subscribe", "fastAssetCtxs", None, None, None);
+        }
         // TS owns dex mids on its account socket, which public-only sessions skip.
         if !self.options.public_data_only && self.user().is_some() {
             for dex in &self.dex_names {
@@ -505,15 +711,14 @@ impl Venue for Hyperliquid {
             }
         }
         for ladder in self.books.values_mut() {
+            ladder.spot_depth = Default::default();
             ladder.depth_time = None;
             ladder.bbo = None;
             ladder.book.clear();
         }
         for symbol in self.books.keys() {
             if let Some(coin) = self.coin(cx, symbol).map(str::to_owned) {
-                for kind in ["l2Book", "bbo"] {
-                    self.subscription(cx, "subscribe", kind, Some(&coin), None, None);
-                }
+                self.book_subscription(cx, "subscribe", &coin);
             }
         }
         for (symbol, interval) in self.candles.keys() {
@@ -541,6 +746,7 @@ impl Venue for Hyperliquid {
             cx.clear_timer(timer);
         }
         for ladder in self.books.values_mut() {
+            ladder.spot_depth = Default::default();
             ladder.depth_time = None;
             ladder.book.clear();
         }
@@ -559,6 +765,45 @@ impl Venue for Hyperliquid {
             return;
         }
         match pending {
+            Pending::SpotMeta {
+                meta,
+                markets,
+                tickers,
+                valid,
+                stage,
+                attempt,
+            } => {
+                if !valid || stage != 2 {
+                    self.on_request_failed(
+                        cx,
+                        Pending::SpotMeta {
+                            meta,
+                            markets,
+                            tickers,
+                            valid,
+                            stage,
+                            attempt,
+                        },
+                        "Malformed Hyperliquid spot metadata",
+                    );
+                    return;
+                }
+                if let Some(meta) = meta {
+                    for native in meta.universe {
+                        if let Some(m) = markets.iter().find(|m| m.id == native.name) {
+                            self.assets.insert(m.symbol.clone(), 10_000 + native.index);
+                            if let Some(token) = native.tokens.first() {
+                                self.spot_tokens.insert(*token, m.symbol.clone());
+                            }
+                            self.coins
+                                .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
+                        }
+                    }
+                }
+                cx.store.set_markets(markets);
+                cx.store.set_tickers(tickers);
+                self.next_dex(cx);
+            }
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
                 self.account_response(cx, request, response);
@@ -650,6 +895,28 @@ impl Venue for Hyperliquid {
     }
     fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::SpotMeta {
+                meta,
+                markets,
+                tickers,
+                valid,
+                stage,
+                ..
+            } => {
+                match *stage {
+                    0 => match serde_json::from_str::<SpotMeta>(item) {
+                        Ok(value) => *meta = Some(value),
+                        Err(_) => *valid = false,
+                    },
+                    1 => {
+                        *valid &= meta
+                            .as_ref()
+                            .is_some_and(|meta| spot_rows(meta, item, markets, tickers))
+                    }
+                    _ => *valid = false,
+                }
+                *stage = stage.saturating_add(1);
+            }
             Pending::Account(request) => self.account_item(_cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(request, item),
@@ -693,6 +960,12 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::SpotMeta { attempt, .. } if attempt < 2 => {
+                let timer = cx.set_timer(500.0 * f64::from(attempt + 1));
+                self.meta_retries
+                    .insert(timer, (String::new(), 0, attempt + 1));
+                cx.log(LogLevel::Warning, error);
+            }
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
                 self.account_failed(cx, request, error);
@@ -725,7 +998,11 @@ impl Venue for Hyperliquid {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {
-            self.meta_attempt(cx, dex, offset, attempt);
+            if self.spot {
+                self.spot_meta_attempt(cx, attempt);
+            } else {
+                self.meta_attempt(cx, dex, offset, attempt);
+            }
         }
         if self.connection.reconnect == Some(timer) {
             self.connection.reconnect = None;

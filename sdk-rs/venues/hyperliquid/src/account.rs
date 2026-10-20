@@ -71,6 +71,7 @@ pub struct Account {
     reads: VecDeque<QueuedRead>,
     pub refresh_timer: Option<TimerId>,
     spot_at: f64,
+    spot_forced_at: Option<f64>,
     spot_inflight: bool,
     spot_revision: u64,
     spot_authoritative_ws: bool,
@@ -260,7 +261,7 @@ impl Hyperliquid {
                 (
                     i as u32,
                     MarketSetting {
-                        leverage: 20.0,
+                        leverage: if self.spot { 1.0 } else { 20.0 },
                         buy_leverage: None,
                         sell_leverage: None,
                         margin_type: Some(MarginType::Cross),
@@ -269,6 +270,37 @@ impl Hyperliquid {
             })
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
+        if self.spot {
+            let positions = cx
+                .store
+                .markets()
+                .iter()
+                .map(|m| Position {
+                    id: m.symbol.clone(),
+                    symbol: m.symbol.clone(),
+                    side: PositionSide::Short,
+                    entry_price: 0.0,
+                    notional: 0.0,
+                    leverage: 1.0,
+                    margin_type: Some(MarginType::Cross),
+                    position_mode: Some(PositionMode::Oneway),
+                    unrealized_pnl: 0.0,
+                    realized_pnl: None,
+                    contracts: 0.0,
+                    liquidation_price: 0.0,
+                    margin_size: None,
+                    last_update: None,
+                })
+                .collect();
+            cx.store.set_positions(positions);
+            self.account.mode_resolved = true;
+            self.account.builder_approved = Some(false);
+            if !self.options.public_data_only && self.user().is_some() {
+                self.refresh_spot(cx, true);
+                self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            }
+            return;
+        }
         self.account_read(cx, "userFees", None, Request::Fees, false);
         if self.options.public_data_only {
             return;
@@ -345,6 +377,10 @@ impl Hyperliquid {
         builder
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
@@ -370,6 +406,10 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
@@ -396,6 +436,10 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn schedule_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         if self.account.refresh_timer.is_none() && self.user().is_some() {
             self.account.refresh_timer = Some(
                 cx.set_timer(500.0f64.max(1000.0 - (cx.now - self.account.last_order_refresh))),
@@ -403,8 +447,19 @@ impl Hyperliquid {
         }
     }
     fn refresh_spot(&mut self, cx: &mut Cx<'_, Pending>, force: bool) {
-        if self.account.spot_inflight || (!force && cx.now - self.account.spot_at < 10_000.0) {
+        if self.account.spot_inflight
+            || (!force && cx.now - self.account.spot_at < 10_000.0)
+            || (self.spot
+                && force
+                && self
+                    .account
+                    .spot_forced_at
+                    .is_some_and(|at| cx.now - at < 1500.0))
+        {
             return;
+        }
+        if force {
+            self.account.spot_forced_at = Some(cx.now);
         }
         self.account.spot_inflight = true;
         self.account.spot_at = cx.now;
@@ -469,6 +524,17 @@ impl Hyperliquid {
                 .unwrap(),
             )
         };
+        if self.spot {
+            for kind in [
+                "notification",
+                "spotState",
+                "userFills",
+                "userNonFundingLedgerUpdates",
+            ] {
+                send(cx, kind, None, None, None);
+            }
+            return;
+        }
         for kind in [
             "notification",
             "orderUpdates",
@@ -800,6 +866,11 @@ impl Hyperliquid {
             self.account.last_order_refresh = cx.now;
             self.refresh_orders(cx);
         }
+        if self.account.sync_timer == Some(timer) && self.spot {
+            self.refresh_spot(cx, false);
+            self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            return;
+        }
         if self.account.sync_timer == Some(timer) {
             for dex in self.dex_names.clone() {
                 self.refresh_state(cx, &dex);
@@ -1036,7 +1107,7 @@ impl Hyperliquid {
         self.live_balance(cx);
     }
     pub(crate) fn live_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.user().is_none() || self.options.public_data_only {
+        if self.spot || self.user().is_none() || self.options.public_data_only {
             return;
         }
         let upnl = cx
@@ -1084,6 +1155,54 @@ impl Hyperliquid {
         cx.store.set_balance(balance);
     }
     fn apply_spot(&mut self, cx: &mut Cx<'_, Pending>, state: &SpotState<'_>, ws: bool) {
+        if self.spot {
+            let mut balance = Balance::default();
+            let mut currencies = Vec::new();
+            let mut coins = Vec::new();
+            for b in &state.balances {
+                let price = if ["USDC", "USDT", "USD", "USDH"]
+                    .iter()
+                    .any(|c| b.coin.eq_ignore_ascii_case(c))
+                {
+                    1.0
+                } else {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .find(|m| {
+                            m.base.eq_ignore_ascii_case(&b.coin)
+                                || b.token
+                                    .and_then(|token| self.spot_tokens.get(&token))
+                                    .is_some_and(|symbol| *symbol == m.symbol)
+                        })
+                        .and_then(|m| cx.store.ticker(&m.symbol))
+                        .map_or(0.0, |t| if t.mark > 0.0 { t.mark } else { t.last })
+                };
+                let free = (b.total - b.hold).max(0.0);
+                balance.total += b.total * price;
+                balance.used += b.hold * price;
+                balance.free += free * price;
+                currencies.push(CurrencyBalance {
+                    currency: b.coin.to_string(),
+                    balance: Balance {
+                        total: b.total,
+                        used: b.hold,
+                        free,
+                        upnl: 0.0,
+                    },
+                });
+                coins.push(CoinBalance {
+                    base: b.coin.to_string(),
+                    amount: b.total,
+                    notional: b.total * price,
+                });
+            }
+            cx.store.set_balance(balance);
+            cx.store.set_currency_balances(currencies);
+            cx.store.set_coin_balances(coins);
+            self.account.spot_revision += 1;
+            return;
+        }
         let available = state
             .token_to_available_after_maintenance
             .iter()
@@ -1154,7 +1273,7 @@ impl Hyperliquid {
         };
         let raw = frame.data.get();
         match frame.channel.as_ref() {
-            "clearinghouseState" => {
+            "clearinghouseState" if !self.spot => {
                 if let Ok(env) = serde_json::from_str::<ClearingEnvelope>(raw)
                     && let Some(mut state) = env.clearinghouse_state
                 {
@@ -1171,7 +1290,7 @@ impl Hyperliquid {
                     self.apply_spot(cx, &state, true);
                 }
             }
-            "activeAssetData" => {
+            "activeAssetData" if !self.spot => {
                 if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
                     && let Some(symbol) = self.symbol(&row.coin).map(str::to_owned)
                 {
@@ -1197,7 +1316,7 @@ impl Hyperliquid {
                     self.apply_asset_setting(cx, &symbol, &row);
                 }
             }
-            "orderUpdates" => {
+            "orderUpdates" if !self.spot => {
                 let _ = json::each::<OrderUpdate>(raw, |u| self.order_event(cx, u));
             }
             "userFills" => {
@@ -1205,7 +1324,7 @@ impl Hyperliquid {
                     self.fills(cx, fills);
                 }
             }
-            "user" | "userEvents" => {
+            "user" | "userEvents" if !self.spot => {
                 if raw.starts_with('[') {
                     if let Ok(rows) = serde_json::from_str::<Vec<FillRow>>(raw) {
                         self.fills(
@@ -1233,7 +1352,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            "userNonFundingLedgerUpdates" if self.account.mode != Mode::Standard => {
+            "userNonFundingLedgerUpdates" if self.spot || self.account.mode != Mode::Standard => {
                 self.refresh_spot(cx, false)
             }
             _ => {}
@@ -1432,7 +1551,24 @@ impl Hyperliquid {
                     price: fill.px,
                     amount: fill.sz,
                 });
-                self.optimistic_fill(cx, &symbol, &fill);
+                if self.spot {
+                    let id = fill.oid.to_string();
+                    self.amend_source_filled(&id);
+                    if let Some(order) = cx.store.order(&id) {
+                        let remaining = (order.remaining - fill.sz).max(0.0);
+                        if remaining == 0.0 {
+                            cx.store.remove_orders(&[&id]);
+                        } else {
+                            cx.store.update_order(&id, |o| {
+                                o.remaining = remaining;
+                                o.filled = (o.amount - remaining).max(0.0);
+                            });
+                        }
+                    }
+                    self.refresh_spot(cx, true);
+                } else {
+                    self.optimistic_fill(cx, &symbol, &fill);
+                }
             }
         }
         self.live_balance(cx);

@@ -56,4 +56,19 @@ documented positive relative distance; ambiguous edits fail before writes.
   implementation lanes assigned to the two existing crates, with a separate
   harness lane. Host/consumer integration and gate orchestration stay with the
   parent. Constructor and auth plans audited before implementation.
-- Gates, review findings, measurements and PR: pending.
+- Public checkpoint review found and authors fixed Kraken WS-v2 BTC/XBT
+  translation, subscribed-depth truncation, and Hyperliquid metadata read
+  retries. Initial Hyperliquid suite: 77 tests including 19 spot tests; strict
+  crate Clippy/format passed. SDK caller-ID/fallback tests: 18 passed. TS spot
+  metadata/ACK/public protocol regression subset: 34 passed.
+- Follow-up private/trading/query review found a Hyperliquid fill-before-ACK
+  resurrection race; fix and new race tests remain required. Private snapshot
+  and query/fallback review found no additional confirmed defect.
+- Initial Hyperliquid live public capture failed with 1006 reconnect loops and
+  no accepted books. This is not a fixture candidate. Check spot socket URL
+  and replace unsupported nSigFigs 1/6 subscriptions with documented supported
+  variants, then recapture. No live public gate is claimed yet.
+- Kraken public tests: 4 passed. Private/trading tests and hardening were in
+  progress at the quota checkpoint; rerun before claiming phase completion.
+- Work-in-progress checkpoint committed before syncing the landing branch;
+  no PR exists yet. Remaining gates, measurements and PR are pending.
