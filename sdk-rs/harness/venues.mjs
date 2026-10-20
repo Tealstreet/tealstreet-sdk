@@ -258,6 +258,9 @@ export const VENUES = {
   },
   mexc: {
     rust: 'mexc',
+    // Handler registration precedes socket open and REST depth completion.
+    // Both implementations publish the initial REST seeds before legacy replay.
+    initialBookSnapshots: true,
     mexcProtocol: true,
     requestBody: mexcRequestBody,
     requestUrl: mexcRequestUrl,

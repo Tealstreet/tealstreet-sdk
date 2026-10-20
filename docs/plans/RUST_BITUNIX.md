@@ -612,3 +612,13 @@ Both exact-production regressions and independent adversarial probes PASS;
 222 helpers PASS. Malformed/auth/subscription errors, caller IDs, economic
 field types and one-shot write consumption remain strict. Hyperliquid CI's
 negative 88-byte buffer component remains under investigation, not normalized.
+
+On 326d080514 all native checks, both root CI jobs and eleven replay lanes
+PASS. Hyperliquid still rejects a negative TS buffer component (-112 bytes).
+Node22 Darwin probes have valid +32 bytes and rule out fetch and temporary
+DER-key exports; retain strict accounting and investigate without normalization.
+Local MEXC exposed a socket-open/REST-seed race: enabling the existing symmetric
+initial-book presence barrier yields both books and all 144 hashes identical
+to native, zero unserved/protocol errors, and 222 helper tests PASS.
+Bitrue then landed at fc18c55874 and made PR #1309 conflicting; checkpoint this
+reviewable startup fix before integrating latest landing. No stash.
