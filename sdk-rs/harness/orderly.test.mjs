@@ -226,3 +226,22 @@ test('Orderly audit rejects bad signatures, early subscriptions and unsubscribed
   assert.throws(() => tape.send(socket, JSON.stringify(bad)), /signature/);
   assert.equal(tape.invalidSignatures, 1);
 });
+
+test('Orderly negative subscription acknowledgements invalidate sent-topic coverage and remain audit failures', () => {
+  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: ['BTCUSDC'] });
+  for (const topic of ['tickers', 'bbos', 'markprices', 'PERP_BTC_USDC@orderbookupdate'])
+    audit.sent(publicUrl, JSON.stringify({ event: 'subscribe', topic }));
+  assert.equal(audit.ready(), true);
+  audit.received(publicUrl, '{"event":"subscribe","topic":"PERP_BTC_USDC@orderbookupdate","success":false,"errorMsg":"rejected"}');
+  audit.received(publicUrl, '{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":100,"volume":1,"amount":100}]}');
+  assert.equal(audit.ready(), false, 'sent subscriptions cannot prove rejected feed coverage');
+  assert(audit.errors().some((error) => error.includes('rejected Orderly subscribe')));
+  audit.closed(publicUrl, 1);
+  audit.connected(publicUrl, 2);
+  for (const topic of ['tickers', 'bbos', 'markprices', 'PERP_BTC_USDC@orderbookupdate'])
+    audit.sent(publicUrl, JSON.stringify({ event: 'subscribe', topic }), 2);
+  assert.equal(audit.ready(), true);
+  assert(audit.errors().some((error) => error.includes('rejected Orderly subscribe')), 'recovery must not erase a rejection');
+  audit.received(publicUrl, '{"event":"subscribe","success":false}', 2);
+  assert.equal(audit.ready(), false, 'a rejection without a topic cannot prove any sent feed was accepted');
+});

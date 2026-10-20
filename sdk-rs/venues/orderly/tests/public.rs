@@ -141,14 +141,13 @@ fn seeds_and_routes_global_topics() {
         r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":51002,"volume":12,"amount":612000}]}"#,
         r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","bid":51001,"ask":51003}]}"#,
         r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC","price":51002.5}]}"#,
-        r#"{"topic":"estfundingrate","data":[{"symbol":"PERP_BTC_USDC","fundingRate":"0.0002","fundingTs":"9000"}]}"#,
     ] {
         ws(&mut e, s, text);
     }
     let t = e.store().tickers().first().unwrap();
     assert_eq!(
         (t.last, t.bid, t.ask, t.mark, t.funding_rate, t.funding_time),
-        (51002.0, 51001.0, 51003.0, 51002.5, 0.0002, 9000.0)
+        (51002.0, 51001.0, 51003.0, 51002.5, 0.0001, 3000.0)
     );
     ws(&mut e, s, r#"{"event":"ping"}"#);
     assert!(
@@ -1069,6 +1068,11 @@ fn assert_payload_silence_recovery(silent: usize) {
                     r#"{"topic":"tickers","data":[]}"#,
                     r#"{"topic":"tickers","data":[{"symbol":"PERP_UNKNOWN_USDC","close":3}]}"#,
                     r#"{"topic":"tickers","data":[{"symbol":"PERP_ASSET000_USDC","close":"invalid"}]}"#,
+                    r#"{"topic":"tickers","data":[{"symbol":"PERP_ASSET000_USDC"}]}"#,
+                    r#"{"topic":"tickers","data":[{"symbol":"PERP_ASSET000_USDC","close":3,"volume":1}]}"#,
+                    r#"{"topic":"bbos","data":[{"symbol":"PERP_ASSET000_USDC","bid":1}]}"#,
+                    r#"{"topic":"markprices","data":[{"symbol":"PERP_ASSET000_USDC"}]}"#,
+                    r#"{"topic":"markprices","data":[{"symbol":"PERP_ASSET000_USDC","price":-1}]}"#,
                 ] {
                     e.handle(
                         now,
@@ -1171,4 +1175,133 @@ fn funding_payload_silence_requests_only_its_shard_recovery_despite_pongs() {
 #[test]
 fn market_payload_silence_requests_only_main_recovery_despite_pongs() {
     assert_payload_silence_recovery(0);
+}
+
+#[test]
+fn rejected_book_subscription_hides_snapshot_and_recovers_despite_healthy_tickers() {
+    let (mut e, socket) = ready();
+    subscribe(&mut e);
+    let id = snapshot_id(&mut e);
+    snapshot(&mut e, socket, &id);
+    assert!(e.venue().book("BTCUSDC").is_some());
+    actions(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"event":"subscribe","topic":"PERP_BTC_USDC@orderbookupdate","success":false,"errorMsg":"rejected"}"#,
+    );
+    let closed = actions(&mut e);
+    assert!(
+        closed
+            .iter()
+            .any(|action| matches!(action, Action::WsClose { socket: old } if *old == socket))
+    );
+    assert!(e.venue().book("BTCUSDC").is_none());
+    // Other aggregate topics cannot keep the rejected book's old snapshot live.
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":52000,"volume":1,"amount":52000}]}"#,
+    );
+    assert!(e.venue().book("BTCUSDC").is_none());
+    assert_eq!(e.store().ticker("BTCUSDC").unwrap().last, 51000.0);
+    e.handle(
+        3000.0,
+        Event::TimerFired {
+            timer: only_timer(&closed),
+        },
+    );
+    let reconnect = actions(&mut e);
+    let fresh = reconnect
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                context: Some(context),
+                ..
+            } => {
+                assert_eq!(context.feed, "market");
+                assert!(context.recover);
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(fresh, socket);
+    e.handle(3000.0, Event::WsOpened { socket: fresh });
+    let opened = actions(&mut e);
+    assert!(
+        subscription_topics(&opened, fresh).contains(&"PERP_BTC_USDC@orderbookupdate".to_owned())
+    );
+    assert!(e.venue().book("BTCUSDC").is_none());
+}
+
+#[test]
+fn incomplete_or_invalid_topic_rows_preserve_all_previously_known_prices_and_volumes() {
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","bid":51000,"ask":51002}]}"#,
+    );
+    let prices = |e: &Driver| {
+        let t = e.store().ticker("BTCUSDC").unwrap();
+        (t.last, t.volume, t.quote_volume, t.bid, t.ask, t.mark)
+    };
+    let previous = prices(&e);
+    for text in [
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC"}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":52000}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":52000,"volume":1}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":-1,"volume":1,"amount":2}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":52000,"volume":-1,"amount":2}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":52000,"volume":1,"amount":-2}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC"}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","bid":52000}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","ask":52000}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","bid":-1,"ask":52000}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDC","bid":52001,"ask":52000}]}"#,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC"}]}"#,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC","price":null}]}"#,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC","price":-1}]}"#,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC","price":"NaN"}]}"#,
+    ] {
+        ws(&mut e, socket, text);
+        assert_eq!(
+            prices(&e),
+            previous,
+            "invalid topic row changed prices: {text}"
+        );
+    }
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":"52000","volume":"0","amount":"0"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDC").unwrap().last, 52000.0);
+    assert_eq!(e.store().ticker("BTCUSDC").unwrap().volume, 0.0);
+    // Explicit zeros are valid for inactive contracts and exhausted quote sides.
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDC","close":0,"volume":0,"amount":0}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDC").unwrap().last, 0.0);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDC","price":0}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDC").unwrap().mark, 0.0);
+    for (bid, ask) in [(0, 0), (0, 52000), (52000, 0)] {
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"topic":"bbos","data":[{{"symbol":"PERP_BTC_USDC","bid":{bid},"ask":{ask}}}]}}"#
+            ),
+        );
+        let t = e.store().ticker("BTCUSDC").unwrap();
+        assert_eq!((t.bid, t.ask), (f64::from(bid), f64::from(ask)));
+    }
 }

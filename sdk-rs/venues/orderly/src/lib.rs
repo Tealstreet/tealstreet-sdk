@@ -413,6 +413,12 @@ impl Orderly {
             _ => {}
         }
         if env.success == Some(false) {
+            if matches!(env.event.as_ref(), "subscribe" | "unsubscribe") {
+                self.public.recover = true;
+                let socket = self.public.socket.unwrap();
+                cx.close(socket);
+                self.on_close(cx, socket, 1006);
+            }
             return Err(format!("Orderly socket: {}", env.message));
         }
         let Some(data) = env.data else {
@@ -427,8 +433,13 @@ impl Orderly {
             return Ok(());
         };
         match env.topic.as_ref() {
-            topic @ ("tickers" | "bbos" | "markprices" | "estfundingrate") => {
+            topic @ ("tickers" | "bbos" | "markprices") => {
+                let mut invalid = false;
                 json::each::<LiveTicker<'_>>(data.get(), |r| {
+                    if !r.valid(topic) {
+                        invalid = true;
+                        return;
+                    }
                     if let Some(symbol) = symbol(&r.symbol)
                         && self
                             .native
@@ -440,24 +451,23 @@ impl Orderly {
                         self.public.attempts = 0;
                         cx.store.update_ticker(&symbol, |t| match topic {
                             "tickers" => {
-                                t.last = r.close;
-                                t.volume = r.volume;
-                                t.quote_volume = r.amount;
+                                t.last = r.close.unwrap().0;
+                                t.volume = r.volume.unwrap().0;
+                                t.quote_volume = r.amount.unwrap().0;
                             }
                             "bbos" => {
-                                t.bid = r.bid;
-                                t.ask = r.ask;
+                                t.bid = r.bid.unwrap().0;
+                                t.ask = r.ask.unwrap().0;
                             }
-                            "markprices" => t.mark = r.price,
-                            "estfundingrate" => {
-                                t.funding_rate = r.funding_rate;
-                                t.funding_time = r.funding_time;
-                            }
+                            "markprices" => t.mark = r.price.unwrap().0,
                             _ => {}
                         });
                     }
                 })
                 .map_err(|e| e.to_string())?;
+                if invalid {
+                    return Err("Orderly invalid live ticker fields".into());
+                }
             }
             topic => {
                 if let Some((native, suffix)) = topic.split_once('@')

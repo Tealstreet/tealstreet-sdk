@@ -228,6 +228,13 @@ const orderly = (alias) => {
         received(url, text, generation) {
           const message = JSON.parse(text),
             state = socket(url, generation);
+          if (['subscribe', 'unsubscribe'].includes(message.event) && message.success === false) {
+            if (message.event === 'subscribe') {
+              if (typeof message.topic === 'string') state.channels.delete(message.topic);
+              else state.channels.clear();
+            }
+            failures.push(`rejected Orderly ${message.event}: ${message.topic ?? 'unknown topic'}`);
+          }
           if (message.event === 'ping') state.serverPings++;
           if (message.event === 'auth' && message.success === true) {
             if (!state.auth) failures.push('Orderly auth success preceded a valid request');

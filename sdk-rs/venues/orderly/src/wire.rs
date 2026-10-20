@@ -103,22 +103,32 @@ pub struct TickerRow<'a> {
 pub struct LiveTicker<'a> {
     #[serde(borrow)]
     pub symbol: Cow<'a, str>,
-    #[serde(default, deserialize_with = "number")]
-    pub close: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub volume: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub amount: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub bid: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub ask: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub price: f64,
-    #[serde(rename = "fundingRate", default, deserialize_with = "number")]
-    pub funding_rate: f64,
-    #[serde(rename = "fundingTs", default, deserialize_with = "number")]
-    pub funding_time: f64,
+    pub close: Option<N>,
+    pub volume: Option<N>,
+    pub amount: Option<N>,
+    pub bid: Option<N>,
+    pub ask: Option<N>,
+    pub price: Option<N>,
+}
+impl LiveTicker<'_> {
+    pub fn valid(&self, topic: &str) -> bool {
+        let nonnegative = |n: Option<N>| n.is_some_and(|n| n.0 >= 0.0);
+        match topic {
+            "tickers" => {
+                nonnegative(self.close) && nonnegative(self.volume) && nonnegative(self.amount)
+            }
+            "bbos" => {
+                nonnegative(self.bid)
+                    && nonnegative(self.ask)
+                    && self
+                        .bid
+                        .zip(self.ask)
+                        .is_some_and(|(bid, ask)| bid.0 == 0.0 || ask.0 == 0.0 || bid.0 <= ask.0)
+            }
+            "markprices" => nonnegative(self.price),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Deserialize)]

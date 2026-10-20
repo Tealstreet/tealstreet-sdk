@@ -337,3 +337,13 @@ Three new loader regressions plus transport suite41tests, package typecheck
 and lint pass. Independent re-review repeated the browser-artifact reproduction:
 one initializer invocation and existing engines remain usable. Public/private
 regressions reproduced the other findings before their implementation fixes.
+
+Public review fixes: rejected main subscribe/unsubscribe acknowledgements now
+invalidate books and reconnect with recovery enabled. Snapshot-request errors
+still use per-book retry. Live rows require present finite topic-specific
+fields before updating prices or feed health; valid zero values clear old
+prices, while incomplete rows preserve them and cannot suppress recovery.
+Removed the obsolete aggregate funding handler. The independent harness now
+records subscription rejection as failure instead of trusting sent topics.
+Three public cases failed before fixes; public23tests and harness182tests now
+pass. Independent code-correctness re-review reports no remaining findings.
