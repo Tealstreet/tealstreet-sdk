@@ -302,3 +302,20 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Workspace native, paired private, combined WASM/host and final root tests
   are completing. Public performance/size and Binance regressions repeat
   after the current shared artifact is released.
+
+### All reviewed gates pass before AsterDEX landing
+
+- Reviewed state: 1,466 workspace native tests / 98 ApeX, 113 ApeX TS,
+  264 harness, 75 combined WASM and 45 host tests pass. Root checks:
+  typecheck 44 tasks, lint 28, tests 27; both SDK suites 7,065 tests.
+  Bans, fmt, workspace/default-WASM clippy and secret scan pass.
+- Expanded private gate PASS: 121 tape records, 50 frames, 23 commands,
+  16 writes, strict signature/protocol/missing-write counters zero.
+- Public gate (three runs) PASS: 51 frames/two books; main CPU 77.6 / 33.6
+  ms, steady 46.7 / 4.4 ms, process 113.6 / 77.6 ms, retained 23.9 / 2.2
+  MB. Single WASM node/web each 980,775 bytes < unchanged 1,258,291 cap.
+- Binance public (three runs) PASS: 873 frames/three books; CPU 189.9 / 79.0
+  ms, retained 18.9 / 2.6 MB. Private (one run): 14 frames, exact parity PASS.
+- Landing advanced again to `d9aa597fd3` (AsterDEX #1322). Commit this
+  stable gate checkpoint, integrate its shared account/read/route contracts,
+  adapt the new STP field, then repeat affected checks before final PR push.
