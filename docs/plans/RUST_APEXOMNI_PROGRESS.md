@@ -218,3 +218,26 @@ generated ID and preserves both virtual siblings when editing one leg.
 - All 27 account tests pass, including three exact-order/stale-close cases.
   Independent code-correctness re-review, crate all-target clippy and default
   WASM clippy pass. Combined WASM rebuilt; strict replay is repeating.
+
+### All local acceptance gates pass
+
+- Final ApeX native suite: 81/81 tests. Bans and workspace formatting pass;
+  crate/workspace all-target clippy and default WASM clippy pass. Root checks:
+  typecheck 44 tasks, lint 28, tests 27; both SDK suites 7,026 cases. Harness
+  242, combined WASM integration 74 and host 45 tests pass.
+- Strict private replay: 95 tape records, 42 frames, 18 commands, 21 requests,
+  12 write attempts, 9 subscriptions, 2 execution notifications in each engine.
+  Signature/protocol/unserved/missing/unused-write counters all zero. Exact
+  account positions, settings, fills and command output match after the fix.
+- ApeX public fixture (three runs): 51 frames, 89 markets/tickers, two books.
+  Main CPU TS 94.8 / Rust 43.3 ms; steady 60.4 / 11.0 ms; process 129.2 /
+  95.1 ms; retained memory 23.7 / 2.2 MB; WASM linear 1.6 MB. Exact output.
+  Node/web single-venue WASM: 974,848 bytes < unchanged 1,258,291-byte cap.
+- Binance public regression (three runs): 873 frames, 917 markets, 783 tickers,
+  three books. Main CPU 256.5 / 135.0 ms, steady 138.4 / 62.4 ms, retained
+  memory 18.9 / 2.6 MB. Private regression: 14 frames, exact account/command
+  parity. Both PASS; private performance remains informational.
+- Logs: `/tmp/apex-orderfix-private.log`, `/tmp/apex-accepted-public.log`,
+  `/tmp/apex-binance-public.log`, `/tmp/apex-binance-private.log`.
+  Next: PR into `feat/rust-rewrite`, independent code-correctness reviews
+  posted on that PR, address findings, green CI, merge and fresh branch.
