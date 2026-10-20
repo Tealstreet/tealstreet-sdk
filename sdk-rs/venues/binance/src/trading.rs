@@ -192,6 +192,7 @@ fn number(value: f64) -> String {
 impl BinanceFutures {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchStpMode { command }
+        | Command::AmendOrderWithSymbol { command, .. }
         | Command::SetStpMode { command, .. }
         | Command::CancelOrdersWithSymbols { command, .. }
         | Command::FetchAccount { command }
