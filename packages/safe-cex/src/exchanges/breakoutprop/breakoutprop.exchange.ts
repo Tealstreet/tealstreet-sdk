@@ -82,6 +82,8 @@ export class BreakoutpropExchange extends BaseExchange {
   sessionTokenExpiresAt: number = 0;
   sessionTokenRequest: Promise<string> | null = null;
   accountCode: string | null = null;
+  private accountCodeSelection?: { username: string; subaccount?: string };
+  private accountCodeRequest?: { username: string; subaccount?: string; promise: Promise<string> };
 
   recentWsRequests: Record<
     string,
@@ -150,39 +152,45 @@ export class BreakoutpropExchange extends BaseExchange {
   };
 
   getAccountCode = async (): Promise<string> => {
-    try {
-      if (this.accountCode) {
-        return this.accountCode;
-      }
-      await this.getSessionToken();
-      const { data } = await this.xhr.get<USER_RESPONSE>(ENDPOINTS.USER, {
-        params: {
-          username: this.options.key,
-        },
+    const username = this.options.key;
+    const subaccount = this.options.subaccount;
+    const current = () => !this.isDisposed && this.options.key === username && this.options.subaccount === subaccount;
+    const assertCurrent = () => {
+      if (!current()) throw new Error(this.isDisposed ? 'Breakout account discovery disposed' : 'Breakout account selection changed during discovery');
+    };
+    assertCurrent();
+    if (this.accountCode && this.accountCodeSelection?.username === username && this.accountCodeSelection.subaccount === subaccount) return this.accountCode;
+    this.accountCode = null;
+    let request = this.accountCodeRequest;
+    const assertOwner = () => {
+      assertCurrent();
+      if (this.accountCodeRequest !== request) throw new Error('Breakout account discovery superseded');
+    };
+    if (!request || request.username !== username || request.subaccount !== subaccount) {
+      const promise = (async () => {
+        await this.getSessionToken();
+        assertOwner();
+        const { data } = await this.xhr.get<USER_RESPONSE>(ENDPOINTS.USER, { params: { username } });
+        assertOwner();
+        const validAccounts = data.userDetails[0].accounts.filter((account) => account.accountStatus === 'FULL_TRADING');
+        if (!validAccounts.length) throw new Error('No valid accounts found');
+        if (validAccounts.length > 1 && !subaccount) throw new Error('Multiple accounts found. Please specify subaccount number ');
+        const selected = validAccounts.length === 1 ? validAccounts[0] : validAccounts.find((account) => account.account === subaccount || account.account.replace(/^default:/, '') === subaccount);
+        if (!selected) throw new Error('Subaccount for number not found');
+        this.accountCodeSelection = { username, subaccount };
+        this.accountCode = selected.account;
+        return selected.account;
+      })().catch((err) => {
+        if (!this.isDisposed) this.emitAndLogError(err?.response?.data?.msg || err?.message);
+        throw err;
       });
-      const userDetail = data.userDetails[0];
-      const validAccounts = userDetail.accounts.filter((account) => account.accountStatus === 'FULL_TRADING');
-      if (!validAccounts.length) {
-        throw new Error('No valid accounts found');
-      }
-      if (validAccounts.length > 1) {
-        if (!this.options.subaccount) {
-          throw new Error('Multiple accounts found. Please specify subaccount number ');
-        }
-        // account ==== default:{subaccount}
-        const subaccount = validAccounts.find((account) => account.account === this.options.subaccount || account.account.replace(/^default:/, '') === this.options.subaccount);
-        if (!subaccount) {
-          throw new Error('Subaccount for number not found');
-        }
-        this.accountCode = subaccount.account;
-        return this.accountCode;
-      } else {
-        this.accountCode = validAccounts[0].account;
-        return this.accountCode;
-      }
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.msg || err?.message);
-      throw err;
+      request = { username, subaccount, promise };
+      this.accountCodeRequest = request;
+    }
+    try {
+      return await request.promise;
+    } finally {
+      if (this.accountCodeRequest === request) this.accountCodeRequest = undefined;
     }
   };
 
@@ -654,6 +662,8 @@ export class BreakoutpropExchange extends BaseExchange {
   };
 
   start = async () => {
+    const username = this.options.key, subaccount = this.options.subaccount;
+    const current = () => !this.isDisposed && this.options.key === username && this.options.subaccount === subaccount;
     const useExternalPublicData = await this.initExternalPublicData();
 
     if (!this.isPublicDataOnly) {
@@ -662,14 +672,26 @@ export class BreakoutpropExchange extends BaseExchange {
 
     if (!useExternalPublicData) {
       const markets = await this.fetchMarkets();
-      if (this.isDisposed) return;
+      if (!current()) return;
       this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+      if (!current()) return;
 
       const tickers = await this.fetchTickers();
-      if (this.isDisposed) return;
+      if (!current()) return;
+      // Capture existing listeners before the store notification. A late
+      // subscription still waits for a later poll; failed reads return the
+      // cached ticker array and must not masquerade as a new initial quote.
+      const listeners = tickers === this.store.tickers ? [] : tickers.flatMap((ticker) =>
+        (this.publicWebsocket.messageHandlers[`poll_book.${ticker.symbol}`] ?? []).map((parser) => ({ ticker, parser })),
+      );
       this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+      for (const { ticker, parser } of listeners) {
+        if (!current()) return;
+        if (this.publicWebsocket.messageHandlers[`poll_book.${ticker.symbol}`]?.includes(parser)) parser(ticker);
+      }
     }
 
+    if (!current()) return;
     if (this.isPublicDataOnly) {
       this.store.update({
         loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
@@ -679,7 +701,7 @@ export class BreakoutpropExchange extends BaseExchange {
     }
 
     const portfolioRaw = await this.fetchPortfolioRaw();
-    if (this.isDisposed) return;
+    if (!current()) return;
     if (portfolioRaw) {
       const balance = this.formatBalance(portfolioRaw);
       const positions = this.formatPositions(portfolioRaw);

@@ -84,6 +84,8 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 // Breakout selects the exact account, retains same-symbol positionCode lots,
 // validates portfolio sections atomically, fences session/write-stale reads,
 // polls public quotes, returns string order IDs and sends If-Match cancellation.
+// Its paired TS adapter also coalesces startup account discovery and publishes
+// the first fetched quotes to existing book listeners, preserving poll phase.
 // Coinbase's explicit independent input oracle is in known-ts-fixes-coinbase.mjs.
 // Every port still compares all intermediate book timestamps/hashes unchanged.
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.

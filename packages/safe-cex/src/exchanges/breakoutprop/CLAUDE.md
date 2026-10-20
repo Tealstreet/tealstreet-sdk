@@ -62,7 +62,7 @@ no Bitrue-style `error sign!` response contract.
 and requires `options.subaccount` when more than one is available. Account
 selection matches the exact account code or suffix, preventing a request for
 `2` from selecting `12`. Account codes use the `default:<account>` form and are inserted through
-`replaceUrlParams`.
+`replaceUrlParams`. Concurrent discovery for the same username and subaccount shares one in-flight read, including the two instrument queries at startup. A rejection releases the read for retry; disposal or changed selection prevents an old response from committing or clearing a newer request. Session renewal for the same identity retains the existing one-401 recovery contract.
 
 ## Active REST surface
 
@@ -97,7 +97,7 @@ Historical candle timestamps are normalized from RFC 3339 milliseconds to
 safe-cex seconds. The polling listener creates synthetic zero-volume candles
 from ticker `last`, bucketed to the subscribed interval start. The order book
 is likewise synthetic and contains the REST quote's bid/ask with placeholder
-size, with one level on each side. Public-only sessions continue quote polling
+size, with one level on each side. A successful startup quote read publishes once to book listeners registered before its store update; removed listeners and listeners added by that update or another callback are excluded. Failed-read fallback quotes and disposed or obsolete startup responses are not published. Late subscriptions still wait for the next polling update; startup does not emit synthetic candles. Public-only sessions continue quote polling
 for their listeners while skipping portfolio reads. These are legacy limitations, not real WebSocket market depth/bars.
 
 ## Portfolio reconciliation

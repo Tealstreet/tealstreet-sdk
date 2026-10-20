@@ -1820,3 +1820,19 @@ Tests must prove live mutation freeze, typedarray/Infinity/undefined fidelity,
 usage-before-projection, cleanup errors and late integrity failures. Prior
 gate results remain historical after shared source integration; final rebuilt
 controls and exact38-check CI still required before merge.
+
+Breakout correction frozen/reviewed PASS:43focused cases (13new), three
+fresh fail-before baseline controls, independent13/13 and original ABA probe.
+Full deterministic SDK7362tests/508files +5lint-rule tests PASS; package
+typecheck/lint/whitespace PASS. Source adds identity/selector/active-request
+ownership and disposal fences with own-promise cleanup, retains transparent
+401 recovery, and emits initial fetched quotes only to existing/live book
+listeners. Store-notification and callback reentrancy cannot publish stale
+data; late/new subscribers keep next-poll behavior. No native/harness/clock/
+timestamp/fixture edits. Logs /tmp/bitunix-breakout-{startup-after,startup-fail-
+before-final,full-safecex-tests,safecex-types,safecex-lint,independent-review}.log.
+
+Own git fetch nowpins02e9db0e8bbd1eaaab021cdfb7b63c7bc3d54722, which
+adds GRVT-products1337 docs/tests+fixture ONLY after reviewed86ed; no GRVT
+production change. Brief reread from origin Process unchanged. Merge this
+exact fetched SHA after checkpoint, keeping every documented local correction.
