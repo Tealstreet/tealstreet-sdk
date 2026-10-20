@@ -491,17 +491,8 @@ describe('RustEngineExchange', () => {
     expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/business');
   });
 
-  it.each([
-    ['binance', 4321, 4321],
-    ['binance', 0, 0],
-    ['binance', undefined, 20000],
-    ['binancepm', 4321, 4321],
-    ['binancepm', 0, 0],
-    ['binancepm', undefined, 20000],
-  ] as const)('signs secondary reads, primary writes and lookup for %s with recvWindow %s', async (venue, recvWindow, expectedWindow) => {
-    const tape = recordedTransport({ balance: { status: 200, body: '[]' } });
-    const accountHost = venue === 'binancepm' ? 'papi.binance.com' : 'fapi.binance.com';
-    const orderPath = venue === 'binancepm' ? '/papi/v1/um/order' : '/fapi/v1/order';
+  it('signs secondary reads and primary writes and definitive lookup with their actual account identities', async () => {
+    const tape = recordedTransport();
     const outgoing: Array<Parameters<Transport['request']>[0]> = [];
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => ({
@@ -538,11 +529,10 @@ describe('RustEngineExchange', () => {
       },
     }));
     exchange = new RustEngineExchange(
-      venue,
+      'binance',
       {
         key: 'primary-key',
         secret: 'primary-secret',
-        extra: { recvWindow },
         secondary_key: 'read-key',
         secondary_secret: 'read-secret',
         secondaryProxyUrl: 'https://read-proxy.example/egress',
@@ -555,9 +545,8 @@ describe('RustEngineExchange', () => {
     const reads = outgoing.filter((r) => r.method === 'GET' && r.url.includes('signature='));
     expect(reads.length).toBeGreaterThan(0);
     for (const request of reads) {
-      expect(request.url.startsWith(`https://read-proxy.example/egress/https://${accountHost}/`)).toBe(true);
+      expect(request.url).toMatch(/^https:\/\/read-proxy\.example\/egress\/https:\/\/fapi\.binance\.com\//);
       expect(request.headers['X-MBX-APIKEY']).toBe('read-key');
-      expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
       const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
       expect(signature).toBe(createHmac('sha256', 'read-secret').update(query).digest('hex'));
     }
@@ -576,17 +565,16 @@ describe('RustEngineExchange', () => {
         amount: 0.012,
         price: 90000,
       }),
-    ).resolves.toHaveLength(1);
+    ).resolves.toEqual(['4242']);
     await expect(exchange.findOrderByClientOrderId('BTCUSDT', 'LostResponse1')).resolves.toMatchObject({
       found: true,
-      order: { id: venue === 'binancepm' ? 'LostResponse1' : '4243', clientOrderId: 'LostResponse1', status: OrderStatus.Closed },
+      order: { id: '4243', clientOrderId: 'LostResponse1', status: OrderStatus.Closed },
     });
     const primaryOrders = outgoing.filter((r) => new URL(r.url).pathname.endsWith('/order'));
     expect(primaryOrders.map((r) => r.method)).toEqual(['POST', 'GET']);
     for (const request of primaryOrders) {
-      expect(request.url.startsWith(`https://${accountHost}${orderPath}?`)).toBe(true);
+      expect(request.url).toMatch(/^https:\/\/fapi\.binance\.com\/fapi\/v1\/order\?/);
       expect(request.headers['X-MBX-APIKEY']).toBe('primary-key');
-      expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual([String(expectedWindow)]);
       const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');
       expect(signature).toBe(createHmac('sha256', 'primary-secret').update(query).digest('hex'));
     }

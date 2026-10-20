@@ -245,6 +245,10 @@ ws(PRIVATE, {
       marginMode: 'cross',
       size: '0.2',
       slTriggerPrice: '55000',
+      // Documented inactive sibling fields may be null in native TPSL rows.
+      tpTriggerPrice: null,
+      tpOrderPrice: null,
+      tpTriggerPriceType: null,
       state: 'live',
     },
   ],

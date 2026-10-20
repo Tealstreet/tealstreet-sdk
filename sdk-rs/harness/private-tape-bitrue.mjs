@@ -27,7 +27,11 @@ const position = { side: 'BUY', volume: 0.2, openPrice: 60000, avgPrice: 60000, 
   positionType: 1, positionBalance: 12000, forceLiquidationPrice: 30000 };
 http('GET', '/fapi/v2/account', ok({ account: [{ marginCoin: 'USDT', totalEquity: 1010, accountNormal: 1000,
   accountLock: 5, sumMaintenanceMargin: 4, totalPositionNormal: 10, totalCost: 1, sumOpenRealizedAmount: 0,
-  positionVos: [{ contractName: 'E-BTC-USDT', positions: [position] }] }] }));
+  positionVos: [{ contractName: 'E-BTC-USDT', positions: [position] }] }, {
+    marginCoin: 'USDC', totalEquity: 40, accountNormal: 35, accountLock: 2,
+    sumMaintenanceMargin: 1, totalPositionNormal: 3, totalCost: 0,
+    sumOpenRealizedAmount: -0.5, positionVos: [],
+  }] }));
 const normal = (id, patch = {}) => ({ orderId: id, clientOrderId: '', price: 59000, origQty: 0.004,
   executedQty: 0, avgPrice: 0, status: 'NEW', type: 'LIMIT', side: 'BUY', action: 'OPEN',
   transactTime: 1700000000000, ...patch });
@@ -89,6 +93,15 @@ http('GET', '/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=10&startTime=170000
 // The inherited TS lookup only sees open orders; absence is never definitive.
 command({ op: 'findOrderByClientOrderId', symbol: 'E-BTC-USDT', clientOrderId: 'missing-caller' });
 command({ op: 'findOrderByClientOrderId', symbol: 'E-ETH-USDT', clientOrderId: 'missing-caller' });
+// Flat-symbol maximum leverage is an authenticated bracket read, independent
+// of current position leverage. Both implementations must expose the native cap.
+command({ op: 'fetchMaxLeverage', symbol: 'E-ETH-USDT' });
+http('GET', '/fapi/v2/leverageBracket?contractName=E-ETH-USDT', ok({
+  contractName: 'E-ETH-USDT', brackets: [
+    { bracket: 1, initialLeverage: 125, qtyCap: 50000, qtyFloor: 0, maintMarginRatio: 0.004, cum: 0 },
+    { bracket: 2, initialLeverage: 50, qtyCap: 250000, qtyFloor: 50000, maintMarginRatio: 0.005, cum: 50 },
+  ],
+}));
 ws(PRIVATE, { event: 'ACCOUNT_UPDATE' });
 ws(PRIVATE, { event: 'ping', ts: '1700000005000' });
 mkdirSync(dirname(values.out), { recursive: true });
