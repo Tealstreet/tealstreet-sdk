@@ -169,3 +169,14 @@ live trading, weakened parity oracle, or performance threshold changes.
   replay/build-size gates are queued. The primary matrix is read from current
   CI rather than a hand-maintained venue subset, followed by combined bindings
   and consumer/lifecycle checks.
+
+### Final merged-source quality receipts
+
+- Formatting and banned-pattern checks pass; strict all-target native workspace
+  Clippy passes (3m46s). All 2825 workspace tests across 238 suites pass,
+  including negative compilation proving Polymarket credentials cannot Serialize.
+- Root typecheck 44/44, lint 28/28, test tasks 27/27 pass; safe-cex has
+  7758 passing tests in each of its two runners (525 files each).
+- Wasm workspace Clippy is running. The serialized 30-venue isolated build,
+  size/public/private replay matrix follows it, then combined bindings,
+  consumer and fake-account lifecycle checks. No real private trading occurred.
