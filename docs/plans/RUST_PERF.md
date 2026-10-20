@@ -567,3 +567,21 @@ strict Rust tests and final wasm workspace clippy remain in progress. Final
 exact landing control4420816 bytes/global opt3 retains its original unbatched
 runtime; both copies'11-helper closure matches30b5d05a07. Public and optional
 diagnostic samples wait until every local compile/test/private replay is quiet.
+
+All753 strict Rust tests/77 groups and final wasm workspace clippy pass, with
+all local jobs quiet before measurements. The initial eleven-family controlled
+cohort passes every public/private threshold gate, and every retained-memory
+ratio widens. Six CPU ratios narrow: Crypto1.32→1.27, WEEX1.66→1.51,
+BingX1.32→1.29, Backpack2.07→2.01, Hyperliquid7.23→6.62, and fixed ten-pair
+MEXC3.02→2.85. These are valid retained observations, not exclusions. Raw runs,
+hashes and the fixed MEXC cohort are in `RUST_PERF_INITIAL11.json`. The requested
+all-family CPU-margin outcome remains open; do not push/merge as complete.
+
+Next diagnostic phase predeclares three instrumented runs per family/config:
+original aggregate immediate-single, current isolated immediate-single, current
+isolated queued-batch, for each of those six families. Alternate configuration
+order by run, retain all samples, no source changes or favorable stopping. Compare
+gross WS/frame/HTTP method CPU, actual call counts and overall process/main-thread
+mix. Parser source and ticker lookup are unchanged on Crypto/WEEX. Investigate
+queue packing, double UTF8 validation, singleton delivery and startup/frame cost
+only where data supports a real hot path; fix/review/test before new comparisons.
