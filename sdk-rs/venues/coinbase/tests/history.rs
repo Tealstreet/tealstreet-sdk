@@ -456,3 +456,60 @@ fn malformed_success_envelope_cannot_become_empty_history() {
     d.reply(r, 200, r#"{"error":"permission rejected"}"#);
     assert!(d.result().is_err());
 }
+
+/// Pins the exact request sequence of paged fills and order history.
+/// Paging refactors keep it.
+#[test]
+fn paged_request_sequences_are_pinned() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(fills(5));
+    let mut urls = Vec::new();
+    let r = d.request();
+    urls.push(r.url.clone());
+    let a = fill("a", "100", "1", false, "2024-01-01T00:00:01Z");
+    d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"c1"}}"#));
+    let r = d.request();
+    urls.push(r.url.clone());
+    let b = fill("b", "100", "1", false, "2024-01-01T00:00:00Z");
+    d.reply(r, 200, &format!(r#"{{"fills":[{b}],"cursor":""}}"#));
+    assert!(d.result().is_ok());
+    d.query(Query::OrderHistory {
+        symbol: Some("BTC-USD".into()),
+        from_ms: Some(NOW),
+        to_ms: Some(NOW + 1000.0),
+        limit: Some(5),
+    });
+    let r = d.request();
+    urls.push(r.url.clone());
+    let newer = order("BTC-USD", "0", "").replace("order-a", "newer");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"orders":[{newer}],"has_next":true,"cursor":"o1"}}"#),
+    );
+    let r = d.request();
+    urls.push(r.url.clone());
+    let older = order("BTC-USD", "0", "");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"orders":[{older}],"has_next":false}}"#),
+    );
+    assert!(d.result().is_ok());
+    let paths: Vec<_> = urls
+        .iter()
+        .map(|u| {
+            u.split_once(".com")
+                .map_or(u.as_str(), |(_, p)| p)
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(paths, PINNED);
+}
+
+const PINNED: [&str; 4] = [
+    "/api/v3/brokerage/orders/historical/fills?limit=5&sort_by=TRADE_TIME&product_ids=BTC-USD&order_ids=native-order&product_types=SPOT&start_sequence_timestamp=2023-12-31T23%3A59%3A59.999Z&end_sequence_timestamp=2024-01-01T00%3A00%3A01.001Z",
+    "/api/v3/brokerage/orders/historical/fills?limit=5&sort_by=TRADE_TIME&product_ids=BTC-USD&order_ids=native-order&product_types=SPOT&start_sequence_timestamp=2023-12-31T23%3A59%3A59.999Z&end_sequence_timestamp=2024-01-01T00%3A00%3A01.001Z&cursor=c1",
+    "/api/v3/brokerage/orders/historical/batch?limit=5&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=BTC-USD&product_type=SPOT&start_date=2024-01-01T00%3A00%3A00.000Z&end_date=2024-01-01T00%3A00%3A01.001Z",
+    "/api/v3/brokerage/orders/historical/batch?limit=5&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=BTC-USD&product_type=SPOT&start_date=2024-01-01T00%3A00%3A00.000Z&end_date=2024-01-01T00%3A00%3A01.001Z&cursor=o1",
+];
