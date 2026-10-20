@@ -7,7 +7,7 @@
 //   -> { op: 'command', id, command }       any EngineHost command
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
-//    | { op: 'event', level, code, message, fields }
+//      structured events add { code, fields } to 'log' and may use level 'debug'
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -220,7 +220,10 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
             onFrame: (frame) => this.broadcast(frame),
             onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
             onLog: (level, text) => this.notify(level !== 'info', { op: 'log', level, message: text }),
-            onEvent: (event) => this.notify(event.level === 'warn' || event.level === 'error', { op: 'event', ...event }),
+            // Legacy `log` clients keep working; structured clients also read code and fields.
+            onEvent: ({ level, code, message, fields }) => this.notify(level === 'warn' || level === 'error', {
+              op: 'log', level: level === 'warn' ? 'warning' : level, message, code, fields,
+            }),
           },
         );
         this.host.start();

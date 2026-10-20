@@ -86,8 +86,8 @@ Hosts forward events and write Warn+ to stderr/console with no client.
 
 PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
 HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`, wasm
-`logLevel` option, `EngineHost.health()`/`onEvent`, native and DO `event`
-notices); (2) redaction sweep with a test that fails on
+`logLevel` option, `EngineHost.health()`/`onEvent`, native `event` notices,
+DO `log` notices with `code` and `fields`); (2) redaction sweep with a test that fails on
 secrets in any notice; (3) engine-level ws and auth counting; (4) venue batches
 assigning codes and fixing levels (keep message text stable); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.

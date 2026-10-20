@@ -339,11 +339,11 @@ test('Durable Object notices reach clients, and Warn+ reaches the console with n
   const object = new EngineObject({ storage: { setAlarm() {} } });
   const warned = t.mock.method(console, 'warn', () => {});
   object.notify(false, { op: 'log', level: 'info', message: 'quiet' });
-  object.notify(true, { op: 'event', level: 'warn', code: 'ws.reconnect', message: 'reconnecting' });
-  assert.deepEqual(warned.mock.calls.map((call) => call.arguments), [['safe-cex warn ws.reconnect: reconnecting']]);
+  object.notify(true, { op: 'log', level: 'warning', code: 'ws.reconnect', message: 'reconnecting' });
+  assert.deepEqual(warned.mock.calls.map((call) => call.arguments), [['safe-cex warning ws.reconnect: reconnecting']]);
   const sent = [];
   object.clients.add({ send: (text) => sent.push(JSON.parse(text)) });
-  object.notify(true, { op: 'event', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} });
-  assert.deepEqual(sent, [{ op: 'event', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} }]);
+  object.notify(true, { op: 'log', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} });
+  assert.deepEqual(sent, [{ op: 'log', level: 'error', code: 'auth.rejected', message: 'rejected', fields: {} }]);
   assert.equal(warned.mock.callCount(), 1);
 });
