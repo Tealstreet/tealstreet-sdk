@@ -73,6 +73,35 @@ fn executions_dedup_by_native_fill_id_across_snapshot_and_reconnect() {
         ),
     );
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 0);
+    let (next, _) = fresh_private(&mut e, socket);
+    message(
+        &mut e,
+        next,
+        NOW + 1001.0,
+        r#"{"event":"challenge","message":"reconnected"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        message(
+            &mut e,
+            next,
+            NOW + 1002.0,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    message(
+        &mut e,
+        next,
+        NOW + 1003.0,
+        &format!(
+            r#"{{"feed":"fills","fills":[{}]}}"#,
+            fill.replace("exec-1", "exec-2")
+        ),
+    );
+    assert_eq!(
+        e.take_frame(NOW + 1003.0).map_or(0, fill_count),
+        0,
+        "recent execution replay after a fresh challenge must stay deduplicated"
+    );
 }
 #[test]
 fn fills_without_execution_identity_fail_closed() {
@@ -259,6 +288,7 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
     }
 }
 fn fresh_private(e: &mut Engine<Kraken>, old: SocketId) -> (SocketId, safe_cex_engine::TimerId) {
+    e.drain_actions().for_each(drop);
     e.handle(
         NOW,
         Event::WsClosed {
@@ -551,4 +581,56 @@ fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_c
     );
     assert!(e.store().orders().is_empty());
     assert_eq!(e.take_frame(NOW).map_or(0, fill_count), 2);
+}
+#[test]
+fn quiet_authenticated_private_feeds_stay_open_after_initial_empty_snapshots() {
+    let (mut e, s) = ready();
+    let (s, mut timer) = fresh_private(&mut e, s);
+    message(
+        &mut e,
+        s,
+        NOW + 1001.0,
+        r#"{"event":"challenge","message":"fresh"}"#,
+    );
+    for feed in ["fills", "open_orders", "open_positions"] {
+        message(
+            &mut e,
+            s,
+            NOW + 1002.0,
+            &format!(r#"{{"event":"subscribed","feed":"{feed}"}}"#),
+        );
+    }
+    for snapshot in [
+        r#"{"feed":"fills_snapshot","fills":[]}"#,
+        r#"{"feed":"open_orders_snapshot","orders":[]}"#,
+        r#"{"feed":"open_positions","positions":[]}"#,
+    ] {
+        message(&mut e, s, NOW + 1002.0, snapshot);
+    }
+    e.drain_actions().for_each(drop);
+    // Event-driven fills/orders legitimately stay quiet for hours after snapshots.
+    for step in 1..=180 {
+        let now = NOW + 1000.0 + 10000.0 * f64::from(step);
+        message(&mut e, s, now, r#"{"event":"pong"}"#);
+        e.handle(now, Event::TimerFired { timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::WsClose{socket}if *socket==s)),
+            "quiet authenticated account reconnected at step {step}"
+        );
+        timer = actions
+            .into_iter()
+            .find_map(|a| {
+                if let Action::SetTimer { timer, at_ms } = a
+                    && at_ms == now + 10000.0
+                {
+                    Some(timer)
+                } else {
+                    None
+                }
+            })
+            .expect("private watchdog remains armed");
+    }
 }

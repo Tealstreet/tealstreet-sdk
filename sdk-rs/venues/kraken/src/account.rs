@@ -9,10 +9,38 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
+/// Recent execution deduplication and terminal fences survive reconnects without
+/// retaining every historical identity for the lifetime of the engine.
+#[derive(Default)]
+struct RecentIds<const CAPACITY: usize> {
+    members: HashSet<String>,
+    arrival: VecDeque<String>,
+}
+impl<const CAPACITY: usize> RecentIds<CAPACITY> {
+    fn insert(&mut self, id: String) -> bool {
+        if !self.members.insert(id.clone()) {
+            return false;
+        }
+        self.arrival.push_back(id);
+        while self.arrival.len() > CAPACITY {
+            if let Some(expired) = self.arrival.pop_front() {
+                self.members.remove(&expired);
+            }
+        }
+        true
+    }
+    fn contains(&self, id: &str) -> bool {
+        self.members.contains(id)
+    }
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.members.len()
+    }
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     Orders,
@@ -50,7 +78,7 @@ pub struct Account {
     settings_write_revision: u64,
     orders_revision: u64,
     positions_revision: u64,
-    terminal: HashSet<String>,
+    terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
     started: bool,
     socket: Option<SocketId>,
@@ -67,7 +95,7 @@ pub struct Account {
     poll: Option<TimerId>,
     heal: Option<TimerId>,
     attempts: u32,
-    seen_fills: HashSet<String>,
+    seen_fills: RecentIds<8192>,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -581,16 +609,11 @@ impl Kraken {
         if self.account.open {
             if (self.account.acks.len() < FEEDS.len() && cx.now >= self.account.deadline)
                 || cx.now - self.account.last_received >= 60000.0
-                || FEEDS.iter().any(|feed| {
-                    cx.now
-                        - self
-                            .account
-                            .payloads
-                            .get(*feed)
-                            .copied()
-                            .unwrap_or(self.account.opened_at)
-                        >= 180000.0
-                })
+                // Fills and orders are event driven: a confirmed empty snapshot
+                // may legitimately be followed by hours with only ping replies.
+                // Missing initial snapshots are different from a quiet account.
+                || (cx.now-self.account.opened_at>=180000.0
+                    &&FEEDS.iter().any(|feed|!self.account.payloads.contains_key(*feed)))
             {
                 self.account_disconnect(cx, "Kraken private socket timed out");
             } else if let Some(socket) = self.account.socket {
@@ -1262,4 +1285,36 @@ fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
             })
             .collect(),
     )
+}
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    #[test]
+    fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
+        let mut account = Account::default();
+        for n in 0..20000 {
+            assert!(account.seen_fills.insert(format!("fill-{n}")));
+        }
+        assert!(
+            account.seen_fills.len() <= 8192,
+            "execution identity cache grew without bound"
+        );
+        assert!(account.seen_fills.contains("fill-19999"));
+        assert!(!account.seen_fills.insert("fill-19999".into()));
+        assert!(!account.seen_fills.contains("fill-0"));
+    }
+    #[test]
+    fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {
+        let mut account = Account::default();
+        for n in 0..20000 {
+            assert!(account.terminal.insert(format!("order-{n}")));
+        }
+        assert!(
+            account.terminal.len() <= 16384,
+            "terminal order cache grew without bound"
+        );
+        assert!(account.terminal.contains("order-19999"));
+        assert!(!account.terminal.insert("order-19999".into()));
+        assert!(!account.terminal.contains("order-0"));
+    }
 }

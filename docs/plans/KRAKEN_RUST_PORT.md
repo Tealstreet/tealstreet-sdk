@@ -146,3 +146,22 @@ a clear signing error without exposing credentials. Added native and real Wasm
 boundary regressions so account startup cannot hang silently on malformed keys.
 Quiet-account watchdog semantics and bounded execution/tombstone retention are
 being audited before final acceptance.
+
+### Quiet-account and retention review fixes
+
+Official fills/open_orders feeds are event driven after their initial snapshots.
+A code-correctness audit confirmed that payload-age reconnects were incorrectly
+closing healthy quiet accounts. The watchdog now requires initial snapshots and
+continues transport ping/receive deadlines, while initialized quiet feeds remain
+open. A 30-minute virtual-clock regression failed before and passes after.
+
+Execution and terminal-order ID sets now use bounded FIFO recent windows (8,192
+and 16,384 identities) and survive reconnects; duplicate IDs do not grow their
+queues. Before/after cap regressions prove bounded retention, and a fresh-challenge
+reconnect regression proves recent executions stay deduplicated. No load tests.
+
+Landing-source proofs before these focused fixes: 1,247 workspace tests; root
+44 typecheck, 28 lint, 27 test tasks; 215 harness tests. Binance public and private
+PASS (public CPU 221.1/100.5 ms, retained 4.2/2.4 MB). Kraken combined-build public
+and private PASS (public CPU 1,781.2/377.9 ms; retained 3.7/1.9 MB). Final source
+reverification follows this checkpoint.
