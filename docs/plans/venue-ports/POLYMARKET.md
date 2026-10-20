@@ -288,3 +288,20 @@ Combineddefault buildPASS; all91actualWasm SDK tests and55host testsPASS.
 Root44typecheck/28lint/27testtasksPASS afterParadexintegration. Binancepublic
 PASS3runs CPU294.3/140.1ms, steady166.2/55.6ms, retained19.2/3.3MB; bothprivate
 replaysPASS. Remainingfinalnative/public/selectedbundle checks completing.
+
+
+### Final local gate checkpoint (590fc8012c)
+
+AlllocalgatesPASS:1,857nativeworkspace tests (74Polymarket), workspacealltarget
+clippy, wasmclippy, fmt andbans; root44typecheck/28lint/27testtasks;
+318harness,55host,91actualWasmSDK tests. Polymarket-only hostfeaturetestsPASS,
+15actualWasm boundarytestsPASS. Final selectedbrowserbundle823,423bytes
+versusunchanged1,258,291budget. Public3runsPASS:TS/RustworkerCPU48.7/30.4ms,
+steady23.6/9.3ms, retained21.3/0.9MB. Fixture185records/182replayevents,
+4outcomes/2books, explicitlyscopedgenuine20secondcapture asdisclosedabove.
+SelectedprivatePASS:33records/12WSframes/8commands, exactsignedwrites/state/
+fills/commands/subscriptions; CPU69.6/66.6ms informational. Combineddefault
+build+bothprivategatesPASS. Binancepublic3runsPASS CPU294.3/140.1ms,
+steady166.2/55.6ms, retained19.2/3.3MB. No thresholds orprotocolchecksweakened.
+Next: pushPRintofeat/rust-rewrite, freshadversarialcorrectnessreviews/comments,
+addressfindings, waitallCIgreenbeforemerge andfreshfollowupbranch.
