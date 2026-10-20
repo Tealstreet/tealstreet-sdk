@@ -387,11 +387,12 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     ).rejects.toThrow('raw response body');
   });
 
-  it('all exchange account preference permutations reach the same HTTP route as the TS golden matrix', async () => {
-    // Both golden suites independently freeze account normalization and the
-    // resolver's full routing matrix. Drive their real outputs through the host
-    // rather than snapshotting a second copy of the routing table here.
-    for (const exchange of Object.keys(exchangeMetadata) as ExchangeName[]) {
+  it.each(Object.keys(exchangeMetadata) as ExchangeName[])(
+    '%s account preferences reach the TS golden HTTP route',
+    async (exchange) => {
+      // Both golden suites independently freeze account normalization and the
+      // resolver's full routing matrix. Drive their real outputs through the host
+      // rather than snapshotting a second copy of the routing table here.
       for (const tealstreetProxy of [false, true]) {
         for (const tealstreetTunnel of [false, true]) {
           for (const proxyRegion of [undefined, 'JA', 'SG']) {
@@ -439,8 +440,8 @@ describe('engine HTTP routing at the raw transport boundary', () => {
           }
         }
       }
-    }
-  });
+    },
+  );
 });
 
 const websocketHeaders = {
@@ -457,8 +458,9 @@ const handlers = (channel: 'public' | 'private' | 'business' = 'public') => ({
 });
 
 describe('engine socket routing at the raw transport boundary', () => {
-  it('each exchange and every golden routing permutation opens exactly the TS channel host', () => {
-    for (const exchange of Object.keys(exchangeMetadata) as ExchangeName[]) {
+  it.each(Object.keys(exchangeMetadata) as ExchangeName[])(
+    '%s routing permutations open exactly the TS channel host',
+    (exchange) => {
       for (const tealstreetProxy of [false, true]) {
         for (const tealstreetWsRoute of [false, true]) {
           for (const proxyRegion of [undefined, 'JA', 'SG']) {
@@ -499,10 +501,10 @@ describe('engine socket routing at the raw transport boundary', () => {
           }
         }
       }
-    }
-    expect(mocks.token).not.toHaveBeenCalled();
-    expect(mocks.relay).not.toHaveBeenCalled();
-  });
+      expect(mocks.token).not.toHaveBeenCalled();
+      expect(mocks.relay).not.toHaveBeenCalled();
+    },
+  );
 
   it('preserves native venue upgrade headers and adds WAF headers on a routed socket', () => {
     const raw = makeRaw();

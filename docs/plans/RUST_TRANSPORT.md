@@ -225,3 +225,24 @@ thresholds, normalizations or size budgets changed for this transport work.
 - Landing now builds per-venue bundles with an inherited **1,258,291-byte**
   budget. Final CI covers **25 replay comparisons** (11 public, 14 private),
   including all four OKX account variants. No transport gate thresholds changed.
+
+### Final CI test isolation
+
+- All **25/25** eleven-venue replay comparisons pass on `837fc996fa`; fresh
+  local Bitget, Hyperliquid and Binance public/private replays also pass.
+  Workspace verification passes **762 Rust tests**, all native/wasm lint and
+  bans/format checks; repository typecheck **44/44**, lint **28/28**, harness
+  **147/147**, SDK/wasm **28/28**, JS host **34/34**.
+- The PR repository job passes **6,713 SDK tests**, but the companion push job
+  times out one new socket matrix test: it executes all 3,672 destinations in
+  one five-second case. Split the matrix into cases per venue, retaining every
+  option/channel assertion and the existing timeout. Audit the matching HTTP
+  matrix for the same avoidable coupling, run focused verification, request an
+  independent review, commit and rerun CI. No production or gate changes.
+- Implemented the per-venue matrix split for both HTTP and sockets. **204/204**
+  focused tests, package typecheck/lint and diff/format checks pass; all 3,672
+  socket destinations and HTTP option permutations remain asserted, with no
+  timeout increase. Independent re-review is the final commit gate.
+- Independent review is clear: every matrix permutation is retained, per-venue
+  mock state is reset, and the socket token/relay absence checks now run for
+  every venue. Commit the test-only correction and require the full CI rerun.
