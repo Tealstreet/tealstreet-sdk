@@ -51,6 +51,9 @@ export class CallMethodHandler extends BaseHandler {
         case 'fetchAndSetPrivateSnapshot':
           result = await this._exchange.fetchAndSetPrivateSnapshot();
           break;
+        case 'fetchEngineSnapshot':
+          result = await this._exchange.fetchEngineSnapshot();
+          break;
         case 'reconnect':
           this._exchange.reconnect();
           break;

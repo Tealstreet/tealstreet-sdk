@@ -204,13 +204,13 @@ fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
         param(&regular.url, "origClientOrderId").as_deref(),
         Some("x-s3vFFRQpresting")
     );
-    h.reply(regular.id, 200, "", "{}");
+    h.reply(regular.id, 200, "", r#"{"symbol":"BTCUSDT","orderId":1917641,"clientOrderId":"x-s3vFFRQpresting","origQty":"0.40","executedQty":"0","status":"CANCELED"}"#);
     let conditional = h.take("/papi/v1/um/conditional/order");
     assert_eq!(
         param(&conditional.url, "newClientStrategyId").as_deref(),
         Some("abc")
     );
-    h.reply(conditional.id, 200, "", "{}");
+    h.reply(conditional.id, 200, "", r#"{"symbol":"BTCUSDT","strategyId":123445,"newClientStrategyId":"abc","strategyStatus":"CANCELED"}"#);
     assert_eq!(
         h.engine.store().order("abc").unwrap().status,
         OrderStatus::Canceled

@@ -426,6 +426,7 @@ fn settings_commit_only_after_success_and_unsupported_modes_never_write() {
         command: 7,
         symbol: "E-BTC-USDT".into(),
         leverage: 30.0,
+        side: None,
     });
     let request = h.take(Method::Post, "/fapi/v2/level_edit");
     h.reply(request, r#"{"code":"-1","msg":"denied"}"#);
@@ -442,6 +443,7 @@ fn settings_commit_only_after_success_and_unsupported_modes_never_write() {
     h.command(Command::SetPositionMode {
         command: 7,
         hedged: true,
+        symbol: None,
     });
     assert!(h.failed());
 }

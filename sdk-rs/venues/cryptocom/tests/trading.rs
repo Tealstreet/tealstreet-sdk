@@ -254,6 +254,7 @@ fn leverage_uses_account_identity_and_global_numeric_leverage() {
             command: 1,
             symbol: "BTCUSD-PERP".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     h.reply(

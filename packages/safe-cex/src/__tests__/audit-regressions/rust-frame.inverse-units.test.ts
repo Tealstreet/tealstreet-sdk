@@ -182,13 +182,13 @@ describe('Rust frames preserve inverse native units', () => {
     expect(placeOrder.mock.calls[0][6]).toBe(true);
   });
 
-  it('does not add inverse extras to linear positions or orders', () => {
+  it('preserves explicit native order quantities without inventing inverse extras on linear positions', () => {
     const store = new DefaultStore();
     new FrameApplier(store).apply(fixture({ inverse: false, native: true, positions: true, orders: [
       { id: 'linear', amount: 1, filled: 0, remaining: 1, native: 1 },
     ] }));
     expect(store.positions[0].extra).toBeUndefined();
-    expect(store.orders[0].extra).toBeUndefined();
+    expect(store.orders[0].extra).toEqual({ remainingNative: 1 });
   });
 
   it('keeps venue-specific legacy inverse sizing and exact native tails through the main-thread bridge', () => {

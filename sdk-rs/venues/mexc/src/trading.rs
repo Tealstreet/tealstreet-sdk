@@ -228,9 +228,11 @@ impl MexcFutures {
             } else {
                 2
             },
-            leverage: self
-                .leverage_for(opts)
-                .clamp(m.limits.leverage.min, m.limits.leverage.max),
+            leverage: num::clamp_leverage(
+                self.leverage_for(opts),
+                m.limits.leverage.min,
+                m.limits.leverage.max,
+            )?,
             external_oid: format!("ts_{}", safe_cex_crypto::uuid::uuid()?),
             reduce_only: opts.reduce_only.filter(|v| *v),
             stp_mode: batch.then_some(0),
@@ -404,9 +406,11 @@ impl MexcFutures {
         let body = json(&Plan {
             symbol: &m.id,
             vol,
-            leverage: self
-                .leverage_for(&opts)
-                .clamp(m.limits.leverage.min, m.limits.leverage.max),
+            leverage: num::clamp_leverage(
+                self.leverage_for(&opts),
+                m.limits.leverage.min,
+                m.limits.leverage.max,
+            )?,
             side: native_side(opts.side, true),
             open_type: if self.order_rails(&opts.symbol).isolated {
                 1
@@ -566,6 +570,7 @@ impl MexcFutures {
         symbol: &str,
         leverage: Option<f64>,
         isolated: Option<bool>,
+        selected_side: Option<PositionSide>,
     ) -> Result<VecDeque<Step>, String> {
         let m = cx
             .store
@@ -581,9 +586,14 @@ impl MexcFutures {
             } else {
                 PositionSide::Short
             };
-            let leverage = leverage
-                .unwrap_or(if position_type == 1 { r.long } else { r.short })
-                .clamp(m.limits.leverage.min, m.limits.leverage.max);
+            if selected_side.is_some_and(|selected| selected != side) {
+                continue;
+            }
+            let leverage = num::clamp_leverage(
+                leverage.unwrap_or(if position_type == 1 { r.long } else { r.short }),
+                m.limits.leverage.min,
+                m.limits.leverage.max,
+            )?;
             let next_isolated = isolated.unwrap_or(r.isolated);
             let native = cx
                 .store
@@ -766,10 +776,11 @@ impl MexcFutures {
                 command,
                 symbol,
                 leverage,
+                side,
             } => (
                 command,
                 if leverage.is_finite() && leverage > 0.0 {
-                    self.settings_steps(cx, &symbol, Some(leverage), None)
+                    self.settings_steps(cx, &symbol, Some(leverage), None, side)
                 } else {
                     Err("Invalid leverage".into())
                 },
@@ -781,10 +792,14 @@ impl MexcFutures {
                 isolated,
             } => (
                 command,
-                self.settings_steps(cx, &symbol, None, Some(isolated)),
+                self.settings_steps(cx, &symbol, None, Some(isolated), None),
                 0.0,
             ),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Mode {
@@ -903,7 +918,7 @@ impl MexcFutures {
                 let (bodies, receipts): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
                 Step { receipts, path:BATCH,body:format!("[{}]",bodies.join(",")),call:Call::Batch{orders}}
             }),
-            Call::Leverage {symbol,position_type,leverage,isolated,keep_leverage,keep_margin}=>self.settings_steps(cx,&symbol,(!keep_leverage).then_some(leverage),(!keep_margin).then_some(isolated)).and_then(|steps|steps.into_iter().find(|s|matches!(&s.call,Call::Leverage {position_type:p,..}if *p==position_type)).ok_or_else(||"MEXC leverage rail missing".into())),
+            Call::Leverage {symbol,position_type,leverage,isolated,keep_leverage,keep_margin}=>self.settings_steps(cx,&symbol,(!keep_leverage).then_some(leverage),(!keep_margin).then_some(isolated),Some(if position_type==1{PositionSide::Long}else{PositionSide::Short})).and_then(|steps|steps.into_iter().find(|s|matches!(&s.call,Call::Leverage {position_type:p,..}if *p==position_type)).ok_or_else(||"MEXC leverage rail missing".into())),
             _=>Ok(step),
         };
         step = match refreshed {
@@ -1403,7 +1418,7 @@ impl MexcFutures {
                         .settings_revision
                         .insert(symbol.clone(), revision);
                     cx.store.update_setting(&symbol, |s| {
-                        s.leverage = leverage;
+                        s.leverage = rails.long;
                         s.buy_leverage = Some(rails.long);
                         s.sell_leverage = Some(rails.short);
                         s.margin_type = Some(if isolated {

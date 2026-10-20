@@ -209,6 +209,75 @@ describe('native public-feed ownership through real private workers', () => {
     expect(input.failures).toEqual([]);
   }, 15_000);
 
+  it('preserves midpoint additions, changes and clears through a provider, native receiver and main frame store', async () => {
+    const source = await exchange({ key: '', secret: '', publicDataOnly: true });
+    await source.startup;
+    const symbol = 'BTC-USD';
+    const tickerIndex = source.account.store.tickers.findIndex((ticker) => ticker.symbol === symbol);
+    expect(tickerIndex).toBeGreaterThanOrEqual(0);
+    const last = source.account.store.tickers.find((ticker) => ticker.symbol === symbol)!.last;
+    // Independent revision-1 ticker delta entering the producer's frame boundary.
+    const publishMidpoint = (midpoint: number) => {
+      const buffer = new ArrayBuffer(48);
+      const view = new DataView(buffer);
+      view.setUint32(0, 0x46584353, true);
+      view.setUint16(4, 1, true);
+      view.setUint16(6, 1, true);
+      view.setUint16(16, 4, true);
+      view.setUint16(18, 1, true);
+      view.setUint32(20, 24, true);
+      view.setFloat64(24, tickerIndex, true);
+      view.setFloat64(32, 1 << 11, true);
+      view.setFloat64(40, midpoint, true);
+      (source.account as unknown as { receiveFrame(frame: ArrayBuffer): void }).receiveFrame(buffer);
+    };
+    publishMidpoint(last + 0.125);
+    const provider = new RustPublicFeedProvider(source.account);
+    cleanups.push(() => provider.dispose());
+    const channel = new MessageChannel();
+    provider.attach(channel.port1 as unknown as MessagePort);
+    const input = nativeInput(true);
+    setRustEngineTransport(() => input.transport);
+    const account = new RustEngineExchange(
+      'coinbasespot',
+      {
+        key: '',
+        secret: '',
+        publicDataOnly: true,
+        publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
+        transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
+      },
+      new DefaultStore(),
+    );
+    cleanups.push(() => account.dispose());
+    const mainStore = new DefaultStore();
+    const mainApplier = new FrameApplier(mainStore);
+    account.onFrame = (buffer) => mainApplier.apply(new Frame(buffer));
+    account.on('error', (message: unknown) => input.failures.push(String(message)));
+    await account.start();
+    const expectMidpoint = async (midPrice: number | undefined) => {
+      await waitFor(() => {
+        for (const store of [account.store, mainStore]) {
+          const ticker = store.tickers.find((ticker) => ticker.symbol === symbol)!;
+          expect(ticker.last).toBe(last);
+          expect(ticker.midPrice).toBe(midPrice);
+        }
+      });
+      const snapshot = new DefaultStore();
+      new FrameApplier(snapshot).apply(new Frame(account.snapshotFrame()!));
+      const ticker = snapshot.tickers.find((ticker) => ticker.symbol === symbol)!;
+      expect(ticker.last).toBe(last);
+      expect(ticker.midPrice).toBe(midPrice);
+    };
+    await expectMidpoint(last + 0.125);
+    publishMidpoint(last + 0.25);
+    await expectMidpoint(last + 0.25);
+    publishMidpoint(NaN);
+    await expectMidpoint(undefined);
+    expect(input.failures).toEqual([]);
+    expect(source.input.failures).toEqual([]);
+  }, 15_000);
+
   it('fans one frame-forwarding provider out to two transferred private-worker ports with native snapshots and isolated state', async () => {
     const publicSide = await exchange({ key: '', secret: '', publicDataOnly: true });
     await publicSide.startup;

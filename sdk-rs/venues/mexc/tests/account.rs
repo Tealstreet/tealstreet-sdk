@@ -287,6 +287,7 @@ fn metadata_read_cannot_be_overwritten_by_older_mutation_ack() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     let mutation = requests(&mut e).remove(0);

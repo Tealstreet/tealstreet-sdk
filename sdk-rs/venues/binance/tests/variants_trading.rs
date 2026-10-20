@@ -157,6 +157,7 @@ fn spot_derivative_settings_rejected_without_http() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 5.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -166,6 +167,7 @@ fn spot_derivative_settings_rejected_without_http() {
         Command::SetPositionMode {
             command: 3,
             hedged: true,
+            symbol: None,
         },
     ] {
         h.event(Event::Command(c));
@@ -269,29 +271,13 @@ fn plain_trigger_intent_rejects_both_variants_before_any_batch_write() {
 }
 
 fn seed_spot_maker(h: &mut Harness) {
-    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType, TimeInForce};
-    let order = Order {
-        id: "original-caller".into(),
-        parent_id: None,
-        status: OrderStatus::Open,
-        symbol: "BTCUSDT".into(),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: 99.0,
-        amount: 2.0,
-        filled: 0.0,
-        remaining: 2.0,
-        reduce_only: false,
-        close: Some(false),
-        client_order_id: Some("original-caller".into()),
-        time_in_force: Some(TimeInForce::PostOnly),
-        last_update: 1.0,
-        trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
-    };
-    h.engine.store_mut().set_orders(vec![order]);
+    let socket = h.socket("ws-api/v3").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "ws-api/v3",
+        r#"{"id":"tealstreet-user-data-10","status":200,"result":{"subscriptionId":0}}"#,
+    );
+    h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":1,"s":"BTCUSDT","c":"original-caller","S":"BUY","o":"LIMIT_MAKER","X":"NEW","x":"NEW","p":"99","L":"0","q":"2","z":"0","l":"0"}}"#);
 }
 
 #[test]

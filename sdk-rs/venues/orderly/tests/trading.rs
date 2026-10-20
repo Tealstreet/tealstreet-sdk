@@ -422,6 +422,7 @@ fn margin_selector_keeps_existing_positions_and_targets_symbol_leverage() {
             command: 2,
             symbol: "BTCUSDC".into(),
             leverage: 1000.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).pop().unwrap();
@@ -539,6 +540,7 @@ fn global_cross_leverage_is_clamped_for_each_symbol() {
             command: 1,
             symbol: String::new(),
             leverage: 100.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).pop().unwrap();
@@ -1154,4 +1156,117 @@ fn omitted_stream_fields_do_not_erase_prior_type_or_margin_contradictions() {
             "missing fields erased contradictory native evidence"
         );
     }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            2000.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDC".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
+}
+
+#[test]
+fn accepted_global_leverage_continues_past_invalid_market_limits() {
+    use safe_cex_engine::model::MarginType;
+    let (mut e, _) = ready();
+    actions(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::SetMarginType {
+            command: 100,
+            symbol: "ETHUSDC".into(),
+            isolated: false,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, r#"{"success":true}"#);
+    assert!(done(actions(&mut e), 100).is_ok());
+    let mut markets = e.store().markets().to_vec();
+    let mut sol = markets[0].clone();
+    sol.id = "SOL/USDC:USDC".into();
+    sol.symbol = "SOLUSDC".into();
+    sol.base = "SOL".into();
+    sol.limits.leverage.max = 30.;
+    markets[1].limits.leverage.min = 50.;
+    markets[1].limits.leverage.max = 10.;
+    markets.push(sol);
+    e.store_mut().set_markets(markets);
+    let positions = e.store().positions().to_vec();
+    let cross = positions
+        .iter()
+        .find(|p| p.margin_type == Some(MarginType::Cross))
+        .unwrap()
+        .clone();
+    let isolated = positions
+        .iter()
+        .find(|p| p.margin_type == Some(MarginType::Isolated))
+        .unwrap()
+        .clone();
+    let mut rows = vec![isolated.clone()];
+    for symbol in ["BTCUSDC", "ETHUSDC", "SOLUSDC"] {
+        let mut p = cross.clone();
+        p.id = symbol.into();
+        p.symbol = symbol.into();
+        rows.push(p);
+    }
+    e.store_mut().set_positions(rows);
+    e.handle(
+        2000.,
+        Event::Command(Command::SetLeverage {
+            command: 101,
+            symbol: String::new(),
+            leverage: 80.,
+            side: None,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert_eq!(body(&r)["leverage"], 80.);
+    assert!(body(&r).get("symbol").is_none());
+    reply(&mut e, &r, 200, r#"{"success":true}"#);
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
+    assert!(done(out, 101).is_ok());
+    for (symbol, expected) in [("BTCUSDC", 80.), ("ETHUSDC", 80.), ("SOLUSDC", 30.)] {
+        assert_eq!(e.store().setting(symbol).unwrap().leverage, expected);
+        assert_eq!(
+            e.store()
+                .positions()
+                .iter()
+                .find(|p| p.id == symbol)
+                .unwrap()
+                .leverage,
+            expected
+        );
+    }
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.id == isolated.id)
+            .unwrap()
+            .leverage,
+        isolated.leverage
+    );
 }
