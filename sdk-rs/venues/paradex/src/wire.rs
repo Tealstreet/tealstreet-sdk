@@ -1,9 +1,19 @@
 //! Borrowed Paradex public payloads.
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-pub use safe_cex_engine::de::Number;
+/// Public rows: blank reads as 0, null and malformed reject the row.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct Number(#[serde(deserialize_with = "safe_cex_engine::de::number_or_blank_zero")] pub f64);
+pub use safe_cex_engine::de::Number as StrictNumber;
+
+fn summary_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
+    // Summary fields use TS's `value || '0'`; do not widen instrument,
+    // depth, signed quantity or private numeric parsing.
+    Ok(Option::<Number>::deserialize(d)?.unwrap_or_default())
+}
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -58,18 +68,31 @@ pub struct MarketIdentity<'a> {
 pub struct Tick<'a> {
     #[serde(borrow, alias = "market")]
     pub symbol: Str<'a>,
+    #[serde(deserialize_with = "summary_number")]
     pub bid: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub ask: Number,
-    #[serde(alias = "last_price", alias = "last")]
+    #[serde(
+        alias = "last_price",
+        alias = "last",
+        deserialize_with = "summary_number"
+    )]
     pub last_traded_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub mark_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub underlying_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub oracle_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub index_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub price_change_rate_24h: Number,
-    #[serde(alias = "volume")]
+    #[serde(alias = "volume", deserialize_with = "summary_number")]
     pub volume_24h: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub open_interest: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub funding_rate: Number,
 }
 #[derive(Deserialize, Default)]
@@ -145,8 +168,8 @@ impl<T> Many<T> {
 pub struct Level<'a> {
     #[serde(borrow)]
     pub side: Str<'a>,
-    pub price: Number,
-    pub size: Number,
+    pub price: StrictNumber,
+    pub size: StrictNumber,
 }
 #[derive(Deserialize)]
 pub struct Depth<'a> {
