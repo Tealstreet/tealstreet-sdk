@@ -729,3 +729,22 @@ CI steady CPU TS56.2/Rust37.2ms; module827,296bytes below unchanged1,258,291.
 Bitunix CI public/private PASS with699,935-byte module,28694frames/697markets/
 2books; TS/Rust CPU346.3/310.7ms, steady152.7/139.6ms, retained3.6/2.1MB,
 sampledpeak17.9/15.8MB. RealizedPNL remains verbatim net of fees/funding.
+
+### Final throughput and gate checkpoint
+
+The local size-optimized Bitunix build passed correctness/memory but narrowly
+failed main CPU (TS1,181.0/Rust1,208.8ms) and steady CPU779.9/820.2ms.
+Change only its release package optimization to3, preserving the full workload,
+three-run medians, exact output checks and all thresholds. The rebuilt module
+is774,839bytes below1,258,291. Public PASS:28,694frames,697markets/tickers,
+two books; TS/Rust main CPU1,044.4/983.8ms, steady716.4/655.2ms, retained
+3.7/2.2MB, sampledpeak31.5/16.1MB. Private42records PASS. Independent
+performance review reports no findings; process CPU remains informational as
+in the existing gate. No attempts discarded or thresholds adjusted.
+
+WOO's seed correction passes full public/private CI on72eb26478a, including
+strict book-event timestamps/hashes. Every14venue replay lane passes on that
+head, along with native/workspace/WASM checks; root CI is still running. The
+final throughput profile commit requires its own green exact-head CI before
+merge, then a fresh branch from landedfeat/rust-rewrite. Local full root test
+rerun continues; typecheck44/lint28 and all239harness helpers already PASS.

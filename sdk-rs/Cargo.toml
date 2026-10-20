@@ -94,7 +94,7 @@ opt-level = "z"
 opt-level = 3
 
 [profile.release.package.safe-cex-venue-bitunix]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-blofin]
 opt-level = "z"
