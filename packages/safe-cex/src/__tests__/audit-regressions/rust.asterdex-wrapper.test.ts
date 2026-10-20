@@ -8,6 +8,7 @@ import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../../exchanges/asterdex/
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const USER = '0x1111111111111111111111111111111111111111';
 const SIGNER = '0x2222222222222222222222222222222222222222';
@@ -16,6 +17,7 @@ const running: RustEngineExchange[] = [];
 
 const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'asterdex') => {
   const commands: Array<Record<string, unknown>> = [];
+  const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
     start: noActions,
@@ -41,7 +43,10 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
         },
       ]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      options: nativeSettings,
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
@@ -64,7 +69,8 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
     store,
   );
   running.push(exchange);
-  return { exchange, construct, commands, store };
+  const setNativeHedged = (isHedged: boolean) => { nativeSettings.isHedged = isHedged; };
+  return { exchange, construct, commands, store, setNativeHedged };
 };
 
 describe('Aster Rust wrapper account and typed command boundary', () => {
@@ -213,7 +219,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   });
 
   it('serves engine-owned public metadata and the account alias query', async () => {
-    const { exchange, store, commands } = fixture();
+    const { exchange, store, commands, setNativeHedged } = fixture();
     store.update({
       markets: [
         {
@@ -227,7 +233,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
         },
       ],
     });
-    store.setSetting('isHedged', true);
+    setNativeHedged(true);
     await exchange.start();
     expect(await exchange.fetchMarkets()).toBe(store.markets);
     expect(await exchange.fetchTickers()).toBe(store.tickers);

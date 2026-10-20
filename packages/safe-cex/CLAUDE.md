@@ -68,6 +68,15 @@ A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means
 the native engine emits no changed frame.
+Book/candle listeners registered before startup retain current demand and replay
+after native metadata is ready, including when the JS store was restored from
+cache. Callbacks register before the first subscription, and forwarded catalog
+frames precede any synchronous subscription data. Public `fetchMarkets` and
+`fetchTickers` start an unstarted Rust engine and wait up to 30 seconds for their
+native readiness flags, independently of private balance/order reconciliation.
+Running reads return native snapshots; they do not force a metadata refresh.
+The caller still owns the exchange after successful `validateAccount`, including
+disposal; validation does not invalidate an instance intended for reuse.
 Venue/network/product identity and native instrument IDs/flags/contract sizes
 must match before account readiness; account-local metadata may be a subset.
 Catalog changes require restarting provider/accounts. Heartbeats release dead

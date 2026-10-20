@@ -10,6 +10,7 @@ import { OKXExchange } from '../../exchanges/okx/okx.exchange';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
 const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
@@ -24,7 +25,9 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(verdict()) }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: empty,
     wsMessage: empty,

@@ -111,6 +111,10 @@ verification and a stable commit. Keep failures and evidence boundaries visible.
   Native source is unchanged. Local combined artifact is 12,172,135 bytes,
   SHA256 `51e335bd0acd407f75b51b26bf780d083ea49bd720b9533c2fc2cc9906c2d3c3`.
   Broad final gates and PR review remain phase 7 work.
+- Phase 1 follow-up CI on `6dcaf5446c` is green (run `39416821651`):
+  44 typecheck, 28 lint and 27 test tasks; SDK 7,768 tests in 526 files
+  passed twice. Phase 2 now passes all 450 SDK WASM tests in 18 files using
+  the same combined native artifact; native source remains unchanged.
 
 ## Phase 2 plan and audit
 
@@ -139,3 +143,69 @@ verification and a stable commit. Keep failures and evidence boundaries visible.
   catalog-before-book ordering, and public metadata available while private
   balance is still pending. Run scoped checks, independent review, fixes and
   commit before phase 3.
+
+## Phase 2 implementation and review
+
+- Native STATUS now owns readiness independently of seeded JS flags. Live
+  subscription demand replays after native catalog application/validation and
+  forwarding; callbacks exist before the first send. Public reads start the
+  single-use engine and await only relevant native sections, bounded at 30 s.
+- Independent code-correctness review PASS after fixing shared ticker reads
+  that could return the receiver's REST seed before provider quotes arrived.
+  Market-only reads may finish after native catalog validation; ticker reads
+  also await accepted shared quotes. Actual-native regressions cover delayed
+  metadata/subscriptions, a rejected shared catalog with zero forwarded demand,
+  and delayed valid provider quotes. Nine focused unit cases cover reentrancy,
+  seeded readiness, disposal and concurrent reads. All 450 WASM cases pass.
+- Existing fake-ABI wrappers that emitted no STATUS now emit independent fixture
+  STATUS frames matching their formerly seeded readiness. ApeX's controlled
+  account readiness and Aster's hedged flag are modeled as native inputs;
+  business assertions and deadlines are retained. The original GRVT case
+  failed at its unchanged 5 s deadline before that fixture correction.
+  Scoped verification: 25 startup/parity unit cases plus 132 distinct wrapper
+  cases across eight files pass; the initial Aster fixture mismatch was corrected
+  by supplying native hedged state and its unchanged 20 cases then pass. SDK
+  typecheck and strict scoped lint pass. Independent fixture review confirms
+  retained assertions/deadlines and private-readiness hold/release semantics.
+- Successful validation retains caller ownership: no in-repo consumer proves
+  automatic disposal necessary. This lifecycle-only audit item is skipped under
+  the production-impact judging rule. General unstarted public reads are fixed
+  here in addition to the factory-specific startup/refresh closure in #1342.
+
+## Phase 3 audit notes (implementation not started)
+
+- One host settlement helper must remove the pending entry and clear its
+  deadline before resolve/reject, including malformed success JSON. Currently
+  `done` deletes the entry before parsing, which can strand the promise.
+  Unknown host actions must fail visibly without dropping unrelated completions
+  from the remaining batch. Timeouts expire caller waiting, not venue actions;
+  no automatic retry or compensation is implied.
+- Normal dispose needs best-effort cleanup and typed interruption errors as
+  well as the already implemented trap path. Worker dispose currently sends a
+  generic RPC failure before the typed host rejection; preserve identity and
+  outcome through that ordering. Known native rejections retain partial batch
+  metadata and do not become unknown outcomes.
+- **Identity coverage is currently caller IDs only.** A host-only timeout or
+  dispose fix cannot claim generated native IDs. Add typed native command
+  identity/progress, correlated by command/input order/child role where needed,
+  from existing formatter/job context before the corresponding write escapes.
+  Capture actual native IDs separately from requested IDs and represent partial
+  coverage honestly. A deadline may precede a queued job's ID generation, so
+  later identity progress needs an account/generation/command-correlated receipt
+  path even after its promise settles. Never parse venue HTTP bodies in JS,
+  mint incompatible substitute IDs, or query a poisoned engine.
+- Native paired command log+done sites have the command ID locally. Prefer
+  explicit optional command-ID log metadata/helper there; the SDK can retain
+  diagnostic command logs and emit one failure at the public command boundary.
+  Background notices remain visible. A batch-local exact-message compatibility
+  match is bounded but cannot distinguish an unrelated identical notice, so it
+  must not be represented as causal proof or a global string/time deduper.
+- Cancel bridge keeps existing `ids` dispatch and sends parallel descriptor
+  metadata `{id, symbol, type}`. Do not route every venue through today's
+  feature-gated symbol-aware operation. The other lane owns unknown-ID venue
+  handling and its generic native consumption seam.
+- Fake-clock checks cover completion/deadline boundaries, late/duplicate done,
+  concurrent reads/writes, caller/generated/batch/child IDs before dispatch,
+  late identity receipts, cleanup throws and partial results. Verify ordinary
+  validation, timeout/dispose and native failure each report once, while
+  independent identical failures retain independent reports.

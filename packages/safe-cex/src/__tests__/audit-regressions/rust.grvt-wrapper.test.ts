@@ -7,6 +7,7 @@ import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/ru
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 it.each([true, false])('GRVT SDK uses the transport-selected authentication protocol when proxied=%s', async (proxied) => {
   const noop = () => '[]';
@@ -16,7 +17,9 @@ it.each([true, false])('GRVT SDK uses the transport-selected authentication prot
       const command = JSON.parse(json);
       return JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,

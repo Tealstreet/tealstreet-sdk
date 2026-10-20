@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const wasm = vi.hoisted(() => ({ initialize: vi.fn(), generation: 0, engines: [] as WasmEngineLike[] }));
 
@@ -19,7 +20,9 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
 
       start = () => '';
       command = () => '';
-      takeFrame = () => undefined;
+      takeFrame = () => new Uint8Array(consumerFrame({
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      }));
       snapshotFrame = () => {
         if (this.generation !== wasm.generation) throw new Error('WASM instance replaced under a live engine');
         return Uint8Array.of(this.generation);

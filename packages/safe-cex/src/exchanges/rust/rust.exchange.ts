@@ -28,7 +28,7 @@ import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import bs58 from 'bs58';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
@@ -260,6 +260,8 @@ export class RustEngineExchange extends BaseExchange {
   private sharedPublicFeed?: RustPublicFeedClient;
   private requestSharedSnapshot = false;
   private sharedPublicReady = false;
+  private nativeLoaded = 0;
+  private publicDemandReady = false;
   private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
   /** Public providers observe applied native ticker frames, without replacing onFrame. */
@@ -292,7 +294,9 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
+    this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
+      exchangeName,
+    );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
@@ -715,6 +719,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       await this.untilLoaded();
+      this.assertEngineAlive();
     } catch (error) {
       this.dispose();
       throw error;
@@ -752,10 +757,16 @@ export class RustEngineExchange extends BaseExchange {
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);
     this.applier.apply(frame, !this.onFrame);
+    const status = frame.status();
+    const receivedLoaded = status?.loaded ?? this.nativeLoaded;
     if (frame.markets() || frame.tickers() || frame.tickerDeltas()) {
       for (const observer of this.publicFeedObservers) observer.updated(Boolean(frame.markets()));
     }
-    if (this.sharedPublicFeed && this.store.loaded.markets && (frame.markets() || !this.requestSharedSnapshot)) {
+    if (
+      this.sharedPublicFeed &&
+      receivedLoaded & LOADED_FLAG.MARKETS &&
+      (frame.markets() || !this.requestSharedSnapshot)
+    ) {
       try {
         this.sharedPublicFeed.validateMarkets(this.store.markets);
       } catch (error) {
@@ -769,6 +780,7 @@ export class RustEngineExchange extends BaseExchange {
         this.sharedPublicFeed.send({ op: 'snapshot' });
       }
     }
+    this.nativeLoaded = receivedLoaded;
     for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
     if (!this.onFrame || this.feedBookListeners.size) {
       for (const { symbol, orderbook } of this.applier.books(frame)) {
@@ -799,6 +811,20 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     this.onFrame?.(buffer);
+    // Forward the catalog before a subscription can synchronously produce data.
+    if (!this.publicDemandReady && this.nativeLoaded & LOADED_FLAG.MARKETS && !this.isDisposed) {
+      this.publicDemandReady = true;
+      const books = [...this.bookListeners];
+      const candles = [...this.candleListeners];
+      for (const [symbol, listeners] of books)
+        if (this.bookListeners.get(symbol) === listeners && listeners.size) this.bookDemand(symbol, true);
+      for (const [key, listeners] of candles)
+        if (this.candleListeners.get(key) === listeners && listeners.size) {
+          const separator = key.lastIndexOf(':');
+          this.candleDemand(key.slice(0, separator), key.slice(separator + 1) as OHLCVOptions['interval'], true);
+        }
+    }
+    for (const wake of this.startupWaiters) wake();
   };
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
@@ -814,21 +840,20 @@ export class RustEngineExchange extends BaseExchange {
   private untilLoaded = () =>
     new Promise<void>((resolve, reject) => {
       const ready = () => {
-        const loaded = this.store.loaded;
-        const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
-        return loaded.markets && loaded.tickers && account && (!this.sharedPublicFeed || this.sharedPublicReady);
+        const required =
+          LOADED_FLAG.MARKETS |
+          LOADED_FLAG.TICKERS |
+          (this.isPublicDataOnly ? 0 : LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS);
+        return (this.nativeLoaded & required) === required && (!this.sharedPublicFeed || this.sharedPublicReady);
       };
-      let unsubscribe = () => {};
       const wake = () => {
         if (!this.startupFailure && !this.isDisposed && !ready()) return;
-        unsubscribe();
         this.startupWaiters.delete(wake);
         if (this.startupFailure || this.isDisposed)
           reject(this.startupFailure ?? new Error('Exchange disposed during startup'));
         else resolve();
       };
       this.startupWaiters.add(wake);
-      unsubscribe = this.store.subscribe(wake);
       wake();
     });
 
@@ -1054,9 +1079,52 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   // The engine reconciles orders and positions itself; reads serve its state.
-  fetchMarkets = async () => this.store.markets;
+  /** Public reads wait for native data, independently of private reconciliation. */
+  private untilNativeData = (flag: number, label: string): Promise<void> => {
+    const ready = new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
+        this.startupWaiters.delete(wake);
+        if (error) reject(error);
+        else resolve();
+      };
+      const wake = () => {
+        const failure = this.engineFailure ?? this.startupFailure;
+        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during public read'));
+        else if (
+          (this.nativeLoaded & flag) === flag &&
+          (!(flag & LOADED_FLAG.TICKERS) || !this.sharedPublicFeed || this.sharedPublicReady)
+        )
+          finish();
+      };
+      const timeout = setTimeout(() => finish(new Error(`Timed out waiting for native ${label}`)), 30_000);
+      this.startupWaiters.add(wake);
+      wake();
+    });
+    // Own the background startup rejection even when a public read finishes first.
+    void this.start().catch((error: unknown) => {
+      this.startupFailure ??= error instanceof Error ? error : new Error(String(error));
+      for (const wake of this.startupWaiters) wake();
+    });
+    return ready;
+  };
 
-  fetchTickers = async () => this.store.tickers;
+  fetchMarkets = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+    this.assertEngineAlive();
+    return this.store.markets;
+  };
+
+  fetchTickers = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS, 'tickers');
+    this.assertEngineAlive();
+    return this.store.tickers;
+  };
+
+  private assertEngineAlive = () => {
+    if (this.engineFailure || this.startupFailure) throw this.engineFailure ?? this.startupFailure;
+    if (this.isDisposed) throw new Error('Exchange disposed');
+  };
 
   /** Native reconciliation owns refresh; account consumers read the current balance. */
   fetchBalance = async () => this.store.balance;
@@ -1234,24 +1302,29 @@ export class RustEngineExchange extends BaseExchange {
 
   listenOrderBook = (symbol: string, callback: (book: OrderBook) => void) => {
     let listeners = this.bookListeners.get(symbol);
+    const first = !listeners;
     if (!listeners) {
       listeners = new Map();
       this.bookListeners.set(symbol, listeners);
-      if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: true });
-      this.subscriptionCommand({ op: 'subscribeOrderBook', symbol });
     }
     const listenerId =
       (this.name !== 'asterdex' ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
       ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
+    if (first) this.bookDemand(symbol, true);
     return () => {
       if (!listeners!.delete(listenerId)) return;
       if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
         this.bookListeners.delete(symbol);
-        if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: false });
-        this.subscriptionCommand({ op: 'unsubscribeOrderBook', symbol });
+        this.bookDemand(symbol, false);
       }
     };
+  };
+
+  private bookDemand = (symbol: string, subscribe: boolean) => {
+    if (!this.publicDemandReady || this.isDisposed) return;
+    this.sharedPublicFeed?.send({ op: 'book', symbol, subscribe });
+    this.subscriptionCommand({ op: subscribe ? 'subscribeOrderBook' : 'unsubscribeOrderBook', symbol });
   };
 
   /** Provider listeners still receive data when normal callbacks are handled by the frame consumer. */
@@ -1269,23 +1342,26 @@ export class RustEngineExchange extends BaseExchange {
     const interval = this.candleInterval(opts.interval);
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
+    const first = !listeners;
     if (!listeners) {
       listeners = new Set();
       this.candleListeners.set(key, listeners);
-      if (this.sharedPublicFeed)
-        this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: true });
-      this.subscriptionCommand({ op: 'subscribeCandles', symbol: opts.symbol, interval });
     }
     listeners.add(callback);
+    if (first) this.candleDemand(opts.symbol, interval, true);
     return () => {
       listeners!.delete(callback);
       if (listeners!.size === 0 && this.candleListeners.get(key) === listeners) {
         this.candleListeners.delete(key);
-        if (this.sharedPublicFeed)
-          this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: false });
-        this.subscriptionCommand({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
+        this.candleDemand(opts.symbol, interval, false);
       }
     };
+  };
+
+  private candleDemand = (symbol: string, interval: OHLCVOptions['interval'], subscribe: boolean) => {
+    if (!this.publicDemandReady || this.isDisposed) return;
+    this.sharedPublicFeed?.send({ op: 'candle', symbol, interval, subscribe });
+    this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
   candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);

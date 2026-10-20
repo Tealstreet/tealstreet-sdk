@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, Market, PlaceOrderOpts } from '../../types';
+import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,7 @@ import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const MARKET: Market = {
   id: 'BTC-USDT',
@@ -27,7 +28,9 @@ const placement = (overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => (
   price: 100,
   ...overrides,
 });
-const fixture = (options: Partial<ExchangeOptions> = {}) => {
+const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<StoreData['loaded']> = {}) => {
+  // Native STATUS, rather than the seeded JS store, controls startup readiness.
+  const nativeLoaded = { markets: true, tickers: true, balance: true, orders: true, positions: true, ...initialLoaded };
   const result = vi.fn((_command: Record<string, unknown>): unknown => []);
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
@@ -40,7 +43,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({ loaded: nativeLoaded })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
@@ -58,7 +61,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const store = new DefaultStore();
   store.update({
     markets: [MARKET],
-    loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    loaded: { ...nativeLoaded },
   });
   const exchange = new RustEngineExchange(
     'apexomni',
@@ -71,13 +74,14 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
     },
     store,
   );
-  return { exchange, store, construct, commands, result, start };
+  const setNativeLoaded = (loaded: Partial<StoreData['loaded']>) => Object.assign(nativeLoaded, loaded);
+  return { exchange, store, construct, commands, result, start, setNativeLoaded };
 };
 
 describe('Rust ApeX Omni SDK boundary', () => {
   const exchanges: RustEngineExchange[] = [];
-  const setup = (options: Partial<ExchangeOptions> = {}) => {
-    const f = fixture(options);
+  const setup = (options: Partial<ExchangeOptions> = {}, loaded: Partial<StoreData['loaded']> = {}) => {
+    const f = fixture(options, loaded);
     exchanges.push(f.exchange);
     return f;
   };
@@ -182,8 +186,9 @@ describe('Rust ApeX Omni SDK boundary', () => {
   });
 
   it('fetches identity without an Omni seed or loaded account while sharing concurrent startup', async () => {
-    const { exchange, store, commands, result, construct, start } = setup({ omniKeySeed: undefined });
-    store.update({ loaded: { ...store.loaded, balance: false, orders: false, positions: false } });
+    const { exchange, store, commands, result, construct, start, setNativeLoaded } = setup(
+      { omniKeySeed: undefined }, { balance: false, orders: false, positions: false },
+    );
     const startup = exchange.start();
     void startup.catch(() => {});
     result.mockReturnValue({ userId: 'account-id', affiliateId: null });
@@ -196,15 +201,16 @@ describe('Rust ApeX Omni SDK boundary', () => {
     expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('omniKeySeed');
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });
     expect(commands).toHaveLength(2);
-    store.update({ loaded: { ...store.loaded, balance: true, orders: true, positions: true } });
+    setNativeLoaded({ balance: true, orders: true, positions: true });
     await startup;
     expect(construct).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledOnce();
   });
 
   it('fetches identity with API credentials while every account section remains unloaded', async () => {
-    const { exchange, store, commands, result, start } = setup({ omniKeySeed: undefined });
-    store.update({ loaded: { markets: false, tickers: false, balance: false, orders: false, positions: false } });
+    const { exchange, store, commands, result, start } = setup(
+      { omniKeySeed: undefined }, { markets: false, tickers: false, balance: false, orders: false, positions: false },
+    );
     result.mockReturnValue({ userId: 'account-id', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });
     expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
@@ -224,13 +230,12 @@ describe('Rust ApeX Omni SDK boundary', () => {
   });
 
   it('starts account validation after an identity-only host was created', async () => {
-    const { exchange, store, construct, start } = setup();
-    store.update({ loaded: { ...store.loaded, balance: false } });
+    const { exchange, store, construct, start, setNativeLoaded } = setup({}, { balance: false });
     await exchange.getAccount();
     expect(start).not.toHaveBeenCalled();
     const validation = exchange.validateAccount();
     await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
-    store.update({ loaded: { ...store.loaded, balance: true } });
+    setNativeLoaded({ balance: true });
     await expect(validation).resolves.toEqual({ error: '', balance: store.balance });
     expect(construct).toHaveBeenCalledOnce();
   });
