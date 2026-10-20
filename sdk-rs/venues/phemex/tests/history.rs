@@ -824,16 +824,30 @@ fn unknown_lookup_market_is_nondefinitive_without_io_even_without_credentials() 
 fn ledger_identity_preserves_money_digits_beyond_binary_float_precision() {
     let mut e = engine(true);
     let a = query(&mut e, income(1000., 2000., None));
-    let x = ledger(1100, "0.000000001", "10000000000000000.000000001", "REALIZED_PNL", "USDT");
-    let y = ledger(1100, "0.000000001", "10000000000000000.000000002", "REALIZED_PNL", "USDT");
+    let x = ledger(
+        1100,
+        "0.000000001",
+        "10000000000000000.000000001",
+        "REALIZED_PNL",
+        "USDT",
+    );
+    let y = ledger(
+        1100,
+        "0.000000001",
+        "10000000000000000.000000002",
+        "REALIZED_PNL",
+        "USDT",
+    );
     let body = format!("[{x},{y}]");
     respond(&mut e, &a, &body, true);
     let a = next_http(&mut e);
     respond(&mut e, &a, &body, true);
     let result = finish_empty_probes(&mut e).unwrap();
     #[derive(Deserialize)]
-    #[serde(rename_all="camelCase")]
-    struct Income { tran_id: String }
+    #[serde(rename_all = "camelCase")]
+    struct Income {
+        tran_id: String,
+    }
     let rows: Vec<Income> = serde_json::from_str(&result).unwrap();
     assert_eq!(rows.len(), 2);
     assert_ne!(rows[0].tran_id, rows[1].tran_id);
