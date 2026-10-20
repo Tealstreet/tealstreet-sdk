@@ -58,3 +58,23 @@ private snapshots retain their stricter all-or-nothing safety contract.
 - Planning: brief, spec, root/package contracts and port review findings read.
   Fresh branch created; independent broker/cancel implementers and startup
   survey are active with disjoint write responsibilities.
+- Broker phase: all 48 registered names inventoried in
+  `RUST_BROKER_ATTRIBUTION.md`; missing public factory headers and BloFin gated
+  placement attribution repaired. Independent review also caught configured
+  KuCoin partner signatures on authenticated public reads; repaired and covered
+  for futures, spot and public-data-only accounts.
+- Cancel phase: eight silent-drop planners now reject absent routing context
+  before any write. KuCoin sends unknown native IDs, continues mixed batches,
+  and preserves stops on symbol cancellation. Independent integration review
+  found that the SDK generic cancel-all loop no longer reached KuCoin stops;
+  the SDK now sends the explicit account scope, including for an empty store.
+  Native cancellation and SDK scope regressions pass.
+- Public startup checkpoint: implementation and phase reviews saved on
+  `feat/rust-public-startup` at `bfce1c1012`; it is not part of PR 1. Remaining
+  review fixes include incomplete Hyperliquid quote contexts and early-private
+  valuation when public prices are unavailable. No public phase completion is
+  claimed yet.
+- Integration: landing merged through `fc809a9d85`. Exact-source full checks
+  are running before the broker/cancel PR. Native and wasm Clippy, root
+  typecheck (44 tasks) and lint (28 tasks) pass. Harness timing and rebuilt
+  wasm checks remain pending; no failed run is treated as a pass.
