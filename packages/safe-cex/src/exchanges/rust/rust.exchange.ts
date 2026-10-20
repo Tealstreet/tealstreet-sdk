@@ -23,11 +23,12 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
+import type { CallableMethodsInWorker } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 
 import bs58 from 'bs58';
 
-import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
@@ -261,6 +262,7 @@ export class RustEngineExchange extends BaseExchange {
   private requestSharedSnapshot = false;
   private sharedPublicReady = false;
   private nativeLoaded = 0;
+  private readonly commandTimeoutMs: number;
   private publicDemandReady = false;
   private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
@@ -293,7 +295,11 @@ export class RustEngineExchange extends BaseExchange {
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
+      throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
+    this.commandTimeoutMs = commandTimeoutMs;
     this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(
       exchangeName,
     );
@@ -648,8 +654,20 @@ export class RustEngineExchange extends BaseExchange {
           this.emitter.emit('deactivate');
         },
       },
+      { commandTimeoutMs: this.commandTimeoutMs },
     );
   };
+
+  protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
+
+  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker): Error =>
+    Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+      code: 'COMMAND_TIMEOUT',
+      command: method,
+      ...(['setLeverage', 'scheduleCancel', 'changePositionMode', 'changeMarginType'].includes(method)
+        ? { outcome: 'unknown' as const }
+        : {}),
+    });
 
   private receiveEngineFailure = (error: Error) => {
     if (this.engineFailure) return;
@@ -1006,9 +1024,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
+    const descriptors = orders.map(({ id, symbol, type }) => ({ id, symbol, type }));
     if (this.name === 'asterdex' || this.name === 'kucoinspot') {
-      await this.command({ op: 'cancelOrdersWithSymbols', orders: orders.map(({ id, symbol }) => ({ id, symbol })) });
-    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
+      await this.command({ op: 'cancelOrdersWithSymbols', orders: descriptors });
+    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
   };
 
   cancelSymbolOrders = async (symbol: string) => {

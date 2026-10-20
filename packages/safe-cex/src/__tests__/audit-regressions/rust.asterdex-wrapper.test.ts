@@ -249,11 +249,11 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     const [id] = await exchange.placeOrder({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 });
     expect(id).toBe('newly-acked');
     expect(store.orders).toEqual([]);
-    await exchange.cancelOrders([{ id, symbol: 'BTCUSDT' } as Order]);
-    await exchange.cancelOrders([{ id: 'external', symbol: 'ETHUSDT' } as Order]);
+    await exchange.cancelOrders([{ id, symbol: 'BTCUSDT', type: OrderType.Limit } as Order]);
+    await exchange.cancelOrders([{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss } as Order]);
     expect(commands.slice(-2)).toMatchObject([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'newly-acked', symbol: 'BTCUSDT' }] },
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'external', symbol: 'ETHUSDT' }] },
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit }] },
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss }] },
     ]);
     expect(store.orders).toEqual([]);
   });

@@ -87,11 +87,11 @@ describe('KuCoin spot Rust SDK boundary', () => {
   it('keeps the supplied symbol when canceling or amending an uncached order', async () => {
     const { exchange, commands } = setup();
     await exchange.start();
-    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT' } as Parameters<typeof exchange.cancelOrders>[0][number];
+    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit } as Parameters<typeof exchange.cancelOrders>[0][number];
     await exchange.cancelOrders([uncached]);
     await exchange.updateOrder({ order: uncached, update: { price: 101 } });
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT' }] },
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }] },
       { op: 'amendOrderWithSymbol', id: 'lost-ack-id', symbol: 'BTC-USDT', price: 101 },
     ]);
   });

@@ -34,6 +34,8 @@ class ControlledEngine implements WasmEngineLike {
   trapWrites = false;
   trapSubscriptions = false;
   holdCommands = false;
+  completeAfterMs = 0;
+  commandError: Record<string, unknown> | undefined;
   commands: Array<Record<string, unknown>> = [];
   current: Partial<StoreData> = {
     markets: [market],
@@ -57,6 +59,12 @@ class ControlledEngine implements WasmEngineLike {
     if (this.trapWrites && command.op === 'placeOrders') throw new WebAssembly.RuntimeError('placement panic');
     if (this.trapSubscriptions && command.op === 'subscribeOrderBook')
       throw new WebAssembly.RuntimeError('subscription panic');
+    if (command.command !== undefined && this.completeAfterMs) {
+      return JSON.stringify([{ op: 'setTimer', timer: command.command, at: Date.now() + this.completeAfterMs }]);
+    }
+    if (command.command !== undefined && this.commandError) {
+      return JSON.stringify([{ op: 'done', command: command.command, error: JSON.stringify(this.commandError) }]);
+    }
     if (this.holdCommands && command.command !== undefined) return '[]';
     return command.command === undefined
       ? '[]'
@@ -94,7 +102,7 @@ class ControlledEngine implements WasmEngineLike {
   httpChunk = this.wsOpen;
   httpEnd = this.wsOpen;
   httpFailed = this.wsOpen;
-  timer = this.wsOpen;
+  timer = (id: number) => JSON.stringify([{ op: 'done', command: id, result: '["late-accepted"]' }]);
 }
 const transport: Transport = {
   now: () => Date.now(),
@@ -104,7 +112,7 @@ const transport: Transport = {
   connect: () => {
     throw new Error('No fixture sockets');
   },
-  setTimeout,
+  setTimeout: (callback, ms) => setTimeout(callback, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 const workers: ExchangeWorker[] = [];
@@ -466,6 +474,184 @@ describe('Rust worker engine ownership', () => {
     expect(replies).toHaveLength(1);
     expect(replies[0].data[0]).toMatchObject({ success: false, error: expect.stringContaining('outcome is unknown') });
   });
+
+  it('settles pending native read/write on disposal before fallback and fences late state', async () => {
+    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
+      const orderIds = await exchange.placeOrder({
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+        clientOrderId: 'caller-disposed',
+      });
+      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
+    });
+    const { worker, messages } = createWorker();
+    const sibling = createWorker({}, 'sibling');
+    await start(worker);
+    await start(sibling.worker);
+    const original = worker.exchange as RustEngineExchange;
+    const oldFrame = original.onFrame!;
+    const oldStore = worker.store;
+    sources[0].holdCommands = true;
+    worker.handlePayload({ op: 'exec', data: { reqId: 'write-dispose', command: 'fixture' } });
+    worker.handlePayload({
+      op: 'callMethod',
+      data: { requestId: 'read-dispose', method: 'fetchOHLCV', args: [{ symbol: market.symbol, interval: '1m' }] },
+    });
+    worker.dispose();
+    worker.dispose();
+    const boundary = messages.length;
+    oldFrame(new ArrayBuffer(1));
+    oldStore.update({ balance: { total: 999, free: 999, used: 0, upnl: 0 } });
+    await vi.advanceTimersByTimeAsync(0);
+    const write = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'write-dispose');
+    expect(write).toHaveLength(1);
+    expect(write[0].data[0]).toMatchObject({
+      success: false,
+      errorDetails: {
+        code: 'ENGINE_DISPOSED',
+        command: 'placeOrders',
+        outcome: 'unknown',
+        clientOrderId: 'caller-disposed',
+        clientOrderIds: ['caller-disposed'],
+      },
+    });
+    const read = messages.filter((m) => m.op === 'callMethod:done' && m.data.requestId === 'read-dispose');
+    expect(read).toHaveLength(1);
+    expect(read[0].data).toMatchObject({
+      success: false,
+      result: { code: 'ENGINE_DISPOSED', command: 'fetchCandles' },
+    });
+    expect(read[0].data.result).not.toHaveProperty('outcome');
+    expect(messages.slice(boundary).some((m) => m.op === 'frame' || m.op === 'store')).toBe(false);
+    expect(sibling.worker.exchange?.isDisposed).toBe(false);
+    expect(sources[0].commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
+    expect(sources).toHaveLength(2);
+  });
+
+  it('keeps a known acknowledgement queued before repeated normal dispose', async () => {
+    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
+      const orderIds = await exchange.placeOrder({
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+      });
+      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
+    });
+    const { worker, messages } = createWorker();
+    await start(worker);
+    worker.handlePayload({ op: 'exec', data: { reqId: 'known-dispose', command: 'fixture' } });
+    worker.dispose();
+    worker.dispose();
+    await vi.advanceTimersByTimeAsync(0);
+    const replies = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'known-dispose');
+    expect(replies).toHaveLength(1);
+    expect(replies[0].data[0]).toMatchObject({ success: true, data: { orderIds: ['accepted-id'] } });
+  });
+
+  it('retains native partial receipts queued before disposal without inventing unknown attribution', async () => {
+    registerCommandExecutor(async (exchange) => {
+      await exchange.placeOrder({ symbol: market.symbol, side: OrderSide.Buy, type: OrderType.Market, amount: 1 });
+    });
+    const { worker, messages } = createWorker();
+    await start(worker);
+    sources[0].commandError = {
+      message: 'second leg refused',
+      partialOrderIds: ['known-first'],
+      partialOrderCount: 1,
+      totalOrderCount: 2,
+      failedOrderIndex: 1,
+    };
+    worker.handlePayload({ op: 'exec', data: { reqId: 'partial-dispose', command: 'fixture' } });
+    worker.dispose();
+    await vi.advanceTimersByTimeAsync(0);
+    const replies = messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'partial-dispose');
+    expect(replies).toHaveLength(1);
+    expect(replies[0].data[0]).toMatchObject({
+      success: false,
+      errorDetails: {
+        message: 'second leg refused',
+        partialOrderIds: ['known-first'],
+        partialOrderCount: 1,
+        totalOrderCount: 2,
+        failedOrderIndex: 1,
+      },
+    });
+    expect(replies[0].data[0].errorDetails).not.toHaveProperty('outcome');
+  });
+
+  it('bounds a live native command deadline, ignores late completion, and never replays the write', async () => {
+    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
+      const orderIds = await exchange.placeOrder({
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+        clientOrderId: 'caller-timeout',
+      });
+      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
+    });
+    const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } });
+    await start(worker);
+    expect((worker.exchange as unknown as { commandTimeoutMs: number }).commandTimeoutMs).toBe(20);
+    sources[0].completeAfterMs = 40;
+    worker.handlePayload({ op: 'exec', data: { reqId: 'deadline', command: 'fixture' } });
+    await vi.advanceTimersByTimeAsync(25);
+    const replies = () => messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'deadline');
+    expect(replies()).toHaveLength(1);
+    expect(replies()[0].data[0]).toMatchObject({
+      success: false,
+      errorDetails: {
+        code: 'COMMAND_TIMEOUT',
+        command: 'placeOrders',
+        timeoutMs: 20,
+        outcome: 'unknown',
+        clientOrderId: 'caller-timeout',
+      },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(replies()).toHaveLength(1);
+    expect(worker.exchange?.isDisposed).toBe(false);
+    expect(sources[0].commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
+    expect(sources).toHaveLength(1);
+  });
+
+  it.each(['setLeverage', 'fetchOHLCV'] as const)(
+    'settles silent %s fallback once even when cleanup throws',
+    async (method) => {
+      const { worker, messages } = createWorker();
+      await start(worker);
+      const original = worker.exchange!;
+      let finish!: (value: any) => void;
+      vi.spyOn(original, method).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }) as never,
+      );
+      worker.handlePayload({ op: 'callMethod', data: { requestId: 'silent', method, args: [] } });
+      const oldFrame = (original as RustEngineExchange).onFrame!;
+      const realDispose = original.dispose.bind(original);
+      vi.spyOn(original, 'dispose').mockImplementation(() => {
+        realDispose();
+        throw new Error('cleanup failed');
+      });
+      expect(() => worker.dispose()).toThrow('cleanup failed');
+      worker.dispose();
+      oldFrame(new ArrayBuffer(1));
+      await vi.advanceTimersByTimeAsync(0);
+      finish([]);
+      await vi.advanceTimersByTimeAsync(0);
+      const replies = messages.filter((m) => m.op === 'callMethod:done' && m.data.requestId === 'silent');
+      expect(replies).toHaveLength(1);
+      expect(replies[0].data).toMatchObject({ success: false, result: { code: 'ENGINE_DISPOSED', command: method } });
+      if (method === 'setLeverage') expect(replies[0].data.result.outcome).toBe('unknown');
+      else expect(replies[0].data.result).not.toHaveProperty('outcome');
+      expect(messages.some((m) => m.op === 'frame' && m.data.byteLength === 1)).toBe(false);
+    },
+  );
 
   it('keeps SharedWorker attachments on the recovering owner', async () => {
     const context = () => {

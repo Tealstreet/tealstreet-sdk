@@ -158,6 +158,8 @@ export type ExchangeOptions = {
   readonly extra?: {
     /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
     tickInterval?: number;
+    /** Rust command waiting deadline in ms (default 120000); expiry never retries or cancels a write. */
+    rustCommandTimeoutMs?: number;
     recvWindow?: number;
     // Optional AsterDEX REST API version override.
     asterdexApiVersion?: 'v1' | 'v3';

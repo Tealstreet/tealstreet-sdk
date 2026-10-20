@@ -13,6 +13,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 import { TinyEmitter } from 'tiny-emitter';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { deserializeCommandError } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
@@ -1516,20 +1517,24 @@ export class BaseExchange implements Exchange {
     });
   };
 
+  protected workerCommandTimeoutMs = () => 5000;
+
+  protected workerCommandTimeoutError = (_method: CallableMethodsInWorker): Error =>
+    new Error('Timeout callMethodInWorker');
+
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
-    this.emitter.emit('callMethod', { method, args, requestId });
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
-        reject(new Error('Timeout callMethodInWorker'));
-      }, 5000);
+        reject(this.workerCommandTimeoutError(method));
+      }, this.workerCommandTimeoutMs());
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
@@ -1538,22 +1543,18 @@ export class BaseExchange implements Exchange {
             resolve(event.result);
             this.afterMethodCalledInWorker(event.result, method, ...args);
           } else {
-            // Reconstruct error from serialized format
-            let err: Error;
-            if (typeof event.result === 'object' && event.result !== null) {
-              err = new Error(event.result.message || 'Unknown error');
-              if (event.result.name) err.name = event.result.name;
-              if (event.result.stack) err.stack = event.result.stack;
-              // Restore custom properties like 'code' from exchange errors
-              if (event.result.code !== undefined) (err as any).code = event.result.code;
-            } else {
-              err = new Error(event.result || 'Unknown error');
-            }
-            reject(err);
+            reject(deserializeCommandError(event.result));
           }
         }
       };
       this.emitter.on('callMethod:done', handleDone);
+      try {
+        this.emitter.emit('callMethod', { method, args, requestId });
+      } catch (error) {
+        clearTimeout(timeout);
+        this.emitter.off('callMethod:done', handleDone);
+        reject(error);
+      }
     });
   };
 

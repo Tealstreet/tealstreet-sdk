@@ -3,6 +3,7 @@ import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => { exchanges.splice(0).forEach((exchange) => exchange.dispose()); vi.restoreAllMocks(); });
@@ -10,7 +11,11 @@ const setup = (reject = true) => {
   const empty = () => '[]';
   const start = vi.fn(() => reject ? '[{"op":"deactivate"}]' : '[]');
   const engine: WasmEngineLike = {
-    start, command: empty, takeFrame: () => undefined, snapshotFrame: () => new Uint8Array(),
+    start, command: empty,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: !reject, tickers: !reject, balance: !reject, orders: !reject, positions: !reject },
+    })),
+    snapshotFrame: () => new Uint8Array(),
     wsOpen: empty, wsMessage: empty, wsClose: empty, httpStart: empty,
     httpChunk: empty, httpEnd: empty, httpFailed: empty, timer: empty,
   };

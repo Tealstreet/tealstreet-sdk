@@ -190,6 +190,7 @@ describe('CommandHandler', () => {
           handled: true,
           success: false,
           error: expect.stringContaining('boom'),
+          errorDetails: { message: 'boom', name: 'Error', stack: expect.any(String) },
         });
       });
     });

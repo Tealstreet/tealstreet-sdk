@@ -278,6 +278,10 @@ retry N <body>
 Re-runs `<body>` up to N times after a failure. First attempt is "try 0",
 so `retry 3` means up to 4 total attempts.
 
+If an exchange reports an unknown write outcome or a batch reports accepted
+orders before a failure, the CLI stops retrying that command. Reconcile the
+account before placing a replacement; a timeout does not prove an order failed.
+
 | Bound       | Behavior                                                       |
 | ----------- | -------------------------------------------------------------- |
 | N = 0       | Same as not using `retry`                                      |

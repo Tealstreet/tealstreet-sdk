@@ -1,3 +1,4 @@
+import { serializeCommandError, type SerializedCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
 import type { CLIPlatformAdapter, ExchangeLike, TaskAction } from '../types';
 import type { CommandContext, CommandResult as CmdResult } from './Command';
 import type { PreprocessStore } from '../preprocess/types';
@@ -167,6 +168,8 @@ export interface ExecuteResult {
   success?: boolean;
   /** Error message from a handled command failure. */
   error?: string;
+  /** Known native rejection or interrupted-command attribution, when available. */
+  errorDetails?: SerializedCommandError;
   /**
    * The executor already printed this error to the user.
    *
@@ -323,7 +326,13 @@ export async function executeCommand(
   } catch (error) {
     const message = (error as Error).message;
     adapter.printError(`Command failed: ${message}`);
-    return { handled: true, success: false, error: message, errorReported: true };
+    return {
+      handled: true,
+      success: false,
+      error: message,
+      errorReported: true,
+      ...(error instanceof Error && { errorDetails: serializeCommandError(error) }),
+    };
   }
 }
 

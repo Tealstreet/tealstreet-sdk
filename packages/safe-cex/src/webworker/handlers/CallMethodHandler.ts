@@ -1,3 +1,4 @@
+import { serializeCommandError } from '../../commandOutcome';
 import { CallableMethodsInWorker } from '../../exchanges/base';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
@@ -106,26 +107,7 @@ export class CallMethodHandler extends BaseHandler {
       this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
     } catch (e: any) {
       console.error('Error calling method', e);
-      // Serialize error with all properties including custom ones like 'code'
-      const serializedError =
-        e instanceof Error
-          ? {
-              message: e.message,
-              name: e.name,
-              stack: e.stack,
-              // Preserve custom properties like 'code' from exchange errors
-              ...('code' in e && { code: (e as Error & { code: unknown }).code }),
-              ...('code' in e && e.code === 'ENGINE_DEAD' && {
-                ...('outcome' in e && e.outcome === 'unknown' && { outcome: 'unknown' }),
-                ...('clientOrderId' in e && typeof e.clientOrderId === 'string' && { clientOrderId: e.clientOrderId }),
-                ...('clientOrderIds' in e && Array.isArray(e.clientOrderIds) && {
-                  clientOrderIds: e.clientOrderIds.filter((id: unknown) => typeof id === 'string'),
-                }),
-              }),
-            }
-          : {
-              message: String(e),
-            };
+      const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
         data: { requestId, success: false, result: serializedError },

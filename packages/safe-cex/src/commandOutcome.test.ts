@@ -1,0 +1,93 @@
+import { describe, expect, it } from 'vitest';
+
+import { deserializeCommandError, serializeCommandError } from './commandOutcome';
+
+// The worker and normal CLI share this exact allowlist at their clone boundary.
+describe('command outcome serialization', () => {
+  it.each(['ENGINE_DEAD', 'COMMAND_TIMEOUT', 'ENGINE_DISPOSED'])(
+    'round trips %s attribution through structured clone',
+    (code) => {
+      const error = Object.assign(new Error('Write interrupted'), {
+        name: 'InterruptedCommandError',
+        code,
+        command: 'placeOrders',
+        timeoutMs: 120000,
+        outcome: 'unknown',
+        clientOrderId: 'caller-a',
+        clientOrderIds: ['caller-a', 'caller-b'],
+        request: { secret: 'must not cross' },
+        cause: new Error('internal'),
+      });
+      const details = serializeCommandError(error);
+      const restored = deserializeCommandError(structuredClone(details));
+      expect(restored).toBeInstanceOf(Error);
+      expect(restored).toMatchObject({
+        message: 'Write interrupted',
+        name: 'InterruptedCommandError',
+        code,
+        command: 'placeOrders',
+        timeoutMs: 120000,
+        outcome: 'unknown',
+        clientOrderId: 'caller-a',
+        clientOrderIds: ['caller-a', 'caller-b'],
+      });
+      expect(restored).not.toHaveProperty('request');
+      expect(restored).not.toHaveProperty('cause');
+      expect(details.clientOrderIds).not.toBe(error.clientOrderIds);
+    },
+  );
+
+  it('retains known partial failure receipts without inventing an unknown outcome', () => {
+    const error = Object.assign(new Error('Second order refused'), {
+      code: 400,
+      command: 'placeOrders',
+      partialOrderIds: ['venue-accepted'],
+      partialOrderCount: 1,
+      totalOrderCount: 2,
+      failedOrderIndex: 1,
+    });
+    const restored = deserializeCommandError(structuredClone(serializeCommandError(error)));
+    expect(restored).toMatchObject({
+      message: error.message,
+      code: 400,
+      command: 'placeOrders',
+      partialOrderIds: ['venue-accepted'],
+      partialOrderCount: 1,
+      totalOrderCount: 2,
+      failedOrderIndex: 1,
+    });
+    expect(restored).not.toHaveProperty('outcome');
+    expect(restored).not.toHaveProperty('clientOrderId');
+    expect(restored.partialOrderIds).not.toBe(error.partialOrderIds);
+  });
+
+  it('drops invalid metadata and does not coerce mixed identity arrays or unsafe counts', () => {
+    expect(
+      serializeCommandError({
+        message: 'Rejected',
+        name: 1,
+        code: NaN,
+        command: {},
+        timeoutMs: Infinity,
+        outcome: 'success',
+        clientOrderId: 123,
+        clientOrderIds: ['valid', 1],
+        partialOrderIds: [null],
+        partialOrderCount: -1,
+        totalOrderCount: Number.MAX_SAFE_INTEGER + 1,
+        failedOrderIndex: 0.5,
+        arbitrary: () => {},
+      }),
+    ).toEqual({ message: 'Rejected' });
+    expect(serializeCommandError({ message: 'Bad timeout', timeoutMs: 2147483648 })).toEqual({
+      message: 'Bad timeout',
+    });
+  });
+
+  it('preserves plain failures and read interruption without adding write uncertainty', () => {
+    expect(serializeCommandError('plain failure')).toEqual({ message: 'plain failure' });
+    expect(serializeCommandError(null)).toEqual({ message: 'null' });
+    const error = Object.assign(new Error('Read interrupted'), { code: 'ENGINE_DISPOSED', command: 'fetchOHLCV' });
+    expect(serializeCommandError(error)).not.toHaveProperty('outcome');
+  });
+});

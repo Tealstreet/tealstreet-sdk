@@ -7,6 +7,7 @@ import { DefaultStore } from '../../store/store.base';
 import { isInertCapability } from '../../exchanges/base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const running: RustEngineExchange[] = [];
 const fixture = (options: Partial<ExchangeOptions> = {}, startupActions: unknown[] = [], loaded = true) => {
@@ -15,7 +16,14 @@ const fixture = (options: Partial<ExchangeOptions> = {}, startupActions: unknown
   const engine: WasmEngineLike = {
     start: () => JSON.stringify(startupActions),
     command(json) { commands.push(JSON.parse(json)); return '[]'; },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: {
+        markets: loaded, tickers: loaded,
+        balance: loaded && !options.publicDataOnly,
+        orders: loaded && !options.publicDataOnly,
+        positions: loaded && !options.publicDataOnly,
+      },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
     httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,

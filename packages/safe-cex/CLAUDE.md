@@ -109,6 +109,20 @@ Shared-feed accounts require a fresh provider attachment and account init;
 their closed transferred port cannot be reused. Module-wide WASM initialization
 and sibling accounts remain independent of one account's terminal state.
 
+Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
+positive integer deadline up to 2147482647 ms; long paginated queries may need
+a larger value. The Rust worker RPC allows one additional second for delivery;
+TS worker RPCs retain their five-second wait. Expiry does not cancel the venue
+action, dispose the engine or retry a write. `COMMAND_TIMEOUT` and
+`ENGINE_DISPOSED` preserve unknown outcomes for interrupted writes and currently
+known caller client IDs. Native-generated identity receipts are tracked by the
+bridge-fixes plan; caller IDs alone do not establish complete attribution.
+Native rejections retain known partial-order results. SDK worker and outer CLI
+executor error boundaries copy an explicit allowlist of command fields, including IDs and
+partial counts, instead of flattening them or copying arbitrary error objects.
+Cancellation commands retain the caller's id, symbol and type alongside legacy
+ID dispatch; venue unknown-ID behavior is a separate native contract.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

@@ -634,3 +634,18 @@ a venue lists — reproduced in a test as an entire bracket placed on `SUSDT`
 instead of `BTCUSDT`. Note the reproduction needs a TICKER, not just a market:
 `validateSymbol` checks `store.tickers`, which is why the default fixture hid
 this.
+
+## Structured command failures
+
+`executeCommand` preserves actual thrown `Error` attribution as optional
+`ExecuteResult.errorDetails`, using safe-cex's `src/commandOutcome` allowlist.
+The worker router forwards it alongside the existing error string and
+`errorReported` flag. Interrupted native writes may carry caller client IDs and
+`outcome: 'unknown'`; known partial venue rejections retain accepted order IDs
+without becoming unknown outcomes. Neither serialization nor timeout authorizes
+a retry or reconstructs missing native-generated IDs.
+
+This outer-executor contract covers errors that propagate from awaited order
+calls. Commands which aggregate or log errors internally (global close, swarm,
+and fire-and-forget nuke) keep their existing result semantics; the outer
+executor cannot recover metadata those command implementations have discarded.

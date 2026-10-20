@@ -13,8 +13,64 @@
 // }
 
 const CHUNK_BYTES = 16 * 1024;
+export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+const commandTimeout = (value) => {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
+    throw new RangeError('Command timeout must be a positive safe integer <= 2147483647');
+  }
+  return value;
+};
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
+class UnknownEngineActionError extends Error {}
+
+function interruptedCommand(error, command, interrupted) {
+  if (!command) return;
+  error.command = command.op;
+  if (interrupted && WRITE_COMMANDS.has(command.op)) {
+    error.outcome = 'unknown';
+    error.message += '; command outcome is unknown. Reconcile before retrying';
+  }
+  if (command.clientOrderId !== undefined) error.clientOrderId = command.clientOrderId;
+  if (command.clientOrderIds?.length) error.clientOrderIds = command.clientOrderIds;
+}
+
+export class CommandTimeoutError extends Error {
+  constructor(timeoutMs, command) {
+    super(`Engine command timed out after ${timeoutMs} ms`);
+    this.name = 'CommandTimeoutError';
+    this.code = 'COMMAND_TIMEOUT';
+    this.timeoutMs = timeoutMs;
+    interruptedCommand(this, command, true);
+  }
+}
+
+export class CommandDeadlineError extends Error {
+  constructor(cause, command) {
+    super('Unable to establish engine command deadline', { cause });
+    this.name = 'CommandDeadlineError';
+    this.code = 'COMMAND_DEADLINE_FAILED';
+    interruptedCommand(this, command, true);
+  }
+}
+
+export class CommandProtocolError extends Error {
+  constructor(cause, command) {
+    super('Invalid exchange engine command response', { cause });
+    this.name = 'CommandProtocolError';
+    this.code = 'ENGINE_PROTOCOL_ERROR';
+    interruptedCommand(this, command, true);
+  }
+}
+
+export class EngineDisposedError extends Error {
+  constructor(command, interrupted = false) {
+    super('engine disposed');
+    this.name = 'EngineDisposedError';
+    this.code = 'ENGINE_DISPOSED';
+    interruptedCommand(this, command, interrupted);
+  }
+}
 
 /** A trapped engine cannot be reused. An interrupted write may already exist at the venue. */
 export class EngineDeadError extends Error {
@@ -35,7 +91,8 @@ export class EngineDeadError extends Error {
 }
 
 export class EngineHost {
-  constructor(engine, transport, handlers = {}) {
+  constructor(engine, transport, handlers = {}, options = {}) {
+    this.commandTimeoutMs = commandTimeout(options.commandTimeoutMs === undefined ? DEFAULT_COMMAND_TIMEOUT_MS : options.commandTimeoutMs);
     this.engine = engine;
     this.transport = transport;
     this.handlers = handlers;
@@ -74,14 +131,17 @@ export class EngineHost {
       if (typeof WebAssembly === 'undefined' || !(error instanceof WebAssembly.RuntimeError)) throw error;
       this.deadError = new EngineDeadError(error);
       this.disposed = true;
-      try { this.cleanup(this.deadError, true); }
+      try { this.cleanup(); }
       finally { this.handlers.onDead?.(this.deadError); }
     }
   }
 
   /** Send a command; resolves with its result for commands that report one. */
-  command(command) {
-    if (this.disposed) return Promise.reject(this.deadError ?? new Error('engine disposed'));
+  command(command, options) {
+    if (this.disposed) return Promise.reject(this.deadError ?? new EngineDisposedError());
+    let timeoutMs;
+    try { timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs); }
+    catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
@@ -94,15 +154,51 @@ export class EngineHost {
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity }));
     try {
-      this.run(this.invoke(this.engine.command, JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+      const startedAt = this.transport.now();
+      const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply });
+      this.run(this.invoke(this.engine.command, json, startedAt));
       if (reply === undefined && this.deadError) return Promise.reject(this.deadError);
+      const pending = this.commands.get(reply);
+      if (pending) {
+        // Synchronous completions need no timer. Use the transport clock so replay
+        // and virtual transports retain their normal deadline semantics.
+        try {
+          const clock = typeof this.transport.setTimeout === 'function' && typeof this.transport.clearTimeout === 'function'
+            ? this.transport : globalThis;
+          const timer = clock.setTimeout(() => {
+            const current = this.commands.get(reply);
+            if (current) this.settleCommand(reply, new CommandTimeoutError(timeoutMs, current.identity), true);
+          }, Math.max(0, timeoutMs - (this.transport.now() - startedAt)));
+          pending.clearDeadline = () => clock.clearTimeout(timer);
+          // Also tolerate synchronous timer adapters and disposal during scheduling.
+          if (this.commands.get(reply) !== pending) {
+            try { pending.clearDeadline(); } catch { /* Settlement already won. */ }
+          }
+        } catch (cause) {
+          this.settleCommand(reply, new CommandDeadlineError(cause, pending.identity), true);
+        }
+      }
     } catch (error) {
       if (reply === undefined) return Promise.reject(error);
+      if (!this.commands.has(reply) && error instanceof UnknownEngineActionError) {
+        // A known completion cannot be undone, but protocol failures remain visible.
+        if (this.handlers.onLog) this.handlers.onLog('error', error.message);
+        else console.error(error);
+      }
       const pending = this.commands.get(reply);
-      this.commands.delete(reply);
-      pending?.reject(error);
+      this.settleCommand(reply, error instanceof UnknownEngineActionError
+        ? new CommandProtocolError(error, pending?.identity) : error, true);
     }
     return promise;
+  }
+
+  settleCommand(id, value, rejected = false) {
+    const pending = this.commands.get(id);
+    if (!pending) return;
+    this.commands.delete(id);
+    try { pending.clearDeadline?.(); } catch { /* A timer adapter cannot strand the caller. */ }
+    if (rejected) pending.reject(value);
+    else pending.resolve(value);
   }
 
   /**
@@ -120,14 +216,14 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
-    if (this.disposed) throw this.deadError ?? new Error('engine disposed');
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const frame = this.invoke(this.engine.snapshotFrame, this.transport.now());
     if (this.deadError) throw this.deadError;
     return frame.buffer;
   }
 
   accountId() {
-    if (this.disposed) throw this.deadError ?? new Error('engine disposed');
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const id = this.engine.accountId ? this.invoke(this.engine.accountId) : undefined;
     if (this.deadError) throw this.deadError;
     return id;
@@ -136,14 +232,15 @@ export class EngineHost {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this.cleanup(new Error('engine disposed'));
+    this.cleanup();
   }
 
-  cleanup(error, tolerateErrors = false) {
+  cleanup() {
     const attempt = (fn) => {
-      if (!tolerateErrors) { fn(); return; }
       try { fn(); } catch { /* A broken transport must not strand the remaining resources. */ }
     };
+    for (const [id, pending] of this.commands) this.settleCommand(id, this.deadError
+      ? new EngineDeadError(this.deadError.cause, pending.identity) : new EngineDisposedError(pending.identity, true), true);
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
     for (const pending of this.signings.values()) {
@@ -151,9 +248,6 @@ export class EngineHost {
       attempt(() => this.transport.clearTimeout(pending.timer));
     }
     this.signings.clear();
-    for (const pending of this.commands.values()) pending.reject(this.deadError
-      ? new EngineDeadError(this.deadError.cause, pending.identity) : error);
-    this.commands.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
@@ -256,13 +350,23 @@ export class EngineHost {
 
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
-    for (const action of JSON.parse(actionsJson)) this.execute(action);
+    let unknown;
+    for (const action of JSON.parse(actionsJson)) {
+      // Unknown protocol actions remain errors, but cannot discard the batch's
+      // subsequent command completions. Ordinary callbacks still propagate.
+      try { this.execute(action); }
+      catch (error) {
+        if (!(error instanceof UnknownEngineActionError)) throw error;
+        unknown ??= error;
+      }
+    }
+    if (unknown) throw unknown;
   }
 
   execute(action) {
     if (this.disposed) return;
     const { engine, transport } = this;
-    switch (action.op) {
+    switch (action?.op) {
       case 'signPayload':
         this.signPayload(action);
         break;
@@ -367,7 +471,6 @@ export class EngineHost {
         break;
       case 'done': {
         const pending = this.commands.get(action.command);
-        this.commands.delete(action.command);
         if (!pending) break;
         if (action.error !== undefined) {
           const error = new Error(action.error);
@@ -382,13 +485,18 @@ export class EngineHost {
               error.failedOrderIndex = details.failedOrderIndex;
             }
           } catch { /* Plain venue errors carry only their message. */ }
-          pending.reject(error);
+          this.settleCommand(action.command, error, true);
         }
-        else pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));
+        else {
+          let result;
+          try { result = action.result === undefined ? undefined : JSON.parse(action.result); }
+          catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
+          this.settleCommand(action.command, result);
+        }
         break;
       }
       default:
-        throw new Error(`unknown engine action: ${action.op}`);
+        throw new UnknownEngineActionError(`unknown engine action: ${action?.op}`);
     }
   }
 }

@@ -1,4 +1,6 @@
 /** Runs a WasmEngine against a transport. See host.mjs. */
+export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
+
 export interface Socket {
   send(text: string): void;
   close(): void;
@@ -66,6 +68,67 @@ export class EngineDeadError extends Error {
   readonly clientOrderIds?: string[];
 }
 
+export interface CommandIdentity {
+  op: string;
+  /** Caller-supplied identifiers only; native-generated identifiers need separate receipts. */
+  clientOrderId?: string;
+  clientOrderIds?: string[];
+}
+
+export class CommandTimeoutError extends Error {
+  constructor(timeoutMs: number, command?: CommandIdentity);
+  readonly code: 'COMMAND_TIMEOUT';
+  readonly timeoutMs: number;
+  readonly command?: string;
+  /** The write can still complete at the venue. Reconcile before retrying. */
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+}
+
+/** The host could not arm a deadline after handing the command to the engine.
+ * This is a waiting failure, not an expired deadline or an engine trap. */
+export class CommandDeadlineError extends Error {
+  constructor(cause: unknown, command?: CommandIdentity);
+  readonly code: 'COMMAND_DEADLINE_FAILED';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+}
+
+/** A malformed result or unsupported action prevents confirming the command outcome. */
+export class CommandProtocolError extends Error {
+  constructor(cause: unknown, command?: CommandIdentity);
+  readonly code: 'ENGINE_PROTOCOL_ERROR';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+}
+
+export class EngineDisposedError extends Error {
+  constructor(command?: CommandIdentity, interrupted?: boolean);
+  readonly code: 'ENGINE_DISPOSED';
+  readonly command?: string;
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
+}
+
+export interface EngineHostOptions {
+  /** Whole-command waiting deadline, including pagination; default 120000 ms.
+   * Positive safe integer <= 2147483647. Long history queries may need a larger value.
+   * Expiry does not cancel venue work or retry it. */
+  commandTimeoutMs?: number;
+}
+
+export interface CommandOptions {
+  /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
+   * Host metadata: never sent to the native engine or venue. */
+  timeoutMs?: number;
+}
+
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
   accountId?(): string | undefined;
@@ -95,10 +158,10 @@ export class EngineHost {
   readonly dead: boolean;
   readonly deadError?: EngineDeadError;
   accountId(): string | undefined;
-  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
+  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
   /** Resolves with the command's result for commands that report one. */
-  command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
+  command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;

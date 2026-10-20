@@ -17,6 +17,7 @@ import {
   resolveDeferredCaptures,
 } from '../../../packages/cli-core/src/index';
 import { FilePreprocessStore } from './preprocess-store';
+import { commandResultError, runCommandWithRetries } from './command-outcome';
 import {
   isAuditEnabled,
   setAuditEnabled,
@@ -1803,9 +1804,7 @@ async function processSingleCommand(command: string, captureTo?: string): Promis
     // waits see it (cli-core/CLAUDE.md, "Runner failure contract"). Carry
     // whether the executor already showed it to the user, or reportStepError
     // prints the same sentence a second time under a different prefix.
-    const err = new Error(result.error ?? 'Command failed') as Error & { alreadyReported?: boolean };
-    if (result.errorReported) err.alreadyReported = true;
-    throw err;
+    throw commandResultError(result);
   }
 
   // `<var> = <body>` capture (preprocess sets step.captureTo; runner
@@ -2171,17 +2170,10 @@ async function runStep(step: import('@tealstreet/cli-core').PreprocessedStep): P
   // `retry N <body>` — await + retry up to N times. The first attempt
   // is "try 0", so retry: 3 means up to 4 total attempts.
   if (step.retry !== undefined) {
-    let lastErr: Error | undefined;
-    for (let attempt = 0; attempt <= step.retry; attempt++) {
-      try {
-        await fire();
-        return;
-      } catch (e) {
-        lastErr = e as Error;
-      }
-    }
-    if (lastErr) {
-      reportStepError(step, new Error(`(after ${step.retry} retries) ${lastErr.message}`));
+    try {
+      await runCommandWithRetries(fire, step.retry);
+    } catch (error) {
+      reportStepError(step, error as Error);
     }
     return;
   }

@@ -361,3 +361,22 @@ TWAP instances are tracked by actual handler-created instance identity, never
 account name, so terminating one worker cannot stop another same-name account.
 `TwapInstance.start()` checks termination again after its awaited placement;
 otherwise a reply arriving after terminate could schedule another old slice.
+
+## Interrupted command replies
+
+Normal disposal fences state immediately, then lets pending native command
+rejections and acknowledgements already queued reach their original request IDs
+before one task fallback. Repeated disposal preserves that grace window. Host
+`ENGINE_DEAD`, `ENGINE_DISPOSED`, and `COMMAND_TIMEOUT` errors retain their
+allowlisted command, timeout, caller client IDs, unknown-outcome marker and known
+partial-order receipts through `commandOutcome.ts`; never spread arbitrary error
+properties into worker messages. Known venue rejections are not relabelled as
+unknown. Timeouts end the caller's wait; they do not prove cancellation or permit
+placement replay.
+
+The fallback knows only the RPC method: dispatched `setLeverage`,
+`changeMarginType`, `changePositionMode`, and `scheduleCancel` are interrupted
+writes, while reads receive no write-outcome marker. It must not parse CLI text
+or invent caller/native IDs. `exec-result.error` and
+`updatePositions:done.reason` remain strings; optional `errorDetails` carries the
+original structured failure when it is still available.

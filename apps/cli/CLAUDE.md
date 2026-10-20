@@ -524,6 +524,11 @@ name}` footer segment auto-runs the named script ~1×/sec
   relies on `processSingleCommand` throwing on that shape so `retry`,
   `set ec`, blocking waits, and capture writeback all see failures.
   Do not collapse returned failures back into plain `{ handled: true }`.
+  `command-outcome.ts` restores allowlisted `errorDetails` (including client IDs,
+  unknown outcomes and partial accepted IDs) before the REPL throws. Its retry
+  loop stops on unknown outcomes or accepted partial members; it must never
+  reissue the whole write in those cases. Fully rejected operations retain the
+  explicit retry count and the already-reported flag.
 - **`FilePreprocessStore` (`src/preprocess-store.ts`).** Subclasses
   `MemoryPreprocessStore` from `cli-core` to persist vars/aliases to
   `~/.tealstreet/vars.json` + `~/.tealstreet/aliases.json` after every

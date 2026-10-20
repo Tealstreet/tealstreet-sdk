@@ -1,3 +1,4 @@
+import type { SerializedCommandError } from '../commandOutcome';
 import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
@@ -103,6 +104,7 @@ export class ExchangeWorker {
   private _generation = 0;
   private _started = false;
   private _stopped = false;
+  private _disposed = false;
   private _recovering = false;
   private _recoveryAttempted = false;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -753,29 +755,40 @@ export class ExchangeWorker {
   }
 
   dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
     this._stopped = true;
     this._started = false;
     this._recovering = false;
     this._generation++;
+    this._throttledStoreUpdate.cancel();
     if (this._recoveryTimer !== null) clearTimeout(this._recoveryTimer);
     this._recoveryTimer = null;
-    if (this._pendingFailureTimer !== null) clearTimeout(this._pendingFailureTimer);
-    this._pendingFailureTimer = null;
     this._publicDemand.clear();
     this._latestUiState = null;
-    this._failPendingRequests('Exchange disposed; interrupted operation outcomes are unknown and were not replayed.');
+    this._deferInterruptedRequests({
+      message: 'Exchange disposed; interrupted operation outcomes are unknown and were not replayed.',
+      name: 'EngineDisposedError',
+      code: 'ENGINE_DISPOSED',
+    });
     this._messageBuffer = [];
-    this._stopOwnedTwaps();
     // Bump the token so any in-flight start() observes the change after its
     // next await and bails instead of proceeding to clobber state.
     this._startupToken++;
     this._cancelStartup?.();
     this._cancelStartup = null;
-    if (this._exchange) {
-      chaserOrderManagerInstance.cleanupExchange(this._exchange);
+    try {
+      this._stopOwnedTwaps();
+      if (this._exchange) chaserOrderManagerInstance.cleanupExchange(this._exchange);
+    } finally {
+      try {
+        // Native pending-command rejections (or acknowledgements already
+        // queued) reach their original caller before the task fallback.
+        this._exchange?.dispose();
+      } finally {
+        this._clearRuntimePipeline();
+      }
     }
-    this._exchange?.dispose();
-    this._clearRuntimePipeline();
   }
 
   private _clearRuntimePipeline() {
@@ -937,15 +950,35 @@ export class ExchangeWorker {
     this._ctx.postMessage(message);
   }
 
-  private _failPendingRequests(message: string) {
-    const requests = [...this._pendingRequests.values()];
-    this._pendingRequests.clear();
-    for (const { payload } of requests) this._rejectUnavailablePayload(payload, message);
+  private _deferInterruptedRequests(fallback: SerializedCommandError) {
+    // Explicit disposal after a trap must retain that generation's grace
+    // window, rather than erase its native command-specific interruption.
+    if (this._pendingFailureTimer !== null || !this._pendingRequests.size) return;
+    const interrupted = [...this._pendingRequests.entries()];
+    this._pendingFailureTimer = setTimeout(() => {
+      this._pendingFailureTimer = null;
+      for (const [key, request] of interrupted) {
+        if (this._pendingRequests.get(key) !== request) continue;
+        this._pendingRequests.delete(key);
+        // Only these RPC methods dispatch venue writes. An executor's text and
+        // caller IDs cannot be inferred here; actual native errors win first.
+        const method = request.payload.op === 'callMethod' ? request.payload.data?.method : undefined;
+        const details: SerializedCommandError = {
+          ...fallback,
+          ...(typeof method === 'string' && { command: method }),
+          ...(['setLeverage', 'changeMarginType', 'changePositionMode', 'scheduleCancel'].includes(method) && {
+            outcome: 'unknown' as const,
+          }),
+        };
+        this._rejectUnavailablePayload(request.payload, fallback.message, details);
+      }
+    }, 0);
   }
 
   private _rejectUnavailablePayload(
     payload: StoreWorkerPayload,
     message = 'Rust engine unavailable; operation was not replayed. Reinitialize the account if recovery failed.',
+    errorDetails?: SerializedCommandError,
   ) {
     if (payload.op === 'callMethod') {
       this._ctx.postMessage({
@@ -953,7 +986,7 @@ export class ExchangeWorker {
         data: {
           requestId: payload.data?.requestId,
           success: false,
-          result: { message, name: 'EngineUnavailableError' },
+          result: errorDetails ?? { message, name: 'EngineUnavailableError' },
         },
       });
     } else if (payload.op === 'updatePositions') {
@@ -963,6 +996,7 @@ export class ExchangeWorker {
           requestId: payload.data?.requestId,
           success: false,
           reason: message,
+          ...(errorDetails && { errorDetails }),
         },
       });
     } else if (payload.op === 'exec') {
@@ -974,6 +1008,7 @@ export class ExchangeWorker {
             handled: true,
             success: false,
             error: message,
+            ...(errorDetails && { errorDetails }),
           },
         ],
       });
@@ -1016,21 +1051,12 @@ export class ExchangeWorker {
     this._started = false;
     this._recovering = true;
     this._activeTickerSymbols = [...(this._exchange?.getActiveTickerSymbols() ?? [])];
-    const interrupted = [...this._pendingRequests.entries()];
-    // Host command rejections settle through their normal handlers first, so
-    // command-specific ENGINE_DEAD outcome/client IDs reach the same RPC. A
-    // task fallback also settles executors that never report a failed result.
-    this._pendingFailureTimer = setTimeout(() => {
-      this._pendingFailureTimer = null;
-      for (const [key, request] of interrupted) {
-        if (this._pendingRequests.get(key) !== request) continue;
-        this._pendingRequests.delete(key);
-        this._rejectUnavailablePayload(
-          request.payload,
-          'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
-        );
-      }
-    }, 0);
+    this._deferInterruptedRequests({
+      message:
+        'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
+      name: 'EngineDeadError',
+      code: 'ENGINE_DEAD',
+    });
     this._generation++;
     this._clearRuntimePipeline();
     this._stopOwnedTwaps();

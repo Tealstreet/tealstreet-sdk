@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
-import { OrderStopTriggerType } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { OrderStopTriggerType } from '../../types';
 import { CallMethodHandler } from './CallMethodHandler';
 
 describe('CallMethodHandler', () => {
@@ -217,6 +219,45 @@ describe('CallMethodHandler', () => {
               },
             },
           });
+        });
+      });
+
+      it.each(['COMMAND_TIMEOUT', 'ENGINE_DISPOSED', 'ENGINE_DEAD'])('retains %s command attribution', async (code) => {
+        const error = Object.assign(new Error('Interrupted'), {
+          code,
+          command: 'setLeverage',
+          timeoutMs: 120000,
+          outcome: 'unknown',
+          clientOrderId: 'caller',
+          clientOrderIds: ['caller'],
+          partialOrderIds: ['accepted'],
+          partialOrderCount: 1,
+          totalOrderCount: 2,
+          failedOrderIndex: 1,
+        });
+        vi.mocked(mockExchange.setLeverage).mockRejectedValueOnce(error);
+        await handler.handleCallMethod('typed', 'setLeverage', ['BTCUSDT', 10]);
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'typed',
+            success: false,
+            result: {
+              message: 'Interrupted',
+              name: 'Error',
+              stack: expect.any(String),
+              code,
+              command: 'setLeverage',
+              timeoutMs: 120000,
+              outcome: 'unknown',
+              clientOrderId: 'caller',
+              clientOrderIds: ['caller'],
+              partialOrderIds: ['accepted'],
+              partialOrderCount: 1,
+              totalOrderCount: 2,
+              failedOrderIndex: 1,
+            },
+          },
         });
       });
 

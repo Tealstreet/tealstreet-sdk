@@ -14,6 +14,7 @@ import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const origin = 'https://api-evm.orderly.org';
 const query = '/v1/order?symbol=PERP_BTC_USDC&client_order_id=a%20b%2Fc';
@@ -143,7 +144,9 @@ describe('Orderly Rust transport boundary', () => {
         JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://ws-evm.orderly.org/ws/stream/account-id' }]),
       ),
       command: noActions,
-      takeFrame: () => undefined,
+      takeFrame: () => new Uint8Array(consumerFrame({
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      })),
       snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions,
       wsMessage: noActions,

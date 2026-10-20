@@ -148,7 +148,8 @@ test('fatal cleanup settles all pending operations with unknown write outcomes d
   assert.equal(httpSignal.aborted, true);
   assert.equal(signSignal.aborted, true);
   assert.equal(closes, 2);
-  assert.equal(cleared, 2);
+  // The signing/native timers and all four pending command deadlines are cleared.
+  assert.equal(cleared, 6);
   assert.equal(disposed, 1);
   assert.equal(r.deaths.length, 1);
   const count = r.calls.length;

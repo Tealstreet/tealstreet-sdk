@@ -172,7 +172,13 @@ verification and a stable commit. Keep failures and evidence boundaries visible.
   the production-impact judging rule. General unstarted public reads are fixed
   here in addition to the factory-specific startup/refresh closure in #1342.
 
-## Phase 3 audit notes (implementation not started)
+The broad CI run on phase-2 commit `5d95bf7078` (`39418652867`) exposed
+seven more missing-STATUS fixture timeouts in Orderly transport, BreakoutProp
+wrapper and spot validation: 7,770 pass / 7 fail. Those three fixtures now emit
+native STATUS without changing assertions/deadlines, with independent review
+PASS. The later full phase-3a run passes all 7,807 SDK unit cases.
+
+## Phase 3 audit notes
 
 - One host settlement helper must remove the pending entry and clear its
   deadline before resolve/reject, including malformed success JSON. Currently
@@ -209,3 +215,83 @@ verification and a stable commit. Keep failures and evidence boundaries visible.
   late identity receipts, cleanup throws and partial results. Verify ordinary
   validation, timeout/dispose and native failure each report once, while
   independent identical failures retain independent reports.
+
+- The actual CLI executor catch/router previously erased structured failures;
+  phase 3a preserves them for propagated errors (including actual buy/sell).
+  Follow-up account/aggregate commands still need production-impact checks:
+  CloseCommand's global-close catch prints then returns success, Swarm drops
+  rejected allSettled reasons/partial IDs, and Nuke starts unawaited work. Carry
+  those concrete consumer findings into phase 4's nuke/account work, retaining
+  acknowledged earlier calls when a later multi-symbol placement fails. Do not
+  claim the outer executor alone fixes these internally converted outcomes.
+
+### Phase 3a implementation plan
+
+- Host-only command completion has one settlement path: native done, malformed
+  result, synchronous rejection, deadline, fatal trap and normal disposal each
+  remove pending work and clear its timer once. Add configurable 120 s default
+  deadline with per-call positive bounded integer override outside native JSON.
+  Long paginated queries can override it; it is a caller waiting limit, never a
+  cancellation or automatic retry. Start timers only for still-pending commands
+  after synchronous native processing, accounting for admission elapsed time.
+- Interruption codes are ENGINE_DEAD, COMMAND_TIMEOUT and ENGINE_DISPOSED.
+  Interrupted writes explicitly retain unknown outcome and currently available
+  caller IDs. Native-generated identity coverage remains phase 3b work, so this
+  checkpoint makes no complete attribution claim. Ordinary cleanup is best
+  effort; one throwing transport disposer cannot strand sibling commands.
+- Process the rest of an action batch after an unknown action, then surface the
+  first unknown-action error. Keep ordinary callback/transport errors distinct.
+  Preserve native partial rejection fields and settle malformed JSON visibly.
+- Worker disposal fences state immediately, retains a bounded pending-RPC grace
+  window for known acknowledgements or structured host rejections, then sends a
+  fallback only for still-owned requests. Repeated disposal cannot erase that
+  grace window. Extend bounded error serialization for interruption/partial-order
+  fields and additive exec error details where the original Error is available.
+- Bridge cancels retain each venue's existing command operation and add caller
+  descriptors containing id, symbol and type; generic ID-only commands retain
+  ids for compatible dispatch. Venue handling of unknown IDs remains owned by
+  the startup-broker lane.
+- Verification: fake-clock completion/deadline boundaries, late/duplicate done,
+  malformed results, unknown-action batch tails, throwing cleanup, concurrent
+  reads/writes, retained partial results, known-ack-before-dispose, repeated
+  dispose, stale-generation suppression and account isolation. Run host and
+  affected SDK tests/types/lint, independent review/fixes and stable commit.
+
+### Phase 3a implementation and review
+
+- One host settlement path owns pending replies and deadline cleanup. Default
+  wait is 120 s; per-host/per-call overrides remain outside native JSON. SDK
+  exposes `extra.rustCommandTimeoutMs`; Rust worker RPCs allow one additional
+  second for delivery while TS keeps its existing five-second wait. Register
+  main RPC listeners before dispatch, including synchronous replies.
+- Interrupted writes retain unknown outcomes and known caller IDs on timeout,
+  ordinary disposal, fatal traps, post-dispatch deadline setup failure and
+  malformed/unsupported protocol results. Review fixes add distinct
+  COMMAND_DEADLINE_FAILED and ENGINE_PROTOCOL_ERROR codes, preserving known
+  native failures, partial results and already acknowledged successes. A
+  callback throwing undefined remains a rejection. No timeout cancels venue
+  work, retries it or claims native-generated identities are already covered.
+- Worker disposal immediately fences state, then retains one bounded correlated
+  reply grace window. Known acknowledgements and command-specific errors win
+  before fallback; repeat disposal cannot erase the window. Explicit allowlist
+  serialization survives worker, CLI executor/router and standalone REPL
+  boundaries. No-reqId CLI failures honor errorReported and print once.
+- The actual standalone retry loop now stops for an unknown outcome or accepted
+  partial members, preserving IDs and original failure metadata. Fully rejected
+  operations retain the user's explicit retry budget. Workflow docs describe
+  the changed behavior. Cancel descriptors preserve id/symbol/type alongside
+  existing operation/legacy IDs. Unknown-ID venue behavior stays out of scope.
+- Independent host, wrapper/fixtures, worker/CLI, and standalone retry reviews
+  PASS after fixes. Verification: 121 host tests (23 new command cases), all
+  7,807 SDK unit tests in 529 files, all 450 SDK WASM tests in 18 files, and
+  589 harness tests PASS. Scoped leaf checks: 67 worker/helper/handler, 45 CLI
+  core/router, 14 standalone actual-command/retry and 66 final RPC/fixture
+  cases PASS. SDK/CLI-core/app CLI typechecks and strict scoped lint PASS;
+  the existing repl file has six pre-existing unused-variable warnings and no
+  lint errors. Initial new-test type/fixture errors were corrected; no gate,
+  business assertion or test deadline was weakened. Native code/artifact is
+  unchanged at this checkpoint.
+- Remaining phase 3 work is native-generated identity progress and command
+  error-report correlation. The dedicated identity plan records source hook
+  inventory rather than claiming runtime proof. Account/aggregate consumer
+  findings and phases 4–7 remain outstanding; no PR/landing claim yet.

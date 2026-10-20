@@ -56,6 +56,20 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 describe('Rust parity query forwarding', () => {
+  it('retains cancellation type and symbol alongside legacy IDs before reconciliation', async () => {
+    const { exchange, commands } = fixture('bybit');
+    await exchange.start();
+    const uncached = [
+      { id: 'new-limit', symbol: 'BTCUSDT', type: OrderType.Limit },
+      { id: 'new-stop', symbol: 'ETHUSDT', type: OrderType.StopLoss },
+    ] as Order[];
+    await exchange.cancelOrders(uncached);
+    expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
+      { op: 'cancelOrders', ids: ['new-limit', 'new-stop'], orders: uncached },
+    ]);
+    expect(exchange.store.orders).toEqual([]);
+  });
+
   it.each<ExchangeName>(['binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'phemex'])(
     '%s preserves the native definitive lookup verdict',
     async (name) => {
