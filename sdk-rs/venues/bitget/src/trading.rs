@@ -1501,6 +1501,7 @@ impl BitgetFutures {
             self.resume_trading(cx);
             return;
         }
+        let mut write_noted = false;
         if error.is_none()
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
@@ -1514,7 +1515,10 @@ impl BitgetFutures {
             for order in orders {
                 if accepted.contains(&native_id(order)) {
                     self.mark_canceled(cx, &order.id);
-                    self.note_write(cx);
+                    if !write_noted {
+                        self.note_write(cx);
+                        write_noted = true;
+                    }
                 }
             }
             if data.is_some_and(|d| !d.failure_list.is_empty()) {
@@ -1572,6 +1576,7 @@ impl BitgetFutures {
                 }
                 if !ids.is_empty() {
                     self.note_write(cx);
+                    write_noted = true;
                 }
                 if error.is_none() {
                     let p = &request.call.payload;
@@ -1764,7 +1769,9 @@ impl BitgetFutures {
             }
             _ => {}
         }
-        self.note_write(cx);
+        if !write_noted && request.call.path != paths::ORDER_DETAIL {
+            self.note_write(cx);
+        }
         self.trading.active = Some(job);
         self.resume_trading(cx);
     }

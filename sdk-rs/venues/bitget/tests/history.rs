@@ -360,6 +360,11 @@ fn inverse_fill_without_fee_coin_uses_the_symbol_collateral() {
             .replace("USDT", "USD"),
     );
     h.respond("/tickers", 200, &TICKERS.replace("BTCUSDT", "ETHUSD"));
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
     query(&mut h, fills());
     let mut row = fill("eth-fill", "buy", "buy_single");
     row["symbol"] = json!("ETHUSD");

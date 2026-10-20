@@ -128,6 +128,7 @@ const KNOWN_TS_FIXES = {
       'Use UTA execution IDs, quantities and prices from the fill topic.',
       'Keep both TP/SL legs of status-less UTA strategy rows.',
       'Include UTA totalFundingFee in realized PnL.',
+      'Derive UTA TPSL closing direction from the protected position side, preserving ordinary execution directions.',
       'Use cumulative executed size for orders and deduplicate executions.',
       'Do not emit an execution for an algo trigger acknowledgement.',
       'Split normal orders at floored max lots without losing requested volume.',

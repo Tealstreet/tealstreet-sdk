@@ -1,7 +1,8 @@
-// Fake credentials only. Native UTA payloads, independent of TS behavior:
+// Fake credentials only. UTA trailing lifecycle is verified through documented
+// REST snapshots, not inferred REST-shaped strategy-order WebSocket messages.
 // https://www.bitget.com/docs/catalog/account/assets-balance#get-financial-records
 // https://www.bitget.com/docs/catalog/trading/strategy-trading
-// https://www.bitget.com/docs/uta/websocket/private/Strategy-Order-Channel
+// https://www.bitget.com/docs/uta/websocket/private/Strategy-Order-Channel.md
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -46,12 +47,12 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
     side: 'sell',
     posSide: 'long',
     status,
-    trailingStopParams: nativeParams(activation, variance),
+    // Bitget names the same price-distance mode "spread" in GET responses
+    // and "distance" in POST placement parameters.
+    trailingStopParams: { ...nativeParams(activation, variance), trailType: 'spread' },
     createdTime: String(UTA_EPOCH),
     updatedTime: String(UTA_EPOCH),
   });
-  const strategy = (t, row) =>
-    ws(t, priv, { arg: { instType: 'UTA', topic: 'strategy-order' }, action: 'snapshot', data: [row] });
   const placeBody = (qty, activation, variance) => ({
     category,
     symbol,
@@ -104,25 +105,34 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
   http('GET', '/api/v3/position/current-position', `category=${category}`, { list: [], cursor: '' });
   http('GET', '/api/v3/account/assets', '', { accountEquity: '1000', effEquity: '900', unrealisedPnl: '0' });
   http('GET', '/api/v3/trade/unfilled-orders', `category=${category}&limit=100`, { list: [], cursor: '' });
-  http('GET', '/api/v3/trade/unfilled-strategy-orders', `category=${category}&type=tpsl`, [
-    {
-      orderId: 'existing-stop',
-      category,
-      symbol,
-      qty: '0.01',
-      side: 'sell',
-      posSide: 'long',
-      stopLoss: '90',
-      slTriggerBy: 'market',
-      slOrderType: 'market',
-      status: 'pending',
-      createdTime: String(UTA_EPOCH),
-      updatedTime: String(UTA_EPOCH),
-    },
+  const tpsl = {
+    orderId: 'existing-stop',
+    type: 'tpsl',
+    category,
+    symbol,
+    qty: '0.01',
+    side: 'sell',
+    posSide: 'long',
+    stopLoss: '90',
+    slTriggerBy: 'market',
+    slOrderType: 'market',
+    status: 'pending',
+    createdTime: String(UTA_EPOCH),
+    updatedTime: String(UTA_EPOCH),
+  };
+  http('GET', '/api/v3/trade/unfilled-strategy-orders', `category=${category}&type=tpsl`, [tpsl]);
+  const trailingSnapshot = (afterCommand, rows) => {
+    http('GET', '/api/v3/trade/unfilled-strategy-orders', `category=${category}&type=trailing_stop`, rows);
+    records.at(-1).afterCommand = afterCommand;
+  };
+  trailingSnapshot(0, [trailingRow('trail-rest'), trailingRow('trail-disappears', '0.01', '94', '2')]);
+  trailingSnapshot(2, [trailingRow('trail-rest'), trailingRow('trail-created', '0.01', '95', '5')]);
+  trailingSnapshot(3, [trailingRow('trail-rest'), trailingRow('trail-restored', '0.01', '95', '5')]);
+  trailingSnapshot(4, [
+    trailingRow('trail-restored', '0.01', '95', '5'),
+    trailingRow('trail-amended', '0.02', '95', '7'),
   ]);
-  http('GET', '/api/v3/trade/unfilled-strategy-orders', `category=${category}&type=trailing_stop`, [
-    trailingRow('trail-rest'),
-  ]);
+  trailingSnapshot(5, [trailingRow('trail-amended', '0.02', '95', '7'), trailingRow('trail-final', '0.03', '96', '3')]);
   ws(0, priv, { event: 'login', code: '0' });
   const bill = (id, type, amount, fee) => ({
     id,
@@ -155,12 +165,26 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
     ],
   });
   http('POST', '/api/v3/trade/place-strategy-order', '', { orderId: 'trail-created' }, placeBody('0.01', '95', '5'));
-  strategy(700, trailingRow('trail-created', '0.01', '95', '5'));
   command(900, 'amendOrder', { id: 'trail-created', price: 96 });
   http('POST', '/api/v3/trade/cancel-strategy-order', '', null, { orderId: 'trail-created' });
   http('POST', '/api/v3/trade/place-strategy-order', '', null, placeBody('0.01', '96', '4'), '43023');
   http('POST', '/api/v3/trade/place-strategy-order', '', { orderId: 'trail-restored' }, placeBody('0.01', '95', '5'));
-  strategy(1100, trailingRow('trail-restored', '0.01', '95', '5'));
+  // Published strategy-order schema covers TP/SL, not trailingStopParams.
+  ws(1100, priv, {
+    action: 'snapshot',
+    arg: { instType: 'UTA', topic: 'strategy-order', symbol: 'default' },
+    data: [
+      {
+        ...tpsl,
+        category: category.toLowerCase(),
+        side: 'buy',
+        reduceOnly: 'no',
+        triggerType: 'stopLoss',
+        updatedTime: String(UTA_EPOCH + 1100),
+      },
+    ],
+    ts: UTA_EPOCH + 1100,
+  });
   ws(1300, pub, {
     arg: { instType: category, channel: 'ticker', instId: symbol },
     action: 'snapshot',
@@ -169,10 +193,8 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
   command(1500, 'amendOrder', { id: 'trail-rest', amount: 0.02 });
   http('POST', '/api/v3/trade/cancel-strategy-order', '', null, { orderId: 'trail-rest' });
   http('POST', '/api/v3/trade/place-strategy-order', '', { orderId: 'trail-amended' }, placeBody('0.02', '95', '7'));
-  strategy(1700, trailingRow('trail-amended', '0.02', '95', '7'));
   command(1900, 'cancelOrders', { ids: ['trail-restored'] });
   http('POST', '/api/v3/trade/cancel-strategy-order', '', null, { orderId: 'trail-restored' });
-  strategy(2100, trailingRow('trail-restored', '0.01', '95', '5', 'cancelled'));
   const fill = {
     category,
     symbol,
@@ -183,7 +205,6 @@ export function buildBitgetUtaTape({ usdc = false } = {}) {
     execQty: '0.004',
   };
   ws(2300, priv, { arg: { instType: 'UTA', topic: 'fill' }, data: [fill, fill] });
-  strategy(2700, trailingRow('trail-final', '0.03', '96', '3'));
   return records;
 }
 
@@ -319,5 +340,11 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     : buildBitgetUtaTape({ usdc: values.usdc });
   mkdirSync(dirname(values.out), { recursive: true });
   writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-  console.log(JSON.stringify({ out: values.out, records: records.length, seconds: 2.7 }));
+  console.log(
+    JSON.stringify({
+      out: values.out,
+      records: records.length,
+      seconds: Math.max(...records.map((r) => r.t ?? 0)) / 1000,
+    }),
+  );
 }

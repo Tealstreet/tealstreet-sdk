@@ -43,6 +43,7 @@ pub struct OrderSnapshot {
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
     started: f64,
+    stream_revision: u64,
     invalid: bool,
     virtual_only: bool,
 }
@@ -83,6 +84,7 @@ pub struct Account {
     positions_in_flight: bool,
     balance_in_flight: bool,
     orders_in_flight: bool,
+    orders_dirty: bool,
     positions_timer: Option<TimerId>,
     balance_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
@@ -194,11 +196,7 @@ impl BitgetFutures {
             cx.store.set_orders(vec![]);
             return;
         }
-        if self.inverse() {
-            self.private_detected(cx);
-        } else {
-            self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
-        }
+        self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
     }
 
     fn private_detected(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -272,6 +270,8 @@ impl BitgetFutures {
             inst_id: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
             coin: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            symbol: Option<&'a str>,
         }
         #[derive(Serialize)]
         struct Subscribe<'a> {
@@ -284,6 +284,7 @@ impl BitgetFutures {
                 .into_iter()
                 .map(|topic| Topic {
                     inst_type: "UTA",
+                    symbol: (topic == "strategy-order").then_some("default"),
                     channel: None,
                     topic: Some(topic),
                     inst_id: None,
@@ -295,6 +296,7 @@ impl BitgetFutures {
                 .into_iter()
                 .map(|channel| Topic {
                     inst_type: &product,
+                    symbol: None,
                     channel: Some(channel),
                     topic: None,
                     inst_id: (channel != "account").then_some("default"),
@@ -400,6 +402,7 @@ impl BitgetFutures {
             return;
         }
         self.account.orders_in_flight = true;
+        self.account.orders_dirty = false;
         self.order_page(
             cx,
             OrderSnapshot {
@@ -412,6 +415,7 @@ impl BitgetFutures {
                 plans: vec![],
                 trailing: vec![],
                 started: cx.now,
+                stream_revision: self.order_revision_clock(),
                 invalid: false,
                 virtual_only,
             },
@@ -567,8 +571,8 @@ impl BitgetFutures {
                     self.private_detected(cx);
                 }
                 Ok(header) if header.code.0 == Some(0.0) && response.status == 200 => {
-                    if self.options.testnet {
-                        cx.log(LogLevel::Error, "Bitget testnet UTA is unsupported");
+                    if self.options.testnet || self.inverse() {
+                        cx.log(LogLevel::Error, "Bitget inverse/testnet UTA is unsupported");
                         return;
                     }
                     match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
@@ -742,11 +746,12 @@ impl BitgetFutures {
                 } else {
                     self.account.orders_in_flight = false;
                     for (id, state) in snapshot.trailing {
-                        let newer = self
-                            .account
-                            .opened
-                            .get(&id)
-                            .is_some_and(|until| *until >= snapshot.started + 5_000.0);
+                        let newer = self.order_revision(&id) > snapshot.stream_revision
+                            || self
+                                .account
+                                .opened
+                                .get(&id)
+                                .is_some_and(|until| *until >= snapshot.started + 5_000.0);
                         let terminal = self.account.terminal.contains_key(&id)
                             || cx.store.order(&id).is_some_and(|o| {
                                 matches!(
@@ -763,7 +768,16 @@ impl BitgetFutures {
                     for (id, plan) in snapshot.plans {
                         self.account.plans.insert(id, plan);
                     }
-                    self.commit_orders(cx, snapshot.rows, snapshot.virtual_only, snapshot.started);
+                    self.commit_orders(
+                        cx,
+                        snapshot.rows,
+                        snapshot.virtual_only,
+                        snapshot.started,
+                        snapshot.stream_revision,
+                    );
+                    if self.account.uta && self.account.orders_dirty {
+                        self.refresh_orders(cx, false);
+                    }
                 }
             }
             Request::Probe => {}
@@ -930,17 +944,19 @@ impl BitgetFutures {
         mut rows: Vec<Order>,
         virtual_only: bool,
         started: f64,
+        stream_revision: u64,
     ) {
         self.account.terminal.retain(|_, until| *until > cx.now);
         self.account.opened.retain(|_, until| *until > cx.now);
         let mut seen = HashSet::new();
         rows.retain(|row| seen.insert(row.id.clone()));
         for row in &mut rows {
-            if self
-                .account
-                .opened
-                .get(&row.id)
-                .is_some_and(|until| *until >= started + 5_000.0)
+            if (self.order_revision(&row.id) > stream_revision
+                || self
+                    .account
+                    .opened
+                    .get(&row.id)
+                    .is_some_and(|until| *until >= started + 5_000.0))
                 && let Some(current) = cx.store.order(&row.id)
             {
                 *row = current.clone();
@@ -975,7 +991,10 @@ impl BitgetFutures {
             for current in cx.store.orders() {
                 if current.status == OrderStatus::Open
                     && !rows.iter().any(|r| r.id == current.id)
-                    && (is_algo(current.kind) || self.account.opened.contains_key(&current.id))
+                    && ((is_algo(current.kind)
+                        && !(self.account.uta && current.kind == OrderType::TrailingStopLoss))
+                        || self.account.opened.contains_key(&current.id)
+                        || self.order_revision(&current.id) > stream_revision)
                 {
                     rows.push(current.clone());
                 }
@@ -1438,6 +1457,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn mark_opened(&mut self, now: f64, id: &str) {
+        self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
+        self.account
+            .ws_order_revisions
+            .insert(id.to_owned(), self.account.ws_order_clock);
         self.account.opened.insert(id.to_owned(), now + 5_000.0);
     }
 
@@ -1462,6 +1485,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn note_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.uta {
+            self.account.orders_dirty = true;
+            self.refresh_orders(cx, false);
+        }
         if self.account.write_check.is_none() {
             self.account.write_check = Some((cx.set_timer(5_000.0), cx.now));
         }
@@ -1498,7 +1525,7 @@ impl BitgetFutures {
                 self.refresh_balance(cx);
             }
             if self.account.tick.is_multiple_of(4) {
-                self.refresh_orders(cx, true);
+                self.refresh_orders(cx, !self.account.uta);
             }
             self.account.poll = Some(cx.set_timer(2_000.0));
             self.account
@@ -1673,7 +1700,9 @@ impl BitgetFutures {
                 OrderSide::Sell
             });
         let protected = first_text(&[&raw.hold_side, &raw.pos_side]);
-        if !raw.plan_type.is_empty() && matches!(protected, "long" | "short" | "buy" | "sell") {
+        if (!raw.plan_type.is_empty() || (self.account.uta && kind.is_none()))
+            && matches!(protected, "long" | "short" | "buy" | "sell")
+        {
             side = if matches!(protected, "long" | "buy") {
                 OrderSide::Sell
             } else {
@@ -1960,10 +1989,18 @@ fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
         {
             return Some(("unsupported".into(), value));
         }
-        if !matches!(params.trail_type.as_str(), "distance" | "ratio") {
+        if !matches!(params.trail_type.as_str(), "distance" | "spread" | "ratio") {
             return None;
         }
-        Some((params.trail_type.clone(), value))
+        // REST names price distance "spread"; placement names the same mode "distance".
+        Some((
+            if params.trail_type == "spread" {
+                "distance".into()
+            } else {
+                params.trail_type.clone()
+            },
+            value,
+        ))
     } else {
         raw.callback_ratio
             .0

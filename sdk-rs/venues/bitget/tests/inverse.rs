@@ -38,6 +38,11 @@ fn started(tickers: &str) -> Harness {
     h.message(
         &json!({"arg":{"channel":"ticker"},"action":"snapshot","data":seed["data"]}).to_string(),
     );
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
     assert!(!h.requests.iter().any(|r| r.url.contains("/api/v3/")));
     h
 }
@@ -327,6 +332,37 @@ fn inverse_late_uta_error_never_promotes_or_calls_v3_private_routes() {
     assert!(!h.requests.iter().any(|r| r.url.contains("/api/v3/")));
     assert!(!h.sockets.iter().any(|(_, url)| url.contains("/v3/")));
     assert!(h.sent.iter().any(|(_, body)| body.contains("COIN-FUTURES")));
+}
+
+#[test]
+fn inverse_uta_probe_success_reports_scoped_unsupported_before_private_routing() {
+    let mut h = Harness::started(Options {
+        product: Product::Inverse,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    });
+    h.respond("/contracts", 200, CONTRACTS);
+    h.respond("/tickers", 200, TICKERS);
+    let probe = h.take("/account/settings");
+    assert!(probe.url.contains("/api/v3/account/settings"));
+    h.reply(
+        probe.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode"}}"#,
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("inverse") && m.contains("UTA") && m.contains("unsupported"))
+    );
+    assert!(!h.requests.iter().any(|r| r.url.contains("/api/v3/")
+        || r.url.contains("/api/v2/mix/account/")
+        || r.url.contains("/position/")));
+    assert!(!h.sockets.iter().any(|(_, url)| url.contains("/private")));
+    let loaded = h.engine.store().loaded();
+    assert!(!loaded.balance && !loaded.positions && !loaded.orders);
 }
 
 #[test]

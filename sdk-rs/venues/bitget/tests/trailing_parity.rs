@@ -107,6 +107,8 @@ fn native_order(kind: OrderType) -> Order {
     }
 }
 
+// Defensive compatibility case: REST trailing fields adapted to the strategy topic.
+// The published WS schema lists TPSL/trigger only; REST lifecycle is tested separately.
 fn uta_native_trailing(h: &mut Harness, kind: &str, variance: &str) {
     h.private_message(&json!({"arg":{"instType":"UTA","topic":"strategy-order"},"data":[{
         "category":"USDT-FUTURES","type":"trailing_stop","orderId":"trail-1","symbol":"BTCUSDT",
@@ -356,6 +358,11 @@ fn inverse_eth() -> Harness {
     for (socket, _) in h.sockets.clone() {
         h.event(Event::WsOpened { socket });
     }
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
     h.respond(
         "/all-position",
         200,
@@ -721,4 +728,51 @@ fn external_uta_limit_execution_and_index_activation_stay_visible_and_cancelable
         h.reply(id, 200, r#"{"code":"00000","data":null}"#);
         assert!(h.done.last().unwrap().1.is_ok());
     }
+}
+
+#[test]
+fn one_uta_write_starts_one_complete_refresh_without_a_duplicate_dirty_followup() {
+    let mut h = uta(false);
+    // Opening the authenticated socket requests another complete snapshot.
+    while h
+        .requests
+        .iter()
+        .any(|r| r.url.contains("/unfilled-orders"))
+    {
+        h.respond(
+            "/unfilled-orders",
+            200,
+            r#"{"code":"00000","data":{"list":[]}}"#,
+        );
+        h.respond("type=tpsl", 200, r#"{"code":"00000","data":[]}"#);
+        h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
+    }
+    place(&mut h, vec![opts("sell", 95.0)]);
+    ready(&mut h);
+    let (id, _) = body(&mut h, "/place-strategy-order");
+    success(&mut h, id, "one-write-trailing");
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/unfilled-orders"))
+            .count(),
+        1
+    );
+    h.respond(
+        "/unfilled-orders",
+        200,
+        r#"{"code":"00000","data":{"list":[]}}"#,
+    );
+    h.respond("type=tpsl", 200, r#"{"code":"00000","data":[]}"#);
+    h.respond("type=trailing_stop", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/unfilled-orders")
+                || r.url.contains("/unfilled-strategy-orders"))
+    );
+    assert_eq!(
+        h.done.last().unwrap().1.as_ref().unwrap(),
+        "[\"one-write-trailing\"]"
+    );
 }

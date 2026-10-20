@@ -12,6 +12,25 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 
 test('UTA tape requires the documented trailing payload before consuming a write', () => {
   const records = buildBitgetUtaTape();
+  for (const record of records.filter((r) => r.type === 'http')) {
+    if (record.method === 'GET' && new URL(record.url).searchParams.get('type') === 'trailing_stop') {
+      for (const row of JSON.parse(record.body).data) {
+        assert.equal(row.trailingStopParams.trailType, 'spread');
+        assert.equal(row.trailingStopParams.activationType, 'market');
+        assert.equal(row.trailingStopParams.preOrderType, 'market');
+      }
+    }
+    if (record.requestBody?.type === 'trailing_stop') {
+      assert.equal(record.requestBody.trailingStopParams[0].trailType, 'distance');
+    }
+  }
+  for (const record of records.filter((r) => r.type === 'ws')) {
+    const message = JSON.parse(record.text);
+    if (message.arg?.topic === 'strategy-order') {
+      assert.equal(message.arg.symbol, 'default');
+      assert(message.data.every((row) => row.type === 'tpsl' && !row.trailingStopParams));
+    }
+  }
   const native = records.find((r) => r.method === 'POST');
   const tape = createTape([native], { rust: 'bitget' }, true);
   const wrong = structuredClone(native.requestBody);
@@ -124,6 +143,72 @@ for (const usdc of [false, true]) {
         assert.match(result.commands[2].error, /invalid qty/);
         assert.deepEqual(result.commands[3], { ok: ['trail-amended'] });
         assert.deepEqual(result.commands[4], { ok: [] });
+        // Every trailing row here came from staged native REST snapshots.
+        // Neither discovery nor cancellation depends on an undocumented WS shape.
+        assert.deepEqual(result.account.orders.map((o) => o.id).sort(), [
+          'existing-stop',
+          'trail-amended',
+          'trail-final',
+        ]);
+        assert.deepEqual(
+          result.account.orders.map(
+            ({ id, type, status, side, price, amount, filled, remaining, reduceOnly, trigger }) => ({
+              id,
+              type,
+              status,
+              side,
+              price,
+              amount,
+              filled,
+              remaining,
+              reduceOnly,
+              trigger,
+            }),
+          ),
+          [
+            {
+              id: 'existing-stop',
+              type: 'stop_market',
+              status: 'open',
+              side: 'sell',
+              price: 90,
+              amount: 0.01,
+              filled: 0,
+              remaining: 0.01,
+              reduceOnly: true,
+              trigger: 'last_price',
+            },
+            {
+              id: 'trail-amended',
+              type: 'trailing_stop_market',
+              status: 'open',
+              side: 'sell',
+              price: 95,
+              amount: 0.02,
+              filled: 0,
+              remaining: 0.02,
+              reduceOnly: true,
+              trigger: 'last_price',
+            },
+            {
+              id: 'trail-final',
+              type: 'trailing_stop_market',
+              status: 'open',
+              side: 'sell',
+              price: 96,
+              amount: 0.03,
+              filled: 0,
+              remaining: 0.03,
+              reduceOnly: true,
+              trigger: 'last_price',
+            },
+          ],
+        );
+        assert(
+          result.requests.includes(
+            `GET https://api.bitget.com/api/v3/trade/unfilled-strategy-orders?category=${coin}-FUTURES&type=trailing_stop`,
+          ),
+        );
         const final = result.account.orders.find((o) => o.id === 'trail-final');
         assert(final, JSON.stringify(result.account.orders));
         assert.equal(final.symbol, symbol);
@@ -133,6 +218,11 @@ for (const usdc of [false, true]) {
         assert.equal(final.amount, 0.03);
         assert.equal(final.remaining, 0.03);
         assert.equal(final.reduceOnly, true);
+        assert.equal(final.status, 'open');
+        assert.equal(final.trigger, 'last_price');
+        const amended = result.account.orders.find((o) => o.id === 'trail-amended');
+        assert.equal(amended.amount, 0.02);
+        assert.equal(amended.price, 95);
         assert.equal(result.account.hedged, true);
         assert(
           result.account.orders.some((o) => o.id === 'existing-stop' && o.type === 'stop_market' && o.price === 90),

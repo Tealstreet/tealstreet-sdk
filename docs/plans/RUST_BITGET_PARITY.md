@@ -157,3 +157,28 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Independent registration/feature and Bitget engine/query merge audits clear;
   nativeBitget123, sharedharness147 and nativecontractintegration4 tests PASS.
   Final rebuilt per-venue measurements and final-head CI remain required.
+
+## Documented trailing lifecycle checkpoint
+
+- Primary UTA strategy WS schema documents TPSL/trigger only. Replaced the UTA
+  replay's inferred trailing pushes with staged documented REST snapshots; kept
+  adapted full trailing frames only as explicitly labeled defensive race tests.
+- UTA writes trigger full snapshots, coalescing writes that arrive during a read;
+  eight-second polls reconcile full UTA strategy lists. Absent trailing orders
+  expire after fresh-stream grace while Classic/TPSL preservation remains intact.
+- Captured order revisions protect rows, callbacks and absence decisions even
+  when an old HTTP response arrives after the five-second grace has expired.
+- Official REST read mode spread maps to the placement API's distance enum.
+  Preserved ratio mode and activation basis. Deduplicated write notifications
+  so a single HTTP acknowledgement starts one reconciliation, retaining partial
+  accepted-write handling and excluding identity GETs from write notifications.
+- Exact published TPSL push derives closing direction from its protected side;
+  documented long protection stays long through amendment. TS direction defect
+  is explicitly registered in KNOWN_TS_FIXES.
+- Inverse startup now performs the same eligibility probe as TS; Classic40084
+  routes coin futures, while inverse UTA success fails with scoped guidance.
+  This preserves the strict landing request oracle without request suppression.
+- Resumed native suite, formatting and strict clippy PASS. Repository test suite
+  PASS27 tasks with concurrency1; an earlier parallel cold-import timeout was
+  isolated and resolved without changing test timeouts or product code.
+- Final native-contract replays, rebuilt per-venue gates and PR/CI still required.
