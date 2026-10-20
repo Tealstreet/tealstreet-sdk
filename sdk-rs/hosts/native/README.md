@@ -129,7 +129,8 @@ shared frames.
 
 `ServerConfig` bounds connection count, clients per account, outbound queue depth,
 message/frame size, subscriptions and pending commands. Default flush cadence is
-100 ms; default inbound JSON limit is 64 KiB and outbound frame limit is 16 MiB.
+60 ms, matching the existing worker book cadence; default inbound JSON limit is
+64 KiB and outbound frame limit is 16 MiB.
 Symbols are at most 256 bytes and candle intervals at most 64. A slow peer is
 canceled when its outbound queue fills; messages are never silently discarded.
 Socket upgrade/write/close operations have a deadline. An oversized outgoing

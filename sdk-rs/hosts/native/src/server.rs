@@ -36,7 +36,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            flush_every: Duration::from_millis(100),
+            flush_every: Duration::from_millis(60),
             client_queue_capacity: 32,
             max_clients_per_account: 128,
             max_connections: 256,

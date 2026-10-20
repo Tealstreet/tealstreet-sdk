@@ -140,3 +140,10 @@ JSON parser features preserve the landing's Aster/ApeX single-venue size and
 unsupported-command contracts; native enables both parser features for its
 complete command surface. Root and native agent audited the union; final
 workspace, TS, host/harness and WASM gates run again on this combined tree.
+
+- Final cadence review found native's initial 100 ms default would be slower
+  than the existing Workers book default (60 ms). Set the native default to
+  60 ms to preserve the spec's cadence contract; clients can still configure
+  their account flush interval. Native agent independently confirmed the issue
+  and the two-line behavior/documentation fix. Bandwidth figures remain the
+  explicitly stated four-flush/second fixture, independent of server defaults.
