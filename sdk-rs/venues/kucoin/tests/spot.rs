@@ -431,7 +431,7 @@ fn candles_use_spot_order_and_second_timestamps() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: "BTC-USDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(1),
         from_ms: None,
         to_ms: Some(1700000060000.0),
@@ -507,7 +507,7 @@ fn hf_native_place_and_amend_keep_caller_identity_on_original() {
 }
 #[test]
 fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
-    assert!(!KucoinSpot::new(Options::default()).supports_options());
+    assert!(!KucoinSpot::new(Options::default()).capabilities().options);
     for invalid in ["duplicate", "bracket", "type", "id", "iv"] {
         let mut h = H::new(true);
         h.actions.clear();
@@ -1301,7 +1301,7 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
         h.command(Command::FetchCandles {
             command: 3,
             symbol: "BTC-USDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(10),
@@ -1501,7 +1501,7 @@ fn spot_supervisors_repost_role_tokens_with_increasing_backoff_and_restore_inter
             });
             h.command(Command::SubscribeCandles {
                 symbol: "BTC-USDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             });
         }
         let old = if private { h.private } else { h.public };
@@ -1784,4 +1784,23 @@ fn write_failures_are_classified_without_changing_their_text() {
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+}
+
+#[test]
+fn balance_events_faster_than_the_heal_read_cannot_starve_the_balance() {
+    let mut h = H::new(true);
+    let event = json!({"currency":"USDT","available":"900","hold":"100","total":"1000"});
+    h.ws(true, "/account/balance", event.clone());
+    h.timer(250.0);
+    let mut read = h.http("/accounts?type=trade");
+    for step in 1..=3u32 {
+        h.ws(true, "/account/balance", event.clone());
+        let total = (2000 + step).to_string();
+        let body = json!({"code":"200000","data":[{"currency":"USDT","available":total,"holds":"0","balance":total}]});
+        h.respond(&read, 200, &body.to_string());
+        let expected = if step <= 2 { 1300.0 } else { 2003.0 };
+        assert_eq!(h.e.store().balance().total, expected, "step {step}");
+        h.timer(250.0);
+        read = h.http("/accounts?type=trade");
+    }
 }

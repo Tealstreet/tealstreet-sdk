@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -19,6 +20,8 @@ const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/list
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
+/// Consecutive event-fenced snapshots discarded before one commits anyway.
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 const ORDER_RETRY_INITIAL_MS: f64 = 500.0;
 const ORDER_RETRY_CAP_MS: f64 = 30_000.0;
 
@@ -109,6 +112,7 @@ pub struct Account {
     fast: Option<TimerId>,
     snapshot_pending: bool,
     snapshot_again: bool,
+    snapshot_guard: StaleGuard,
     order_queue: VecDeque<String>,
     order_active: Option<String>,
     order_timer: Option<TimerId>,
@@ -211,8 +215,8 @@ struct Coin<'a> {
     total_cost: Number,
     #[serde(default)]
     sum_maintenance_margin: Option<Number>,
-    #[serde(default, rename = "sumOpenRealizedAmount")]
-    _sum_open_realized_amount: Number,
+    #[serde(default)]
+    sum_open_realized_amount: Number,
     #[serde(borrow)]
     position_vos: Option<Vec<ContractPositions<'a>>>,
 }
@@ -1096,7 +1100,7 @@ impl Bitrue {
             return Ok(());
         }
         let groups = coin.position_vos.ok_or(())?;
-        let mut balance = Balance {
+        let balance = Balance {
             total: coin.total_equity.0,
             free: coin.account_normal.0,
             used: (coin.total_equity.0 - coin.account_normal.0)
@@ -1105,9 +1109,9 @@ impl Bitrue {
                 .max(coin.total_cost.0)
                 .max(coin.sum_maintenance_margin.map_or(0.0, |n| n.0))
                 .max(0.0),
-            upnl: 0.0,
+            upnl: coin.sum_open_realized_amount.0,
         };
-        let first_position = data.positions.len();
+        data.balances.insert(coin.margin_coin.to_string(), balance);
         for group in groups {
             if group.contract_name.is_empty() {
                 return Err(());
@@ -1210,13 +1214,6 @@ impl Bitrue {
                 });
             }
         }
-        balance.upnl = data.positions[first_position..]
-            .iter()
-            .try_fold(0.0, |sum, p| {
-                let value = sum + p.unrealized_pnl;
-                value.is_finite().then_some(value).ok_or(())
-            })?;
-        data.balances.insert(coin.margin_coin.to_string(), balance);
         Ok(())
     }
     fn map_rest_order(
@@ -1617,13 +1614,24 @@ impl Bitrue {
                 }
                 let schema = serde_json::from_str::<SnapshotEnvelope>(response.body)
                     .is_ok_and(|v| v.data.account.is_empty());
-                if !schema || data.invalid || data.balances.is_empty() {
+                let malformed = !schema || data.invalid || data.balances.is_empty();
+                let current = revision == self.account.settings_revision;
+                // A leverage command waits for a snapshot issued after its write.
+                let admit = !malformed
+                    && if self.account.leverage_queries.is_empty() {
+                        self.account
+                            .snapshot_guard
+                            .admit(current, STALE_SNAPSHOT_LIMIT)
+                    } else {
+                        current
+                    };
+                if malformed {
                     self.report_leverage_error(
                         cx,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
                     self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
-                } else if revision == self.account.settings_revision {
+                } else if admit {
                     if data.valuation_pending {
                         cx.log(
                             LogLevel::Warning,

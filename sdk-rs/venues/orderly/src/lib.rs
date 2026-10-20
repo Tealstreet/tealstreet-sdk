@@ -7,7 +7,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -103,7 +103,7 @@ pub struct Orderly {
     options: Options,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     native: HashMap<String, String>,
     seed_backoff: safe_cex_engine::startup::Backoff<Seed>,
     generation: u64,
@@ -135,6 +135,26 @@ impl Orderly {
             "https://api-evm.orderly.org"
         }
     }
+    /// The broker application is the account's identity and affiliate.
+    fn account_identity(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Identity<'a> {
+            user_id: &'a str,
+            affiliate_id: &'a str,
+        }
+        match self.options.application_id.as_deref() {
+            Some(id) if !id.is_empty() && !self.options.public_data_only => {
+                serde_json::to_string(&Identity {
+                    user_id: id,
+                    affiliate_id: id,
+                })
+                .map_err(|error| error.to_string())
+            }
+            _ => Err("Orderly private account ID is required".into()),
+        }
+    }
+
     fn public_url(&self) -> String {
         let host = if self.options.testnet {
             "testnet-ws-evm.orderly.org"
@@ -477,8 +497,9 @@ impl Orderly {
                             }
                         };
                         self.depth(cx, &s, env.ts, d)?;
-                    } else if let Some(interval) = suffix.strip_prefix("kline_")
-                        && self.candles.contains_key(&(s.clone(), interval.into()))
+                    } else if let Some(interval) =
+                        suffix.strip_prefix("kline_").and_then(Interval::parse)
+                        && self.candles.contains_key(&(s.clone(), interval))
                     {
                         let k: Kline =
                             serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
@@ -531,15 +552,23 @@ fn native_parts(native: &str) -> Option<(&str, &str)> {
     }
     Some((base, settlement))
 }
-fn interval_valid(i: &str) -> bool {
-    matches!(
-        i,
-        "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "12h" | "1d" | "1w"
-    )
+// Orderly kline types are the TS spellings.
+fn interval_valid(i: Interval) -> bool {
+    use Interval::*;
+    matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1)
 }
 
 impl Venue for Orderly {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::Native,
+            account: safe_cex_engine::AccountLookup::AfterLoad,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            account_leverage: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.initialize_account(cx);
     }
@@ -963,22 +992,19 @@ impl Venue for Orderly {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if (cx.store.loaded().markets && !self.native.contains_key(&symbol))
-                    || !interval_valid(&interval)
-                {
+                if !interval_valid(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Orderly"));
                     return;
                 }
-                if !self
-                    .candles
-                    .contains_key(&(symbol.clone(), interval.clone()))
+                if cx.store.loaded().markets && !self.native.contains_key(&symbol) {
+                    return;
+                }
+                if !self.candles.contains_key(&(symbol.clone(), interval))
                     && !self.public_topic_available(cx)
                 {
                     return;
                 }
-                let n = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let n = self.candles.entry((symbol.clone(), interval)).or_default();
                 *n = n.saturating_add(1);
                 if *n == 1 && self.native.contains_key(&symbol) {
                     self.subscribe(
@@ -989,7 +1015,7 @@ impl Venue for Orderly {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(n) = self.candles.get_mut(&key) {
                     *n = n.saturating_sub(1);
                     if *n > 0 {
@@ -1015,8 +1041,11 @@ impl Venue for Orderly {
                     cx.done(command, Err("Orderly unknown symbol".into()));
                     return;
                 };
-                if !interval_valid(&interval)
-                    || limit == Some(0)
+                if !interval_valid(interval) {
+                    cx.done(command, Err(interval.unsupported("Orderly")));
+                    return;
+                }
+                if limit == Some(0)
                     || [from_ms, to_ms]
                         .into_iter()
                         .flatten()
@@ -1046,6 +1075,7 @@ impl Venue for Orderly {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),
+            Command::FetchAccount { command } => cx.done(command, self.account_identity()),
             trade => self.trade_command(cx, trade),
         }
     }

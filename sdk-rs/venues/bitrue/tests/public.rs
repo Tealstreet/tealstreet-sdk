@@ -226,7 +226,7 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "E-BTC-USDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: Some(1704067200000.0),
             to_ms: Some(1704067260000.0),

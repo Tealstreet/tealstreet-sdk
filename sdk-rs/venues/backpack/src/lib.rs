@@ -7,9 +7,10 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -30,7 +31,7 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
-    History(history::Request),
+    History(Box<history::Request>),
     Markets {
         rows: Vec<Market>,
         skipped: Vec<String>,
@@ -54,15 +55,28 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    received: f64,
     ping_at: f64,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 struct Delta {
@@ -118,7 +132,7 @@ pub struct Backpack {
     options: Options,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     seed: Seed,
     /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
     skipped_markets: HashMap<String, bool>,
@@ -130,6 +144,10 @@ pub struct Backpack {
 impl Backpack {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.public.socket.is_none() {
+            // Suppressed public feeds never open; supervising them would only churn retries.
+            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                self.public.supervisor.connecting(cx);
+            }
             self.public.socket =
                 Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
         }
@@ -446,25 +464,22 @@ impl Backpack {
             }
             "kline" => {
                 let d: KlineEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
-                if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (d.o, d.h, d.l, d.c, d.v) {
-                    let interval = stream.split('.').nth(1).unwrap_or("");
-                    if self
-                        .candles
-                        .contains_key(&(d.s.to_string(), interval.to_owned()))
-                    {
-                        cx.candle(
-                            &d.s,
-                            interval,
-                            Candle {
-                                timestamp: timestamp(&d.t)?,
-                                open: finite(&o)?,
-                                high: finite(&h)?,
-                                low: finite(&l)?,
-                                close: finite(&c)?,
-                                volume: finite(&v)?,
-                            },
-                        );
-                    }
+                if let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (d.o, d.h, d.l, d.c, d.v)
+                    && let Some(interval) = stream.split('.').nth(1).and_then(Interval::parse)
+                    && self.candles.contains_key(&(d.s.to_string(), interval))
+                {
+                    cx.candle(
+                        &d.s,
+                        interval,
+                        Candle {
+                            timestamp: timestamp(&d.t)?,
+                            open: finite(&o)?,
+                            high: finite(&h)?,
+                            low: finite(&l)?,
+                            close: finite(&c)?,
+                            volume: finite(&v)?,
+                        },
+                    );
                 }
             }
             _ => {}
@@ -503,10 +518,8 @@ impl Venue for Backpack {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.received = cx.now;
         self.public.ping_at = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5000.0));
+        self.public.supervisor.opened(cx);
         let topics = cx
             .store
             .markets()
@@ -539,7 +552,7 @@ impl Venue for Backpack {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         let result = (|| {
             let envelope: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
             if let Some(error) = envelope.error {
@@ -568,17 +581,11 @@ impl Venue for Backpack {
         }
         self.public.open = false;
         self.public.socket = None;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for state in self.books.values_mut() {
             state.generation += 1;
             state.sync = Sync::Waiting(vec![]);
         }
-        self.public.attempts += 1;
-        self.public.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30000.0)),
-        );
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let result = match pending {
@@ -711,7 +718,7 @@ impl Venue for Backpack {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::History(request) = pending {
-            self.history_response(cx, request, response);
+            self.history_response(cx, *request, response);
             return;
         }
         if let Pending::Trade(request) = pending {
@@ -930,25 +937,26 @@ impl Venue for Backpack {
             self.seed_read(cx, kind);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 20000.0 {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-            } else {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => {}
+            Tick::Reconnect => return self.connect_public(cx),
+            Tick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
                     cx.send(socket, "{\"method\":\"PING\"}");
                 }
-                self.public.watchdog = Some(cx.set_timer(5000.0));
+                return;
             }
-        } else if let Some(symbol) = self
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+                return;
+            }
+            Tick::Handled => return,
+        }
+        if let Some(symbol) = self
             .books
             .iter()
             .find_map(|(s, b)| matches!(b.sync,Sync::Retry(t, _) if t==timer).then(|| s.clone()))
@@ -988,17 +996,18 @@ impl Venue for Backpack {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                if !supported(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Backpack"));
+                    return;
+                }
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1 {
                     self.subscribe(cx, vec![format!("kline.{interval}.{symbol}")], true);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count -= 1;
                     if *count == 0 {
@@ -1015,8 +1024,15 @@ impl Venue for Backpack {
                 to_ms,
                 ..
             } => {
-                let mut params: sign::Params =
-                    [("symbol".into(), symbol), ("interval".into(), interval)].into();
+                if !supported(interval) {
+                    cx.done(command, Err(interval.unsupported("Backpack")));
+                    return;
+                }
+                let mut params: sign::Params = [
+                    ("symbol".into(), symbol),
+                    ("interval".into(), interval.to_string()),
+                ]
+                .into();
                 if let Some(from) = from_ms {
                     params.insert(
                         "startTime".into(),
@@ -1055,3 +1071,12 @@ impl Venue for Backpack {
 
 #[cfg(test)]
 mod secondary_tests;
+
+// Backpack kline codes are the TS spellings for these intervals.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(
+        interval,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H6 | H8 | H12 | D1 | D3 | W1
+    )
+}
