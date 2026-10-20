@@ -52,6 +52,14 @@ pub struct Message<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct InstrumentKey<'a> {
+    #[serde(default)]
+    pub symbol: Option<&'a str>,
+    #[serde(default)]
+    pub inst_type: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
 pub struct Instrument<'a> {
     pub symbol: &'a str,
     pub inst_type: &'a str,
@@ -59,16 +67,16 @@ pub struct Instrument<'a> {
     pub base_ccy: &'a str,
     pub quote_ccy: &'a str,
     #[serde(default)]
-    pub underlying_symbol: &'a str,
+    pub underlying_symbol: Option<&'a str>,
     #[serde(default)]
-    pub price_tick_size: &'a str,
+    pub price_tick_size: Option<&'a str>,
     #[serde(default)]
-    pub qty_tick_size: &'a str,
+    pub qty_tick_size: Option<&'a str>,
     pub quote_decimals: i32,
     pub quantity_decimals: i32,
     pub max_leverage: &'a str,
     #[serde(default)]
-    pub contract_size: &'a str,
+    pub contract_size: Option<&'a str>,
 }
 
 impl Instrument<'_> {
@@ -76,8 +84,8 @@ impl Instrument<'_> {
         if self.inst_type != "PERPETUAL_SWAP" || !self.tradable {
             return None;
         }
-        let qty = num::parse(self.qty_tick_size);
-        let price = num::parse(self.price_tick_size);
+        let qty = self.qty_tick_size.map_or(0.0, num::parse);
+        let price = self.price_tick_size.map_or(0.0, num::parse);
         Some(Market {
             id: self.symbol.into(),
             symbol: self.symbol.into(),
@@ -105,7 +113,9 @@ impl Instrument<'_> {
                 },
                 price: Some(Min { min: 0.0 }),
             },
-            contract_size: Some(num::parse(self.contract_size))
+            contract_size: self
+                .contract_size
+                .map(num::parse)
                 .filter(|n| *n > 0.0)
                 .or(Some(1.0)),
             is_expiring: Some(false),
