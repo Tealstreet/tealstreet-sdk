@@ -39,6 +39,9 @@ Action  = WsConnect | WsSend | WsClose
 
 - There is no async runtime, no futures and no `Rc<RefCell>` graph in the core.
   Hosts run the event loop: a thin layer per target, a few hundred lines each.
+- Live polling intervals arrive as typed host events; null pauses the WASM
+  control, and positive infinity pauses native polling. The host can forward
+  incident slowdown changes without rebuilding an account.
 - Time comes in as an event. Replaying recorded traffic is exact and needs no
   fake clock.
 - HTTP effects may carry optional `direct` / `publicCors` route hints. Hosts
@@ -322,7 +325,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Paradex, GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| BreakoutProp legacy DXtrade | port implementation and phase reviews complete; scripted gates running; live capture requires legacy credentials |
+| Paradex, GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

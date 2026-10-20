@@ -4,6 +4,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
+import { breakoutprop } from './breakoutprop-requests.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
@@ -510,6 +511,7 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  breakoutprop,
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',

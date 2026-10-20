@@ -104,6 +104,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Legacy DXtrade has no anonymous API; this public fixture is documented/scripted.
+          - venue: breakoutprop
+            books: BTCUSD,ETHUSD
+            private_script: rust:private-tape-breakoutprop
           - venue: asterdex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-asterdex
@@ -209,6 +213,9 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Breakout compiled account, startup and polling controls
+        if: matrix.venue == 'breakoutprop'
+        run: yarn rust:test-breakoutprop-parity
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |

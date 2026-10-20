@@ -135,3 +135,28 @@ verification.
   definitive auth rejection, explicit interval control and pause/resume).
   Root typecheck: 44 tasks pass; root lint: 28 tasks pass. Combined default WASM
   strict clippy also passes. Full root/native regressions are running.
+- Phase 5 adds an explicit HTTP-only polling timeline. A bounded final-read
+  fence lets each implementation's next natural poll observe the last eligible
+  snapshot. It neither injects requests nor rewinds response time, and fails
+  closed on missing/superseded reads or unmatched writes. Independent tests
+  cover phase offsets, skipped intermediate snapshots, pause/missing reads,
+  unchanged socket replays, validators and mutation consumption. Harness: 280
+  passing before the final recorder account-selection regressions.
+- Full native workspace: 1,570 tests pass before final zero-CLOSE follow-ups.
+  Targeted wrapper/config/routing integration: 232 tests pass. Root test run
+  hit two existing dynamic-import 5-second timeouts in capability-branding;
+  full safe-cex rerun uses two workers without changing assertions/timeouts.
+- Final adversarial review added account/private-tape coverage for exact zero
+  CLOSE conservation and found zero-CLOSE amendments incorrectly rejected by
+  the positive-remaining precondition. A safe zero-CLOSE amendment must still
+  obtain exact terminal zero-fill history proof before any replacement.
+- Recorder review caught fixture subaccount defaults leaking into live options
+  and sole-account anonymization differing from the native selector. Live
+  recording now requires caller-supplied account selection when ambiguous;
+  sole eligible account inference follows native selection. Credential/token
+  and escaped diagnostic guards remain fail-closed.
+- Phase 5 independent fence/privacy review is clear. Final harness: 282/282
+  pass; full safe-cex CI rerun: 7,020/7,020 pass across 478 files, with the
+  existing 5-second timeout unchanged. Root's other 25 tasks passed/cached.
+  The CI matrix now runs the honestly scripted Breakout public/private gates
+  plus the compiled host/Store/config tests; live provenance is not implied.
