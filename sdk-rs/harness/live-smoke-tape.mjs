@@ -1,7 +1,7 @@
 // A private recorder for EngineHost's transport interface. Only sanitized copies
 // enter the tape; the engine and the real transport keep the original bytes.
 import { gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync } from 'node:zlib';
-import { canonicalUrl } from './requests.mjs';
+import { canonicalUrl, isWriteRequest } from './requests.mjs';
 import { POLYMARKET_REPLAY } from './polymarket.mjs';
 import { ASTER_PRIVATE_KEY, ASTER_USER, ASTER_SIGNER } from './asterdex-requests.mjs';
 
@@ -23,13 +23,21 @@ const textOf = (value) => {
   return typeof value === 'string' ? value : JSON.stringify(value);
 };
 
+class UnrecordableSecret extends Error {
+  constructor() { super('Live-smoke credential material is too short to record safely'); }
+}
+
 /** Known secrets plus discovered auth/session fields are scrubbed before write. */
 export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venue } = {}) {
   const aliases = new Map();
   const configuredNames = new Set(Object.keys(secrets).map(normalized));
   let next = 0;
   const remember = (name, value) => {
-    if (typeof value !== 'string' || !value || aliases.has(value) || [...aliases.values()].includes(value)) return;
+    if (typeof value !== 'string' || !value) return;
+    // Short public account/index metadata is allowed; short authentication
+    // material cannot be scrubbed from arbitrary echoes without corrupting IDs.
+    if (sensitive(name) && value.length < 4) throw new UnrecordableSecret();
+    if (aliases.has(value) || [...aliases.values()].includes(value)) return;
     const key = normalized(name);
     if (key.endsWith('authorization')) {
       const bearer = /^Bearer\s+(.+)$/i.exec(value);
@@ -60,9 +68,9 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
         if (url.username) remember('key', decodeURIComponent(url.username));
         if (url.password) remember('password', decodeURIComponent(url.password));
         for (const [key, item] of url.searchParams) if (sensitive(key)) remember(key, item);
-      } catch { /* Plain strings and non-URL payloads. */ }
+      } catch (error) { if (error instanceof UnrecordableSecret) throw error; /* Plain strings and non-URL payloads. */ }
       if (/^[\s]*[\[{\"]/.test(value)) {
-        try { discover(parseJson(value)); } catch { /* Plain text. */ }
+        try { discover(parseJson(value)); } catch (error) { if (error instanceof UnrecordableSecret) throw error; /* Plain text. */ }
       } else if (/(?:^|&)[A-Za-z_%-][^=&]*=/.test(value)) {
         for (const [key, item] of new URLSearchParams(value)) discover(item, key);
       }
@@ -203,6 +211,9 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
     }
   };
   const capture = (fn) => { if (sealed) return; try { return fn(); } catch { failed(); return undefined; } };
+  const requiredRedaction = (fn) => {
+    try { return fn(); } catch { failed(); throw new Error('Live-smoke tape redaction failed'); }
+  };
   const emit = (record) => {
     if (sealed) return;
     const safe = scrub.redact({ t: Math.max(0, live.now() - epoch), ...record });
@@ -215,10 +226,10 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
   const transport = {
     ...live,
     connect(url, handlers) {
-      const safeUrl = scrub.url(url, callerIds, venue);
+      const safeUrl = requiredRedaction(() => scrub.url(url, callerIds, venue));
       const socket = ordinals.get(safeUrl) ?? 0;
       ordinals.set(safeUrl, socket + 1);
-      scrub.headers(handlers.headers);
+      requiredRedaction(() => scrub.headers(handlers.headers));
       let connection;
       try { connection = live.connect(url, {
         ...handlers,
@@ -244,19 +255,25 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
     },
     async request(request) {
       const stage = commandIndex;
+      const writeRequest = venue.isWrite?.(request.method, request.url) ?? isWriteRequest(request.method, request.url);
       // Discover request/header secrets before any response echoes are persisted.
-      scrub.headers(request.headers);
-      const safeUrl = scrub.url(request.url, callerIds, venue);
-      const requestBody = request.body === undefined ? undefined : scrub.redact(textOf(request.body));
+      requiredRedaction(() => scrub.headers(request.headers));
+      const safeUrl = requiredRedaction(() => scrub.url(request.url, callerIds, venue));
+      const requestBody = request.body === undefined ? undefined : requiredRedaction(() => scrub.redact(textOf(request.body)));
       let response;
       try { response = await live.request(request); }
       catch { throw new Error('Live-smoke transport request failed'); }
-      const headers = scrub.headers(response.headers);
-      const captured = (body) => emit({ type: 'http', method: request.method, url: safeUrl,
-        ...(requestBody === undefined ? {} : { requestBody }), status: response.status, headers,
-        body: scrub.redact(body), afterCommand: stage });
+      const headers = requiredRedaction(() => scrub.headers(response.headers));
+      const captured = (body) => {
+        try { return emit({ type: 'http', method: request.method, url: safeUrl,
+          ...(requestBody === undefined ? {} : { requestBody }), status: response.status, headers,
+          // A delayed read first exposes its state at completion. Writes remain
+          // attached to the command that issued them so replay can await them.
+          body: scrub.redact(body), afterCommand: writeRequest ? stage : commandIndex }); }
+        catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
+      };
       if (response.body instanceof Uint8Array || response.body instanceof ArrayBuffer) {
-        captured(textOf(response.body));
+        captured(requiredRedaction(() => textOf(response.body)));
         return response;
       }
       return { ...response, body: (async function* () {
@@ -265,7 +282,7 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
         try {
           for await (const chunk of response.body) { body += decoder.decode(chunk, { stream: true }); yield chunk; }
           captured(body + decoder.decode());
-        } catch { throw new Error('Live-smoke transport response recording failed'); }
+        } catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
       })() };
     },
   };

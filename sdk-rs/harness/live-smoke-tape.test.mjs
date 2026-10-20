@@ -48,7 +48,7 @@ test('large native order IDs remain exact through sanitized response JSON', () =
 
 test('canonical URLs remove clocks/signatures, preserve economics and session identity', () => {
   const scrub = createSmokeRedactor(secrets);
-  const canonical = scrub.url(`https://u:p@example.com/orders?symbol=BTCUSDT&price=23&timestamp=42&signature=real-sign&apiKey=${secrets.key}&listenKey=session-abc`);
+  const canonical = scrub.url(`https://username:password@example.com/orders?symbol=BTCUSDT&price=23&timestamp=42&signature=real-sign&apiKey=${secrets.key}&listenKey=session-abc`);
   assert.equal(canonical, 'https://example.com/orders?apiKey=replay-key&listenKey=live-smoke-session-1&price=23&symbol=BTCUSDT');
   assert.equal(scrub.redact({ listenKey: 'session-abc' }).listenKey, 'live-smoke-session-1');
 });
@@ -392,4 +392,152 @@ test('canonical form encoding cannot retain known credentials containing spaces,
   const url = scrub.url(`https://exchange.example/private?${form}&symbol=BTCUSDT`);
   assert.equal(url, 'https://exchange.example/private?apiKey=replay-key&symbol=BTCUSDT');
   assert.ok(!scrub.redact(`echo ${form}`).includes(form));
+});
+
+test('short credential, session and signature material refuses instead of preserving arbitrary echoes', () => {
+  for (const name of ['key', 'secret', 'passphrase', 'privateKey', 'polymarket.apiKey', 'signature', 'signed_challenge']) {
+    assert.throws(() => createSmokeRedactor({ [name]: 'abc' }), { message: 'Live-smoke credential material is too short to record safely' });
+  }
+  const scrub = createSmokeRedactor({ applicationId: '1', apiKeyIndex: '2' }, { applicationId: '42', apiKeyIndex: '3' });
+  for (const name of ['token', 'listenKey', 'auth', 'jwt_token', 'ACCESS-SIGN']) {
+    assert.throws(() => scrub.redact({ [name]: 'abc' }), /too short to record safely/);
+    assert.throws(() => scrub.redact(JSON.stringify({ nested: { [name]: 'abc' } })), /too short to record safely/);
+  }
+  // Refuse even if a public metadata alias already exists for the same bytes.
+  assert.throws(() => scrub.redact({ token: '1' }), /too short to record safely/);
+  assert.throws(() => scrub.url('wss://example.com/private?token=abc'), /too short to record safely/);
+  assert.throws(() => scrub.headers('ACCESS-SIGN: abc'), /too short to record safely/);
+  assert.deepEqual(scrub.redact({ applicationId: '1', apiKeyIndex: '2', price: '1', orderId: '2' }),
+    { applicationId: '42', apiKeyIndex: '3', price: '1', orderId: '2' });
+});
+
+test('short dynamic HTTP auth response never reaches the tape and latches recording failure', async () => {
+  const recorder = createPrivateRecorder(makeLive(async () => ({ status: 200, body: bytes('{"token":"abc","echo":"abc"}') })));
+  await assert.rejects(recorder.transport.request({ method: 'GET', url: 'https://example.com/auth' }), { message: 'Live-smoke transport response recording failed' });
+  assert.ok(recorder.failure);
+  assert.equal(recorder.records.length, 2);
+  assert.ok(!JSON.stringify(recorder.records).includes('abc'));
+});
+
+test('short dynamic WebSocket auth refuses capture while failure latching preserves cleanup transport', () => {
+  let callbacks, fed = false, closed = false;
+  const sent = [];
+  const live = { ...makeLive(), connect(_url, handlers) {
+    callbacks = handlers; return { send: (text) => sent.push(text), close() { closed = true; } };
+  } };
+  const recorder = createPrivateRecorder(live);
+  const socket = recorder.transport.connect('wss://example.com/private', { onOpen() {}, onMessage() { fed = true; }, onClose() {} });
+  assert.doesNotThrow(() => callbacks.onMessage('{"token":"abc"}'));
+  assert.equal(fed, true);
+  assert.ok(recorder.failure);
+  const cancel = '{"op":"cancel","orderId":"native-order-44"}';
+  socket.send(cancel);
+  socket.close();
+  assert.deepEqual(sent, [cancel]);
+  assert.equal(closed, true);
+  assert.ok(!JSON.stringify(recorder.records).includes('abc'));
+});
+
+const assertReadStages = (records, url, method = 'GET', body) => {
+  const tape = new Tape(records);
+  assert.equal(JSON.parse(tape.respond(method, url, body).body).balance, '10');
+  tape.commandIndex = 1;
+  assert.equal(JSON.parse(tape.respond(method, url, body).body).balance, '9');
+};
+
+test('a delayed HTTP read is unavailable before the command stage where it completes', async () => {
+  let resolveResponse, calls = 0;
+  const url = 'https://example.com/account';
+  const recorder = createPrivateRecorder(makeLive(() => ++calls === 1
+    ? Promise.resolve({ status: 200, body: bytes('{"balance":"10"}') })
+    : new Promise((resolve) => { resolveResponse = resolve; })));
+  await recorder.transport.request({ method: 'GET', url });
+  const pending = recorder.transport.request({ method: 'GET', url });
+  await recorder.command({ op: 'setLeverage', symbol: 'BTCUSDT', leverage: 10 }, async () => {});
+  resolveResponse({ status: 200, body: bytes('{"balance":"9"}') });
+  await pending;
+  assert.equal(recorder.records.at(-1).afterCommand, 1);
+  assertReadStages(recorder.records, url);
+});
+
+test('a streamed read is staged only when its final response body bytes arrive', async () => {
+  let finishBody, beganBody, calls = 0;
+  const url = 'https://example.com/account';
+  const bodyStarted = new Promise((resolve) => { beganBody = resolve; });
+  const bodyReady = new Promise((resolve) => { finishBody = resolve; });
+  const recorder = createPrivateRecorder(makeLive(async () => ++calls === 1
+    ? { status: 200, body: bytes('{"balance":"10"}') }
+    : { status: 200, body: (async function* () { yield bytes('{"balance":'); beganBody(); await bodyReady; yield bytes('"9"}'); })() }));
+  await recorder.transport.request({ method: 'GET', url });
+  const response = await recorder.transport.request({ method: 'GET', url });
+  const consumed = bodyBytes(response.body);
+  await bodyStarted;
+  await recorder.command({ op: 'setLeverage', symbol: 'BTCUSDT', leverage: 10 }, async () => {});
+  finishBody();
+  await consumed;
+  assert.equal(recorder.records.at(-1).afterCommand, 1);
+  assertReadStages(recorder.records, url);
+});
+
+test('POST reads use completion stage while mutation acknowledgements retain their issuing command', async () => {
+  let finishPost, finishWrite;
+  const url = 'https://api.hyperliquid-testnet.xyz/info';
+  const body = '{"type":"clearinghouseState","user":"fake-account-address"}';
+  let calls = 0;
+  const recorder = createPrivateRecorder(makeLive((request) => {
+    if (request.url.endsWith('/exchange')) return new Promise((resolve) => { finishWrite = resolve; });
+    return ++calls === 1 ? Promise.resolve({ status: 200, body: bytes('{"balance":"10"}') })
+      : new Promise((resolve) => { finishPost = resolve; });
+  }));
+  await recorder.transport.request({ method: 'POST', url, body });
+  const post = recorder.transport.request({ method: 'POST', url, body });
+  let write;
+  await recorder.command({ op: 'placeOrders', orders: [] }, async () => {
+    write = recorder.transport.request({ method: 'POST', url: 'https://api.hyperliquid-testnet.xyz/exchange', body: '{"action":{"type":"order"}}' });
+  });
+  await recorder.command({ op: 'cancelSymbolOrders', symbol: 'BTCUSDT' }, async () => {});
+  finishPost({ status: 200, body: bytes('{"balance":"9"}') });
+  finishWrite({ status: 200, body: bytes('{"status":"ok"}') });
+  await Promise.all([post, write]);
+  assert.equal(recorder.records.find((row) => row.type === 'http' && row.body === '{"balance":"9"}').afterCommand, 2);
+  assert.equal(recorder.records.find((row) => row.type === 'http' && row.url.includes('/exchange')).afterCommand, 1);
+  const tape = new Tape(recorder.records);
+  assert.equal(JSON.parse(tape.respond('POST', url, body).body).balance, '10');
+  tape.commandIndex = 1;
+  assert.equal(JSON.parse(tape.respond('POST', url, body).body).balance, '10');
+  tape.commandIndex = 2;
+  assert.equal(JSON.parse(tape.respond('POST', url, body).body).balance, '9');
+});
+
+test('short auth headers or URLs latch failure and cannot leave an incomplete successful capture', async () => {
+  let requests = 0;
+  const live = makeLive(async () => { requests++; return { status: 200, headers: 'x-access-token: abc', body: bytes('{}') }; });
+  const outbound = createPrivateRecorder(live);
+  await assert.rejects(outbound.transport.request({ method: 'GET', url: 'https://example.com/account', headers: { 'ACCESS-SIGN': 'abc' } }), { message: 'Live-smoke tape redaction failed' });
+  assert.ok(outbound.failure);
+  assert.equal(requests, 0);
+  const url = createPrivateRecorder(live);
+  await assert.rejects(url.transport.request({ method: 'GET', url: 'https://example.com/account?token=abc' }), { message: 'Live-smoke tape redaction failed' });
+  assert.ok(url.failure);
+  assert.equal(requests, 0);
+  const inbound = createPrivateRecorder(live);
+  await assert.rejects(inbound.transport.request({ method: 'GET', url: 'https://example.com/account' }), { message: 'Live-smoke tape redaction failed' });
+  assert.ok(inbound.failure);
+  assert.equal(requests, 1);
+  assert.equal(inbound.records.length, 2);
+});
+
+test('unrecordable UTF8 response bytes latch failure for both buffered and streamed HTTP', async () => {
+  for (const streamed of [false, true]) {
+    const invalid = Uint8Array.from([0xff, 0xfe, 0x80]);
+    const recorder = createPrivateRecorder(makeLive(async () => ({ status: 200,
+      body: streamed ? (async function* () { yield bytes('{"balance":"9"}'); yield invalid; })() : invalid })));
+    const work = (async () => {
+      const response = await recorder.transport.request({ method: 'GET', url: 'https://example.com/account' });
+      if (streamed) await bodyBytes(response.body);
+    })();
+    await assert.rejects(work, /Live-smoke (?:tape redaction|transport response recording) failed/);
+    assert.ok(recorder.failure, `missing failure latch for ${streamed ? 'streamed' : 'buffered'} response`);
+    assert.equal(recorder.records.length, 2);
+  }
 });
