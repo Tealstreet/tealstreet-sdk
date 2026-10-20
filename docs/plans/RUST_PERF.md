@@ -604,3 +604,16 @@ WEEX and MEXC without the per-method observer. Classify sampled WASM, host,
 harness, GC and idle stacks; sampled wall distribution is not exact thread CPU.
 Only evidence-backed runtime/harness optimization follows, with review/tests and
 a stable commit before new performance comparisons.
+
+Predeclared scheduling-quality pilot after CPU sampling: five current-binary
+WEEX uninstrumented runs under normal policy and five under macOS
+`taskpolicy -c background`, alternating order by pair. This compares variability
+of identical code, never before/after performance direction. Keep all samples.
+The local system manual guarantees an inherited QoS clamp, not core affinity.
+Adopt that separate context for a new balanced comparison only if its sample
+CV is at most half normal CV and max/min CPU is at most1.25; otherwise do not
+claim the clamp stabilizes the experiment. Do not mix foreground and clamped
+cohorts. Any future performance comparison applies the same policy to both sides
+and must be predeclared independently; no favorable-result extension. The initial
+foreground regressions remain reported regardless of pilot outcome. Independent
+plan review accepts this as experiment-quality diagnosis, not a performance win.
