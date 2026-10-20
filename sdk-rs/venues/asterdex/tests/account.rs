@@ -15,6 +15,7 @@ struct H {
     sockets: Vec<(SocketId, String)>,
     timers: Vec<(TimerId, f64)>,
     done: Vec<(u32, Result<String, String>)>,
+    logs: Vec<String>,
 }
 impl H {
     fn new() -> Self {
@@ -34,6 +35,7 @@ impl H {
             sockets: vec![],
             timers: vec![],
             done: vec![],
+            logs: vec![],
         };
         h.engine.start(h.now);
         h.collect();
@@ -68,6 +70,7 @@ impl H {
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 _ => {}
             }
         }
@@ -232,10 +235,10 @@ fn order_terminal_and_cumulative_guards_survive_stale_ws_and_rest() {
     );
 }
 #[test]
-fn malformed_position_snapshot_preserves_last_good_state() {
+fn unidentifiable_position_row_preserves_last_good_state() {
     let mut h = H::new();
     h.fire_after(27000.0);
-    h.reply("/positionRisk",r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","entryPrice":"0","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"25"}, {"symbol":"BROKEN"}]"#);
+    h.reply("/positionRisk",r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","entryPrice":"0","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"25"}, {"positionAmt":"1"}]"#);
     assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 10.0);
 }
@@ -541,4 +544,224 @@ fn leverage_metadata_command_completes_from_native_settings() {
     )
     .unwrap();
     assert_eq!(output, json!({"buyLeverage":10,"sellLeverage":10}));
+}
+
+fn place(h: &mut H, command: u32, order: Value) {
+    h.event(Event::Command(safe_cex_engine::Command::PlaceOrders {
+        command,
+        orders: vec![serde_json::from_value(order).unwrap()],
+    }));
+}
+fn result(h: &H, command: u32) -> &Result<String, String> {
+    &h.done.iter().find(|(c, _)| *c == command).unwrap().1
+}
+#[test]
+fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
+    let mut h = H::pending_mode();
+    h.reply("/positionSide/dual", r#"{"code":-1000,"msg":"busy"}"#);
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("position mode read failed"))
+    );
+    let reduce =
+        json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1,"reduceOnly":true});
+    place(&mut h, 30, reduce.clone());
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    assert!(
+        result(&h, 30)
+            .as_ref()
+            .unwrap_err()
+            .contains("position mode has not loaded")
+    );
+    h.fire_after(1_000.0);
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
+    assert!(h.engine.store().hedged());
+    place(&mut h, 31, reduce);
+    assert!(h.take("/order").url.contains("positionSide=SHORT"));
+}
+#[test]
+fn unmapped_liquidation_order_type_still_delivers_its_fill() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    let mut liquidation = order(10.0, "FILLED", "2", 77);
+    liquidation["o"]["i"] = json!(555);
+    liquidation["o"]["ot"] = json!("LIQUIDATION");
+    liquidation["o"]["o"] = json!("LIQUIDATION");
+    h.ws(liquidation);
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    assert!(h.engine.store().order("555").is_none());
+}
+#[test]
+fn malformed_open_order_row_is_skipped_and_keeps_known_copy() {
+    let mut h = H::new();
+    h.ws(order(10.0, "NEW", "0", 1));
+    assert!(h.engine.store().order("123").is_some());
+    h.fire_after(10_000.0);
+    h.reply(
+        "/openOrders",
+        r#"[{"orderId":200,"symbol":"BTCUSDT","type":"LIMIT","side":"SELL","price":"110","origQty":"1","executedQty":"0","status":"NEW","timeInForce":"GTC","reduceOnly":false,"closePosition":false},
+            {"orderId":123,"symbol":"BTCUSDT","type":"LIMIT","side":"BUY","price":"100","origQty":"bad","executedQty":"0","status":"NEW","reduceOnly":false,"closePosition":false}]"#,
+    );
+    assert!(h.engine.store().order("200").is_some());
+    assert_eq!(
+        h.engine.store().order("123").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l.contains("skipped 1 malformed open order row(s): 123"))
+    );
+}
+#[test]
+fn malformed_position_row_is_skipped_and_keeps_known_symbol() {
+    let mut h = H::new();
+    h.fire_after(27000.0);
+    h.reply("/positionRisk",r#"[{"symbol":"ETHUSDT","positionSide":"BOTH","positionAmt":"2","entryPrice":"10","unRealizedProfit":"0","liquidationPrice":"0","notional":"20","leverage":"5"},
+        {"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"3","entryPrice":"bad","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"25"}]"#);
+    let store = h.engine.store();
+    assert_eq!(store.position("ETHUSDT").unwrap().contracts, 2.0);
+    assert_eq!(store.position("BTCUSDT").unwrap().contracts, 1.0);
+}
+#[test]
+fn flat_position_row_with_a_bad_field_still_closes_the_position() {
+    let mut h = H::new();
+    h.fire_after(27000.0);
+    h.reply("/positionRisk",r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"0","entryPrice":"bad","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"25"}]"#);
+    assert!(h.engine.store().position("BTCUSDT").is_none());
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 25.0);
+}
+#[test]
+fn hedge_malformed_leg_keeps_only_that_leg_without_duplicating_or_reviving_others() {
+    let leg = |side: &str, amount: &str, entry: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"{entry}","unRealizedProfit":"0","liquidationPrice":"0","notional":"0","leverage":"5"}}"#
+        )
+    };
+    for (long_amount, expected_long) in [("3", Some(3.0)), ("0", None)] {
+        let mut h = H::pending_mode();
+        h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
+        h.ws(account(json!(10), "1", "LONG"));
+        h.ws(account(json!(11), "-2", "SHORT"));
+        h.fire_after(27000.0);
+        h.reply(
+            "/positionRisk",
+            &format!(
+                "[{},{}]",
+                leg("LONG", long_amount, "100"),
+                leg("SHORT", "-5", "bad")
+            ),
+        );
+        let positions = h.engine.store().positions();
+        assert_eq!(
+            positions.iter().filter(|p| p.id == "BTCUSDT:long").count(),
+            usize::from(expected_long.is_some())
+        );
+        assert_eq!(
+            positions
+                .iter()
+                .find(|p| p.id == "BTCUSDT:long")
+                .map(|p| p.contracts),
+            expected_long
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .position("BTCUSDT:short")
+                .unwrap()
+                .contracts,
+            2.0
+        );
+        assert!(h.engine.store().position("BTCUSDT").is_none());
+    }
+}
+#[test]
+fn malformed_row_cannot_reopen_a_locally_canceled_order() {
+    let mut h = H::new();
+    h.ws(order(10.0, "NEW", "0", 1));
+    h.event(Event::Command(safe_cex_engine::Command::CancelOrders {
+        command: 50,
+        ids: vec!["123".into()],
+    }));
+    h.reply(
+        "/order",
+        r#"{"orderId":123,"status":"CANCELED","executedQty":"0"}"#,
+    );
+    h.fire_after(10_000.0);
+    h.reply(
+        "/openOrders",
+        r#"[{"orderId":123,"symbol":"BTCUSDT","type":"LIMIT","side":"BUY","price":"100","origQty":"bad","executedQty":"0","status":"NEW","reduceOnly":false,"closePosition":false}]"#,
+    );
+    assert_eq!(
+        h.engine.store().order("123").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+#[test]
+fn hedge_amend_right_after_placement_uses_the_acknowledged_leg() {
+    let mut h = H::pending_mode();
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
+    place(
+        &mut h,
+        60,
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}),
+    );
+    let placed = h.take("/order");
+    assert!(placed.url.contains("positionSide=LONG"));
+    h.respond(placed, r#"{"orderId":123}"#);
+    // The private NEW row carries no positionSide here.
+    h.ws(order(10.0, "NEW", "0", 1));
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 61,
+        id: "123".into(),
+        price: Some(99.0),
+        amount: None,
+    }));
+    let cancel = h.take("/order");
+    h.respond(
+        cancel,
+        r#"{"orderId":123,"status":"CANCELED","executedQty":"0"}"#,
+    );
+    assert!(h.take("/order").url.contains("positionSide=LONG"));
+}
+#[test]
+fn hedge_amend_keeps_the_order_rows_position_side() {
+    let mut h = H::pending_mode();
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
+    // A hedge close-long limit: SELL on the LONG leg, reported with reduceOnly=false.
+    let mut close_long = order(10.0, "NEW", "0", 1);
+    close_long["o"]["S"] = json!("SELL");
+    close_long["o"]["ps"] = json!("LONG");
+    h.ws(close_long);
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 40,
+        id: "123".into(),
+        price: Some(105.0),
+        amount: None,
+    }));
+    let cancel = h.take("/order");
+    h.respond(
+        cancel,
+        r#"{"orderId":123,"status":"CANCELED","executedQty":"0"}"#,
+    );
+    let replacement = h.take("/order");
+    assert!(replacement.url.contains("side=SELL"));
+    assert!(replacement.url.contains("positionSide=LONG"));
+
+    let mut unknown = order(11.0, "NEW", "0", 2);
+    unknown["o"]["i"] = json!(124);
+    h.ws(unknown);
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 41,
+        id: "124".into(),
+        price: Some(105.0),
+        amount: None,
+    }));
+    assert!(
+        result(&h, 41)
+            .as_ref()
+            .unwrap_err()
+            .contains("no known hedge position side")
+    );
 }
