@@ -47,8 +47,22 @@ export interface Transport {
   clearTimeout(handle: unknown): void;
 }
 
+/** Structured engine failure (`engine/src/error.rs`); `message` is the user-facing text. */
+export interface VenueErrorDetail {
+  message: string;
+  kind?: 'rejected' | 'invalidInput' | 'authInvalid' | 'authExpired' | 'authPermission' | 'rateLimited'
+    | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  outcome?: 'notSent' | 'rejected' | 'unknown';
+  venueCode?: string;
+  venueMessage?: string;
+  retryAfterMs?: number;
+  partial?: { orderIds: string[]; total: number; failedIndex: number };
+}
+
 export interface EngineHandlers {
   onDeactivate?(): void;
+  /** Startup cannot complete; the account should fail `start` with this. */
+  onStartupFailed?(detail: VenueErrorDetail): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
