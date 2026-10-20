@@ -250,6 +250,33 @@ publish an empty snapshot or dispose the previous good engine.
   production code. Final source root typecheck 44/lint 28 and SDK 414 WASM pass.
   No native venue logic or combined WASM bytes changed in this PR review round.
 
+- Landing advanced to spot-products PR #1339 (`f4ea9e06ab`) during the PR review
+  round. Integrated as `20e7a6d401`, retaining the new account-validation
+  startup/signer guards plus all reviewed consumer fixes and the scoped Paradex
+  build profile. Current inventory is 49 names / 47 Rust aliases / 9 defaults /
+  38 opt-in / 2 absent (Bitunix and KuCoin Spot).
+- New spot integration audit: Hyperliquid's existing spot guard prevents perps
+  valuation; both spot ports intentionally value holdings at private balance
+  application, not quote-only events. Shared quotes must retain that cadence
+  while remaining authoritative for the next private apply. Test-only native
+  ownership/reconnect/price-restoration evidence follows; no new spot price
+  cache or quote-time valuation is introduced. The combined binary and affected
+  consumer/gate proofs are rebuilt for this integration before final CI/landing.
+
+- Spot integration checkpoint `da128ffc37` adds test-only native coverage;
+  focused 36 tests and independent review PASS. Full merged native workspace
+  2,558 tests / 210 result suites, workspace all-target/all-feature Clippy,
+  WASM32 Clippy, bans/fmt PASS. Merged SDK unit 7,482/516 files, SDK WASM
+  426/14 files, server 138 unit + 11 native WASM, host 70/harness 571, spot frame
+  integration 8 and all nine consumer WASM cases PASS. Root typecheck 44 and
+  lint 28 tasks PASS; packaged isolated smoke retains 131 JS / 353 Rust notices.
+- Current combined web/node/packaged artifact is 11,614,314 bytes, SHA-256
+  `d1fdda29b8593918707278e5371419e19d6a7be73d167b70c3a8f8a8668e7b88`.
+  Final combined replay covers 17 public/26 private profiles, including both
+  spot aliases and a Kraken futures control; Paradex solo adds one of each.
+  Public timing runs alone after all other owned checks stop. Final metrics
+  replace the pre-spot measurements below once the replay completes.
+
 ## Final public replay metrics
 
 Three-run medians on the integrated `eb2f1751…b3359` combined binary, except
