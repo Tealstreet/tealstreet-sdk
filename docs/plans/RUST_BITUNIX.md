@@ -2167,3 +2167,26 @@ After merge and correction, refresh affected global checks and actual compiled
 consumers; run the remaining venue and Binance/Bitunix control gates, push,
 post adversarial review findings, fix them, and merge only the reviewed head
 with green CI. CI now includes two additional OKX public fixture invocations.
+
+
+Parity-sweep merge committed as 8202946de8. Independent harness and SDK
+transport union reviews pass. Final harness suite passes 811 tests after
+removing two duplicated conflict-overlap test copies, keeping their originals.
+KuCoin and Phemex retain quotas with secondary credentials selected and signed
+at actual dispatch; definitive Phemex lookup retains primary identity and route.
+All 210 scoped tests and strict Clippy pass. The six initial Phemex query-helper
+failures are retained in /tmp/bitunix-df2-kucoin-phemex-tests.log; repaired helpers
+advance registered timers monotonically without relaxing result assertions.
+Root typecheck 44/44, lint 28/28 and test 27/27 tasks pass, including 7,707 SDK
+tests in each target. Global bans, formatting, locked check and native Clippy
+pass; full native tests and WASM Clippy are still running.
+
+Hyperliquid numeric allocation correction has independent final source review
+PASS. All 104 existing tests plus six contract controls pass (110 total).
+Direct and flattened numeric parsing preserve finite validation, escaped and
+trimmed strings, optional null/defaults, integer rounding and signed zero.
+A late invalid context prevents publishing any market/ticker or opening a
+socket until a valid retry. Spot output reservation occurs only after complete
+context parsing and changes capacity, never selection or output rows. No
+fixture, oracle, gate or timing policy changed. Rebuild and fresh parent/spot
+gates are required next; the previous failed replay remains evidence.

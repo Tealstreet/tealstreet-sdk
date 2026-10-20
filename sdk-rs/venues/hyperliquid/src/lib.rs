@@ -650,6 +650,9 @@ fn spot_rows(
     let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
         return false;
     };
+    let additional = meta.universe.len().min(contexts.len());
+    markets.reserve_exact(additional);
+    tickers.reserve_exact(additional);
     let positional =
         contexts.len() == meta.universe.len() && contexts.iter().all(|c| c.coin.is_empty());
     for (position, native) in meta.universe.iter().enumerate() {

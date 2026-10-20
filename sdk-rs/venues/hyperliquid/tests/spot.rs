@@ -56,6 +56,49 @@ fn metadata_joins_by_coin_and_uses_token_size_precision() {
             .all(|p| p.contracts == 0.0 && p.leverage == 1.0 && p.side == PositionSide::Short)
     );
 }
+
+#[test]
+fn late_invalid_spot_context_keeps_the_entire_catalog_unpublished_until_valid_retry() {
+    for invalid in [
+        r#""NaN""#,
+        r#""1e400""#,
+        r#""bad""#,
+        "null",
+        "false",
+        "[]",
+        "{}",
+    ] {
+        let mut e = Engine::new(Hyperliquid::new_spot(Options {
+            public_data_only: true,
+            ..Options::default()
+        }));
+        e.start(1000.0);
+        let request = take_http(&mut e);
+        // The first context is valid; a malformed number occurs only in the last row.
+        let payload = META.replace(
+            r#""dayNtlVlm":"8906.0""#,
+            &format!(r#""dayNtlVlm":{invalid}"#),
+        );
+        assert_ne!(payload, META);
+        support::reply(&mut e, &request, 200, &payload);
+        assert!(e.store().markets().is_empty(), "{invalid}");
+        assert!(e.store().tickers().is_empty(), "{invalid}");
+        assert!(!e.store().loaded().markets);
+        assert!(!e.store().loaded().tickers);
+        assert!(
+            !e.drain_actions()
+                .any(|action| matches!(action, Action::WsConnect { .. }))
+        );
+        let retry = e.wait_http(|request| support::kind(request) == "spotMetaAndAssetCtxs");
+        support::reply(&mut e, &retry, 200, META);
+        assert_eq!(e.store().markets().len(), 2);
+        assert_eq!(e.store().tickers().len(), 2);
+        assert!(e.store().loaded().markets);
+        assert!(e.store().loaded().tickers);
+        assert_eq!(e.store().ticker("HFUN/USDC").unwrap().last, 0.00093722);
+    }
+}
+
 #[test]
 fn spot_subscriptions_exclude_perpetual_channels() {
     let (mut e, _) = ready(true);
