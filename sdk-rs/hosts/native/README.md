@@ -107,10 +107,11 @@ Send the exact same JSON command objects as `WasmEngine.command`, for example:
 
 ```json
 {"op":"subscribeOrderBook","symbol":"BTCUSDT"}
-{"op":"fetchAccount","command":1}
+{"op":"fetchCandles","command":1,"symbol":"BTCUSDT","interval":"1m","limit":100}
 ```
 
-All trading, account and query variants use the shared typed decoder. Text
+All trading, account and query variants use the shared typed decoder; individual
+venues still reject operations they do not implement. Text
 responses have `type: "done"`, the caller's `command`, and either `result` (a
 JSON string, as in the WASM host) or `error`. IDs need only be unique among that
 client's pending commands; the server allocates separate internal IDs. Duplicate

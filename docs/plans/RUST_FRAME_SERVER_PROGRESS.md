@@ -147,3 +147,27 @@ workspace, TS, host/harness and WASM gates run again on this combined tree.
   their account flush interval. Native agent independently confirmed the issue
   and the two-line behavior/documentation fix. Bandwidth figures remain the
   explicitly stated four-flush/second fixture, independent of server defaults.
+
+### Phase 3 verification checkpoint
+
+Runtime source: b15812f843 (merged twenty-venue tree). Passed:
+
+- Workspace native tests with CI RUSTFLAGS: 1,800 passed across 151 groups,
+  zero failed or ignored. Includes the new loopback and queue/lifecycle cases.
+- Workspace all-target clippy, banned-pattern and format checks; default
+  twenty-venue WASM clippy; complete workspace wasm32 build and clippy.
+- Combined twenty-venue release WASM build and SDK integration: 76 tests.
+- Root typecheck: 44 tasks; lint: 28 tasks; tests: 27 tasks. Each SDK test-ci
+  and test-unit suite passes 7,186 tests across 491 files. Initial concurrent
+  validation exceeded import-time limits under memory pressure; the unchanged
+  suite passed with Turbo concurrency one, without altering test limits.
+- Host/decoder/Workers: 57 tests. Harness: 309 tests. Actual cross-language
+  Rust writer/JS reader/FrameApplier reconstruction: one test, with the same
+  96,064/704-byte book measurement.
+- Independent phase 3 source, migration, bandwidth and available-evidence
+  reviews (frame_native/frame_consumers) pass with no unresolved findings.
+
+Isolated parser-feature checks, single-venue size preflight, Binance public and
+private gates, and the final branch-range secret-scan refresh remain before PR
+creation. The extra Paradex size preflight is warranted by its existing narrow
+single-venue budget margin; no budget or gate threshold changes are planned.
