@@ -188,3 +188,31 @@ merge and create a fresh follow-up branch.
   Binance-enabled artifact; the Paradex-only build cannot run its Binance test.
 - No public/private replay, performance, artifact-size, finalCI or merge gate is
   claimed at this checkpoint.
+
+### First passing replay checkpoint
+
+- Merged landing WOO/Bitget parity, preserving both venue registrations and the
+  binary host path. Removed duplicate shared slippage fields introduced by the
+  automatic merge. Full workspace formatting is clean; final Clippy found a WOO
+  test's exhaustive socket pattern, now repaired for the new optional field.
+- The fresh 20-second public tape contains 12,261 replayed frames, 66 markets and
+  tickers and two full-depth books (BTC 113/71 bid/ask levels, ETH 107/34). Three-run
+  public gate PASS: main-thread CPU TS 428.6ms / Rust 410.6ms; steady CPU
+  191.0ms / 125.5ms; retained memory 1,547,816 / 1,281,104 bytes.
+- Private gate PASS: 15 commands and 32 replayed frames, with independent exact
+  signatures, write ordering, caller identities and account/query comparisons.
+  Informational CPU TS 477.0ms / Rust 330.9ms; retained memory 10.0MB / 7.0MB.
+  Configured leverage is read from the real TS account cache; effective position
+  leverage remains separate and is still compared exactly.
+- Artifact size PASS: 1,214,403 bytes against the unchanged 1,258,291-byte budget.
+  Removed unused production dynamic EIP712 helpers/dependencies, kept independent
+  ABI oracles in test dependencies, and used the existing per-venue size profile.
+  Independent signing/formula and harness reviews pass; harness179 tests pass.
+- Final native venue run passes 85 tests: 8 unit, 18 account, 13 history, 28 public,
+  4 signing and 14 trading. The last public audit extended identity filtering to
+  markets before financial decode; irrelevant malformed options cannot poison
+  the perpetual seed, while selected malformed perps still reject atomically.
+  This final public source change requires the scheduled artifact/replay rerun.
+- Binance regressions, combined-host tests, final workspace checks and CI/PR
+  reviews remain in progress. All 6,917 safe-cex tests passed with one test worker;
+  repository checks are being repeated after merging the landing branch.
