@@ -327,3 +327,19 @@ PR [#1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325) targets
 `feat/rust-rewrite`. Fresh account/auth, trading/history and public/integration
 code-correctness reviews are running against the published port. Findings and
 fixes will be posted on the PR; merge requires green CI at its exact head.
+
+### Published PR correctness review, round one
+
+Three fresh reviewers found six actionable issues: REST scans advanced fill
+emission baselines and discarded deduplication history; user orders mixed quote
+leaves with base fills without denomination proof; recovered placement IDs did
+not resolve ambiguous reservations; history sent an undocumented sort enum;
+stream intervals reused REST's smaller whitelist; and daily candles did not
+backfill after reconnect. Fixes and focused interleaving/reconnect regressions
+are in progress, followed by affected gates and another independent review.
+
+CI's five secret-scan findings were inspected locally with the same gitleaks
+8.30.1 version. Three are literal `organizations/test/apiKeys/test` test names;
+two match PEM delimiter labels/invalid `AAAA` inputs rather than key material.
+Only their exact historical commit/path/rule/line fingerprints are ignored;
+the default detection rules and future source scans remain enabled.
