@@ -52,7 +52,7 @@ export const settledMemory = async ({
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
   quietMs = 100,
-  timeoutMs = 1000,
+  timeoutMs = 5000,
 } = {}) => {
   const started = now();
   const deadline = started + timeoutMs;
@@ -66,8 +66,11 @@ export const settledMemory = async ({
   let heapStableSince = now();
   let heapTransitionCount = 0;
   let lastHeapUsed;
+  let longestCollectionMs = 0;
   while (now() <= deadline) {
+    const collectStarted = now();
     await collect();
+    longestCollectionMs = Math.max(longestCollectionMs, now() - collectStarted);
     await pause();
     const memory = sample();
     const time = now();
@@ -92,8 +95,8 @@ export const settledMemory = async ({
   const elapsedMs = now() - started;
   throw Object.assign(
     new Error(
-      `Heap/backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs}, heapTransitions=${heapTransitionCount}, lastHeapUsed=${lastHeapUsed})`,
+      `Heap/backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs}, heapTransitions=${heapTransitionCount}, lastHeapUsed=${lastHeapUsed}, longestGC=${longestCollectionMs.toFixed(1)}ms)`,
     ),
-    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs, heapTransitionCount, lastHeapUsed },
+    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs, heapTransitionCount, lastHeapUsed, longestCollectionMs },
   );
 };

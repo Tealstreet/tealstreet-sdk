@@ -152,6 +152,9 @@ jobs:
           - venue: grvt
             books: BTC_USDT_PERP,ETH_USDT_PERP
             private_script: rust:private-tape-grvt
+          - venue: phemex
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape:phemex
           - venue: kraken
             books: PF_XBTUSD,PF_ETHUSD
             private_script: rust:private-tape-kraken
