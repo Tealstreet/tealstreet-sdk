@@ -131,3 +131,23 @@ Evidence limitation: the captured public tape contains no null values; nullable
 protection comes from official documented examples and is now in the private
 tape. Required-field nulls in regression tests are labeled defensive corruption
 cases, not live traffic. No TS state normalization is added for these fixes.
+
+### Integration checkpoint
+
+- Venue commits: MEXC `769872ed18`, Bitrue/shared boundary `6811eb049b`,
+  BloFin `e15200f4d8`. All phase findings were fixed and independently re-reviewed.
+- Merged landing `5f84b3e21d` (Binance/Bybit audit repairs) as `31f418fc0b`.
+  Final workspace and root checks run against that combined source.
+- Initial root checks passed: 44 typecheck tasks, 28 lint tasks, 27 test tasks;
+  safe-cex 7,779 tests per runner. Harness: 593 tests pass. Root checks are being
+  repeated for the newly merged landing code; these initial counts are not final.
+- The new real SDK/WASM bracket regression detected a stale local baseline
+  artifact (`fetchMaxLeverage` missing). Its dependency info referenced the old
+  archived performance baseline. That failing run is excluded; all local
+  workspace release WASM artifacts were cleaned and are rebuilding from current
+  source before any replay or compiled SDK evidence is accepted.
+- Full workspace clippy passes. Final native tests, WASM clippy/build, compiled
+  SDK/host/consumer checks and public/private/size gates remain in progress.
+- MEXC startup policy remains assigned to the cross-venue startup lane. Sent
+  two coordination messages and durable Aimux handoff `task-dmbixqhc1yzx` to
+  `codex-u1pmrg`; no duplicate startup retry implementation in this branch.
