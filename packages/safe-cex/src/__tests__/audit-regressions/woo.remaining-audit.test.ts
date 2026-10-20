@@ -70,7 +70,7 @@ describe('WooX remaining July audit regressions', () => {
 
     expect(post).toHaveBeenCalledWith(
       ENDPOINTS.ALGO_ORDER,
-      expect.objectContaining({ algoType: 'STOP', triggerPrice: 90, quantity: 1 }),
+      expect.objectContaining({ algoType: 'STOP', triggerPrice: '90', quantity: '1' }),
     );
     expect(ids).toEqual(['101', '102']);
   });

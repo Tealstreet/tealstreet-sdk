@@ -649,6 +649,7 @@ impl PhemexPerpetuals {
                 price.unwrap_or(parent.price)
             }),
             trigger_price: None,
+            max_slippage_pct: None,
             stop_loss: sl,
             take_profit: tp,
             reduce_only: Some(parent.reduce_only),

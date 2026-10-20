@@ -1152,3 +1152,20 @@ test('shared public/private routing rejects ambiguous closes and keeps physical 
   await tape.deliverFrame({ type: 'ws', url, socket: 2, text: '{"private":false}' });
   assert.deepEqual(seen, ['public', 'private', 'closed-public:1006', 'private', 'replacement']);
 });
+
+test('caught WOO request validation failures remain fatal after a valid retry', () => {
+  const venue = venueOf('woo');
+  const url = 'https://api.woox.io/v3/accountinfo';
+  const timestamp = Date.now();
+  const headers = {
+    'x-api-key': 'replay-key',
+    'x-api-timestamp': timestamp,
+    'x-api-signature': createHmac('sha256', 'replay-secret').update(`${timestamp}GET/v3/accountinfo`).digest('hex'),
+  };
+  const tape = new Tape([{ type: 'http', method: 'GET', url, status: 200, body: '{"success":true}' }], venue, true);
+  assert.throws(() => tape.respond('GET', url, undefined, { ...headers, 'x-api-signature': 'bad' }), /signature/);
+  assert.equal(tape.respond('GET', url, undefined, headers).status, 200);
+  assert.equal(tape.unserved, 0);
+  assert.equal(tape.invalidSignatures, 1);
+  assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+});

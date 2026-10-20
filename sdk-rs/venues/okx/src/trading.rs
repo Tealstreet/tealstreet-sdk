@@ -690,6 +690,7 @@ impl Okx {
                     amount: amount.unwrap_or(o.amount),
                     price: Some(price.unwrap_or(o.price)),
                     trigger_price: None,
+                    max_slippage_pct: None,
                     stop_loss: None,
                     take_profit: None,
                     reduce_only: Some(o.reduce_only),
