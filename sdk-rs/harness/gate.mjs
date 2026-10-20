@@ -470,9 +470,10 @@ const KNOWN_TS_FIXES = {
   bitrue(ts) {
     // Rust refuses zero/non-finite ticker-derived position losses and aggregates
     // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
-    // Confirmed leverage survives flat/empty account metadata; TS clears that
-    // rail and blocks fresh-account orders. Native regression tests cover this
-    // correction; no account values or command results are normalized here.
+    // fixBitrue zeroes only the exact snapshot's position-free currency UPnL TS
+    // copied from sumOpenRealizedAmount. Confirmed leverage survives flat/empty
+    // account metadata; TS clears that rail and blocks fresh-account orders.
+    // Native regression tests cover this; command results are not normalized.
     // Flat rows may omit leverage until explicitly set; balance still commits.
     // Cancellation continues after failures, including child fallbacks after a
     // failed parent, and reports each failed ID. TS stops subsequent chunks.
