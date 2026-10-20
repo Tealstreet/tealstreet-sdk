@@ -921,3 +921,9 @@ after updates, since Kraken does not delete levels falling outside that depth.
 Spot USD valuation resolves normalized asset identity through its market,
 including `XXBT` holdings with an `XBT/USD` SDK ticker. Spot port scope, review
 and gate evidence are tracked in `docs/plans/RUST_SPOT_PRODUCTS.md`.
+
+Kraken Spot accounts retain the shared secondary-client GET routing policy:
+public catalog/ticker/candle GETs select the secondary egress when configured.
+All Spot private reads and mutations use primary-signed POSTs, including the
+WS-token request. Native Spot therefore keeps its primary signer while the
+host admits secondary options and routes those public GETs.

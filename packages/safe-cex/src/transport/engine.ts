@@ -91,6 +91,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   phemex: 'X-PHEMEX-ACCESS-TOKEN',
   backpack: 'X-API-Key',
   kraken: 'APIKey',
+  krakenspot: 'API-Key',
   bitget: 'ACCESS-KEY',
   bitgetusdc: 'ACCESS-KEY',
   bitgetinverse: 'ACCESS-KEY',

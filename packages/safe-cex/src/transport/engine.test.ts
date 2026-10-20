@@ -4,16 +4,19 @@ import type { BaseExchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions } from '../types';
 
 import { Blob as NodeBlob } from 'node:buffer';
+import { createHash, createHmac } from 'node:crypto';
 import { deflateSync, gzipSync } from 'node:zlib';
 
 import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { exchangeMetadata } from '../exchangeMetadata';
 import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
 import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
+import { createAPI as createKrakenSpotAPI } from '../exchanges/kraken/krakenspot.api';
 import { createAPI as createParadexAPI } from '../exchanges/paradex/paradex.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
@@ -1389,6 +1392,80 @@ describe('typed HTTP operation deadlines', () => {
 });
 
 describe('secondary GET identity egress', () => {
+  it('Kraken Spot matches the actual secondary public GET client while private POSTs retain primary signatures and egress', async () => {
+    const primarySecret = Buffer.from('primary-spot-secret').toString('base64');
+    const opts = options({
+      key: 'primary-spot-key',
+      secret: primarySecret,
+      secondary_key: 'secondary-spot-key',
+      secondary_secret: Buffer.from('secondary-spot-secret').toString('base64'),
+      secondaryProxyUrl: 'https://secondary.example/spot',
+      tealstreetProxy: true,
+      tealstreetTunnel: false,
+    });
+    const parent = {
+      name: 'krakenspot', grafanaEndpointsEvery: [], grafanaEndpointsPeriodic: [], emitter: { emit: vi.fn() },
+    } as unknown as BaseExchange;
+    const captured: Request[] = [];
+    const [client] = createApiWithSecondaryKey(opts, parent, (selected, exchange) => {
+      const api = createKrakenSpotAPI(selected, exchange);
+      api.defaults.adapter = async (config) => {
+        captured.push({
+          method: config.method!.toUpperCase(),
+          url: `${config.baseURL}${config.url}`,
+          headers: config.headers.toJSON() as Record<string, string>,
+          ...(config.data !== undefined ? { body: config.data as string } : {}),
+        });
+        return { status: 200, statusText: 'OK', config, headers: {}, data: { error: [], result: {} } };
+      };
+      return api;
+    });
+    await client.get('/0/public/AssetPairs');
+    await client.get('/0/public/Ticker');
+    await client.post('/0/private/Balance', {});
+    await client.post('/0/private/GetWebSocketsToken', {});
+    expect(captured.map(({ url }) => url)).toEqual([
+      'https://secondary.example/spot/https://api.kraken.com/0/public/AssetPairs',
+      'https://secondary.example/spot/https://api.kraken.com/0/public/Ticker',
+      `${PRIVATE_PROXY_ASIA}/https://api.kraken.com/0/private/Balance`,
+      `${PRIVATE_PROXY_ASIA}/https://api.kraken.com/0/private/GetWebSocketsToken`,
+    ]);
+    for (const input of captured.slice(0, 2)) {
+      expect(input.headers['API-Key']).toBeUndefined();
+      expect(input.headers['API-Sign']).toBeUndefined();
+    }
+    const raw = makeRaw();
+    const routed = createEngineTransport('krakenspot', opts, raw);
+    try {
+      for (const input of captured) {
+        const venueUrl = `https://api.kraken.com${input.url.split('https://api.kraken.com')[1]}`;
+        if (input.method === 'POST') {
+          expect(input.headers['API-Key']).toBe('primary-spot-key');
+          const nonce = new URLSearchParams(input.body).get('nonce');
+          const digest = createHash('sha256').update(nonce + input.body!).digest();
+          const signature = createHmac('sha512', Buffer.from(primarySecret, 'base64'))
+            .update(new URL(venueUrl).pathname).update(digest).digest('base64');
+          expect(input.headers['API-Sign']).toBe(signature);
+        }
+        await routed.request({ ...input, url: venueUrl });
+        const delivered = raw.request.mock.lastCall![0];
+        expect(delivered.url).toBe(input.url);
+        expect(delivered.body).toBe(input.body);
+        expect(delivered.headers['API-Key']).toBe(input.headers['API-Key']);
+        expect(delivered.headers['API-Sign']).toBe(input.headers['API-Sign']);
+      }
+      const plan = resolveEngineRoutingPlan('krakenspot', opts, 'https://api.kraken.com');
+      expect(plan.readHeader).toBe('API-Key');
+      expect(plan.readPublic).toBe(true);
+      expect(plan.readHttp?.prefix).toBe('https://secondary.example/spot');
+      expect(plan.http.prefix).toBe(PRIVATE_PROXY_ASIA);
+      for (const secret of [opts.key, opts.secondary_key, opts.secret, opts.secondary_secret]) {
+        expect(JSON.stringify(plan)).not.toContain(secret);
+      }
+    } finally {
+      routed.dispose!();
+    }
+  });
   const venues: Array<[ExchangeName, string]> = [
     ['binance', 'X-MBX-APIKEY'],
     ['binancepm', 'X-MBX-APIKEY'],
@@ -1405,6 +1482,7 @@ describe('secondary GET identity egress', () => {
     ['phemex', 'X-PHEMEX-ACCESS-TOKEN'],
     ['backpack', 'X-API-Key'],
     ['kraken', 'APIKey'],
+    ['krakenspot', 'API-Key'],
     ['bitget', 'ACCESS-KEY'],
     ['bitgetusdc', 'ACCESS-KEY'],
     ['bitgetinverse', 'ACCESS-KEY'],
@@ -1460,7 +1538,7 @@ describe('secondary GET identity egress', () => {
       routed.dispose!();
     },
   );
-  it.each(['phemex', 'weex', 'kucoin', 'okx', 'backpack'] as ExchangeName[])(
+  it.each(['phemex', 'weex', 'kucoin', 'okx', 'backpack', 'krakenspot'] as ExchangeName[])(
     '%s rejects partial read identities before any transport effect',
     (venue) => {
       for (const extra of [

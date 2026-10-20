@@ -547,3 +547,31 @@ than treating the original port boundary as a waiver.
   read-credential field. Its private reads are primary-signed POSTs, so set
   that field to None explicitly. Original failed build retained; repeat the
   affected build/native/WASM checks on the fixed union.
+
+### Final spot-account admission review repair
+
+- Fixed-union4e3dd1622e Rust quality PASS:2633native+3doctests, all strict
+  Clippy/fmt/bans. Root44/28/27 tasks PASS with7649SDK cases per target;
+  combined421compiledSDK cases and68host cases PASS. GRVT and4OKXprivate
+  gates PASS. No public score was sampled before the following review repair.
+- Independent union review found Kraken Spot missing from shared secondary
+  account admission. Its real TS helper selects secondary public GET egress,
+  while all private reads/writes use primary POST signing. Add the actual
+  API-Key routing policy entry; preserve native read_credentials:None.
+- Actual production TS factory/helper control proves public AssetPairs/Ticker
+  GET routes and primary Balance/WS-token POST signatures against an independent
+  HMAC calculation; compare routed request bytes and native policy. The red
+  control fails exactly at unsupported-account admission, then258focused
+  transport/native-golden cases PASS with the one-entry policy repair.
+  Independent repair re-review follows. Rust source is unchanged by this fix.
+- Expanded final runner:136steps,64child replays (30public/34private),
+  28profile builds/25unique features,19venuecontrols+11integrations. With
+  primaryOKX:71planned gates (33public/38private),26unique feature budgets;
+  additional combinedGRVT private is separate72nd proof. CI now101replays,
+  34Rust jobs after landed spot aliases. These remain planned until completed.
+
+- Independent Kraken Spot repair re-review PASS: one production policy entry,
+  GET-only secondary selection and primary POST signer preserved; existing
+  generic native exported-plan consumer needs no venue-specific mapping.
+  Red/green258-case receipts inspected independently. Final source frozen
+  after this reviewed repair; rebuild and affected root/compiled checks follow.
