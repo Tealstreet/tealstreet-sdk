@@ -3806,6 +3806,22 @@ mod startup_tests {
             })
             .collect();
         assert_eq!(delays, [120_000.0, 1_000.0]);
+        // A later ban pushes back a read that was already waiting on its own schedule.
+        retry.failed_after(&mut cx, "premium", 90_000.0);
+        let actions: Vec<_> = cx.io.actions.drain(..).collect();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::ClearTimer { .. }))
+        );
+        let delays: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(delays, [90_000.0, 90_000.0]);
         let response = |status, headers| Response {
             status,
             headers,

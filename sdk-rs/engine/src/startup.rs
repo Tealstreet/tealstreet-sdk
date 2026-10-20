@@ -5,6 +5,7 @@ struct Read<K> {
     key: K,
     attempts: u32,
     timer: Option<TimerId>,
+    due: f64,
 }
 
 pub struct Backoff<K> {
@@ -30,6 +31,22 @@ impl<K: PartialEq> Backoff<K> {
     /// As `failed`, waiting at least `minimum_ms`: a venue rate-limit or ban
     /// window must not be retried into, since bans escalate and block trading.
     pub fn failed_after<P>(&mut self, cx: &mut Cx<'_, P>, key: K, minimum_ms: f64) {
+        let minimum = if minimum_ms.is_finite() {
+            minimum_ms.max(0.0)
+        } else {
+            0.0
+        };
+        // A ban covers the whole host, so reads already waiting wait it out too.
+        let until = cx.now + minimum;
+        for read in &mut self.reads {
+            if let Some(timer) = read.timer
+                && read.due < until
+            {
+                cx.clear_timer(timer);
+                read.timer = Some(cx.set_timer(minimum));
+                read.due = until;
+            }
+        }
         let index = match self.reads.iter().position(|read| read.key == key) {
             Some(index) => index,
             None => {
@@ -37,6 +54,7 @@ impl<K: PartialEq> Backoff<K> {
                     key,
                     attempts: 0,
                     timer: None,
+                    due: 0.0,
                 });
                 self.reads.len() - 1
             }
@@ -47,12 +65,9 @@ impl<K: PartialEq> Backoff<K> {
         }
         read.attempts = read.attempts.saturating_add(1);
         let delay = f64::from((1_000u32 << read.attempts.saturating_sub(1).min(5)).min(30_000));
-        let minimum = if minimum_ms.is_finite() {
-            minimum_ms
-        } else {
-            0.0
-        };
-        read.timer = Some(cx.set_timer(delay.max(minimum)));
+        let delay = delay.max(minimum);
+        read.timer = Some(cx.set_timer(delay));
+        read.due = cx.now + delay;
         cx.log(
             LogLevel::Warning,
             "Public discovery read failed; retry scheduled",
