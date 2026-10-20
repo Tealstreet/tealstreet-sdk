@@ -200,3 +200,27 @@ instead of inventing coins for an unrelated fake account. Incoming universal gat
 CLI smoke failed before, passes after; independent harness 235/235 pass. Shared
 protocol hooks, book readiness, constructor validation and single fix dispatch
 were independently reviewed with no remaining findings.
+
+### All local gates pass on integrated source
+
+Source e0f50e7a27 integrates landing 922b5fdc89. Final proofs:
+
+- Bans, workspace formatting, workspace/all-target Clippy and Wasm Clippy PASS.
+- 85 Kraken native tests; 1,354 workspace tests PASS.
+- 235 harness tests; 75 real-Wasm boundary tests; 45 host tests PASS.
+- Root typecheck 44/44, lint 28/28, test tasks 27/27 PASS. Bounded workers and
+  serial task scheduling resolve the unrelated cold-import timeouts without
+  changing test timeouts or source. Safe-cex suite: 6,971 tests per task.
+- Live-recorded Kraken public PASS: 9,641 frames, 207 markets/tickers, two books;
+  main-thread CPU TS/Rust 1,697.8/417.9 ms (4.06x), steady 1,274.4/276.9 ms
+  (4.60x), process 1,881.9/562.1 ms (3.35x), retained 18.3/2.1 MB (8.76x).
+- Single-venue browser Wasm 851,373 bytes, below 1,258,291-byte budget.
+- Kraken private correctness PASS on both single and combined builds: 49 frames,
+  13 commands, 11 signed writes; fresh challenge after reconnect and dedup replay.
+- Combined build and Binance regression gates PASS: public CPU 258.2/138.5 ms
+  (1.86x), retained 19.0/3.0 MB (6.25x); private correctness 14 frames.
+
+Private proof is scripted documented traffic, not a funded live account. No
+credentials committed. All five phase reviews and the landing integration review
+accepted. Next: PR into feat/rust-rewrite, fresh local code-correctness reviews
+posted on the PR, address findings, green CI, merge, fresh follow-up branch.
