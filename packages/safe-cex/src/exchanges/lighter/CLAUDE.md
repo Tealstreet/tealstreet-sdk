@@ -836,6 +836,8 @@ Price-only cancel/recreate amendments use the observed remaining quantity;
 explicit replacement amounts keep the caller's requested quantity. This fixes
 the TS default that re-places the original amount after a partial execution.
 
+## Rust shared public feeds
+
 Shared public-feed snapshots revalue loaded native positions with the current
 positive normalized mark, then last price, using the direct ticker handler's
 PnL formula. The ticker mapper copies index into mark when mark is absent;

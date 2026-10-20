@@ -158,3 +158,23 @@ Reference-only TS for deleted families is inspected in
 - Focused Bitget trading 8/8, reconciliation/history 11/11, Lighter 4/4 pass.
 - SDK boundary 7/7 pass; SDK typecheck and lint pass. Full root checks and
   WASM/host/replay gates follow this checkpoint.
+
+### Landing integration checkpoint
+
+- Implementation `61e8f044b6`; known-settings bridge follow-up `e43ddb2804`.
+  The SDK boundary suite now has 14 passing tests, including all seven profiles'
+  known-leverage reads. Independent follow-up source review PASS.
+- Before the consumer merge: root typecheck 44/44, lint 28/28 and tests 27/27
+  pass; SDK runners each pass 7,761 tests in 524 files. The first root run
+  overlapped the bridge edit and mixed old imported runtime with new tests;
+  the clean committed-tree rerun passed. No test limits changed.
+- Native workspace all-target clippy passed. The superseded full workspace
+  test build was interrupted to integrate newly landed shared-feed changes;
+  no full-workspace test pass is claimed from that interrupted run.
+- Consumer-blockers PR #1342 (`fc809a9d85`) merged as `b73b152eff`. Conflicts
+  resolved by retaining both the engine imports and both Lighter doc additions.
+  Optional side/symbol and the known-settings read fix remain intact.
+- Fresh merged-tree Rust checks are running; dependency installation uses the
+  frozen lockfile before fresh merged-tree JS checks. Combined WASM, replay,
+  isolated sizes, PR reviews, CI and merge are still pending.
+- Preliminary secret scan: three lane commits, 134,207 bytes, no leaks.
