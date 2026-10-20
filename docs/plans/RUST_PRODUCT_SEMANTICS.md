@@ -252,3 +252,11 @@ integrations, 406 SDK tests, 68 host tests, one frame-wire integration and
 reviews posted on PR #1341. The requested 24 replay gates and the additional
 Paradex/Breakout public/private controls pass locally. Gitleaks passes; the PR
 must still obtain green CI on this final head before merging.
+
+An additional real-frame lifecycle assertion exposed a position with absent
+Greeks changing identity when its first Greeks arrived: the previous artifact
+fails 15/16 at that assertion. Option-enabled Bybit accounts now request exact
+position IDs at startup, before any position frame, so identity is stable both
+before/after Greek availability. Independent review PASS; repaired combined
+artifact passes all 16 semantic integrations and 406 SDK tests, with Bybit 138
+native tests and strict Clippy. Other profiles retain their prior ID policy.

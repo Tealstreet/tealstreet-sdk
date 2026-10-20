@@ -1608,6 +1608,10 @@ impl Venue for BybitLinear {
             cx.log(LogLevel::Error, error.clone());
             return;
         }
+        if self.category_enabled(Category::Option) {
+            // Keep identity stable before an option position first receives Greeks.
+            cx.store.retain_position_ids();
+        }
         for category in self.categories() {
             self.select_category(category);
             self.request_startup(cx);

@@ -278,10 +278,14 @@ test('native option position identity and Greeks survive frames without position
       native.collect(native.engine.wsMessage(socket.socket, JSON.stringify({ topic: 'position', data: [position] }), native.now));
       native.run();
     };
+    push({ ...row, delta: undefined, gamma: undefined, vega: undefined, theta: undefined });
+    const beforeGreeks = native.store().positions.find((position) => position.symbol === CALL);
+    assert(beforeGreeks);
     push(row);
     const position = native.store().positions.find((position) => position.symbol === CALL);
     assert(position);
     assert.equal(position.id, `${CALL}:long`);
+    assert.equal(position.id, beforeGreeks.id, 'receiving the first Greeks cannot change an existing position identity');
     assert.deepEqual(position.option?.greeks, { delta: 0.4, gamma: 0.01, vega: 12, theta: -8, units: 'Black-Scholes per 1 unit of the underlying, in the premium asset: vega per 1 vol point, theta per calendar day' });
     push({ ...row, size: '0' });
     assert.equal(native.store().positions.length, 0);
