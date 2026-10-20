@@ -3,6 +3,7 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
     OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
@@ -46,6 +47,7 @@ pub enum Request {
         generation: u32,
         rows: Vec<Position>,
         marks: Vec<(String, f64)>,
+        skipped: SnapshotCoverage<String>,
     },
     SymbolConfig {
         generation: u32,
@@ -68,6 +70,7 @@ struct PositionsJoin {
     /// event makes the snapshot stale.
     version: u32,
     rows: Option<Vec<Position>>,
+    skipped: SnapshotCoverage<String>,
     configs: Option<Vec<(String, MarketSetting)>>,
     failed: bool,
 }
@@ -79,6 +82,7 @@ struct OrdersJoin {
     native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
+    skipped: SnapshotCoverage<String>,
     failed: bool,
 }
 
@@ -342,6 +346,7 @@ impl BinanceFutures {
             generation,
             version: self.account.position_version,
             rows: None,
+            skipped: SnapshotCoverage::default(),
             // Without a symbol config endpoint, settings come from the rows.
             configs: symbol_config.is_none().then(Vec::new),
             failed: false,
@@ -355,6 +360,7 @@ impl BinanceFutures {
                 generation,
                 rows: Vec::new(),
                 marks: Vec::new(),
+                skipped: SnapshotCoverage::default(),
             }),
         );
         if let Some(path) = symbol_config {
@@ -399,6 +405,7 @@ impl BinanceFutures {
             native_strategies: Vec::new(),
             regular: None,
             algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
+            skipped: SnapshotCoverage::default(),
             failed: false,
         });
         self.signed(
@@ -620,6 +627,7 @@ impl BinanceFutures {
                 rows,
                 generation,
                 marks,
+                skipped,
             } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
                     if let Some(join) = &mut self.account.positions
@@ -672,7 +680,24 @@ impl BinanceFutures {
                 {
                     marks.push((market.base.clone(), mark));
                 }
-                let signed = num::parse(&p.position_amt);
+                // An unreadable size is not flat: keep this leg's last known state.
+                let Some(signed) = num::parse_decimal(&p.position_amt) else {
+                    let key = match p.position_side.as_ref() {
+                        "BOTH" => Some(PositionMode::Oneway),
+                        "LONG" | "SHORT" => Some(PositionMode::Hedged),
+                        _ => None,
+                    }
+                    .map(|mode| position_id(&p.symbol, position_side(&p.position_side, 0.0), mode));
+                    _cx.log(
+                        LogLevel::Warning,
+                        format!(
+                            "Binance positionRisk row {} has an unreadable positionAmt",
+                            p.symbol
+                        ),
+                    );
+                    skipped.reject(key);
+                    return;
+                };
                 if signed == 0.0 && !self.is_inverse() {
                     return;
                 }
@@ -808,6 +833,7 @@ impl BinanceFutures {
                 generation,
                 rows,
                 marks,
+                skipped,
             } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
@@ -816,6 +842,7 @@ impl BinanceFutures {
                         self.account.native_asset_marks.extend(marks);
                     }
                     join.rows = Some(rows);
+                    join.skipped = skipped;
                 }
                 self.revalue_pending_wallet(cx);
                 self.finish_positions(cx);
@@ -904,12 +931,15 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
                 let mut invalid: Option<String> = None;
+                let mut skipped = Vec::new();
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
                         if self.options.portfolio_margin || self.is_spot() {
                             invalid.get_or_insert_with(|| {
                                 format!("order {} has unsupported type {}", o.order_id, o.kind)
                             });
+                        } else {
+                            skipped.push(o.order_id.to_string());
                         }
                         return;
                     };
@@ -988,6 +1018,7 @@ impl BinanceFutures {
                         Ok(()) if invalid.is_none() => {
                             join.regular = Some(orders);
                             join.native_orders = native_orders;
+                            self.skip_unsupported_orders(cx, generation, skipped);
                         }
                         _ => join.failed = true,
                     }
@@ -1076,8 +1107,10 @@ impl BinanceFutures {
             Request::OpenAlgoOrders { generation } => {
                 let now = cx.now;
                 let mut orders = Vec::new();
+                let mut skipped = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
+                        skipped.push(o.algo_id.to_string());
                         return;
                     };
                     let amount = opt(&o.quantity);
@@ -1107,7 +1140,10 @@ impl BinanceFutures {
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => join.algo = Some(orders),
+                        Ok(()) => {
+                            join.algo = Some(orders);
+                            self.skip_unsupported_orders(cx, generation, skipped);
+                        }
                         Err(_) => join.failed = true,
                     }
                 }
@@ -1130,7 +1166,7 @@ impl BinanceFutures {
             let settings: std::collections::HashMap<&str, MarketSetting> =
                 configs.iter().map(|(s, c)| (s.as_str(), *c)).collect();
             if join.version == self.account.position_version {
-                let positions = join
+                let mut positions: Vec<Position> = join
                     .rows
                     .unwrap_or_default()
                     .into_iter()
@@ -1156,6 +1192,13 @@ impl BinanceFutures {
                         p
                     })
                     .collect();
+                for current in cx.store.positions() {
+                    if !join.skipped.allows_absence(&current.id)
+                        && !positions.iter().any(|p| p.id == current.id)
+                    {
+                        positions.push(current.clone());
+                    }
+                }
                 cx.store.set_positions(positions);
             } else {
                 // A stream event landed after these reads were issued.
@@ -1312,7 +1355,47 @@ impl BinanceFutures {
         for (symbol, client, native) in join.native_strategies {
             self.bind_strategy_native(&symbol, &client, native);
         }
+        for current in cx.store.orders() {
+            let terminal = self.account.terminal_algo_ids.contains(&current.id)
+                || current.id.parse().is_ok_and(|native: u64| {
+                    self.account
+                        .native_executed
+                        .get(&(current.symbol.clone(), native))
+                        .is_some_and(|(_, terminal)| *terminal)
+                });
+            if current.status == OrderStatus::Open
+                && !terminal
+                && !join.skipped.allows_absence(&current.id)
+                && !orders.iter().any(|o| o.id == current.id)
+            {
+                orders.push(current.clone());
+            }
+        }
         cx.store.set_orders(orders);
+    }
+
+    /// Keeps the last known state of listed orders whose type is unsupported.
+    fn skip_unsupported_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        generation: u32,
+        ids: Vec<String>,
+    ) {
+        let Some(join) = self
+            .account
+            .orders
+            .as_mut()
+            .filter(|j| j.generation == generation)
+        else {
+            return;
+        };
+        for id in ids {
+            cx.log(
+                LogLevel::Warning,
+                format!("Binance open order {id} has an unsupported type"),
+            );
+            join.skipped.reject(Some(id));
+        }
     }
 
     /// USD totals over every asset: stablecoins at par, others priced by their

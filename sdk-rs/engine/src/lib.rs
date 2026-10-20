@@ -3,6 +3,7 @@ pub mod backoff;
 pub mod book;
 pub mod capabilities;
 pub mod command;
+pub mod coverage;
 pub mod credentials;
 pub mod de;
 pub mod engine;

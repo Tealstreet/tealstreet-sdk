@@ -526,3 +526,25 @@ fn delayed_row_cannot_replace_newer_callback_after_grace_is_pruned() {
     assert_eq!(payload["trailingStopParams"][0]["activationPrice"], "96");
     assert_eq!(payload["trailingStopParams"][0]["trailVariance"], "7");
 }
+
+#[test]
+fn skipped_uta_trailing_row_keeps_its_stored_copy_though_absent_trailing_is_removed() {
+    // UTA polls never keep an absent trailing stop, so only the skipped row's
+    // identity can keep it.
+    let mut h = uta(&[
+        trailing("skipped", "95", "3"),
+        trailing("absent", "96", "3"),
+    ]);
+    let stored = h.engine.store().order("skipped").unwrap().clone();
+    assert_eq!(stored.kind, OrderType::TrailingStopLoss);
+    let started = h.now;
+    for tick in 1..=4 {
+        poll_at(&mut h, started + 2000.0 * f64::from(tick));
+    }
+    let mut unknown = trailing("skipped", "97", "3");
+    unknown["status"] = json!("secret_new_status");
+    respond_orders(&mut h, &[], &[unknown, trailing("fresh", "98", "3")]);
+    assert_eq!(h.engine.store().order("skipped"), Some(&stored));
+    assert!(h.engine.store().order("absent").is_none());
+    assert!(h.engine.store().order("fresh").is_some());
+}
