@@ -247,3 +247,9 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Earlier root tests hit unrelated Hyrotrader dynamic-import timeouts under Rust
   compilation; no product/test timeout changes. Verify again with bounded test
   concurrency before claiming the repository gate green.
+- CI exposed an incoming transport/Bitrue test integration omission: one Bitrue
+  WsConnect match did not ignore new channel/context fields. Added the structural
+  wildcard; Bitrue account15 tests pass, with full workspace clippy rerunning.
+- Shared-machine load reached148 on10 logical CPUs during local TS import
+  timeouts. Do not weaken test timeouts or claim a local root-test pass; final
+  complete CI remains required and is the repository test source of truth.
