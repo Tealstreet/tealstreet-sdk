@@ -24,6 +24,7 @@ import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
+import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -40,6 +41,10 @@ const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeB
   .trim()
   .split('\n')
   .map(JSON.parse);
+const smokeResult = assertLiveSmokeComplete(tapeRecords);
+// The runner subscribes exactly its selected market. Reproduce that feed set
+// rather than the public benchmark's default three symbols.
+if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 

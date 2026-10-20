@@ -364,6 +364,11 @@ accounts and authorize actual runs. A minimum-size, distant limit order can be
 rejected by price bands, minimum notional, permissions, or account configuration;
 the runner must report the rejection rather than increase exposure silently.
 Use an otherwise empty dedicated account because cancel-all is account-wide.
+The generic cancel-all path visits the selected symbol and any other observed
+open-order symbols, matching the SDK fallback for venues without a global
+endpoint. Unknown minimum-notional rules or original leverage refuse placement;
+add an authoritative discovery decoder before enabling a product the runner
+cannot size. Independent hedge leverage rails must match.
 The runner uses the Wasm engine with the Node transport. `--symbol <symbol>`
 selects a market and `--out <path>` selects an exclusive, mode-0600 tape file;
 the default is `sdk-rs/harness/tapes/<name>-live-private.jsonl`. Replay a completed
@@ -371,6 +376,16 @@ recording with `corepack yarn rust:gate --venue <name> --tape <path> --runs 1
 --books ''`. A failed or incomplete lifecycle is recorded as a failure and
 cannot serve as live lifecycle proof. The selected Wasm build must include the
 requested venue.
+The gate automatically subscribes the recording's selected book. It rejects
+failed/incomplete live captures. After disposal, a fresh Wasm instance reads the
+account again to verify empty orders/positions and restored leverage independently
+of mutation acknowledgements. These redacted reads are retained under
+`live-smoke-verify-*`; their success marker is an operational check by the runner,
+while the TS/Rust replay compares the primary lifecycle. A scripted Binance run
+round-trips through that gate; other profiles still need credentialed proof on
+their actual products. The runner never silently upgrades size after rejection
+or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
+and cleanup; incomplete cleanup remains a failure.
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
 family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read

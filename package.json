@@ -54,7 +54,9 @@
     "rust:replay": "ESBUILD_WORKER_THREADS=0 node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
     "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
-    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
+    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs",
+    "rust:live-smoke": "node sdk-rs/harness/live-smoke.mjs",
+    "rust:test-live-smoke": "node --test sdk-rs/harness/live-smoke.integration.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",

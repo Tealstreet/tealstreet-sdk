@@ -50,3 +50,28 @@ native network primitives provide its transport. No engine shapes change.
 - Read landing brief, rewrite spec, root/package exchange contracts; clean fresh
   branch created from latest landing. Configuration and recorder work delegated
   in disjoint scopes. Lifecycle design under implementation.
+- Phase 1 profiles: `7f3b4b4579`, independent review PASS, 11 tests. Repaired
+  Bybit demo mode and added simulation payload/header fences for shared origins.
+  Recorder review additionally required positional auth redaction and coherent
+  typed replay credentials/session identities; repairs under final re-review.
+- Real Wasm host + scripted Binance transport completes the lifecycle and its
+  recorded tape passes the actual TS/Rust private gate. Lost placement reply,
+  failed replacement, and a nonempty initial account pass negative tests. No
+  real account or credentialed network request was used.
+- Cancel-all uses the SDK generic strategy: cancel each observed account symbol
+  plus the selected symbol. Direct `CancelSymbolOrders {symbol:""}` is invalid
+  on Binance and several other engines; native-global venues accept symbol
+  commands through their implementation. Initial account emptiness bounds scope.
+- Live tapes carry an explicit completion result. The gate refuses failed or
+  incomplete lifecycle captures before replay. Binance LIST_SUBSCRIPTIONS is
+  normalized as a liveness probe, like ping/pong; feed checks remain exact.
+- Phase 1 recorder: `a3f7eef4b4`, independent re-review PASS, 106 recorder/Tape
+  tests. Outgoing authentication is omitted; only protocol request correlation
+  records persist. Canonical real environment URLs, scoped identity aliases,
+  interrupted-startup bootstrap and recorder sealing preserve replay semantics.
+- Phase 2 source review PASS after fixing late final-flush fills and optimistic
+  cleanup proof. A fresh engine reads remote account state after disposal;
+  namespaced verification records remain diagnostic, while the primary lifecycle
+  is compared through TS/Rust. Unknown notional evidence refuses before writes.
+  The runner restores the known original leverage; an engine may correctly
+  treat setting its unchanged value as a no-op.
