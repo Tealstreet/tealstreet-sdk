@@ -2559,3 +2559,32 @@ functional replay each complete 10,034 lifecycle/data frames with both books,
 zero unmatched requests, signature/protocol/socket errors and unused writes.
 These functional runs occur during compilation and are not timing evidence.
 Quiet performance gates still follow the remaining native/WASM checks.
+
+
+Merged native quality is complete: 2,910 workspace tests in 221 groups, zero
+failures/ignored tests; strict all-target native Clippy and whole-workspace
+WASM Clippy pass. Feature-isolated engine checks also pass as above. Fresh
+combined release consumers pass 440 compiled SDK cases in fourteen files, all
+95 host tests, sixteen actual product/CLI checks, the cross-language frame-wire
+integration and native WebSocket session-adapter integration. Full scripts/logs
+use /tmp/bitunix-1a10-{native-tail,consumers}.sh and matching log prefixes.
+
+The scripted lifecycle suite passes eight safety cases but its successful fake
+lifecycle tape fails strict replay: native observes the BTCUSDT book while TS
+does not (all book requirements remain enforced). Preserve the original
+/tmp/bitunix-1a10-live-smoke.log and exact recapture/failure under
+/tmp/bitunix-1a10-smoke-fail-before.*. Bounded diagnostic exports the existing
+opt-in fake tape before asserting gate success so failure evidence survives;
+then trace real TS socket/listener/depth delivery. No synthetic padding, message
+retiming, deadline increase or book-check waiver. Independent causal review and
+all nine scripted lifecycle cases must pass before accepting the consumer gate.
+
+Both strict KuCoin functional outputs also match raw: all 692 markets/tickers,
+two final books, 136 intermediate book events, five request keys and 698
+subscription keys. Owned compilation is now complete. Resolve the lifecycle
+replay defect, then run the quiet sequential /tmp/bitunix-1a10-gates.sh batch
+(KuCoin/Spot, Bitunix, four Binance modes, four OKX public/private profiles,
+Paradex and Bitrue), preserving any failed result before bounded corrections.
+No source is pushed yet; remote PR head is still 6b2d580332. Reviewable commits
+now end at ce578f6962. All-gate claims, PR update/reviews/green CI/merge and the
+fresh follow-up branch remain outstanding.
