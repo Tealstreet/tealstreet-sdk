@@ -76,6 +76,16 @@ private snapshots retain their stricter all-or-nothing safety contract.
   valuation when public prices are unavailable. No public phase completion is
   claimed yet.
 - Integration: landing merged through `fc809a9d85`. Exact-source full checks
-  are running before the broker/cancel PR. Native and wasm Clippy, root
-  typecheck (44 tasks) and lint (28 tasks) pass. Harness timing and rebuilt
-  wasm checks remain pending; no failed run is treated as a pass.
+  pass bans, formatting, native and wasm Clippy, root typecheck (44 tasks),
+  lint (28 tasks) and tests (27 tasks). Native tests pass 2,811 cases across
+  222 targets. Harness passes 590/590 and rebuilt JS hosts 76/76. The actual
+  wasm SDK suite's only failed case was the new proxy fixture using a direct
+  provider that rejects proxy intent; its scripted provider was corrected and
+  both BloFin cases pass (all 444 SDK cases now verified).
+- Replay checkpoint: all 11 affected public gates pass with three runs each,
+  identical output and lower Rust main-thread CPU/retained memory. Ten of 11
+  private gates pass. Bitrue's remaining lookup mismatch is a missing TS WS
+  time-in-force field; it is under independent review, not normalized away.
+  The full root tests pass with package tasks serialized after concurrent
+  imports timed out. Signing-clock setup now has a deterministic slow-import
+  regression without weakening the signature window. No real account used.
