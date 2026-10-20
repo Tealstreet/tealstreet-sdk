@@ -5,7 +5,7 @@ import { decompress } from '@tealstreet/compression/src/decompress';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
-import { getProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
+import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
 import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
 import { HOWWebSocket } from './HOWWebSocket';
@@ -299,6 +299,8 @@ const createAxiosHttpOverWebsocketAdapter = (
   const disposedError = (config: unknown) => new TradeTunnelDisposedError(config, owner);
 
   const adapter: AxiosAdapter = (config) => {
+    // Bound before any await: token reads below run after the socket and auth waits.
+    const getProxyToken = bindProxyToken();
     const requestOwner = {};
     const canceledError = () => new TradeTunnelCanceledError(config, requestOwner);
     if (disposed) return Promise.reject(disposedError(config));

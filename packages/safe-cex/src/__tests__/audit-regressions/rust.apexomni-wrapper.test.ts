@@ -5,10 +5,10 @@ import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../t
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const MARKET: Market = {
@@ -37,6 +37,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
   const noActions = () => '[]';
   const start = vi.fn(noActions);
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('apexomni'),
     start,
     command: (json) => {
       const command = JSON.parse(json);
@@ -170,9 +171,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
   it('keeps unsupported income and order history branded without issuing reads', async () => {
     const { exchange, commands } = setup();
     await exchange.start();
-    expect(isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+    expect(exchange.capabilities).toMatchObject({ orderHistory: false, incomeHistory: false, incomeRange: false });
     await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistoryRange(0, 1000)).resolves.toEqual([]);
@@ -183,7 +182,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
     const { exchange, commands, result, start } = setup();
     result.mockReturnValue({ userId: '611779989544632629', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: '611779989544632629', affiliateId: null });
-    expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(commands).toEqual([{ op: 'fetchAccount', command: 1 }]);
     expect(start).not.toHaveBeenCalled();
   });
 
@@ -197,7 +196,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
     const account = exchange.getAccount();
     await vi.waitFor(() => expect(construct).toHaveBeenCalledOnce());
     await expect(account).resolves.toEqual({ userId: 'account-id', affiliateId: null });
-    expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(commands).toEqual([{ op: 'fetchAccount', command: 1 }]);
     expect(store.loaded.balance).toBe(false);
     expect(store.loaded.positions).toBe(false);
     expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('omniKeySeed');
@@ -215,7 +214,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
     );
     result.mockReturnValue({ userId: 'account-id', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });
-    expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(commands).toEqual([{ op: 'fetchAccount', command: 1 }]);
     expect(store.loaded.balance).toBe(false);
     expect(start).not.toHaveBeenCalled();
   });

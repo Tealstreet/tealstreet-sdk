@@ -9,6 +9,7 @@ import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../../exchanges/asterdex/
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const USER = '0x1111111111111111111111111111111111111111';
@@ -21,6 +22,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
   const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: noActions,
     command(json) {
       const command = JSON.parse(json);

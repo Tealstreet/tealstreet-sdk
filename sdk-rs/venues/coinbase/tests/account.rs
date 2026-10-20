@@ -1,5 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId,
+};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -175,12 +177,32 @@ fn user_order(id: &str, product: &str, status: &str, filled: &str, left: &str) -
     )
 }
 
+fn fetch_account(session: &mut Session) -> Result<String, String> {
+    session.e.handle(
+        session.now,
+        Event::Command(Command::FetchAccount { command: 9 }),
+    );
+    session
+        .e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+            _ => None,
+        })
+        .expect("FetchAccount completes")
+}
+
 #[test]
 fn account_identity_tracks_selected_portfolio_after_discovery() {
-    let session = Session::new("DEFAULT", true);
-    assert_eq!(session.e.account_id(), None);
-    let session = session.ready();
-    assert_eq!(session.e.account_id(), Some("portfolio-one"));
+    assert_eq!(
+        fetch_account(&mut Session::new("DEFAULT", true)),
+        Err("Coinbase private portfolio ID is unavailable".into())
+    );
+    let mut session = Session::new("DEFAULT", true).ready();
+    assert_eq!(
+        fetch_account(&mut session),
+        Ok(r#"{"userId":"portfolio-one"}"#.into())
+    );
 }
 #[test]
 fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
