@@ -219,5 +219,11 @@ it('starts a new forwarded stream with a native empty snapshot, clearing old boo
   header.setUint32(28, 1, true);
   header.setFloat64(40, 99, true);
   header.setFloat64(48, 9, true);
-  expect(() => main.applyWorkerFrame(delta)).toThrow(/snapshot required/);
+  // The main thread rejects the stale-baseline delta and requests a fresh snapshot.
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  expect(() => main.applyWorkerFrame(delta)).not.toThrow();
+  expect(errors).toHaveBeenCalledWith(
+    'Engine frame apply failed',
+    expect.objectContaining({ message: expect.stringMatching(/snapshot required/) }),
+  );
 });
