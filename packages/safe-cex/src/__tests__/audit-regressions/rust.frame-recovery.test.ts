@@ -3,7 +3,7 @@ import type { OrderFillEvent } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Frame, SECTION } from '@tealstreet/safe-cex-wasm/wire';
+import { Frame, LOADED_FLAG, SECTION } from '@tealstreet/safe-cex-wasm/wire';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameApplier } from '../../store/frameApplier';
@@ -27,6 +27,7 @@ type FixtureOptions = {
   secondaryMarket?: boolean;
   reversedMarkets?: boolean;
   fillSymbol?: string;
+  loaded?: number;
 };
 
 // Independent binary sections exercise the real readers and caller recovery.
@@ -45,6 +46,7 @@ const fixture = ({
   secondaryMarket = false,
   reversedMarkets = false,
   fillSymbol,
+  loaded,
 }: FixtureOptions = {}) => {
   const strings = ['BTCUSDT', 'BTC', 'USDT', 'order-1', '1m', 'ETHUSDT', 'ETH'];
   const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
@@ -79,6 +81,7 @@ const fixture = ({
   );
   table(SECTION.CANDLES, [1, 0, 4], [1234, 100, 101, 99, 100, 5]);
   if (book) table(SECTION.BOOK, [0, brokenBook ? 2 : 1, 0, 0], [100, 1, 1]);
+  if (loaded !== undefined) table(SECTION.STATUS, [loaded, 0], [0]);
   const encoded = strings.map((value) => new TextEncoder().encode(value));
   const stringBytes = new Uint8Array(
     align8(4 + (strings.length + 1) * 4 + encoded.reduce((size, value) => size + value.length, 0)),
@@ -488,6 +491,23 @@ describe('Rust frame recovery callers', () => {
     exchange.dispose();
   });
 
+  it('does not validate a shared catalog from JS loaded flags before native metadata is ready', () => {
+    const store = new DefaultStore();
+    store.update({ loaded: { ...store.loaded, markets: true } });
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    installHost(exchange, vi.fn());
+    const shared = { validateMarkets: vi.fn(), send: vi.fn(), dispose: vi.fn() };
+    (exchange as unknown as { sharedPublicFeed: unknown }).sharedPublicFeed = shared;
+    exchange.onFrame = vi.fn();
+    const bytes = fixture();
+    receive(exchange, bytes);
+    expect(shared.validateMarkets).not.toHaveBeenCalled();
+    expect(shared.send).not.toHaveBeenCalled();
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.isDisposed).toBe(false);
+    exchange.dispose();
+  });
+
   it('delivers original account fills and frame before shared catalog validation failure disposes the account', () => {
     vi.spyOn(console, 'trace').mockImplementation(() => {});
     const store = new DefaultStore();
@@ -525,7 +545,7 @@ describe('Rust frame recovery callers', () => {
     });
     exchange.on('error', error);
     exchange.onFrame = vi.fn(() => sequence.push('frame'));
-    const bytes = fixture();
+    const bytes = fixture({ loaded: LOADED_FLAG.MARKETS });
     expect(() => receive(exchange, bytes)).not.toThrow();
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
     expect(accountAtFill).toEqual(Array(2).fill({ disposed: false, total: 42, orderId: 'order-1', contracts: 0.5 }));
@@ -833,7 +853,7 @@ describe('Rust frame recovery callers', () => {
       else await exchange.fetchLeverageForSymbol('BTCUSDT');
       expect(writer).toHaveBeenCalledExactlyOnceWith('BTCUSDT', rails);
       expect(store.fetchedLeverage.BTCUSDT).toEqual(rails);
-      expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
+      expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchLeverage', symbol: 'BTCUSDT' }, { report: false });
       applier.applyLeverage('DELISTED', rails);
       receive(exchange, fixture({ fills: 0 }));
       expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);

@@ -1,7 +1,7 @@
 //! Sequenced trading jobs; preflight and signatures complete before any placement.
 use crate::{ApexOmni, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, Response, TimerId, num};
 use serde::Deserialize;
 use std::collections::{HashSet, VecDeque};
 
@@ -16,7 +16,7 @@ enum Accepted {
 enum Step {
     Build(Vec<PlaceOrderOpts>),
     Amend(String, Option<f64>, Option<f64>),
-    Write(sign::Request, Accepted),
+    Write(sign::Request, Accepted, Vec<OrderIdentityReceipt>),
     Delay,
 }
 struct Job {
@@ -349,6 +349,11 @@ impl ApexOmni {
                 .clone()
                 .map(Ok)
                 .unwrap_or_else(|| generated_id(&self.account.account_id, cx.now, issued))?;
+            let mut receipts = vec![OrderIdentityReceipt {
+                symbol: order.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: id.clone(),
+            }];
             let size = num::format(amount);
             let price_text = num::format(price);
             let signature = sign::contract_signature(
@@ -446,6 +451,11 @@ impl ApexOmni {
                     return Err("ApeX Omni bracket price rounds to zero".into());
                 }
                 let leg_id = generated_id(&self.account.account_id, cx.now, issued)?;
+                receipts.push(OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: leg_id.clone(),
+                });
                 let signature = sign::contract_signature(
                     seed,
                     &leg_id,
@@ -496,6 +506,7 @@ impl ApexOmni {
             steps.push(Step::Write(
                 sign::Request::raw("/v3/order", sign::query(&fields)),
                 Accepted::Place,
+                receipts,
             ));
         }
         Ok(steps)
@@ -509,7 +520,7 @@ impl ApexOmni {
         let (command, steps, placements) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = validate(&orders, cx) {
-                    cx.log(LogLevel::Error, &error);
+                    cx.command_error(command, &error);
                     cx.done(command, Err(error));
                     return Ok(());
                 }
@@ -537,7 +548,7 @@ impl ApexOmni {
                     let id = parent_id(&id).to_owned();
                     if !valid_id(&id) {
                         let error = "ApeX Omni cancel requires an order ID".to_owned();
-                        cx.log(LogLevel::Error, &error);
+                        cx.command_error(command, &error);
                         cx.done(command, Err(error));
                         return Ok(());
                     }
@@ -548,6 +559,7 @@ impl ApexOmni {
                         steps.push(Step::Write(
                             sign::Request::form("/v3/delete-order", vec![pair("id", id.clone())]),
                             Accepted::Cancel(vec![id]),
+                            Vec::new(),
                         ));
                     }
                 }
@@ -566,6 +578,7 @@ impl ApexOmni {
                             vec![pair("symbol", market.id.clone())],
                         ),
                         Accepted::CancelSymbol(symbol),
+                        Vec::new(),
                     )],
                     false,
                 )
@@ -601,6 +614,7 @@ impl ApexOmni {
                             ],
                         ),
                         Accepted::Leverage(symbol, leverage),
+                        Vec::new(),
                     )],
                     false,
                 )
@@ -650,7 +664,7 @@ impl ApexOmni {
             || self.options.passphrase.as_deref().is_none_or(str::is_empty)
         {
             let error = "ApeX Omni private commands require API credentials".to_owned();
-            cx.log(LogLevel::Error, &error);
+            cx.command_error(command, &error);
             cx.done(command, Err(error));
             return Ok(());
         }
@@ -716,7 +730,7 @@ impl ApexOmni {
                     let amendment = match result {
                         Ok(amendment) => amendment,
                         Err(error) => {
-                            cx.log(LogLevel::Error, &error);
+                            cx.command_error(job.command, &error);
                             cx.done(job.command, Err(error));
                             continue;
                         }
@@ -727,6 +741,7 @@ impl ApexOmni {
                             vec![pair("id", amendment.id.clone())],
                         ),
                         Accepted::AmendCancel,
+                        Vec::new(),
                     ));
                     self.trading.amendment = Some(amendment);
                     self.trading.active = Some(job);
@@ -745,7 +760,7 @@ impl ApexOmni {
                             .map(|steps| prepared.extend(steps))
                     });
                     if let Err(error) = result {
-                        cx.log(LogLevel::Error, &error);
+                        cx.command_error(job.command, &error);
                         cx.done(job.command, Err(error));
                         continue;
                     }
@@ -754,10 +769,11 @@ impl ApexOmni {
                     }
                     self.trading.active = Some(job);
                 }
-                Step::Write(request, accepted) => {
+                Step::Write(request, accepted, receipts) => {
                     let command = job.command;
                     self.trading.active = Some(job);
                     self.trading.waiting = true;
+                    cx.command_progress(command, receipts);
                     if let Err(error) = self.signed(
                         cx,
                         request,
@@ -781,7 +797,7 @@ impl ApexOmni {
         self.trading.waiting = false;
         self.trading.amendment = None;
         if let Some(job) = self.trading.active.take() {
-            cx.log(LogLevel::Error, error);
+            cx.command_error(job.command, error);
             cx.done(job.command, Err(error.into()));
         }
         self.drive_trading(cx);
