@@ -906,9 +906,16 @@ fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
     e.start(0.0);
     let r = support::requests(&mut e).remove(0);
     support::response(&mut e, &r, support::MARKETS);
-    let r = support::requests(&mut e).remove(0);
-    support::response(&mut e, &r, support::TICKERS);
-    let mode = support::requests(&mut e)
+    // Private startup no longer waits for tickers, so the mode read may come with them.
+    let mut pending = support::requests(&mut e);
+    let tickers = pending
+        .iter()
+        .position(|r| r.url.contains("contract/ticker"))
+        .unwrap();
+    let tickers = pending.remove(tickers);
+    support::response(&mut e, &tickers, support::TICKERS);
+    pending.extend(support::requests(&mut e));
+    let mode = pending
         .into_iter()
         .find(|r| r.url.contains("position_mode"))
         .unwrap();
