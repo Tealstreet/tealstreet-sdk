@@ -230,6 +230,9 @@ jobs:
           test "$size" -le "$WASM_BUDGET_BYTES"
       - name: Replay request normalization
         run: yarn rust:test-harness
+      - name: Credentialed lifecycle runner (scripted transport only)
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-live-smoke
       - name: Public data (correctness, CPU and memory)
         run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: Account and trading (correctness)
