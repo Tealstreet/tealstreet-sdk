@@ -10,7 +10,13 @@
       "/tmp/gate-honesty-breakoutprop-priority-private.json"
     ],
     "earlierPerformanceRun": 39417011625,
-    "note": "Initial declarations from 104 completed CI cases plus two corrected private cases; complete 107-case certification and independent review required before merge. Earlier Hyro steady CPU miss retained, never rerun-to-green selection."
+    "note": "Initial declarations from 104 completed CI cases plus two corrected private cases; complete 107-case certification and independent review required before merge. Earlier Hyro steady CPU miss retained, never rerun-to-green selection.",
+    "landingRefresh": {
+      "ciRun": 39422195309,
+      "ciHead": "2b10e43733a43f37c0ec4318b8144650ab2c1f3f",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39422195309",
+      "note": "Exact newly observed paths independently classified from raw artifacts; KuCoin refreshed tape preserves the same 60 divergences. Corrected TxFlow startup-window fixture has exactly the prior three settings divergences in both local correctness replays; full exact-head CI must certify the refreshed hash."
+    }
   },
   "failures": [
     {
@@ -3779,6 +3785,12 @@
           "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
           "keys": [
             "checkpoint 2 account.positions[0].unrealizedPnl"
+          ]
+        },
+        {
+          "divergence": "Landing TS now reports GTC while native LIMIT time-in-force is absent; at this checkpoint the lifecycle views already contain different order IDs, so this is not a same-order comparison.",
+          "keys": [
+            "checkpoint 2 account.orders[1].timeInForce"
           ]
         }
       ]
@@ -36066,6 +36078,103 @@
       ]
     },
     {
+      "venue": "kucoin",
+      "tapeSha256": "df6ab9578b95617c40f9ce49b64f82ddd58ac4153e35514893306d55c0ea2f88",
+      "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Native time-in-force is absent or differs in the TS/Rust order views.",
+          "keys": [
+            "checkpoint 12 account.orders[0].timeInForce",
+            "checkpoint 13 account.orders[0].timeInForce"
+          ]
+        },
+        {
+          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
+          "keys": [
+            "checkpoint 10 account.orders[0].clientOrderId",
+            "checkpoint 10 account.orders[1].clientOrderId",
+            "checkpoint 10 account.orders[2].clientOrderId",
+            "checkpoint 12 account.orders[0].clientOrderId",
+            "checkpoint 13 account.orders[0].clientOrderId",
+            "checkpoint 3 account.orders[1].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
+          "keys": [
+            "checkpoint 11 account.orders.length",
+            "checkpoint 11 account.orders[0]",
+            "checkpoint 11 account.orders[1]",
+            "checkpoint 11 account.orders[2]",
+            "checkpoint 12 account.orders.length",
+            "checkpoint 12 account.orders[0].amount",
+            "checkpoint 12 account.orders[0].close",
+            "checkpoint 12 account.orders[0].id",
+            "checkpoint 12 account.orders[0].price",
+            "checkpoint 12 account.orders[0].reduceOnly",
+            "checkpoint 12 account.orders[0].remaining",
+            "checkpoint 12 account.orders[0].side",
+            "checkpoint 12 account.orders[0].status",
+            "checkpoint 12 account.orders[0].type",
+            "checkpoint 12 account.orders[1]",
+            "checkpoint 12 account.orders[2]",
+            "checkpoint 12 account.orders[3]",
+            "checkpoint 13 account.orders.length",
+            "checkpoint 13 account.orders[0].amount",
+            "checkpoint 13 account.orders[0].close",
+            "checkpoint 13 account.orders[0].id",
+            "checkpoint 13 account.orders[0].price",
+            "checkpoint 13 account.orders[0].reduceOnly",
+            "checkpoint 13 account.orders[0].remaining",
+            "checkpoint 13 account.orders[0].side",
+            "checkpoint 13 account.orders[0].status",
+            "checkpoint 13 account.orders[0].type",
+            "checkpoint 13 account.orders[1]",
+            "checkpoint 13 account.orders[2]",
+            "checkpoint 13 account.orders[3]",
+            "checkpoint 2 account.orders.length",
+            "checkpoint 2 account.orders[1]",
+            "checkpoint 3 account.orders[0].filled",
+            "checkpoint 4 account.orders.length",
+            "checkpoint 4 account.orders[0].filled",
+            "checkpoint 4 account.orders[1]",
+            "checkpoint 5 account.orders.length",
+            "checkpoint 5 account.orders[0]",
+            "checkpoint 5 account.orders[1]"
+          ]
+        },
+        {
+          "divergence": "Per-symbol leverage/margin settings or readiness differs between implementations.",
+          "keys": [
+            "checkpoint 15 account.settings.length",
+            "checkpoint 15 account.settings[0]"
+          ]
+        },
+        {
+          "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
+          "keys": [
+            "checkpoint 14 account.positions[0].leverage",
+            "checkpoint 15 account.positions[0].leverage"
+          ]
+        },
+        {
+          "divergence": "Protective trigger reference is absent or differs; attached TP and SL sources are compared independently.",
+          "keys": [
+            "checkpoint 10 account.orders[0].trigger",
+            "checkpoint 10 account.orders[1].stopLossTrigger",
+            "checkpoint 10 account.orders[1].trigger",
+            "checkpoint 10 account.orders[2].takeProfitTrigger",
+            "checkpoint 10 account.orders[2].trigger",
+            "checkpoint 12 account.orders[0].stopLossTrigger",
+            "checkpoint 12 account.orders[0].trigger",
+            "checkpoint 13 account.orders[0].stopLossTrigger",
+            "checkpoint 13 account.orders[0].trigger"
+          ]
+        }
+      ]
+    },
+    {
       "venue": "kucoinspot",
       "tapeSha256": "631ddaee04f31d326745d2badae5f67d2593617238ef601f6c098b832d9c3320",
       "tape": "sdk-rs/harness/tapes/kucoinspot-private.jsonl",
@@ -39038,6 +39147,20 @@
             "checkpoint 9 account.balance.currencies.USDT.used",
             "checkpoint 9 account.balance.free",
             "checkpoint 9 account.balance.used"
+          ]
+        },
+        {
+          "divergence": "At checkpoints 1–3 native retains 83.6 of order 101 reservation after it closes while TS refreshes balances; the exact delta is .02 × 38000 ÷ 10 × 1.1. Commands, writes and taped boundaries agree.",
+          "keys": [
+            "checkpoint 1 account.balance.currencies.USDT.free",
+            "checkpoint 1 account.balance.currencies.USDT.used",
+            "checkpoint 1 account.balance.free",
+            "checkpoint 2 account.balance.currencies.USDT.free",
+            "checkpoint 2 account.balance.currencies.USDT.used",
+            "checkpoint 2 account.balance.free",
+            "checkpoint 3 account.balance.currencies.USDT.free",
+            "checkpoint 3 account.balance.currencies.USDT.used",
+            "checkpoint 3 account.balance.free"
           ]
         }
       ]
@@ -42250,6 +42373,23 @@
             "checkpoint 9 account.orders[1]",
             "checkpoint 9 account.orders[2]",
             "checkpoint 9 account.orders[3]"
+          ]
+        },
+        {
+          "divergence": "TS retains canceled caller and batch orders 1001/2001/2002 at checkpoints 10–13 while native reconciliation omits them; commands, taped boundaries and write sequences agree.",
+          "keys": [
+            "checkpoint 10 account.orders[1]",
+            "checkpoint 10 account.orders[2]",
+            "checkpoint 10 account.orders[3]",
+            "checkpoint 11 account.orders[1]",
+            "checkpoint 11 account.orders[2]",
+            "checkpoint 11 account.orders[3]",
+            "checkpoint 12 account.orders[1]",
+            "checkpoint 12 account.orders[2]",
+            "checkpoint 12 account.orders[3]",
+            "checkpoint 13 account.orders[1]",
+            "checkpoint 13 account.orders[2]",
+            "checkpoint 13 account.orders[3]"
           ]
         }
       ]
@@ -46941,6 +47081,21 @@
             "checkpoint 9 account.orders[4].trigger",
             "checkpoint 9 account.orders[5].takeProfitTrigger",
             "checkpoint 9 account.orders[5].trigger"
+          ]
+        }
+      ]
+    },
+    {
+      "venue": "txflow",
+      "tapeSha256": "0dc0d15f920189c2c708efb537aca6df5f5cb3342decb03df03306587a22976b",
+      "tape": "sdk-rs/harness/tapes/txflow-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Per-symbol leverage/margin settings or readiness differs between implementations.",
+          "keys": [
+            "checkpoint 2 account.settings[0].buyLeverage",
+            "checkpoint 2 account.settings[0].sellLeverage",
+            "checkpoint 3 account.settings[1].marginType"
           ]
         }
       ]

@@ -38,7 +38,8 @@ const context = (price) => ({
   markPx: String(price), oraclePx: String(price), lastPrice: String(price), midPx: String(price),
   prevDayPx: String(price), funding: '0.01', openInterest: '2', dayNtlVlm: '1000', dayBaseVlm: '10', nextFundingTime: EPOCH + 3_600_000,
 });
-for (const [index, price] of [[1, 100], [2, 200]]) {
+const tickerSeeds = [[1, 100], [2, 200]];
+for (const [index, price] of tickerSeeds) {
   info('activeAssetCtx', { coin: String(index) }, {
     instrumentId: index, lastPrice: String(price), prevDayPx: String(price), markPx: String(price), oraclePx: String(price),
     openInterest: '2', dayNtlVlm: '1000', coinVlm: '10', nodeCtx: context(price),
@@ -58,10 +59,14 @@ const state = () => ({
 });
 // Polling always sees the latest command-owned native state. The startup-window
 // limit500 reconciliation read is distinct from indexed limit2000 query reads.
+// Both production consumers pace each initial activeAssetCtx seed by 25 ms,
+// including the last seed, before recording the account's execution window.
+// This is an input-declared startup schedule, never a replay-output rewrite.
+const accountStartupAt = EPOCH + tickerSeeds.length * 25;
 const snapshots = (extra = stage()) => {
   info('clearinghouseState', { user: USER, accountType: 'perp' }, state(), extra);
   info('frontendOpenOrders', { user: USER, offset: 0, limit: 500 }, orders, extra);
-  info('userFills', { user: USER, accountType: ['perp'], offset: 0, limit: 500, startTimeMs: EPOCH }, { data: executions, hasMore: false }, extra);
+  info('userFills', { user: USER, accountType: ['perp'], offset: 0, limit: 500, startTimeMs: accountStartupAt }, { data: executions, hasMore: false }, extra);
   info('activeAssetData', { user: USER, coin: '1' }, btcSetting, extra);
   info('activeAssetData', { user: USER, coin: '2' }, ethSetting, extra);
 };

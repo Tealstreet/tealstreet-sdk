@@ -227,3 +227,32 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Post-merge full harness 766/766, typecheck 44/44, lint 28/28 and repository test
   27/27 tasks PASS. New full matrix is run `39422195309`; declaration updates
   require its exact new evidence, not exemptions for a changed workload.
+- Post-landing matrix review (`39422195309`, head `2b10e43733`): Hyperliquid
+  public now completes seven measured pairs with matching own-audit receipts.
+  Independent raw/source reviews classified 12 newly visible Paradex canceled-row
+  paths, one Bitrue TIF path (the sorted rows already have different IDs), and
+  nine OKX balance paths: native retains an 83.6 reservation after order 101
+  closes while TS refreshes it. KuCoin's landing fixture change preserves the
+  same 60 failures under its new tape hash. Added only those literal paths and
+  refreshed hashes; historical observations, including Hyro CPU, remain declared.
+- Corrected a separate TxFlow fixture assumption, never an exemption: both
+  implementations wait 25 ms after each of two initial ticker reads before
+  recording account startup. The scripted limit-500 execution window now starts
+  at epoch+50; explicit limit-2000 history/query windows remain at epoch.
+  Independent generation verified only 17 such timestamp fields changed.
+  Both canonical correctness replays have zero unserved requests/protocol errors
+  and exactly the prior three interim settings differences. New tape SHA:
+  `0dc0d15f920189c2c708efb537aca6df5f5cb3342decb03df03306587a22976b`.
+  Scoped protocol tests 15/15, integrated harness 766/766, policy tests 9/9 PASS;
+  independent fixture review PASS. Full updated-head matrix remains required.
+- Combined shipping browser/Node artifacts after the broker landing merge are
+  each 12,174,800 bytes, SHA256
+  `637e35fe2648c20d8e3783ab430f68b0691eee56406de80525b2e10d2b750195`,
+  under the unchanged 12,582,912-byte combined ceiling. Standalone budgets stay
+  unchanged. This size result does not establish combined-load performance.
+- Complete post-merge matrix evidence: 107/107 strict reports collected, 27 PASS
+  / 80 FAIL. The final Coinbase suite exposed seven TS performance receipts
+  differing from its own audited public replay; these are protected harness
+  failures, not venue exceptions. Tracing and correcting this before the next
+  matrix. Two Coinbase ES256 private variants also expose additional raw
+  terminal-order checkpoint paths, under independent evidence classification.

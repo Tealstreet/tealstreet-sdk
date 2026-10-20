@@ -227,6 +227,16 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     });
     assert.equal(generated.status, 0, generated.stderr || generated.error?.message);
     const records = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const reads = records.filter(record => record.type === 'http' && new URL(record.url).pathname === '/info')
+      .map(record => JSON.parse(record.requestBody));
+    const initialTickerCount = reads.filter(body => body.type === 'activeAssetCtx').length;
+    assert.equal(initialTickerCount, 2);
+    const accountFills = reads.filter(body => body.type === 'userFills' && body.limit === 500);
+    assert.ok(accountFills.length > 0);
+    for (const body of accountFills) assert.equal(body.startTimeMs, EPOCH + initialTickerCount * 25);
+    const queryFills = reads.filter(body => body.type === 'userFills' && body.limit === 2000);
+    assert.ok(queryFills.length > 0);
+    for (const body of queryFills) assert.equal(body.startTimeMs, EPOCH);
     const closeIndex = records.findIndex((record) => record.type === 'close');
     assert(closeIndex >= 0, 'the fixture must exercise a disconnect');
     const closed = records[closeIndex];
