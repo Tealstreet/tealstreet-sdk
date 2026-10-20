@@ -33,6 +33,10 @@ describe('Paradex engine remote HTTP signing', () => {
   ] as const)('preserves protocol-relative TS URLs for %s with node=%s', async (mode, node, expected) => {
     runtime.node = node;
     vi.stubGlobal('location', new URL('http://app.example/account'));
+    if (node) {
+      vi.stubGlobal('window', undefined);
+      vi.stubGlobal('document', undefined);
+    }
     const { request, transport } = fixture(async ({ id }) => ({
       id, config: { url: '//signed.example/orders', headers: {} },
     }), mode);
@@ -43,6 +47,18 @@ describe('Paradex engine remote HTTP signing', () => {
       await transport.request(input);
       expect(request.mock.calls[0][0].url).toBe(expected);
     }
+  });
+
+  it.each([true, false])('resolves client URLs in a renderer or worker with node=%s', async (node) => {
+    runtime.node = node;
+    vi.stubGlobal('window', node ? { location: new URL('https://desktop.example/account') } : undefined);
+    vi.stubGlobal('document', node ? {} : undefined);
+    vi.stubGlobal('location', new URL('https://worker.example/account'));
+    const { request, transport } = fixture(async ({ id }) => ({
+      id, config: { url: '//signed.example/orders', headers: {} },
+    }), 'direct');
+    await transport.request(input);
+    expect(request.mock.calls[0][0].url).toBe('https://signed.example/orders');
   });
 
   it('passes the TS adapter contract and applies returned bytes before account routing', async () => {

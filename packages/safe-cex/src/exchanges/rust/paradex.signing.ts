@@ -71,9 +71,10 @@ export const paradexSigningTransport = (options: ExchangeOptions, transport: Tra
       }
       let next: URL;
       if (config.url?.startsWith('//') && transport.httpMode !== 'how') {
-        // Axios browser HTTP resolves against the page; Node HTTP rejects it.
-        if (isNodeOrBunRuntime()) throw new TypeError('Invalid URL');
-        next = new URL(config.url, globalThis.location?.href ?? url.origin);
+        // A desktop renderer can expose Node while Axios still uses the page.
+        const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
+        const base = browser ? window.location.href : !isNodeOrBunRuntime() ? globalThis.location?.href : undefined;
+        next = new URL(config.url, base);
       } else {
         next = config.url
           ? new URL(config.url.startsWith('/') ? `/v1${config.url}` : config.url, `${url.origin}/v1/`)
