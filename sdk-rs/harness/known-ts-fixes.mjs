@@ -185,3 +185,91 @@ export function fixLighterCommands(results, records) {
     if(command.op==='setPositionMode' && command.hedged===false && results[index]?.error==='Not implemented') results[index]={ok:null};
   }
 }
+
+// Kraken TS truncates full depth to 100 and emits repeated execution IDs.
+// Reconstruct those two expected outputs from the recording, never Rust state.
+export function fixKrakenOutput(ts,records){
+ const books=new Map(Object.keys(ts.books).map(s=>[s,{seq:undefined,bids:new Map(),asks:new Map()}]));
+ const markets=new Map(ts.markets.map(m=>[m.symbol,m]));
+ const tickers=new Map((ts.tickers??[]).map(t=>[t.symbol,t]));
+ const fills=[],seen=new Set();let coins;
+ const extraReads=new Set();
+ const reads=records.filter(r=>r.type==='http'&&r.method==='GET'&&r.status===200);
+ const redundant=new Set();
+ // Require command-owned anchors; a short page in another query cannot excuse
+ // a missing Rust page. An ambiguous same-stage full page disables correction.
+ for(const source of reads){
+  if(source.afterCommand===undefined)continue;
+  const u=new URL(source.url),data=JSON.parse(source.body);
+  const sameStage=reads.filter(r=>r.afterCommand===source.afterCommand&&new URL(r.url).pathname===u.pathname);
+  if(u.pathname==='/derivatives/api/v3/fills'&&!u.search&&data.fills?.length>0&&data.fills.length<100&&!sameStage.some(r=>JSON.parse(r.body).fills?.length>=100)){
+   const oldest=Math.min(...data.fills.map(f=>Date.parse(f.fillTime)));
+   const cursor=new Date(Math.floor(oldest/1000)*1000+1).toISOString();
+   for(const page of sameStage){const p=new URL(page.url);if(p.searchParams.size===1&&p.searchParams.get('lastFillTime')===cursor&&JSON.parse(page.body).fills?.length===0)redundant.add(page);}
+  }
+  if(u.pathname==='/api/history/v3/account-log'&&data.logs?.length>0&&data.logs.length<500&&!sameStage.some(r=>JSON.parse(r.body).logs?.length>=500)){
+   const cash=data.logs.filter(r=>r.asset?.toLowerCase()!==r.contract?.toLowerCase());
+   if(!cash.length)continue;
+   const boundary=Math.max(...cash.map(r=>Date.parse(r.date)));
+   for(const page of sameStage){const p=new URL(page.url);if(p.searchParams.size===2&&p.searchParams.get('since')===String(boundary)&&p.searchParams.get('count')===u.searchParams.get('count')&&JSON.parse(page.body).logs?.length===0)redundant.add(page);}
+  }
+ }
+ for(const record of records){
+  if(record.type==='http'&&record.method==='GET'&&record.status===200){
+   const u=new URL(record.url),data=JSON.parse(record.body);
+   if(u.pathname==='/derivatives/api/v3/instruments'&&data.result==='success')for(const row of data.instruments??[]){
+    if(Number(row.contractValueTradePrecision)<0){const market=markets.get(row.symbol);if(market)market.precision.amount=10**(-Number(row.contractValueTradePrecision));}
+   }
+   // TS derives fill cursors after flooring to seconds, and its income pager
+   // requests an extra boundary page even when the native page was short.
+   if(redundant.has(record)&&!records.some(other=>other!==record&&other.type==='http'&&other.method==='GET'&&other.url===record.url&&!redundant.has(other))){
+    const params=[...u.searchParams].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    extraReads.add(`GET ${u.origin}${u.pathname}?${params}`);
+   }
+   if(u.pathname==='/derivatives/api/v3/accounts'&&data.result==='success'&&data.accounts){
+    const holdings=new Map();
+    for(const [name,account]of Object.entries(data.accounts)){
+     if(['cash','cashAccount'].includes(name))for(const [coin,amount]of Object.entries(account.balances??{}))holdings.set(coin.toUpperCase(),[Number(amount),Number(amount)]);
+    }
+    const flex=data.accounts.flex??data.accounts.multiCollateralMarginAccount;
+    if(flex?.type==='multiCollateralMarginAccount')for(const [coin,v]of Object.entries(flex.currencies??{}))holdings.set(coin.toUpperCase(),[Number(v.quantity??0),Number(v.value??0)]);
+    for(const [name,a]of Object.entries(data.accounts))if(name.startsWith('fi_')&&a.auxiliary){const coin=(a.auxiliary.currency??'USD').toUpperCase(),v=Number(a.auxiliary.pv??0),prior=holdings.get(coin)??[0,0];holdings.set(coin,[prior[0]+v,prior[1]+v]);}
+    coins=Object.fromEntries([...holdings].map(([coin,[amount,notional]])=>[coin,{amount,notional}]));
+   }
+  }
+  if(record.type!=='ws')continue;
+  const m=JSON.parse(record.text);
+  if(m.feed==='ticker'&&!m.event){
+   const t=tickers.get(m.product_id);
+   if(t){
+    // Full native tickers omit a zero relative rate; TS keeps its stale rate.
+    t.fundingRate=Number(m.relative_funding_rate??0);
+    for(const [native,field]of [['volume','volume'],['volumeQuote','quoteVolume'],['openInterest','openInterest'],['change','percentage']])if(m[native]!=null)t[field]=Number(m[native]);
+    const open=Number(m.open_24h??m.open24h??m.open);
+    if(m.change==null&&m.last!=null&&open>0)t.percentage=(Number(m.last)-open)/open*100;
+   }
+  }
+  if(m.feed==='fills_snapshot'||m.feed==='fills')for(const f of m.fills??[]){
+   if(!f.fill_id||seen.has(f.fill_id))continue;seen.add(f.fill_id);
+   if(m.feed==='fills'&&markets.has(f.instrument))fills.push({id:String(f.order_id),symbol:f.instrument,side:f.buy?'buy':'sell',amount:Number(f.qty),price:Number(f.price)});
+  }
+  const book=books.get(m.product_id);if(!book||!['book','book_snapshot'].includes(m.feed)||m.event)continue;
+  if(m.feed==='book_snapshot'){
+   if(book.seq!==undefined&&m.seq<=book.seq)continue;
+   if(!Array.isArray(m.bids)||!Array.isArray(m.asks))continue;
+   book.bids=new Map(m.bids.map(l=>[Number(l.price),Number(l.qty)]));book.asks=new Map(m.asks.map(l=>[Number(l.price),Number(l.qty)]));book.seq=m.seq;
+  }else{
+   if(book.seq===undefined||m.seq<=book.seq)continue;
+   if(m.seq!==book.seq+1){book.seq=undefined;book.bids.clear();book.asks.clear();continue;}
+   const side=m.side==='buy'?book.bids:book.asks,price=Number(m.price),qty=Number(m.qty);if(qty===0)side.delete(price);else side.set(price,qty);book.seq=m.seq;
+  }
+ }
+ for(const[s,b]of books){if(b.seq===undefined)continue;const scale=markets.get(s)?.contractSize??1;ts.books[s]={bids:[...b.bids].filter(([,q])=>q>0).sort(([a],[b])=>b-a).map(([p,q])=>[p,q*scale]),asks:[...b.asks].filter(([,q])=>q>0).sort(([a],[b])=>a-b).map(([p,q])=>[p,q*scale])};}
+ if(ts.account){
+  ts.account.fills=fills;if(coins!==undefined)ts.account.balance.coins=coins;
+  // Kraken publishes no position margin allocation; TS's base store invents 0.
+  for(const p of ts.account.positions)if(p.marginSize===0)p.marginSize=null;
+ }
+ ts.requests=ts.requests.filter(key=>!extraReads.has(key));
+ ts.subscriptions=ts.subscriptions.filter(key=>!key.includes('"feed":"account_balances"'));
+}

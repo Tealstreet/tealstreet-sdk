@@ -361,6 +361,15 @@ describe('RustEngineExchange', () => {
     vi.restoreAllMocks();
   });
 
+  it('rejects malformed Kraken signing credentials before account startup can hang', async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    const tape = recordedTransport();
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'invalid base64!' }, new DefaultStore());
+    await expect(exchange.start()).rejects.toThrow(/base64/);
+    expect(tape.requests).toEqual([]);
+  });
+
   it('skips private metadata refresh for an implicitly public-only MEXC shell', async () => {
     exchange = new RustEngineExchange('mexc', { key: '', secret: '' }, new DefaultStore());
     expect(exchange.isPublicDataOnly).toBe(true);
