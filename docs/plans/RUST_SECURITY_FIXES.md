@@ -454,3 +454,15 @@ live trading, weakened parity oracle, or performance threshold changes.
   integration). Open the requested PR and integrate/resolve the latest landing
   structure, review the resulting security boundaries and rely on current
   green merge-result CI before landing. No TS venue deletion.
+
+### PR and latest landing integration
+
+- Opened [PR #1351](https://github.com/Tealstreet/tealstreet-sdk/pull/1351)
+  into `feat/rust-rewrite`, then cleanly merged latest landing `c44f22bd8e`
+  at `4c6f5d494f`. Incoming wire, leverage-side and order-lifecycle fixes retain
+  the landing structure. Earlier local numeric receipts are checkpoints for
+  implementation9fe87d1eed; latest merged-source CI governs final acceptance.
+- Run independent PR code-correctness reviews for host boundaries, signing/
+  credentials, and harness/TS/scanner behavior; post their findings on the PR,
+  address findings and repeat. Public timing is exclusively delegated to CI
+  by the overseer's shared-machine instruction. Merge only after green CI.
