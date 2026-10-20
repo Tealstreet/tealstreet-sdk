@@ -277,17 +277,7 @@ impl Lighter {
                     );
                     return;
                 }
-                let kind = protective_kind(cx, &old, old.price);
-                if kind != old.kind
-                    && let Some(price) = price
-                    && protective_kind(cx, &old, price) != kind
-                {
-                    cx.done(
-                        command,
-                        Err("Invalid Lighter protective trigger price for current market".into()),
-                    );
-                    return;
-                }
+                let kind = protective_kind(cx, &old, price.unwrap_or(old.price));
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -829,13 +819,20 @@ impl Lighter {
                         {
                             self.account_setting_write(&symbol);
                             self.trading.uncertain_settings.remove(&symbol);
+                            let margin = if isolated {
+                                MarginType::Isolated
+                            } else {
+                                MarginType::Cross
+                            };
                             cx.store.update_setting(&symbol, |s| {
                                 s.leverage = leverage;
-                                s.margin_type = Some(if isolated {
-                                    MarginType::Isolated
-                                } else {
-                                    MarginType::Cross
-                                });
+                                s.margin_type = Some(margin);
+                            });
+                            cx.store.update_positions(|p| {
+                                if p.symbol == symbol {
+                                    p.leverage = leverage;
+                                    p.margin_type = Some(margin);
+                                }
                             });
                             self.refresh_account(cx);
                         }
@@ -1222,7 +1219,9 @@ fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType
     }) else {
         return order.kind;
     };
-    if (order.side == OrderSide::Sell) == (price <= reference) {
+    if (order.side == OrderSide::Sell && price <= reference)
+        || (order.side == OrderSide::Buy && price >= reference)
+    {
         OrderType::StopLoss
     } else {
         OrderType::Limit

@@ -335,6 +335,21 @@ fn sparse_position_aggregate_does_not_close_existing_exposure() {
     );
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().positions()[0].contracts, 2.0);
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 10.0);
+    assert_eq!(e.store().positions()[0].leverage, 10.0);
+    message(
+        &mut e,
+        s,
+        NOW + 2.0,
+        r#"{"channel":"account_all:718895","positions":{"1":{"market_id":1,"initial_margin_fraction":2000,"margin_mode":1}}}"#,
+    );
+    assert_eq!(e.store().setting("ETH").unwrap().leverage, 5.0);
+    assert_eq!(e.store().positions()[0].leverage, 5.0);
+    assert_eq!(e.store().positions()[0].contracts, 2.0);
+    assert_eq!(
+        e.store().positions()[0].margin_type,
+        Some(MarginType::Isolated)
+    );
 }
 #[test]
 fn live_execution_during_initial_five_seconds_is_reported_once() {

@@ -37,6 +37,10 @@ struct Connection {
     socket: Option<SocketId>,
     open: bool,
     last_received: f64,
+    connected_at: f64,
+    last_payload: Option<f64>,
+    last_recovery: Option<f64>,
+    recovery_started: Option<f64>,
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
     attempts: u32,
@@ -702,6 +706,14 @@ impl Lighter {
         }
         self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
     }
+    fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        let account = self.account.account_index.unwrap();
+        cx.send(
+            socket,
+            format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
+        );
+        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.log(LogLevel::Warning,e)}
+    }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
             return false;
@@ -712,12 +724,11 @@ impl Lighter {
         }
         self.account.connection.last_received = cx.now;
         self.account.connection.attempts = 0;
-        let account = self.account.account_index.unwrap();
-        cx.send(
-            socket,
-            format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
-        );
-        match self.account_auth(cx.now){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.log(LogLevel::Warning,e)}
+        self.account.connection.connected_at = cx.now;
+        self.account.connection.last_payload = None;
+        self.account.connection.last_recovery = None;
+        self.account.connection.recovery_started = None;
+        self.subscribe_private(cx, socket);
         cx.send(
             socket,
             format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
@@ -764,6 +775,32 @@ impl Lighter {
                     self.account_close(cx, socket, 1006);
                 } else {
                     if self.account.connection.open {
+                        let connection = &self.account.connection;
+                        if connection
+                            .recovery_started
+                            .is_some_and(|at| cx.now - at >= 20_000.0)
+                        {
+                            cx.close(socket);
+                            self.account_close(cx, socket, 1006);
+                            return true;
+                        }
+                        let payload_age =
+                            cx.now - connection.last_payload.unwrap_or(connection.connected_at);
+                        let stale_after = if connection.last_payload.is_some() {
+                            120_000.0
+                        } else {
+                            180_000.0
+                        };
+                        if payload_age >= stale_after
+                            && connection.recovery_started.is_none()
+                            && connection
+                                .last_recovery
+                                .is_none_or(|at| cx.now - at >= 180_000.0)
+                        {
+                            self.account.connection.last_recovery = Some(cx.now);
+                            self.account.connection.recovery_started = Some(cx.now);
+                            self.subscribe_private(cx, socket);
+                        }
                         cx.send(
                             socket,
                             format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
@@ -827,6 +864,19 @@ impl Lighter {
                     .filter(|n| *n > 0.0)
                     .map(|n| 1.0 / n)
             })
+            .or_else(|| {
+                cx.store
+                    .setting(symbol)
+                    .map(|s| s.leverage)
+                    .filter(|n| *n > 0.0)
+            })
+            .or_else(|| {
+                cx.store
+                    .positions()
+                    .iter()
+                    .find(|p| p.symbol == symbol)
+                    .map(|p| p.leverage)
+            })
             .unwrap_or(market.limits.leverage.max)
             .clamp(market.limits.leverage.min, market.limits.leverage.max);
         let Some(size) = wire.size else {
@@ -835,7 +885,12 @@ impl Lighter {
                     .positions()
                     .iter()
                     .find(|p| p.symbol == symbol)
-                    .cloned(),
+                    .cloned()
+                    .map(|mut p| {
+                        p.leverage = leverage;
+                        p.margin_type = Some(margin_type);
+                        p
+                    }),
                 symbol.into(),
                 leverage,
                 margin_type,
@@ -1229,6 +1284,21 @@ impl Lighter {
                     .unwrap_or(0)
                     <= revision
             })
+            .map(|mut p| {
+                if self
+                    .account
+                    .settings_revision
+                    .get(&p.symbol)
+                    .copied()
+                    .unwrap_or(0)
+                    > revision
+                    && let Some(setting) = cx.store.setting(&p.symbol)
+                {
+                    p.leverage = setting.leverage;
+                    p.margin_type = setting.margin_type;
+                }
+                p
+            })
             .collect::<Vec<_>>();
         positions.extend(
             cx.store
@@ -1570,6 +1640,8 @@ impl Lighter {
             || payload.account.is_some()
             || payload.balances.is_some();
         if meaningful {
+            self.account.connection.last_payload = Some(cx.now);
+            self.account.connection.recovery_started = None;
             self.account.revision += 1;
             self.schedule_heal(cx);
         }

@@ -56,6 +56,7 @@ pub enum Pending {
     Depth {
         symbol: String,
         revision: u64,
+        generation: u64,
     },
     Candles {
         command: Option<CommandId>,
@@ -64,6 +65,7 @@ pub enum Pending {
         rows: Vec<Candle>,
         failed: bool,
         revision: u64,
+        generation: Option<u64>,
     },
 }
 #[derive(Clone, Debug, Default)]
@@ -86,6 +88,7 @@ struct Connection {
 }
 #[derive(Default)]
 struct DepthState {
+    generation: u64,
     book: Book,
     nonce: Option<u64>,
     subscribers: u32,
@@ -97,6 +100,7 @@ struct DepthState {
 }
 #[derive(Default)]
 struct CandleState {
+    generation: u64,
     revision: u64,
     subscribers: u32,
     last: Option<Candle>,
@@ -112,6 +116,8 @@ pub struct Lighter {
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
+    // Pending reads must distinguish subscriptions whose revisions restart at zero.
+    subscription_generation: u64,
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
@@ -144,6 +150,7 @@ impl Lighter {
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            subscription_generation: 0,
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
@@ -258,6 +265,7 @@ impl Lighter {
             Pending::Depth {
                 symbol: symbol.into(),
                 revision: state.revision,
+                generation: state.generation,
             },
         );
     }
@@ -272,6 +280,10 @@ impl Lighter {
         from: Option<f64>,
         to: Option<f64>,
     ) {
+        let generation = self
+            .candles
+            .get(&(symbol.clone(), interval.clone()))
+            .map(|state| state.generation);
         let revision = self
             .candles
             .get(&(symbol.clone(), interval.clone()))
@@ -318,6 +330,7 @@ impl Lighter {
                         rows: vec![],
                         failed: false,
                         revision,
+                        generation,
                     },
                 );
             }
@@ -547,8 +560,14 @@ impl Lighter {
                 self.ticker_in_flight = false;
                 self.ticker_retry_at = cx.now + 3_000.0;
             }
-            Pending::Depth { symbol, .. } => {
-                if let Some(s) = self.books.get_mut(&symbol) {
+            Pending::Depth {
+                symbol, generation, ..
+            } => {
+                if let Some(s) = self
+                    .books
+                    .get_mut(&symbol)
+                    .filter(|s| s.generation == generation)
+                {
                     s.in_flight = false;
                     s.rest_retry_at = cx.now + 2_000.0;
                 }
@@ -557,11 +576,16 @@ impl Lighter {
                 command,
                 symbol,
                 interval,
+                generation,
                 ..
             } => {
                 if let Some(c) = command {
                     cx.done(c, Err(error.into()));
-                } else if let Some(s) = self.candles.get_mut(&(symbol, interval)) {
+                } else if let Some(s) = self
+                    .candles
+                    .get_mut(&(symbol, interval))
+                    .filter(|s| Some(s.generation) == generation)
+                {
                     s.in_flight = false;
                 }
             }
@@ -996,13 +1020,22 @@ impl Venue for Lighter {
                     }
                 }
             }
-            Pending::Depth { symbol, revision } => {
-                if let Some(s) = self.books.get_mut(&symbol) {
-                    s.in_flight = false;
-                    s.rest_retry_at = cx.now + 2_000.0;
-                    if s.revision != revision {
-                        return;
-                    }
+            Pending::Depth {
+                symbol,
+                revision,
+                generation,
+            } => {
+                let Some(s) = self
+                    .books
+                    .get_mut(&symbol)
+                    .filter(|s| s.generation == generation)
+                else {
+                    return;
+                };
+                s.in_flight = false;
+                s.rest_retry_at = cx.now + 2_000.0;
+                if s.revision != revision {
+                    return;
                 }
                 #[derive(serde::Deserialize)]
                 struct RestDepth {
@@ -1031,7 +1064,16 @@ impl Venue for Lighter {
                 mut rows,
                 failed,
                 revision,
+                generation,
             } => {
+                if command.is_none()
+                    && !self
+                        .candles
+                        .get(&(symbol.clone(), interval.clone()))
+                        .is_some_and(|s| Some(s.generation) == generation)
+                {
+                    return;
+                }
                 if failed {
                     self.public_failed(
                         cx,
@@ -1042,6 +1084,7 @@ impl Venue for Lighter {
                             rows,
                             failed,
                             revision,
+                            generation,
                         },
                         "Invalid Lighter candles",
                     );
@@ -1173,6 +1216,8 @@ impl Venue for Lighter {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
+                    self.subscription_generation = self.subscription_generation.wrapping_add(1);
+                    state.generation = self.subscription_generation;
                     state.waiting = true;
                     state.last_received = cx.now;
                     if let Some(market) = cx.store.market(&symbol) {
@@ -1207,6 +1252,8 @@ impl Venue for Lighter {
                     .or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
+                    self.subscription_generation = self.subscription_generation.wrapping_add(1);
+                    state.generation = self.subscription_generation;
                     state.last_received = cx.now;
                     self.topic(cx, "subscribe", &format!("candle/{id}/{interval}"));
                     if !self.options.public_data_only {

@@ -199,3 +199,54 @@ fn gap_invalidates_rest_request_started_before_the_gap() {
         "pre-gap snapshot cannot establish continuity"
     );
 }
+
+#[test]
+fn prior_subscription_depth_response_cannot_replace_the_new_seed() {
+    let (mut e, _, _, _) = setup();
+    let old = subscribe(&mut e);
+    e.handle(
+        1_001.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    let new = subscribe(&mut e);
+    reply(
+        &mut e,
+        &old,
+        1_002.0,
+        r#"{"code":200,"bids":[[90,1]],"asks":[[91,1]]}"#,
+    );
+    reply(
+        &mut e,
+        &new,
+        1_003.0,
+        r#"{"code":200,"bids":[[100,1]],"asks":[[101,1]]}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(100.0, 1.0)]);
+}
+
+#[test]
+fn prior_subscription_depth_failure_cannot_release_the_new_request() {
+    let (mut e, _, _, poll) = setup();
+    let old = subscribe(&mut e);
+    e.handle(
+        1_001.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    let _new = subscribe(&mut e);
+    e.handle(
+        1_002.0,
+        Event::HttpFailed {
+            request: old.id,
+            error: "old request failed",
+        },
+    );
+    e.handle(5_000.0, Event::TimerFired { timer: poll });
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orderBookOrders")))
+    );
+}

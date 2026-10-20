@@ -479,26 +479,48 @@ fn approved_attribution_is_present_on_signed_order() {
 
 #[test]
 fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() {
-    let (mut e, socket) = ready_unattributed();
-    e.handle(
-        NOW,
-        Event::Command(Command::SetLeverage {
-            command: 8,
-            symbol: "ETH".into(),
-            leverage: 5.0,
-        }),
-    );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let write = http(&mut e, "sendTx");
-    e.handle(NOW + 1.0, Event::WsOpened { socket });
-    let held = requests(&mut e)
-        .into_iter()
-        .find(|r| r.url.contains("/account?"))
-        .unwrap();
-    ack(&mut e, &write);
-    reply_at(&mut e, NOW + 2.0, &held, 200, ACCOUNT);
-    assert_eq!(e.store().setting("ETH").unwrap().leverage, 5.0);
+    for (command, leverage, margin) in [
+        (
+            Command::SetLeverage {
+                command: 8,
+                symbol: "ETH".into(),
+                leverage: 5.0,
+            },
+            5.0,
+            MarginType::Cross,
+        ),
+        (
+            Command::SetMarginType {
+                command: 8,
+                symbol: "ETH".into(),
+                isolated: true,
+            },
+            10.0,
+            MarginType::Isolated,
+        ),
+    ] {
+        let (mut e, socket) = ready_unattributed();
+        e.handle(NOW, Event::Command(command));
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let write = http(&mut e, "sendTx");
+        e.handle(NOW + 1.0, Event::WsOpened { socket });
+        let held = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/account?"))
+            .unwrap();
+        ack(&mut e, &write);
+        assert_eq!(e.store().positions()[0].leverage, leverage);
+        assert_eq!(e.store().positions()[0].margin_type, Some(margin));
+        let snapshot = ACCOUNT.replace(r#""position":"2""#, r#""position":"3""#);
+        reply_at(&mut e, NOW + 2.0, &held, 200, &snapshot);
+        assert_eq!(e.store().setting("ETH").unwrap().leverage, leverage);
+        assert_eq!(e.store().setting("ETH").unwrap().margin_type, Some(margin));
+        let position = &e.store().positions()[0];
+        assert_eq!(position.leverage, leverage);
+        assert_eq!(position.margin_type, Some(margin));
+        assert_eq!(position.contracts, 3.0);
+    }
 }
 
 #[test]
@@ -576,4 +598,59 @@ fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
     e.store_mut().set_markets(markets);
     let request = begin(&mut e, vec![limit()]);
     assert_eq!(wire(&request)["MarketIndex"], 4096);
+}
+
+#[test]
+fn amend_infers_protection_from_requested_price() {
+    for (side, old_price, new_price, conditional) in [
+        (OrderSide::Sell, 110.0, 95.0, true),
+        (OrderSide::Buy, 90.0, 105.0, true),
+        (OrderSide::Sell, 95.0, 110.0, false),
+        (OrderSide::Buy, 105.0, 90.0, false),
+        (OrderSide::Buy, 90.0, 100.0, true),
+    ] {
+        let (mut e, _) = ready_unattributed();
+        e.store_mut().update_order("42", |o| {
+            o.side = side;
+            o.price = old_price;
+            o.reduce_only = true;
+        });
+        e.store_mut().update_positions(|p| {
+            p.side = if side == OrderSide::Buy {
+                PositionSide::Short
+            } else {
+                PositionSide::Long
+            };
+        });
+        e.handle(
+            NOW,
+            Event::Command(Command::AmendOrder {
+                command: 8,
+                id: "42".into(),
+                price: Some(new_price),
+                amount: None,
+            }),
+        );
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let cancel = http(&mut e, "sendTx");
+        ack(&mut e, &cancel);
+        let t = timer(&mut e);
+        e.handle(NOW + 100.0, Event::TimerFired { timer: t });
+        let replacement = http(&mut e, "sendTx");
+        let tx = wire(&replacement);
+        assert_eq!(
+            tx["Type"],
+            if conditional { 2 } else { 0 },
+            "{side:?}: {old_price} -> {new_price}"
+        );
+        assert_eq!(
+            tx["TriggerPrice"],
+            if conditional {
+                (new_price * 100.0) as u64
+            } else {
+                0
+            }
+        );
+    }
 }

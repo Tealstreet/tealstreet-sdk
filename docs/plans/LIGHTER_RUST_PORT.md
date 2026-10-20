@@ -179,3 +179,26 @@ Pre-integration combined Wasm boundary: 31 tests; JS/Workers host: 25 tests.
   (2.61x), retained 4.2/2.2 MB (1.89x). Binance private PASS: 14 events.
 - Full repository tests are running separately; next: PR adversarial review,
   findings posted to PR, fix/review loop and green-CI merge into landing.
+
+### PR adversarial review and fixes
+
+Opened [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319) into
+`feat/rust-rewrite`. Three independent scoped reviewers posted findings via
+root PR comments. Query/harness/wrapper review passed with 169 harness tests.
+Trading/signing found one P1: protective amendment inference used the old
+price. Account/public found three P2s: sparse leverage reset, subscription
+lifetime HTTP races, and heartbeat traffic hiding missing private payloads.
+
+Each finding is fixed and re-reviewed. Native regressions were proven failing
+before the amendment, sparse leverage, generation and liveness fixes. Both
+book and candle callbacks now check subscription generations before changing
+state or in-flight flags. Engine timers separately recover absent private
+payloads despite pongs. Accepted settings stay coherent on positions even
+when an older REST snapshot supplies valid exposure updates. Independent
+cross-review accepted all fixes, with 20 trading, 23 account and 11 targeted
+public/candle/liveness tests passing. No remaining findings in reviewed scopes.
+
+Full repository verification: 27/27 test tasks pass, with 6,858 safe-cex tests
+in each CI/unit run; typecheck 44/44 and lint 28/28 pass. Source changes from
+PR review are Rust-only. Re-running workspace/Wasm and Lighter replay gates
+on the final patch; merge remains conditional on final green PR CI.
