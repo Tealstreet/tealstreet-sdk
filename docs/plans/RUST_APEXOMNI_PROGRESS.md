@@ -333,3 +333,30 @@ generated ID and preserves both virtual siblings when editing one leg.
 - ApeX explicitly rejects the newly modeled unsupported STP control before
   any batch I/O; replacement defaults it absent. Added all-mode single/mixed
   batch and account wire-alias regressions. Full post-merge gates follow.
+
+### Final post-AsterDEX acceptance
+
+- Source checkpoint `a12a57e207`: all 1,579 workspace native tests pass,
+  including 99 ApeX tests. Combined 18-venue WASM build, 75 SDK WASM tests,
+  51 host tests and 274 harness tests pass. Root typecheck passes 44 tasks,
+  lint 28 and tests 27; both full SDK suites pass 7,097 tests each.
+- Bans, workspace formatting, workspace all-target clippy, default WASM
+  clippy and the full branch commit-range secret scan pass. All reported
+  code-correctness findings are fixed and independently cross-reviewed;
+  rounds 1 and 2 findings/resolutions are posted on PR #1324.
+- Expanded paired private gate PASS: 50 frames, 23 commands, 16 writes;
+  strict signature, protocol, unserved and missing-write counters are zero.
+  This uses deterministic synthetic traffic, not a funded live account.
+- ApeX public gate (three runs) PASS with identical output: 51 frames,
+  89 markets/tickers and two books. TS/Rust main CPU 95.5/43.6 ms,
+  steady 55.5/9.0 ms, process 135.8/95.8 ms, retained memory 23.9/2.2 MB;
+  Rust linear memory 1.6 MB. Single-venue node/web WASM each 1,010,983
+  bytes, below the unchanged 1,258,291-byte cap. One initial TS memory
+  sampler deadline passed on an unchanged retry; no threshold was altered.
+- Binance public (three runs) PASS: 873 frames, 917 markets, 783 tickers,
+  three books; TS/Rust main CPU 191.7/89.1 ms, retained 19.0/2.6 MB.
+  Binance private generator (30 records) and one-run gate PASS: 14 frames,
+  two markets/tickers and no books, exact state/command parity.
+- Final documentation checkpoint follows the reviewed source. Merge into
+  `feat/rust-rewrite` remains conditional on green CI for that final head;
+  after merging, cut `feat/rust-apexomni-followup` from the landing branch.
