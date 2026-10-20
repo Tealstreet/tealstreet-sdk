@@ -1,7 +1,7 @@
 // Reader for the engine's flush frame (docs/plans/RUST_REWRITE.md,
 // "Data shapes: the flush frame"; encoder: engine/src/wire.rs).
-// Everything is a view over the transferred buffer: numbers are typed-array
-// columns, strings are decoded only when asked for.
+// Readers return views over the transferred buffer unless ownership is requested.
+// Numbers are typed-array columns; strings are decoded only when asked for.
 
 export const SECTION = {
   STRINGS: 1,
@@ -118,7 +118,7 @@ class Strings {
 
   get(index) {
     if (index === NONE) return undefined;
-    if (!Number.isInteger(index) || index < 0 || index + 1 >= this.offsets.length) throw new Error('invalid string reference');
+    this.validate(index);
     let value = this.cache[index];
     if (value === undefined) {
       value = (utf8 ??= new TextDecoder()).decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
@@ -126,7 +126,30 @@ class Strings {
     }
     return value;
   }
+
+  validate(index) {
+    if (!Number.isInteger(index) || index < 0 || index + 1 >= this.offsets.length) throw new Error('invalid string reference');
+  }
+
+  copy() {
+    const buffer = this.bytes.buffer.slice(this.offsets.byteOffset - 4, this.bytes.byteOffset + this.bytes.byteLength);
+    return new Strings(buffer, 0, buffer.byteLength);
+  }
 }
+
+const tickerIdentity = (strings, refs, count) => (i) => ({
+  symbol: strings.get(refs[i]), id: strings.get(refs[count + i]),
+});
+
+const ownedTickerIdentity = (strings, sourceRefs, count) => {
+  const refs = sourceRefs.slice();
+  for (const index of refs) {
+    if (index === NONE) throw new Error('missing required string reference');
+    if (!strings) throw new Error('missing STRINGS section for string reference');
+    strings.validate(index);
+  }
+  return tickerIdentity(strings?.copy(), refs, count);
+};
 
 /** Float64 columns that follow `u32` data starting at `offset`. */
 const columns = (buffer, offset, rows, names) => {
@@ -289,8 +312,8 @@ export class Frame {
     };
   }
 
-  /** Tickers, replacing any earlier table: `market[i]` and one column per field. */
-  tickers() {
+  /** Tickers replace the earlier table; owned copies survive source transfer. */
+  tickers(owned = false) {
     const section = this.first(SECTION.TICKERS);
     if (!section) return undefined;
     const { buffer } = this;
@@ -300,10 +323,12 @@ export class Frame {
     const tail = at + count * fields.length * 8;
     requireEnd(section, tail + (section.revision === 1 ? count * 8 : 0));
     const market = new Uint32Array(buffer, section.offset + 4, count);
-    const table = { count, market, ...columns(buffer, at, count, fields) };
+    const table = { count, market: owned ? market.slice() : market,
+      ...columns(owned ? buffer.slice(at, tail) : buffer, owned ? 0 : at, count, fields) };
     if (section.revision === 1 || (count > 0 && tail + count * 8 <= section.offset + section.length)) {
       const refs = new Uint32Array(buffer, tail, count * 2);
-      table.identity = (i) => ({ symbol: requiredString(this, refs[i]), id: requiredString(this, refs[count + i]) });
+      table.identity = owned ? ownedTickerIdentity(this.strings, refs, count)
+        : (i) => ({ symbol: requiredString(this, refs[i]), id: requiredString(this, refs[count + i]) });
     }
     return table;
   }
@@ -523,14 +548,13 @@ export class TickerState {
   }
 
   apply(frame) {
-    const table = frame.tickers();
+    const table = frame.tickers(true);
     if (table) {
       this.count = table.count;
-      this.market = table.market.slice();
-      const identities = table.identity && Array.from({ length: table.count }, (_, i) => table.identity(i));
-      this.identity = identities && ((i) => identities[i]);
+      this.market = table.market;
+      this.identity = table.identity;
       for (const field of TICKER_FIELDS) {
-        if (table[field]) this.columns[field] = table[field].slice();
+        if (table[field]) this.columns[field] = table[field];
         else delete this.columns[field];
       }
     }

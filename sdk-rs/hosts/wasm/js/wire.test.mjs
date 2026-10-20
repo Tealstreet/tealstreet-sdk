@@ -655,6 +655,77 @@ test('TickerState owns numeric columns and identities after source transfer', ()
   assert.equal(state.identity, undefined);
 });
 
+test('owned ticker tables copy one numeric buffer and retain lazy identities after transfer', () => {
+  const frame = withStrings(numericFrame([revisedTable(SECTION.TICKERS)]), ['é', '']);
+  const raw = frame.tickers();
+  for (const [field, name] of TICKER_FIELDS.entries()) {
+    raw[name].set([field + 0.5, field === 0 ? NaN : field + 1.5]);
+  }
+  raw.market.set([7, 9]);
+  const decode = TextDecoder.prototype.decode;
+  let decodes = 0;
+  TextDecoder.prototype.decode = function (...args) {
+    decodes++;
+    return decode.apply(this, args);
+  };
+  try {
+    const owned = frame.tickers(true);
+    const state = new TickerState();
+    state.apply(frame);
+    assert.equal(decodes, 0);
+    assert.equal(raw.last.buffer, frame.buffer);
+    assert.equal(raw.market.buffer, frame.buffer);
+    assert.notEqual(owned.market.buffer, frame.buffer);
+    assert.notEqual(owned.last.buffer, frame.buffer);
+    assert.equal(owned.last.buffer.byteLength, TICKER_FIELDS.length * 2 * 8);
+    for (const name of TICKER_FIELDS) {
+      assert.equal(owned[name].buffer, owned.last.buffer);
+      assert.equal(state.columns[name].buffer, state.columns.last.buffer);
+      assert.deepEqual([...owned[name]], [...raw[name]]);
+      assert.deepEqual([...state.columns[name]], [...raw[name]]);
+    }
+    raw.last[0] = 900;
+    raw.market[0] = 99;
+    structuredClone(frame.buffer, { transfer: [frame.buffer] });
+    structuredClone(frame.strings.bytes.buffer, { transfer: [frame.strings.bytes.buffer] });
+    assert.equal(owned.last[0], 2.5);
+    assert.equal(state.columns.last[0], 2.5);
+    assert.deepEqual([...owned.market], [7, 9]);
+    assert.deepEqual([...state.market], [7, 9]);
+    assert.equal(decodes, 0);
+    assert.deepEqual(owned.identity(0), { symbol: 'é', id: 'é' });
+    assert.deepEqual(owned.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 2);
+    assert.deepEqual(owned.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 2);
+    assert.deepEqual(state.identity(0), { symbol: 'é', id: 'é' });
+    assert.deepEqual(state.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 4);
+  } finally {
+    TextDecoder.prototype.decode = decode;
+  }
+});
+
+test('owned tickers validate every required identity reference without decoding strings', () => {
+  for (const value of [NONE, 2]) {
+    for (let reference = 0; reference < 4; reference++) {
+      const frame = withStrings(numericFrame([revisedTable(SECTION.TICKERS)]));
+      const section = frame.first(SECTION.TICKERS);
+      frame.view.setUint32(section.offset + 208 + reference * 4, value, true);
+      const expected = value === NONE ? /missing required string/ : /invalid string reference/;
+      assert.throws(() => frame.tickers(true), expected);
+      assert.throws(() => new TickerState().apply(frame), expected);
+      assert.equal(frame.strings.cache.length, 0);
+    }
+  }
+  const missing = numericFrame([revisedTable(SECTION.TICKERS)]);
+  assert.throws(() => missing.tickers(true), /missing STRINGS/);
+  assert.throws(() => new TickerState().apply(missing), /missing STRINGS/);
+  const empty = numericFrame([revisedTable(SECTION.TICKERS, 0)]).tickers(true);
+  assert.equal(empty.count, 0);
+  assert.equal(empty.last.length, 0);
+});
+
 test('legacy ticker tables omit mid-price and delta revisions bound their masks and rows', () => {
   assert.equal(numericFrame([tickerTable(100)]).tickers().midPrice, undefined);
   for (const values of [[0, 2048, 5], [0, 4], [0], [-1, 0], [0, 1.5, 3]]) {

@@ -211,7 +211,8 @@ export class Frame {
   derivativeProducts(): DerivativeProductTable | undefined;
   positionGreeks(): PositionGreekTable | undefined;
   predictionHoldings(): PredictionHoldingTable | undefined;
-  tickers(): TickerTable | undefined;
+  /** Owned copies survive source transfer; identities remain lazily decoded. */
+  tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;

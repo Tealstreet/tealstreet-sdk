@@ -183,7 +183,22 @@ The measured settings-helper size experiment grew WASM by 34 bytes and was
 removed; no speculative engine optimization or budget increase is retained.
 Integrated checks pass: 95 all-feature engine unit tests plus 9 shared-feed
 integration tests, native format/Clippy/bans, 62 SDK tests and SDK typecheck/lint.
-Real WASM midpoint/provider validation, rebuilt replay gates and CI follow.
+Real rebuilt-WASM midpoint/provider regression and all 12 shared-feed tests pass.
+CI identified three more fill-layout fixture assumptions (OKX/Phemex/WEEX).
+Their repairs preserve execution prices/amounts, ordering and deduplication, and
+consume pending MARKETS before expecting a market-only flush. Independent
+failing-before controls and all 84 affected native tests pass; review passes.
+Repeated Hyperliquid Spot CI startup misses prompted a bounded fixture profile.
+Owned TickerState snapshots now copy numeric storage once and keep validated
+owned identity bytes for lazy decoding. Three alternating paired replays match
+all output; eager/owned median main CPU is 42.634/40.213 ms and steady CPU
+13.063/10.739 ms. This does not explain all startup variance. Transfer, required
+reference and lazy-decode regressions pass (29 reader cases); independent review
+passes. The canonical three-run Hyperliquid Spot gate passes: TS/Rust main
+46.3/41.6 ms, steady 17.1/11.8 ms, retained 18.9/6.9 MB. No budget, fixture or
+shared engine hot path changed. Host JS tests pass 89/89 and actual-writer
+cross-language tests 7/7. Final affected-venue replays and exact-head CI follow;
+the prior Bitrue job failed dependency installation with registry HTTP 502.
 
 ## Security
 
