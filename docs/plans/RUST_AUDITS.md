@@ -402,6 +402,61 @@ per-venue canary holding the formerly circular-evidence venues last.
 
 ## Port reviews (Opus, per venue vs TS)
 
+### Bitunix
+Reviewed on `feat/rust-bitunix` at `846f285d13` (PR #1309, not yet merged); paths
+are relative to `sdk-rs/venues/bitunix/src`. REST and WS signing match TS byte for
+byte; positions, aggregate balance and history paging are at parity.
+- High: app stop payloads are rejected. `trading.rs:265` refuses any order with
+  `trigger_price`, including StopLoss/TakeProfit sent with `triggerPrice == price`
+  (TS places them from `price`, `bitunix.exchange.ts` `formatTPSLOrder`), so a
+  dragged SL/TP leaves the position unprotected. Accept protective kinds whose
+  trigger equals the price (as Orderly does).
+- High: the futures socket (books, candles) is tagged `SocketChannel::Public`
+  (`lib.rs:127`), so the host applies the public route; its fallback is the public
+  proxy, not `bitunixFutures` (`routingTable.ts` `business`). After two silent
+  connects or a watchdog recover the socket sticks to an endpoint that ignores
+  depth/kline subscriptions while still answering pings: books and live candles go
+  dead with no log. Tag it `SocketChannel::Business`.
+- Medium: reconnects have no backoff (`lib.rs:407`); a refused connection loops at
+  network speed across futures, private and every ticker shard.
+- Medium: one unparsable catalog/ticker row fails the whole list and retries every 5 s
+  forever (`lib.rs:453,477,570,587`; strict `Pair`/`Daily` in `wire.rs:118-143`); a
+  tickers failure also blocks the private start (`lib.rs:541`). TS skips such rows.
+- Medium: one unmappable positions/orders row keeps the previous snapshot forever
+  (`account.rs:347,409,436,446`), e.g. a closed position stays displayed; TS skips it.
+- Medium: every WS position/order/tpsl event bumps the snapshot generation and the
+  in-flight REST read is discarded (`account.rs:466,791,1051`), while WS position
+  events do not update positions; under steady activity positions never commit.
+- Medium: history failures return success with empty or partial rows
+  (`history.rs:526,554`); TS surfaces an error. Partial income ledgers look complete.
+- Medium: one failed `batch_order` chunk fails the command and drops ids already
+  placed by earlier chunks (`trading.rs:1225,1249-1343`); TS returns placed ids.
+- Medium: account-read failures (auth, IP whitelist) are logged at Warning and retried
+  at ~1 Hz (`account.rs:446`, `lib.rs:577`): no toast, account never loads.
+- Medium (unverified venue behaviour): leverage serialized as `30.0`
+  (`trading.rs:344`, TS sends an integer); replacement after a virtual-leg cancel
+  requires order detail to be final immediately (`trading.rs:1437`); a login
+  rejection without `data` is ignored (`account.rs:744`).
+- Low: no clock sync or signature-rejection (10007) resend (`sign.rs:73`); rejected
+  login retries every 2 s on the same socket (`account.rs:766`); private watchdog arms
+  only on `op:"pong"` (`lib.rs:394`); `tealstreetWsRoute` not honoured; book kept
+  while disconnected; secondary read keys dropped; `data: null` envelopes treated as
+  failure (`wire.rs:286`); TP/SL without `orderId` in the reply fails the command;
+  caller `clientOrderId` with inline TP/SL rejected; pre-session fill can be emitted
+  as the cumulative amount before the first orders snapshot (`account.rs:989`); TP/SL
+  side defaults to Sell until the position id is known (`account.rs:598`).
+- Shared by both: amending a standalone TP/SL or placing a full-position one can
+  borrow a sibling leg from another TP/SL order by `positionId`
+  (`trading.rs:554,1006`); cancelling one leg of a combined position TP/SL cancels both.
+- Confirm (TS bugs Rust fixed): exact-tick lot splitting within min/max; market
+  orders with inline TP/SL go to `place_order`; TP+SL on a full position merged into
+  one payload; caller ids on TP/SL rejected rather than dropped; stop-limit no longer
+  sent as a resting limit; recreate after cancel/amend uses remaining size and keeps
+  TIF; cancel errors checked; stale snapshots cannot reopen terminal orders and
+  failed order reads no longer wipe orders; fills dedupe by `tradeId`; history
+  respects from/to; funding time from `nft`; decimal depth precision in topics;
+  unsubscribes actually sent.
+
 ### OKX
 - ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
@@ -699,8 +754,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   rows are skipped/logged while malformed identities retain prior snapshots.
 - Medium: ~~full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
   single order uses the batch path paced 1.5 s (`trading.rs:451`)~~;
-  startup halts on tickers/markets/position-mode/plan-list failures
-  (cross-venue startup lane; not changed by the venue-highs lane).
+  startup halts on tickers/markets/~~position-mode/plan-list~~ failures
+  (tickers/markets: public-startup PR). Reverified: mode and plan-list failures
+  retry every 2 s and a failed plan read publishes no normal-only list; a refused
+  key (602/401/402/406/70x or HTTP 401/403) now fails startup instead of retrying.
 - Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
   refused by the adapter.
 
@@ -835,6 +892,9 @@ Mostly matches TS.
 - Low: one bad contract row blocks startup; stream stops misclassified;
   snapshot starvation under load (revision discard, `account.rs:581,1310`);
   malformed snapshot never sets loaded.
+- Confirm (TS bugs Rust fixed): TS prices a position at the all-zero placeholder
+  ticker before the first quote (private tape: -12000 on a 0.2 BTC long whose
+  real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
 
 ### Cross-venue: per-coin balances and snapshot starvation
 - Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
@@ -856,6 +916,10 @@ Signing and payloads match; no confirmed highs.
 - Low: caller client id rejected on stops/brackets/splits; float remaining size;
   zero-price candle rejects batch; leverage always sent. Unchecked: private
   socket via Tealstreet proxy.
+- Confirm (TS bugs Rust fixed): TS values positions at an all-zero placeholder
+  ticker on startup, showing a fabricated loss (private tape: balance 1300 / upnl
+  -300 while the real quote equals the 60000 entry and native PnL is 0) until its
+  next balance fetch; Rust uses reported PnL until a real price arrives.
 
 ### Paradex
 StarkNet typed data, JWT, payloads and SBE decoding match.

@@ -87,9 +87,8 @@ export const FIXER_CONTRACTS = deepFreeze({
   hyperliquidspot: contract([], [{ path: 'requests', add: true, reorder: true, retainAll: true }]),
   // Expected TS feed set gains only the documented all-contract mini ticker.
   mexc: contract([], [{ path: 'subscriptions', add: true, reorder: true, retainAll: true }]),
-  // Exact private fixture only: legacy cumulative-delta fills become native l/L
-  // executions, and position-free realized-as-UPnL currencies become zero.
-  bitrue: contract([...fills, 'account.balance.upnl', 'account.balance.currencies.{currency}.upnl'], fillArrays),
+  // Exact private fixture only: legacy cumulative-delta fills become native l/L executions.
+  bitrue: contract(fills, fillArrays),
   blofin: contract(['account.positions[].marginSize', 'account.balance.used', 'account.balance.upnl']),
   weex: contract(['account.orders[].type', 'account.orders[].price']),
   phemex: contract([

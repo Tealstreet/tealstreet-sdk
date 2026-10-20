@@ -23,9 +23,11 @@ on:
 permissions:
   contents: read
 
+# Pushes to a branch finish their run (the newest push waits behind it), so
+# landing gets completed results during a merge rush; PR pushes cancel stale runs.
 concurrency:
   group: rust-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # No global RUSTFLAGS: it would replace sdk-rs/.cargo/config.toml's flags,
 # including the wasm stack size. Warnings are denied per command instead.

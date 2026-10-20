@@ -118,6 +118,11 @@
       "ciHead": "883313f301",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39477686925",
       "note": "Landing added markPrice to the WOO private tape position rows. The new hash declares the same 563 paths with their rationale; all 563 failure lines, values included, are identical to run 39475320150 on the prior hash. Prior entry retained."
+    },
+    "startupPlaceholderQuote20261021": {
+      "pr": 1448,
+      "landing": "5f111a41e18",
+      "note": "Requested by claude-uhj71c (overseer-approved) after #1448: TS prices positions at an all-zero placeholder ticker before the first quote. ApeX +cp0-2 balance.total/upnl, -cp3 (Rust now matches TS); Bitrue +cp0/cp1 positions[0].unrealizedPnl beside the existing cp2. To be confirmed against this head's CI."
     }
   },
   "failures": [
@@ -276,10 +281,14 @@
           ]
         },
         {
-          "divergence": "Wallet/available funds/PnL or currency balances differ at this boundary.",
+          "divergence": "Known TS defect (KNOWN_TS_FIXES.apexomni): TS prices positions at an all-zero placeholder ticker before the first quote and shows a fabricated startup loss (balance 1300 / upnl -300) until its next balance fetch; the tape quote equals the 60000 entry and native unrealisedPnl is 0, which Rust keeps.",
           "keys": [
-            "checkpoint 3 account.balance.total",
-            "checkpoint 3 account.balance.upnl"
+            "checkpoint 0 account.balance.total",
+            "checkpoint 0 account.balance.upnl",
+            "checkpoint 1 account.balance.total",
+            "checkpoint 1 account.balance.upnl",
+            "checkpoint 2 account.balance.total",
+            "checkpoint 2 account.balance.upnl"
           ]
         }
       ]
@@ -52817,7 +52826,9 @@
         {
           "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
           "keys": [
-            "checkpoint 2 account.positions[0].unrealizedPnl"
+            "checkpoint 2 account.positions[0].unrealizedPnl",
+            "checkpoint 0 account.positions[0].unrealizedPnl",
+            "checkpoint 1 account.positions[0].unrealizedPnl"
           ]
         },
         {
