@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::Book;
 use crate::json::{ArrayAt, ArraySplitter};
-use crate::model::{Candle, OrderSide, PlaceOrderOpts};
+use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
@@ -37,10 +37,27 @@ impl Method {
     }
 }
 
+/// A public request can select a host-owned egress without naming a proxy URL.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestRoute {
+    Direct,
+    PublicCors,
+}
+impl RequestRoute {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::PublicCors => "publicCors",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
     pub method: Method,
+    pub route: Option<RequestRoute>,
+    pub timeout_ms: Option<u32>,
     pub url: String,
     pub headers: Vec<(&'static str, String)>,
     pub body: Option<String>,
@@ -152,6 +169,11 @@ pub enum Command {
         command: CommandId,
         ids: Vec<String>,
     },
+    /// Cancel using caller-supplied routing context before Store sees the order.
+    CancelOrdersWithSymbols {
+        command: CommandId,
+        orders: Vec<CancelOrderRef>,
+    },
     /// Change an open order's price or amount.
     AmendOrder {
         command: CommandId,
@@ -176,6 +198,21 @@ pub enum Command {
     SetPositionMode {
         command: CommandId,
         hedged: bool,
+    },
+    FetchStpMode {
+        command: CommandId,
+    },
+    FetchAccount {
+        command: CommandId,
+    },
+    FetchOrderBook {
+        command: CommandId,
+        symbol: String,
+        limit: Option<u32>,
+    },
+    SetStpMode {
+        command: CommandId,
+        mode: crate::model::StpMode,
     },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
@@ -467,6 +504,8 @@ impl<P> Cx<'_, P> {
         self.io.actions.push(Action::Http(HttpRequest {
             id,
             method,
+            route: None,
+            timeout_ms: None,
             url,
             headers,
             body,
@@ -506,6 +545,38 @@ impl<P> Cx<'_, P> {
     /// Stream the response of an already-issued request, including signed POST reads.
     pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
         self.io.streams.insert(request, at);
+    }
+
+    /// Set host policy on an outbound action before the host drains it.
+    pub fn route_request(&mut self, id: RequestId, route: RequestRoute) {
+        if let Some(request) = self
+            .io
+            .actions
+            .iter_mut()
+            .rev()
+            .find_map(|action| match action {
+                Action::Http(request) if request.id == id => Some(request),
+                _ => None,
+            })
+        {
+            request.route = Some(route);
+        }
+    }
+
+    /// Bound the whole host operation, including route setup and response body.
+    pub fn request_timeout(&mut self, id: RequestId, timeout_ms: u32) {
+        if let Some(request) = self
+            .io
+            .actions
+            .iter_mut()
+            .rev()
+            .find_map(|action| match action {
+                Action::Http(request) if request.id == id => Some(request),
+                _ => None,
+            })
+        {
+            request.timeout_ms = Some(timeout_ms.max(1));
+        }
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
@@ -1211,5 +1282,70 @@ mod streaming_tests {
             assert!(venue.rows.is_empty());
             assert!(venue.body.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod request_route_tests {
+    use super::*;
+    #[test]
+    fn route_hints_mark_only_the_requested_outbound_action() {
+        let mut store = Store::default();
+        let mut io = Io::<()>::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let normal = cx.request(
+            Method::Post,
+            "https://venue.test/order".into(),
+            vec![],
+            None,
+            (),
+        );
+        let direct = cx.request(
+            Method::Get,
+            "https://venue.test/time".into(),
+            vec![],
+            None,
+            (),
+        );
+        let cors = cx.request(
+            Method::Get,
+            "https://venue.test/time".into(),
+            vec![],
+            None,
+            (),
+        );
+        cx.route_request(direct, RequestRoute::Direct);
+        cx.route_request(cors, RequestRoute::PublicCors);
+        cx.request_timeout(direct, 5_000);
+        cx.request_timeout(cors, 0);
+        cx.route_request(RequestId(999), RequestRoute::Direct);
+        let requests = io
+            .actions
+            .iter()
+            .filter_map(|a| {
+                if let Action::Http(r) = a {
+                    Some(r)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests.iter().map(|r| (r.id, r.route)).collect::<Vec<_>>(),
+            vec![
+                (normal, None),
+                (direct, Some(RequestRoute::Direct)),
+                (cors, Some(RequestRoute::PublicCors))
+            ]
+        );
+        assert!(requests.iter().all(|r| r.headers.is_empty()));
+        assert_eq!(
+            requests.iter().map(|r| r.timeout_ms).collect::<Vec<_>>(),
+            vec![None, Some(5_000), Some(1)]
+        );
     }
 }

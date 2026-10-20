@@ -26,6 +26,10 @@ export interface Transport {
   ): Socket;
   request(request: {
     method: string;
+    /** Host policy; this is metadata, never an HTTP header or parameter. */
+    route?: 'direct' | 'publicCors';
+    /** Whole-operation deadline; defaults to 20 seconds. */
+    timeoutMs?: number;
     url: string;
     headers: Record<string, string>;
     body?: string;

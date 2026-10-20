@@ -1,11 +1,24 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
-import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import {
+  COINBASE_REPLAY,
+  verifyCoinbaseRequest,
+  verifyCoinbaseSubscribe,
+  coinbaseSubscription,
+  createCoinbaseSocketAudit,
+} from './coinbase-protocol.mjs';
+import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import {
+  asterRequestUrl,
+  asterSocketAudit,
+  createAsterRequestValidator,
+  initializeAsterCrypto,
+} from './asterdex-requests.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
 let lighterVerifier;
@@ -131,7 +144,8 @@ const orderlyClasses = {
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
-const orderlyNative = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
+const orderlyNative = (symbol) =>
+  symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
 const orderlyPrivateUrl = (url) => new URL(url).pathname.startsWith('/v2/ws/private/stream/');
 const orderlySocketRequest = (message) => {
   if (message.event !== 'request') return undefined;
@@ -297,8 +311,7 @@ const orderly = (alias) => {
             if (message.event === 'subscribe') {
               state.channels.add(message.topic);
               if (state.channels.size > 100) failures.push('Orderly socket exceeds its 100-topic limit');
-            }
-            else state.channels.delete(message.topic);
+            } else state.channels.delete(message.topic);
           } else if (message.event === 'pong') {
             if (!state.serverPings) failures.push('unexpected Orderly heartbeat response');
             else state.serverPings--;
@@ -350,7 +363,6 @@ const orderly = (alias) => {
     },
   };
 };
-
 
 // Replay transport and signing clocks both default to wall-clock milliseconds.
 const validWeexTimestamp = (time, now) =>
@@ -509,37 +521,78 @@ export const mexcRequestUrl = (url) => {
 };
 
 const coinbase = (name) => ({
-  family: 'coinbase', currencyBalances: true, rust: name,
-  ts: { module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
-    className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange', name },
+  family: 'coinbase',
+  currencyBalances: true,
+  rust: name,
+  ts: {
+    module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange',
+    name,
+  },
   publicOptions: { spotOnly: true, extra: { coinbasePublicSpot: true } },
   options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
   replayCredentials: COINBASE_REPLAY,
   privateSocket: 'advanced-trade-ws-user.coinbase.com',
-  tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
-    .filter((key) => key.startsWith('level2.')).length >= count,
+  tsBooksSubscribed: (exchange, count) =>
+    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
   verifyRequest: verifyCoinbaseRequest,
   verifySubscribe: verifyCoinbaseSubscribe,
   subscriptionMessage: coinbaseSubscription,
   createSocketAudit: createCoinbaseSocketAudit,
   streamOf: (text) => {
-    try { const message = JSON.parse(text);
+    try {
+      const message = JSON.parse(text);
       const channel = message.channel === 'l2_data' ? 'level2' : message.channel;
       if (['heartbeats', 'user'].includes(channel)) return channel;
       const product = message.events?.[0]?.product_id;
       return product ? `${channel}.${product}` : undefined;
-    } catch { return undefined; }
+    } catch {
+      return undefined;
+    }
   },
   subscriptionGenerations: true,
-  matchRequestBody: true, requestBodies: true, compareWriteOrder: true,
-  compareClientIds: true, compareFillPrices: true,
+  matchRequestBody: true,
+  requestBodies: true,
+  compareWriteOrder: true,
+  compareClientIds: true,
+  compareFillPrices: true,
   isWrite: (method) => method !== 'GET',
-  generatedBodyId: (key, value) => key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
+  generatedBodyId: (key, value) =>
+    key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
 });
 
 export const VENUES = {
   coinbase: coinbase('coinbase'),
   coinbasespot: coinbase('coinbasespot'),
+  asterdex: {
+    initializeReplay: initializeAsterCrypto,
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url =
+        records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ??
+        'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, {
+        method: 'SUBSCRIBE',
+        params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)],
+      });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',
@@ -551,14 +604,19 @@ export const VENUES = {
       const oracle = await initializeLighterCrypto(impl);
       lighterVerifier = createLighterVerifier(options, oracle);
     },
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
-      .filter((key) => key.startsWith('order_book:')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('order_book:')).length >=
+      count,
     isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
     isWrite: (method) => method !== 'GET',
     requestBody: lighterRequestBody,
-    requestUrl(url) { const parsed = new URL(url); parsed.searchParams.delete('auth'); return parsed.href; },
+    requestUrl(url) {
+      const parsed = new URL(url);
+      parsed.searchParams.delete('auth');
+      return parsed.href;
+    },
     subscriptionMessage(message) {
-      return message.auth === undefined ? message : {...message,auth:'<verified-auth>'};
+      return message.auth === undefined ? message : { ...message, auth: '<verified-auth>' };
     },
     verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
     verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
@@ -575,7 +633,8 @@ export const VENUES = {
     privateSocket: '/v2/ws/private/',
     matchRequestBody: true,
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >=
+      count,
     respondToPing: true,
     createSocketAudit: createWooSocketAudit,
     validateRequest: validateWooRequest,
@@ -592,25 +651,36 @@ export const VENUES = {
     // Creation mints IDs; cancellation must retain the exact native target.
     generatedId: () => false,
     requestOptions: (method, url) => ({
-      generatedBodyId: method === 'POST' && url.pathname === '/fapi/v2/order'
-        ? (key) => key === 'clientOrderId'
-        : undefined,
+      generatedBodyId:
+        method === 'POST' && url.pathname === '/fapi/v2/order' ? (key) => key === 'clientOrderId' : undefined,
     }),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/listenKey'),
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0'))
+        .length >= count,
     validateRequest: ({ method, url, body, headers }) => {
       const parsed = new URL(url);
       if (!['fapi.bitrue.com', 'fapiws-auth.bitrue.com'].includes(parsed.hostname))
         throw new Error('Bitrue must emit a real upstream URL');
-      const fields = Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
-      if (!fields['x-ch-apikey'] && method === 'GET' && parsed.hostname === 'fapi.bitrue.com' && parsed.pathname === '/fapi/v1/contracts') return;
+      const fields = Object.fromEntries(
+        Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]),
+      );
+      if (
+        !fields['x-ch-apikey'] &&
+        method === 'GET' &&
+        parsed.hostname === 'fapi.bitrue.com' &&
+        parsed.pathname === '/fapi/v1/contracts'
+      )
+        return;
       if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
       const timestamp = fields['x-ch-ts'];
       const payload = timestamp + method + parsed.pathname + parsed.search + (body ?? '');
-      if (fields['x-ch-apikey'] !== 'replay-key' || !/^\d+$/.test(timestamp) ||
-          Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
-          fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex'))
+      if (
+        fields['x-ch-apikey'] !== 'replay-key' ||
+        !/^\d+$/.test(timestamp) ||
+        Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
+        fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex')
+      )
         throw new Error('Invalid Bitrue REST signature');
     },
     createSocketAudit: (_impl, { isPrivate, books }) => {
@@ -625,8 +695,16 @@ export const VENUES = {
           const frame = JSON.parse(text);
           const current = state(url);
           if (frame.ping !== undefined) current.pings.add(JSON.stringify({ pong: frame.ping }));
-          else if (frame.event === 'ping') current.pings.add(JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }));
-          if (frame.channel && (frame.tick || frame.data) && frame.event_rep !== 'rep' && !current.channels.has(frame.channel))
+          else if (frame.event === 'ping')
+            current.pings.add(
+              JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }),
+            );
+          if (
+            frame.channel &&
+            (frame.tick || frame.data) &&
+            frame.event_rep !== 'rep' &&
+            !current.channels.has(frame.channel)
+          )
             failures.push('data arrived without subscription: ' + frame.channel);
         },
         sent(url, text) {
@@ -645,15 +723,23 @@ export const VENUES = {
           }
         },
         ready() {
-          return !isPrivate || [...states].some(([url, s]) => url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
+          return (
+            !isPrivate ||
+            [...states].some(
+              ([url, s]) =>
+                url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'),
+            )
+          );
         },
         errors() {
           for (const [url, s] of states) {
             if (s.pings.size) failures.push('missing Bitrue heartbeat reply');
-            if (url.includes('fmarket-ws')) for (const symbol of books) {
-              const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
-              if (!s.channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
-            }
+            if (url.includes('fmarket-ws'))
+              for (const symbol of books) {
+                const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
+                if (!s.channels.has(`market_${native}_simple_depth_step0`))
+                  failures.push('missing Bitrue depth subscription: ' + symbol);
+              }
           }
           return failures;
         },
@@ -683,9 +769,15 @@ export const VENUES = {
   bitgetinverse: {
     inverseNativeAmounts: true,
     rust: 'bitgetinverse',
-    ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
+    ts: {
+      module: `${root}/bitget/bitgetinverse.exchange.ts`,
+      className: 'BitgetInverseExchange',
+      name: 'bitgetinverse',
+    },
     tsBooksSubscribed: (exchange, count) =>
-      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(
+        ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
+      ).length >= count,
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
@@ -1082,8 +1174,9 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
-    .filter((value) => value?.defaults && value?.interceptors);
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))].filter(
+    (value) => value?.defaults && value?.interceptors,
+  );
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */
 export const configuredOptions = (name) => {

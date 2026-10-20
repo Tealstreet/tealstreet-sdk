@@ -61,6 +61,25 @@ pub enum StopTriggerType {
     IndexPrice,
 }
 
+/// Account or per-order self-trade prevention policy where supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StpMode {
+    ExpireTaker,
+    ExpireMaker,
+    ExpireBoth,
+}
+
+impl StpMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExpireTaker => "EXPIRE_TAKER",
+            Self::ExpireMaker => "EXPIRE_MAKER",
+            Self::ExpireBoth => "EXPIRE_BOTH",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RejectReason {
     PostOnly,
@@ -187,6 +206,13 @@ pub struct OrderExtra {
     pub reject_reason: Option<RejectReason>,
 }
 
+/// Order identity supplied by the caller when cancellation precedes reconciliation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelOrderRef {
+    pub id: String,
+    pub symbol: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
@@ -260,14 +286,11 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
-/// Spot holdings retain available and reserved quantities independently.
+/// Full per-currency account balances, alongside the aggregate balance.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CurrencyBalance {
     pub currency: String,
-    pub total: f64,
-    pub free: f64,
-    pub used: f64,
-    pub upnl: f64,
+    pub balance: Balance,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
@@ -340,6 +363,8 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+    #[serde(default)]
+    pub stp_mode: Option<StpMode>,
     #[serde(default)]
     pub bybit_bbo: Option<BybitBbo>,
     #[serde(default)]

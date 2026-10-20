@@ -162,7 +162,10 @@ fn spot_selection_does_not_probe_cfm_and_preserves_held_currency() {
     let s = Session::new("DEFAULT", true).ready();
     assert!(s.urls.iter().all(|u| !u.contains("/cfm/")));
     let b = &s.e.store().currency_balances().unwrap()[0];
-    assert_eq!((b.total, b.free, b.used), (1.5, 1.0, 0.5));
+    assert_eq!(
+        (b.balance.total, b.balance.free, b.balance.used),
+        (1.5, 1.0, 0.5)
+    );
     assert!(s.e.store().positions().is_empty());
 }
 #[test]
@@ -727,4 +730,129 @@ fn failed_external_denomination_read_preserves_prior_snapshot_until_recovery() {
     );
     assert!(s.e.store().order("base-order").is_none());
     assert_eq!(s.e.store().order("quote-order").unwrap().amount, 0.5);
+}
+
+#[test]
+fn zero_fill_terminal_uses_existing_order_size_or_fetches_native_configuration() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let initial = user_order("known-order", "BTC-USD", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{initial}]"));
+    let request = next_read(&mut s, "/orders/historical/known-order");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "known-order",
+            r#"{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}"#,
+        ),
+    );
+    let canceled = user_order("known-order", "BTC-USD", "CANCELLED", "0", "0");
+    s.message(1, "update", &format!("[{canceled}]"));
+    let order = s.e.store().order("known-order").unwrap();
+    assert_eq!(order.status, safe_cex_engine::model::OrderStatus::Canceled);
+    assert_eq!(order.amount, 1.0);
+
+    let unknown = user_order("unknown-order", "BTC-USD", "CANCELLED", "0", "0");
+    s.message(2, "update", &format!("[{unknown}]"));
+    assert!(s.e.store().order("unknown-order").is_none());
+    let request = next_read(&mut s, "/orders/historical/unknown-order");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "unknown-order",
+            r#"{"limit_limit_gtc":{"base_size":"2","limit_price":"100"}}"#,
+        ),
+    );
+    let order = s.e.store().order("unknown-order").unwrap();
+    assert_eq!(order.status, safe_cex_engine::model::OrderStatus::Canceled);
+    assert_eq!(order.amount, 2.0);
+    assert!(fills(&mut s.e).is_empty());
+}
+
+#[test]
+fn completed_wire_snapshot_emits_new_fills_while_another_order_waits_for_sizing() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let initial = user_order("pending-size", "BTC-USD", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{initial}]"));
+    let request = next_read(&mut s, "/orders/historical/pending-size");
+    let filled = user_order("new-fill", "BTC-USD", "FILLED", "1", "0");
+    s.message(1, "update", &format!("[{filled}]"));
+    assert_eq!(fills(&mut s.e), vec![1.0]);
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "pending-size",
+            r#"{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}"#,
+        ),
+    );
+    assert!(fills(&mut s.e).is_empty());
+    s.message(2, "update", &format!("[{filled}]"));
+    assert!(fills(&mut s.e).is_empty());
+}
+
+#[test]
+fn deferred_pre_snapshot_update_does_not_emit_historical_fill_after_wire_completion() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let partial = user_order("pending-size", "BTC-USD", "OPEN", "1", "1");
+    s.message(0, "update", &format!("[{partial}]"));
+    let request = next_read(&mut s, "/orders/historical/pending-size");
+    s.message(1, "snapshot", &format!("[{partial}]"));
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "pending-size",
+            r#"{"limit_limit_gtc":{"base_size":"2","limit_price":"100"}}"#,
+        ),
+    );
+    assert!(fills(&mut s.e).is_empty());
+    let filled = user_order("pending-size", "BTC-USD", "FILLED", "2", "0");
+    s.message(2, "update", &format!("[{filled}]"));
+    assert_eq!(fills(&mut s.e), vec![1.0]);
+}
+
+#[test]
+fn rest_sizing_proof_does_not_let_new_user_row_overtake_queued_row() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    let initial = user_order("pending-size", "BTC-USD", "OPEN", "0", "1");
+    s.message(1, "update", &format!("[{initial}]"));
+    let detail = next_read(&mut s, "/orders/historical/pending-size");
+    let scan = next_read(&mut s, "/orders/historical/batch");
+    let rest = r#"{"orders":[{"order_id":"pending-size","product_id":"BTC-USD","status":"OPEN","order_type":"LIMIT","side":"BUY","filled_size":"0","order_configuration":{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}}],"has_next":false}"#;
+    complete_scan(&mut s, scan, rest);
+    let edited = initial.replace("\"limit_price\":\"100\"", "\"limit_price\":\"110\"");
+    s.message(2, "update", &format!("[{edited}]"));
+    s.reply(
+        detail,
+        200,
+        &size_detail(
+            "pending-size",
+            r#"{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}"#,
+        ),
+    );
+    assert_eq!(s.e.store().order("pending-size").unwrap().price, 110.0);
+}
+
+#[test]
+fn stale_sizing_failure_cannot_deactivate_a_replacement_socket() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let row = user_order("stale-detail", "BTC-USD", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    let request = next_read(&mut s, "/orders/historical/stale-detail");
+    s.e.handle(
+        s.now,
+        Event::WsClosed {
+            socket: s.private.unwrap(),
+            code: 1006,
+        },
+    );
+    s.e.drain_actions().for_each(drop);
+    s.reply(request, 401, r#"{"error":"expired"}"#);
+    assert!(
+        !s.e.drain_actions()
+            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Deactivate)))
+    );
 }

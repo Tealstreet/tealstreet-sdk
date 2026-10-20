@@ -325,6 +325,7 @@ impl Store {
         }
     }
 
+    /// `None` means unspecified; an explicitly empty slice clears the consumer.
     pub fn currency_balances(&self) -> Option<&[CurrencyBalance]> {
         self.currency_balances.as_deref()
     }
@@ -527,10 +528,10 @@ impl Store {
                         w.u32(name);
                     }
                     w.pad();
-                    w.f64s(currencies.iter().map(|row| row.total));
-                    w.f64s(currencies.iter().map(|row| row.free));
-                    w.f64s(currencies.iter().map(|row| row.used));
-                    w.f64s(currencies.iter().map(|row| row.upnl));
+                    w.f64s(currencies.iter().map(|row| row.balance.total));
+                    w.f64s(currencies.iter().map(|row| row.balance.free));
+                    w.f64s(currencies.iter().map(|row| row.balance.used));
+                    w.f64s(currencies.iter().map(|row| row.balance.upnl));
                 }
             }
             w.end();
@@ -619,6 +620,21 @@ impl Store {
         w.pad();
         for column in 0..wire::TICKER_COLUMNS {
             w.f64s(tickers.iter().map(|t| ticker_values(t)[column]));
+        }
+        // Delisted symbols can remain in the venue's aggregate ticker stream.
+        // Preserve their identities without inventing a tradeable market row.
+        if tickers
+            .iter()
+            .any(|ticker| self.market_index(&ticker.symbol).is_none())
+        {
+            for ticker in tickers {
+                let symbol = w.string(&ticker.symbol);
+                w.u32(symbol);
+            }
+            for ticker in tickers {
+                let id = w.string(&ticker.id);
+                w.u32(id);
+            }
         }
         w.end();
     }
@@ -752,6 +768,113 @@ mod tests {
         }
     }
 
+    fn market(symbol: &str) -> Market {
+        Market {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            pretty_symbol: None,
+            base: "LIVE".into(),
+            quote: "USDT".into(),
+            active: true,
+            precision: crate::model::Precision {
+                amount: 0.001,
+                price: 0.01,
+            },
+            limits: crate::model::Limits {
+                amount: crate::model::MinMax {
+                    min: 0.001,
+                    max: 1000.0,
+                },
+                leverage: crate::model::MinMax {
+                    min: 1.0,
+                    max: 100.0,
+                },
+                price: None,
+            },
+            contract_size: Some(1.0),
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }
+    }
+
+    #[test]
+    fn ticker_identity_tail_preserves_orphans_and_leaves_legacy_columns_unchanged() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("LIVEUSDT")]);
+        store.set_tickers(vec![ticker("LIVEUSDT")]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write_tickers(&mut writer);
+        let legacy = writer.finish();
+        let (_, legacy_payload) = crate::wire::sections(&legacy)
+            .find(|(kind, _)| *kind == section::TICKERS)
+            .unwrap();
+        assert_eq!(
+            legacy_payload.len(),
+            96,
+            "known markets retain the old ticker layout"
+        );
+
+        let mut orphan = ticker("OLDUSDT");
+        orphan.id = "native-retired-id".into();
+        orphan.last = 42.0;
+        store.set_tickers(vec![ticker("LIVEUSDT"), orphan]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write_tickers(&mut writer);
+        let frame = writer.finish();
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::TICKERS)
+            .unwrap();
+        let word = |at| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
+        assert_eq!(payload.len(), 208);
+        assert_eq!((word(0), word(4), word(8)), (2, 0, wire::NONE));
+        assert_eq!(
+            f64::from_le_bytes(payload[56..64].try_into().unwrap()),
+            42.0
+        );
+        assert_eq!((word(192), word(196), word(200), word(204)), (0, 1, 0, 2));
+        let (_, strings) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(strings[..4].try_into().unwrap()), 3);
+        let expected = b"LIVEUSDTOLDUSDTnative-retired-id";
+        assert_eq!(&strings[20..20 + expected.len()], expected);
+        assert_eq!(
+            store.markets().len(),
+            1,
+            "ticker identity does not synthesize markets"
+        );
+    }
+
+    #[test]
+    fn orphan_ticker_deltas_keep_the_existing_row_index_and_packed_shape() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("LIVEUSDT")]);
+        store.set_tickers(vec![ticker("LIVEUSDT"), ticker("OLDUSDT")]);
+        store.take_pending();
+        store.update_ticker("OLDUSDT", |ticker| ticker.last = 42.0);
+        let pending = store.take_pending();
+        assert_eq!(pending.ticker_deltas, [(1, 1 << 2)]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write(&pending, &mut writer);
+        let frame = writer.finish();
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::TICKER_DELTAS)
+            .unwrap();
+        assert_eq!(payload.len(), 24);
+        let values = payload
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|bytes| f64::from_le_bytes(*bytes))
+            .collect::<Vec<_>>();
+        assert_eq!(values, [1.0, 4.0, 42.0]);
+    }
+
     #[test]
     fn ticker_lookup_tracks_unsorted_replacements_and_last_duplicate() {
         let mut store = Store::default();
@@ -882,10 +1005,12 @@ mod tests {
         assert_eq!(store.currency_balances(), None);
         let holdings = vec![CurrencyBalance {
             currency: "BTC".into(),
-            total: 2.,
-            free: 1.25,
-            used: 0.75,
-            upnl: 0.,
+            balance: Balance {
+                total: 2.,
+                free: 1.25,
+                used: 0.75,
+                upnl: 0.,
+            },
         }];
         store.set_currency_balances(holdings.clone());
         let frame = balance_frame(&mut store);
@@ -1012,5 +1137,112 @@ mod tests {
             f64::from_le_bytes(payload[64..72].try_into().unwrap()),
             12_501.0
         );
+    }
+
+    #[test]
+    fn currency_columns_keep_all_balance_fields_and_explicitly_clear() {
+        let mut store = Store::default();
+        assert_eq!(store.currency_balances(), None);
+        let currencies = vec![
+            CurrencyBalance {
+                currency: "USDT".into(),
+                balance: Balance {
+                    used: 1.0,
+                    free: 2.0,
+                    total: 3.0,
+                    upnl: -4.0,
+                },
+            },
+            CurrencyBalance {
+                currency: "USDC".into(),
+                balance: Balance {
+                    used: 5.0,
+                    free: 6.0,
+                    total: 11.0,
+                    upnl: 8.0,
+                },
+            },
+        ];
+        store.set_currency_balances(currencies.clone());
+        assert_eq!(store.currency_balances(), Some(currencies.as_slice()));
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        let word = |at| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
+        let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+        assert_eq!(payload.len(), 120);
+        assert_eq!(
+            word(32),
+            0,
+            "currency-only frame retains an empty coin tail"
+        );
+        assert_eq!(word(40), 2);
+        assert_eq!((word(44), word(48), word(52)), (1, 0, 1));
+        assert_eq!((value(56), value(64)), (3.0, 11.0));
+        assert_eq!((value(72), value(80)), (2.0, 6.0));
+        assert_eq!((value(88), value(96)), (1.0, 5.0));
+        assert_eq!((value(104), value(112)), (-4.0, 8.0));
+        assert_eq!(
+            store.coin_balances(),
+            None,
+            "wire padding does not invent store holdings"
+        );
+        store.set_currency_balances(currencies);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        store.set_currency_balances(vec![]);
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 48);
+        assert_eq!(u32::from_le_bytes(payload[40..44].try_into().unwrap()), 0);
+        assert_eq!(store.currency_balances(), Some([].as_slice()));
+    }
+
+    #[test]
+    fn currency_extension_follows_existing_collateral_and_survives_snapshot() {
+        let mut store = Store::default();
+        store.set_coin_balances(vec![CoinBalance {
+            base: "BTC".into(),
+            amount: 0.25,
+            notional: 12500.0,
+        }]);
+        store.set_currency_balances(vec![CurrencyBalance {
+            currency: "USDT".into(),
+            balance: Balance {
+                used: 1.0,
+                free: 2.0,
+                total: 3.0,
+                upnl: 4.0,
+            },
+        }]);
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 104);
+        assert_eq!(u32::from_le_bytes(payload[32..36].try_into().unwrap()), 1);
+        assert_eq!(
+            f64::from_le_bytes(payload[40..48].try_into().unwrap()),
+            0.25
+        );
+        assert_eq!(
+            f64::from_le_bytes(payload[48..56].try_into().unwrap()),
+            12500.0
+        );
+        assert_eq!(u32::from_le_bytes(payload[56..60].try_into().unwrap()), 1);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write(&store.everything(), &mut writer);
+        let snapshot = writer.finish();
+        let (_, snapshot_payload) = crate::wire::sections(&snapshot)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(snapshot_payload.len(), payload.len());
+        assert_eq!(&snapshot_payload[64..], &payload[64..]);
     }
 }

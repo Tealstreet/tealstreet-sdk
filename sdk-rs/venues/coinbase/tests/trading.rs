@@ -182,6 +182,7 @@ fn opts(symbol: &str, kind: OrderType, side: OrderSide, amount: f64) -> PlaceOrd
         close: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+        stp_mode: None,
     }
 }
 impl Session {
@@ -425,6 +426,9 @@ fn entire_batch_is_preflighted_before_any_write() {
     cases.push(bad);
     let mut bad = good.clone();
     bad.bybit_slippage_tolerance_ticks = Some(2.0);
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.stp_mode = Some(StpMode::ExpireBoth);
     cases.push(bad);
     let mut bad = good.clone();
     bad.trigger_type = Some(StopTriggerType::MarkPrice);
@@ -1257,6 +1261,160 @@ fn recovered_client_identity_coalesces_earlier_external_fill_without_create_ack(
     let r = s.write();
     assert_eq!(
         create_wire(&r)
+            .order_configuration
+            .market_market_ioc
+            .unwrap()
+            .base_size,
+        "1"
+    );
+}
+
+#[test]
+fn lost_spot_create_response_recovers_zero_fill_terminal_identity() {
+    for status in ["CANCELLED", "EXPIRED", "FAILED"] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        s.message(0, "snapshot", "[]");
+        let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+        order.client_order_id = Some("terminal-client".into());
+        s.command(Command::PlaceOrders {
+            command: 320,
+            orders: vec![order],
+        });
+        let r = s.write();
+        s.e.handle(
+            s.now,
+            Event::HttpFailed {
+                request: r.id,
+                error: "response lost",
+            },
+        );
+        assert!(s.done(320).is_err());
+        s.message(1, "update", &format!(r#"[{{"order_id":"terminal-zero","client_order_id":"terminal-client","product_id":"BTC-USD","status":"{status}","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"0","limit_price":"100","avg_price":"0"}}]"#));
+        let recovered = s.e.store().order("terminal-zero").unwrap();
+        assert_eq!(recovered.status, OrderStatus::Canceled);
+        assert_eq!(recovered.amount, 1.0);
+        s.command(Command::CancelSymbolOrders {
+            command: 321,
+            symbol: "BTC-USD".into(),
+        });
+        assert_eq!(s.done(321).unwrap(), "null");
+    }
+}
+
+#[test]
+fn zero_fill_terminal_before_create_ack_cannot_be_resurrected_after_pruning() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    s.command(Command::PlaceOrders {
+        command: 330,
+        orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0)],
+    });
+    let r = s.write();
+    let client = create_wire(&r).client_order_id;
+    s.message(1, "update", &format!(r#"[{{"order_id":"early-cancel","client_order_id":"{client}","product_id":"BTC-USD","status":"CANCELLED","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"0","limit_price":"100","avg_price":"0"}}]"#));
+    assert_eq!(
+        s.e.store().order("early-cancel").unwrap().status,
+        OrderStatus::Canceled
+    );
+    s.message(2, "snapshot", "[]");
+    assert!(s.e.store().order("early-cancel").is_none());
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"early-cancel"}}"#,
+    );
+    assert!(s.done(330).is_ok());
+    assert!(s.e.store().order("early-cancel").is_none());
+}
+
+#[test]
+fn zero_fill_terminal_without_client_id_resolves_from_create_ack() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    s.command(Command::PlaceOrders {
+        command: 350,
+        orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0)],
+    });
+    let r = s.write();
+    s.message(1, "update", r#"[{"order_id":"anonymous-cancel","product_id":"BTC-USD","status":"CANCELLED","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"0","limit_price":"100","avg_price":"0"}]"#);
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"anonymous-cancel"}}"#,
+    );
+    assert!(s.done(350).is_ok());
+    assert_eq!(
+        s.e.store().order("anonymous-cancel").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn duplicate_client_ack_preserves_authoritative_quote_sizing_and_edit_provenance() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    s.details.insert("quote-duplicate".into(), r#"{"order":{"order_id":"quote-duplicate","product_id":"BTC-USD","order_configuration":{"limit_limit_gtc":{"quote_size":"200","limit_price":"100"}}}}"#.into());
+    let row = r#"[{"order_id":"quote-duplicate","client_order_id":"duplicate-client","product_id":"BTC-USD","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"200","limit_price":"100","avg_price":"0"}]"#;
+    s.message(1, "update", row);
+    s.reconcile_order("quote-duplicate");
+    let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some("duplicate-client".into());
+    s.command(Command::PlaceOrders {
+        command: 360,
+        orders: vec![order],
+    });
+    let r = s.write();
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"quote-duplicate"}}"#,
+    );
+    assert!(s.done(360).is_ok());
+    s.message(2, "update", row);
+    assert_eq!(s.e.store().order("quote-duplicate").unwrap().amount, 2.0);
+    s.command(Command::AmendOrder {
+        command: 361,
+        id: "quote-duplicate".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    assert!(s.done(361).unwrap_err().contains("provenance"));
+}
+
+#[test]
+fn lost_create_partially_filled_cancel_recovers_and_releases_only_after_position_repair() {
+    let mut s = Session::new("INTX", false).ready();
+    s.message(0, "snapshot", "[]");
+    s.closing(340, 2.0);
+    let r = s.write();
+    let client = create_wire(&r).client_order_id;
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(340).is_err());
+    s.message(1, "update", &format!(r#"[{{"order_id":"partial-cancel","client_order_id":"{client}","product_id":"BTC-PERP-INTX","status":"CANCELLED","order_side":"SELL","order_type":"Market","cumulative_quantity":"1","leaves_quantity":"0","avg_price":"100"}}]"#));
+    s.closing(341, 2.0);
+    assert!(s.done(341).is_err());
+    s.command(Command::CancelSymbolOrders {
+        command: 342,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    assert_eq!(s.done(342).unwrap(), "null");
+    for _ in 0..2 {
+        let r = s.next_position_read();
+        s.reply(
+            r,
+            200,
+            &INTX_POSITIONS.replace("\"net_size\":\"2\"", "\"net_size\":\"1\""),
+        );
+    }
+    s.closing(343, 1.0);
+    assert_eq!(
+        create_wire(&s.write())
             .order_configuration
             .market_market_ioc
             .unwrap()

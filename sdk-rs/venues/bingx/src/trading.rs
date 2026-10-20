@@ -901,6 +901,7 @@ impl Trading {
                 trigger_type: o.trigger_type,
                 tp_trigger_type: o.trigger_type,
                 sl_trigger_type: o.trigger_type,
+                stp_mode: None,
                 max_slippage_pct: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,

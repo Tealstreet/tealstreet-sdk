@@ -363,3 +363,24 @@ Independent public/history re-review is clear. A fresh reviewer is checking the
 account/trading repairs; latest Aster landing integration and affected combined
 acceptance gates remain pending. CI's frozen reference entry-point classification
 failure is fixed, with three passing targeted checks (one web-only skip).
+
+### Integrated review checkpoint
+
+Merged landing d9aa597fd3, retaining Aster and Coinbase options, routing/deadlines,
+account identity and full currency balances. The shared model follows landing's
+nested Balance shape; the frame retains explicit optional-collateral flags and
+all four currency columns. Independent Rust, SDK/host and harness merge reviews
+are clear. Merge repairs removed duplicate `canSign` and protocol imports and
+preserved native Coinbase currencies in explicit replay projections.
+
+Further account/trading reviews fixed zero/partial terminal recovery after lost
+ACKs, no-client-ID terminal updates resolved by later ACKs, deferred rows overtaken
+by REST sizing evidence, and live-fill eligibility while an initial snapshot
+waits for sizing. Receipt-time eligibility prevents historical fills becoming
+live after delayed reads; failed initial baselines reconnect. Existing quote
+provenance outranks duplicate-client ACKs. Stale sizing responses cannot apply
+authentication failures/backoff to a replacement socket. Focused final review
+finds no remaining actionable P1/P2. All113 Coinbase tests and strict targeted
+Clippy/formatting pass. Shared engine60, harness284, host53 and SDK integration230
+pass; root typecheck44/lint28 and uncached test27 tasks pass. Integrated acceptance
+replays, final WASM builds and exact-head CI are still pending.

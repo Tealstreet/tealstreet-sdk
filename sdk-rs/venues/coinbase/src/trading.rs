@@ -234,6 +234,7 @@ impl Coinbase {
             || opts.max_slippage_pct.is_some()
             || opts.bybit_bbo.is_some()
             || opts.bybit_slippage_tolerance_ticks.is_some()
+            || opts.stp_mode.is_some()
         {
             return Err("Coinbase does not support these bracket or slippage instructions".into());
         }
@@ -559,6 +560,7 @@ impl Coinbase {
                         close: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+                        stp_mode: None,
                     };
                     let replacement = self.prepare_create(cx, &opts, Some(id.clone()))?;
                     job.steps.push_back(Step::Cancel {
@@ -769,7 +771,10 @@ impl Coinbase {
                 .extra
                 .as_ref()
                 .and_then(|e| e.remaining_native.zip(e.filled_in_placement_units))
-                .is_some_and(|(remaining, filled)| remaining + filled == reservation.amount)
+                .is_some_and(|(remaining, filled)| {
+                    remaining + filled == reservation.amount
+                        || order.status != OrderStatus::Open && filled <= reservation.amount
+                })
         {
             return;
         }
@@ -796,6 +801,23 @@ impl Coinbase {
         {
             self.trading.reductions.remove(client);
         }
+    }
+    pub(crate) fn trading_order_amount(
+        &self,
+        client: &str,
+        native_id: &str,
+        symbol: &str,
+        side: OrderSide,
+    ) -> Option<f64> {
+        self.trading
+            .reductions
+            .get(client)
+            .filter(|r| {
+                r.symbol == symbol
+                    && r.side == side
+                    && r.native_id.as_deref().is_none_or(|id| id == native_id)
+            })
+            .map(|r| r.amount)
     }
     pub(crate) fn trading_observed_fill(
         &mut self,
@@ -1344,7 +1366,7 @@ impl Coinbase {
                             reservation.accounted_fill.max(external.accounted_fill);
                     }
                 }
-                self.private_base_order(&id);
+                self.private_base_order(cx, &id, order);
                 self.private_placement_finished(&payload.client_order_id);
                 // An earlier user-stream update or deduplicated client ID owns its state.
                 if cx.store.order(&id).is_none() && self.account.terminal_fill(&id).is_none() {

@@ -42,6 +42,8 @@ export interface EngineWsRoute {
 export interface EngineRoutingPlan {
   http: EngineHttpRoute;
   publicHttp?: EngineHttpRoute;
+  readHttp?: EngineHttpRoute;
+  publicCorsHttp?: EngineHttpRoute;
   publicHeader?: string;
   ws: { public: EngineWsRoute; private: EngineWsRoute; business: EngineWsRoute };
   wsHeaders: Record<string, string>;
@@ -68,11 +70,21 @@ const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): v
   }
 };
 
-export const assertEngineAccountRouting = (options: ExchangeOptions): void => {
+export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
+  if (exchange === 'asterdex' && options.secondary_key && options.secondary_secret) return;
   if (options.secondary_key || options.secondary_secret) {
     throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
   }
 };
+
+const asterReadOptions = (options: ExchangeOptions, provider: TransportProvider): ExchangeOptions => ({
+  ...options,
+  key: options.secondary_key!,
+  secret: options.secondary_secret!,
+  secondary_key: undefined,
+  secondary_secret: undefined,
+  overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy(),
+});
 
 const venueHeaders = (exchange: ExchangeName, options: ExchangeOptions): Record<string, string> =>
   isBybitSiteIdExchange(exchange) ? getBybitSiteHeaders(options) : {};
@@ -110,12 +122,13 @@ export const resolveEngineRoutingPlan = (
   options: ExchangeOptions,
   baseURL: string,
 ): EngineRoutingPlan => {
-  assertEngineAccountRouting(options);
+  assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   if (provider !== directTransport && provider !== tealstreetTransport) {
     throw new Error('Custom transports must supply their own native host routing plan');
   }
   const { routing, restRouting } = resolved(exchange, options, provider);
+  const publicCorsProxy = exchange === 'asterdex' ? provider.publicCorsProxy() : undefined;
   const http = (headers: Record<string, string>): EngineHttpRoute => {
     const route = restRoute(provider, exchange, options, restRouting, { method: 'GET', url: baseURL, headers });
     const target = route.baseURL ?? baseURL;
@@ -138,6 +151,23 @@ export const resolveEngineRoutingPlan = (
   };
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
+    ...(publicCorsProxy
+      ? {
+          publicCorsHttp: {
+            mode: 'direct' as const,
+            prefix: publicCorsProxy,
+            authorize: false,
+            authorizationHeader: proxyAuthorizationHeader(exchange),
+            headers: {},
+          },
+        }
+      : {}),
+    ...(exchange === 'asterdex' && options.secondary_key
+      ? {
+          publicHeader: 'X-MBX-APIKEY',
+          readHttp: resolveEngineRoutingPlan(exchange, asterReadOptions(options, provider), baseURL).http,
+        }
+      : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
     ws: {
       public: wsRoute(routing.wsPublic),
@@ -223,8 +253,9 @@ const httpTransport = (
   transport: Transport,
   provider: TransportProvider,
   routing: ResolvedRouting,
+  publicPrefix?: string,
 ): { request: Transport['request']; dispose(): void } => {
-  const tunnel = usesTunnel(exchange, options);
+  const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
         exchange,
@@ -240,6 +271,8 @@ const httpTransport = (
     pending.add(controller);
     const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
     const started = Date.now();
+    const { timeoutMs, ...networkRequest } = request;
+    const deadlineMs = Math.max(1, timeoutMs ?? 20_000);
     const cleanup = () => {
       clearTimeout(timer);
       pending.delete(controller);
@@ -248,14 +281,17 @@ const httpTransport = (
     const timer = setTimeout(() => {
       controller.abort(new Error('Engine transport request timed out'));
       pending.delete(controller);
-    }, 20_000);
+    }, deadlineMs);
     signal.addEventListener('abort', cleanup, { once: true });
     try {
       signal.throwIfAborted();
       const signed = orderlyExchanges.has(exchange) || coinbaseExchanges.has(exchange)
         ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
         : undefined;
-      const route = restRoute(provider, exchange, options, routing, request, transport.serverHeaders);
+      const route =
+        publicPrefix === undefined
+          ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders)
+          : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(adapter));
       const config = {
         method: request.method,
@@ -263,7 +299,7 @@ const httpTransport = (
         baseURL: request.url,
         headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
         data: request.body,
-        timeout: 20_000,
+        timeout: deadlineMs,
         signal,
       } as InternalAxiosRequestConfig;
       aliasHeaders(config.headers, aliases);
@@ -281,7 +317,7 @@ const httpTransport = (
           Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
         ) !== value)
       )) throw new Error('Engine transport authorization changed signed request bytes or headers');
-      config.timeout = Math.max(1, 20_000 - (Date.now() - started));
+      config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
       if (adapter) {
         const response = await untilAborted(adapter(config), signal);
         // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
@@ -295,7 +331,7 @@ const httpTransport = (
       }
       const response = await untilAborted(
         transport.request({
-          ...request,
+          ...networkRequest,
           url: config.url!,
           headers: config.headers.toJSON() as Record<string, string>,
           signal,
@@ -345,7 +381,7 @@ export const createEngineTransport = (
   options: ExchangeOptions,
   transport: Transport,
 ): Transport => {
-  assertEngineAccountRouting(options);
+  assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -379,14 +415,39 @@ export const createEngineTransport = (
   }
   const fallbacks = new Map<string, WsDirectFallback>();
   const http = httpTransport(exchange, options, transport, provider, restRouting);
+  // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
+  // the host; venues choose only the typed route name.
+  const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
+  const publicCorsProxy = provider.publicCorsProxy();
+  const publicCorsHttp = publicCorsProxy
+    ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
+    : undefined;
+  const readOptions =
+    exchange === 'asterdex' && options.secondary_key ? asterReadOptions(options, provider) : undefined;
+  const readHttp = readOptions
+    ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
+    : undefined;
   return {
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
     clearTimeout: (handle) => transport.clearTimeout(handle),
-    request: http.request,
+    request: (request) => {
+      const { route, ...nativeRequest } = request;
+      if (route === 'direct') return directHttp.request(nativeRequest);
+      if (route === 'publicCors')
+        return publicCorsHttp
+          ? publicCorsHttp.request(nativeRequest)
+          : Promise.reject(new Error('Public CORS request routing is not configured'));
+      return readHttp && request.method.toUpperCase() === 'GET' && hasHeader(request.headers, 'X-MBX-APIKEY')
+        ? readHttp.request(nativeRequest)
+        : http.request(nativeRequest);
+    },
     dispose: () => {
       http.dispose();
+      readHttp?.dispose();
+      directHttp.dispose();
+      publicCorsHttp?.dispose();
       transport.dispose?.();
     },
     connect: (url, handlers) => {

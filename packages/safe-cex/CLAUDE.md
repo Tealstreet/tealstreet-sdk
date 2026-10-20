@@ -524,8 +524,13 @@ public/private/business roles; new venues with shared URLs must supply the role.
 Reuse `WsDirectFallback` and the feature-gated package relay. Native launchers
 serialize `resolveEngineRoutingPlan(exchange, options, realRestBaseURL)` and pass
 it to `NetworkTransport::with_routing` with a fresh context token provider; never
-serialize a JWT. The engine rejects secondary signing keys before startup because
-its single signer cannot safely honor the TS secondary-read account contract.
+serialize a JWT. AsterDEX supports a secondary read agent: authenticated GETs
+select its signer and declared read HTTP route, while writes/listen keys keep
+the primary agent. Other engines reject secondary signing keys before startup.
+Optional HTTP `direct` / `publicCors` route hints support venue clock fallback;
+hosts consume these hints before network I/O. Public CORS routes come from the
+provider (and serialized native plan), never venue URLs. Missing native CORS
+policy fails explicitly; normal requests retain account routing and deadlines.
 
 Engine venue requests use native authorization headers. On Coinbase and its
 spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the
