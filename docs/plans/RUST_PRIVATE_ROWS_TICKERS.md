@@ -18,6 +18,13 @@ sequence, timestamp, revision, generation, closure and fill fences remain in for
   authenticated/public-only startup before declaring every family complete.
   This is explicitly deferred from the public PR to this phase because these
   reads are coupled to native account identity and portfolio processing.
+- **Paradex coordination update (2026-10-20):** `feat/rust-paradex-emitter`
+  owns Paradex trading/errors/SBE and TinyEmitter isolation. This lane owns
+  already-implemented public blank ticker/startup. Narrow REST position blank
+  leverage/liquidation tolerance is being folded into that public-startup PR to
+  unblock valid startup; generic private-row isolation stays in the follow-up.
+  Only those optional fields may use TS-compatible zero defaults; keep private
+  sizing/risk and command numerics strict. Integrate landing first.
 - **Polymarket partial catalogue:** an unmappable previously held token must
   retain its existing holding instead of disappearing on snapshot replacement.
   Distinguish intentional marketSlugs scope from rejected selected metadata;

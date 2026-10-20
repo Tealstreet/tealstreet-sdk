@@ -220,3 +220,25 @@ tests passed76/76. Full harness initially hit its unchanged5s TxFlow child
 process timeout during heavy builds; the complete rerun passed592/592 without
 changing tests or timeouts. Final private/public matrices, root test rerun,
 consumer checks and native workspace completion remain pending.
+
+## Complete checkpoint before wire landing integration
+
+At runtime source `7cc5c2a23f` / host-driver checkpoint `623cce1a26`, all
+3102 native cases /259 targets passed; 64/64 scripted private replays passed;
+26/26 standalone bindings passed the unchanged CI budget1258291 bytes
+(maximum Paradex1235382). The size builds kept combined Node bindings unchanged
+(SHA256 checked). Root44 typecheck/28 lint/27 test tasks,444 actual Wasm SDK,
+76 actual JS host and592 harness cases passed. Four consumer Wasm suites
+passed20 cases; frame-wire/server-adapter/product checks passed1/1/16, and
+MCP packaging/smoke passed. Public40-run matrix had not started.
+
+Landing moved to wire PR#1345 at `c44f22bd8e`. Integrate before final artifacts:
+12-column midpoint-aware ticker rows/revisions, symbol-keyed settings and
+failed-frame recovery must coexist with lazy ticker creation, discovery overlays,
+private ticker-independent readiness and catalogue-gain shared snapshots.
+Independent reviews require real catalogue identity before startup, keep null
+midpoint clears from satisfying first shared quote readiness, and preserve the
+catalogue census before deferred snapshot dispatch. Repeat affected gates against
+the integrated artifact. The Paradex lane defers public blank startup and the
+narrow optional REST leverage/liquidation blanks here; SBE/trading/errors stay
+with `feat/rust-paradex-emitter`. Generic private row isolation remains later.

@@ -303,9 +303,12 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   fills (`history.rs:984,867`).~~ Forced-close suffixes and absent profit now map.
   One bad market row or a transient error halts startup with no retry
   (`lib.rs:552,684`) — left to the startup/broker lane.
-  ~~One unmappable row discards the positions/orders snapshot
-  (`account.rs:505,806`).~~ Typed rows skip/log independently; malformed reads
-  and wholly unmappable nonempty snapshots preserve known state.
+  One unmappable REST row still prevents good-peer positions/orders refresh
+  (`account.rs::account_item`). Public-startup integration restores the prior
+  whole scope because the incoming all-unmappable-only guard could delete owned
+  exposure/protection when another peer mapped. Identity-preserving row merges
+  remain pending in the private-row follow-up; valid private stream peers can
+  still apply independently.
 - Low: ~~zero-lot order rejects the whole batch; commands before the account probe
   rejected; sized stop silently becomes full-position; WS-triggered Classic
   refresh dropped while another is in flight; `"0"` leverage limits make `clamp`
