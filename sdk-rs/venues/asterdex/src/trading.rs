@@ -7,7 +7,9 @@ use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
     PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 
@@ -42,7 +44,7 @@ struct Job {
     steps: VecDeque<Planned>,
     ids: Vec<String>,
     successes: usize,
-    error: Option<String>,
+    error: Option<VenueError>,
     continue_on_error: bool,
     result: Option<String>,
 }
@@ -208,7 +210,7 @@ impl AsterDex {
                 (
                     command,
                     self.plan_cancel_refs(&orders).map(|mut job| {
-                        job.error = error;
+                        job.error = error.map(not_sent);
                         job
                     }),
                 )
@@ -354,7 +356,7 @@ impl AsterDex {
                         .and_then(|credentials| credentials.validate());
                     if let Err(error) = valid {
                         cx.log(LogLevel::Error, error.clone());
-                        cx.done(id, Err(error));
+                        cx.fail(id, not_sent(error).kind(ErrorKind::AuthInvalid));
                         return;
                     }
                 }
@@ -378,18 +380,18 @@ impl AsterDex {
                 {
                     let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
                     cx.log(LogLevel::Error, error.clone());
-                    cx.done(id, Err(error));
+                    cx.fail(id, not_sent(error));
                     return;
                 }
                 if let Some(error) = &job.error {
-                    cx.log(LogLevel::Error, error.clone());
+                    cx.log(LogLevel::Error, error.message.clone());
                 }
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
             Err(error) => {
                 cx.log(LogLevel::Error, error.clone());
-                cx.done(id, Err(error));
+                cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
     }
@@ -420,14 +422,15 @@ impl AsterDex {
             return;
         }
         let job = self.trading.jobs.remove(&id).expect("present");
-        let result = if job.error.is_some() && (!job.continue_on_error || job.successes == 0) {
-            Err(job.error.unwrap_or_default())
-        } else {
-            Ok(job
-                .result
-                .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default()))
-        };
-        cx.done(id, result);
+        match job.error {
+            Some(error) if !job.continue_on_error || job.successes == 0 => cx.fail(id, error),
+            _ => cx.done(
+                id,
+                Ok(job
+                    .result
+                    .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default())),
+            ),
+        }
     }
     pub(crate) fn on_trade_response(
         &mut self,
@@ -586,9 +589,18 @@ impl AsterDex {
             }
             match outcome {
                 Ok(()) => job.successes += 1,
-                Err((_, message)) => {
+                Err((code, message)) => {
                     cx.log(LogLevel::Error, message.clone());
-                    job.error = Some(message);
+                    let mut error = failure(code, message);
+                    // An earlier leg that may have executed keeps the command unknown.
+                    if job
+                        .error
+                        .as_ref()
+                        .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
+                    {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
+                    job.error = Some(error);
                 }
             }
             if let Some(id) = placed {
@@ -686,7 +698,7 @@ impl AsterDex {
         // Format and validate before canceling the live order.
         let place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
         if let Some(error) = place.error {
-            return Err(error);
+            return Err(error.message);
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         job.steps.extend(place.steps);
@@ -724,11 +736,14 @@ impl AsterDex {
         };
         for opts in orders {
             if opts.kind == OrderType::TrailingStopLoss {
-                job.error=Some("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable".into());
+                job.error = Some(not_sent("AsterDEX trailing stop-loss orders are unsupported because callbackRate is unavailable").kind(ErrorKind::Unsupported));
                 continue;
             }
             if opts.stp_mode.is_some() && self.version != Version::V3 {
-                job.error = Some("Aster per-order self-trade prevention requires V3".into());
+                job.error = Some(
+                    not_sent("Aster per-order self-trade prevention requires V3")
+                        .kind(ErrorKind::Unsupported),
+                );
                 continue;
             }
             let mut children = vec![opts.clone()];
@@ -784,10 +799,10 @@ impl AsterDex {
                 })
                 .count();
             if max > 0 && existing + count > max {
-                job.error = Some(format!(
+                job.error = Some(not_sent(format!(
                     "AsterDEX max algo order limit reached for {}: {existing}/{max} open, {count} new requested",
                     opts.symbol
-                ));
+                )));
                 continue;
             }
             for child in children {
@@ -806,7 +821,7 @@ impl AsterDex {
                             });
                         }
                     }
-                    Err(error) => job.error = Some(error),
+                    Err(error) => job.error = Some(not_sent(error).kind(ErrorKind::InvalidInput)),
                 }
             }
         }
@@ -1042,4 +1057,31 @@ mod tests {
             assert!(fee_rate(input).is_err(), "{input}");
         }
     }
+}
+
+/// A trading failure classified by its Aster code; code 0 is a transport
+/// failure, a non-JSON HTTP error or an unproven acknowledgement.
+fn failure(code: i64, message: String) -> VenueError {
+    let (kind, outcome) = match code {
+        0 => (None, Outcome::Unknown),
+        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
+        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
+        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
+        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
+        -1022 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
+        -1002 | -5025 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
+        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
+        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+    };
+    let mut error = VenueError::new(message.clone()).outcome(outcome);
+    error.kind = kind;
+    if code != 0 {
+        error = error.venue_code(code.to_string()).venue_message(message);
+    }
+    error
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
