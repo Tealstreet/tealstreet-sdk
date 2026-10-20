@@ -198,11 +198,13 @@ On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
 - At least seven fresh interleaved public pairs with alternating first runner.
-- Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
-  90% of TS. A main or steady CPU objective under 100 ms TS instead runs nine
-  pairs and allows Rust max(1 ms, 5%) above TS: at that size tied runs move
-  several percent between runners (`RUST_GATE_TIMING.md`). The policy and its
-  rationale live in `sdk-rs/harness/performance-policy.mjs`. Include cold implementation loading/WASM compilation in total CPU;
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians
+  clearly below TS, except that small main/steady CPU windows only need to be
+  within run-to-run noise of TS. The exact thresholds, pair counts and their
+  rationale live only in `sdk-rs/harness/performance-policy.mjs`.
+  Overseer decision (2026-10-21): small windows trade the improvement margin
+  for a noise floor (#1461; evidence in `RUST_GATE_TIMING.md`); revisit if a
+  small-window regression slips through. Include cold implementation loading/WASM compilation in total CPU;
   exclude audit callbacks, checkpoint reconstruction and baseline collection.
 - Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
   reservation; never clamp releases to zero. Each measured run must reproduce

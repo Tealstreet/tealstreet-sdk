@@ -12,6 +12,9 @@
 // max(1 ms, 5%) above TS; this subsumes #1380's sub-10 ms 1 ms allowance.
 // Process CPU and memory keep the 10% rule at every size. A per-message
 // slowdown on Bybit and Hyperliquid still fails these rules (PR #1461).
+// Overseer decision (2026-10-21): the small-window floor replaces the 10% rule
+// for those objectives; it cannot catch a regression that keeps Rust within 5%
+// of TS on a small window. Revisit if one slips through.
 
 export const MIN_PUBLIC_RUNS = 7;
 export const REQUIRED_IMPROVEMENT = 0.10;
