@@ -328,3 +328,22 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Publish this declarations-only refresh and require green exact-head CI before
   merge. The report document pins a complete reviewed collection and directs
   final certification to the PR so later runs never imply universal parity.
+- Landing advanced to `6fea5de843` (leverage-side PR #1349) before final merge.
+  Merge conflict was only the moved legacy TS-oracle block: retained the gate
+  byte-for-byte and preserved the exact incoming Lighter note in `ts-oracle`.
+  Retained incoming replay forwarding of leverage side and position-mode symbol.
+  Independent staged-resolution review PASS; harness 767/767 PASS. Repository
+  typecheck 44/44, lint 28/28 and tests 27/27 PASS from Turbo cache (safe-cex
+  unit/CI each 7,772 tests). Incoming Rust/TS changes require rebuilt artifacts
+  and a fresh full matrix; historical artifact bytes in the results document
+  are now explicitly collection-pinned rather than labeled the current build.
+  The pre-merge draft head was pushed after the conflict interrupted the merge;
+  it is not certification evidence. Complete and publish the reviewed merge.
+- Focused incoming command-contract review PASS: serde-defaulted optional side
+  and symbol preserve canonical tape decoding; malformed side values still
+  reject and both hosts/replay paths forward the fields. Canonical no-side
+  tapes do not certify new side-selective behavior; incoming wrapper/native
+  tests provide that evidence. Per-leg settings comparisons still require the
+  venue descriptor's independent-leverage contract. Fresh CI must expose any
+  changed venue diagnostics and remeasure combined size; upstream three-run
+  performance claims do not satisfy this branch's stricter measurements.

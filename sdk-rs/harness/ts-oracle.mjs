@@ -251,6 +251,7 @@ const KNOWN_TS_FIXES = {
       'Reject API key index 255, the query-all sentinel, for signing.',
       'Support the full official int16 market domain; TS leverage still rejects active IDs above 254.',
       'Acknowledge retaining the only supported net position mode; TS inherits an unsupported method.',
+      'Price-only cancel/replace amendments re-place the remaining quantity after partial execution; TS re-places the original amount and increases exposure.',
     ],
   },
   // WOO repairs live in the TS reference itself; no result normalization:

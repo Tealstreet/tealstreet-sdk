@@ -504,6 +504,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
         command: 13,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     }));
     let request = h.take("/fapi/v1/leverage");
     assert_eq!(
@@ -523,6 +524,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
     h.event(Event::Command(Command::SetPositionMode {
         command: 14,
         hedged: true,
+        symbol: None,
     }));
     assert!(h.requests.is_empty(), "refused while a position is open");
     assert!(matches!(h.result(14), Some(Err(_))));

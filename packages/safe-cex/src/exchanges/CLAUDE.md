@@ -1568,6 +1568,19 @@ string sizes or algo totals (WOO, Orderly), a cumulative fallback (Bitget,
 KuCoin Spot) or an unchecked unit, and the web builds no provisional position
 from it. Verify a venue before listing it; do not list one to turn the feature on.
 
+## Rust leverage and position-mode commands
+
+The shared Rust command boundary preserves optional `setLeverage` position
+`side` and optional `changePositionMode` market `symbol`. Only side-aware
+venues interpret the side; coupled venues retain their existing behavior.
+Phemex requires a symbol for its market-scoped mode setter; WEEX accepts an
+optional symbol. Native JSON uses `setPositionMode` with that same scope.
+Successful side writes update only the selected rail and matching positions;
+failed writes preserve both. Venue metadata cannot make leverage clamping panic.
+For the five side-aware families, reading already known leverage flushes the
+engine and returns its confirmed leg settings instead of replacing them with
+the market maximum. Fresh uncached leverage discovery is a separate contract.
+
 ## Rust cancellation requires evidence
 
 For every registered Rust venue, canceling a nonempty ID absent from the local

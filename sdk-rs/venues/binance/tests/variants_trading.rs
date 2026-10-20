@@ -157,6 +157,7 @@ fn spot_derivative_settings_rejected_without_http() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 5.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -166,6 +167,7 @@ fn spot_derivative_settings_rejected_without_http() {
         Command::SetPositionMode {
             command: 3,
             hedged: true,
+            symbol: None,
         },
     ] {
         h.event(Event::Command(c));
