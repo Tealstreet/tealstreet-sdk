@@ -145,5 +145,9 @@ Risky, after live-smoke captures:
    `20.0`) and one Rust owner for client-id rules.
 
 Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
-(done: `engine::test_support`),
-`RangeWalk` for the 16 hand-rolled history paginators, one `SocketSpec`.
+(done: `engine::test_support`), one `SocketSpec`.
+~~`RangeWalk` for the 16 hand-rolled history paginators.~~ Shared `CursorWalk`,
+`windows` and `OffsetWalk` now page Lighter, GRVT, Coinbase, Paradex, Bybit,
+Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,
+Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
+[RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).
