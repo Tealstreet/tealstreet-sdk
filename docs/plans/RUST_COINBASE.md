@@ -384,3 +384,18 @@ finds no remaining actionable P1/P2. All113 Coinbase tests and strict targeted
 Clippy/formatting pass. Shared engine60, harness284, host53 and SDK integration230
 pass; root typecheck44/lint28 and uncached test27 tasks pass. Integrated acceptance
 replays, final WASM builds and exact-head CI are still pending.
+
+### Post-review acceptance rerun
+
+At ce16b82d4d all eight private variants pass, with15 commands per profile and
+both ES256/EdDSA. Three-run public replay is identical:201 frames,925 markets,
+925 tickers,two full-depth books. Median TS/Rust main CPU844.3/317.8ms,
+steady470.9/78.1ms, process972.3/401.3ms, retained32.5/14.2MB (Rust includes11.8MB
+linear memory). Coinbase-only WASM1011067bytes is below1258291bytes. Native
+workspace1596 tests across135 suites, bans/format/native+WASM Clippy and root
+44 typecheck/28 lint/27 uncached test tasks pass; safe-cex7009 tests in each of
+its two tasks. Correctness findings/fixes and clear re-review are posted on PR1325.
+
+Kraken landing7da56dc8a5 arrived during these replays. Integrating its registration
+changes before final combined-build controls and exact-head CI; Coinbase venue,
+crypto and engine source stay unchanged by this merge.

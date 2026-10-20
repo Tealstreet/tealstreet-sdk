@@ -9,6 +9,10 @@ c62a5408611859b331a221d25bff85c81e88cbc0:sdk-rs/venues/coinbase/tests/trading.rs
 # PEM delimiter strings only: parser labels, then intentionally invalid AAAA test input.
 5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:259
 5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:566
+# Kraken replay fixture only: base64 of the literal "replay-secret", paired
+# with "replay-key" and independently checked by kraken-protocol.mjs. No account.
+# Exact historical fingerprint; future source and credential changes stay scanned.
+6e7a3e90853214fd9c9377e5bbf96be74b972303:sdk-rs/harness/venues.mjs:generic-api-key:161
 
 # Aster published V3 demonstration private key, copied only into signing fixtures
 # and their independent oracle/generator (never a funded account credential):

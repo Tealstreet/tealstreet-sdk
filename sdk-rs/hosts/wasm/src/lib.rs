@@ -20,12 +20,13 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "kraken",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, coinbase, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, coinbase, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
@@ -56,6 +57,8 @@ use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "kraken")]
+use safe_cex_venue_kraken::{Kraken, Options as KrakenOptions};
 #[cfg(feature = "kucoin")]
 use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 #[cfg(feature = "lighter")]
@@ -135,6 +138,7 @@ struct KucoinExtra {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "kraken",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
@@ -165,6 +169,7 @@ struct EngineOptions {
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "kraken",
         feature = "orderly",
         feature = "lighter",
         feature = "bitget",
@@ -740,6 +745,7 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "kraken",
         feature = "orderly",
         feature = "lighter",
         feature = "okx"
@@ -754,6 +760,15 @@ impl WasmEngine {
         {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
+        #[cfg(feature = "kraken")]
+        if venue == "kraken"
+            && !options.public_data_only
+            && options.key.as_deref().is_some_and(|key| !key.is_empty())
+            && let Some(secret) = options.secret.as_deref()
+        {
+            safe_cex_venue_kraken::sign::Signer::new(secret)
+                .map_err(|error| JsError::new(&error))?;
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             #[cfg(feature = "coinbase")]
             "coinbase" | "coinbasespot" => Box::new(Engine::new(
@@ -766,6 +781,13 @@ impl WasmEngine {
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),
+            #[cfg(feature = "kraken")]
+            "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             #[cfg(feature = "asterdex")]
             "asterdex" => Box::new(Engine::new(AsterDex::new(AsterOptions {
                 testnet: options.testnet,

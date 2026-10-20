@@ -280,6 +280,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
         subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
       );
     }
+    if (options.productSubscriptions && Array.isArray(message.product_ids)) return message.product_ids.map((product) => subscriptionKey(url, {...message,product_ids:[product]},callerIds,options));
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field)
       return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
