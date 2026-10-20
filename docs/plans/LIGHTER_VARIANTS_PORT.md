@@ -161,3 +161,31 @@ readiness row. Combined inventory: 49 exchange names, 45 Rust adapters, nine
 Rust defaults, 36 opt-in TS defaults and four names without Rust. The landing's
 TxFlow reference/default cutover and replay finalization/routing improvements
 are retained. Lighter production TS files remain intact.
+
+## Integrated acceptance
+
+Runtime `c77e0d4bb1`, including landing `bf1cf3c99a`, canonical combined
+release WASM. Independent integration review PASS; both venues' registrations,
+startup and client-ID behavior remain intact. Native engine/crypto/Lighter
+sources are byte-identical to the passed 100-test native suite. Repeated bans,
+crate/host fmt, combined-host WASM Clippy/build, package typecheck/lint,
+65 Lighter/TxFlow wrapper-mode tests, 14 real-WASM boundary tests and 172
+shared harness tests all PASS. The 219-test routing evidence remains applicable:
+only the unrelated TxFlow native public-CORS selection changed on integration.
+
+Three-run public gates, identical output and unchanged thresholds:
+
+| Venue | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB | Rust linear MB |
+| --- | --- | --- | --- | --- |
+| lighter | 785.6 / 522.5 | 492.9 / 330.5 | 17.3 / 3.7 | 1.6 |
+| lighter-robinhood | 392.4 / 154.2 | 264.3 / 84.5 | 19.8 / 5.8 | 2.8 |
+| binance | 205.0 / 108.2 | 111.8 / 47.3 | 17.3 / 4.5 | 2.0 |
+
+All three public gates and all five private correctness gates PASS. Each private
+recording has 14 frames; both Lighter deployments cover mainnet and testnet.
+Private performance remains informational (Binance steady CPU 14.7/16.0 ms).
+No private live-key claim is made; private tapes use documented/offline inputs.
+No TS Lighter venue is deleted, no new TS bug divergence is introduced, and no
+gate thresholds or existing fixtures are weakened. Implementation, local gates
+and phase reviews are complete; the feature PR tracks adversarial review, CI
+and landing status.
