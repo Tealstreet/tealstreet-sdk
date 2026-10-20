@@ -143,3 +143,12 @@ No new error architecture or unrelated engine helper migration belongs here.
   including 15 new focused cases; strict Clippy/format/bans passed. Independent
   review and an independent 15-case rerun passed. Evidence is scripted, not a
   funded private-account capture.
+- Binance trading phase: partial COIN-M failures retain proven native IDs in
+  the existing host-readable error envelope and stop subsequent steps. Both
+  mixed/short batch replies and failures after earlier successful steps are
+  covered; optional caller counts/indices are omitted rather than guessed.
+  PM explicit nonzero stop quantity survives close:true and does not cancel an
+  existing full stop; zero still closes the full position. The initial three
+  regressions failed before implementation. Independent review and all 26
+  portfolio/variant trading tests pass. The additional actual SDK partial-error
+  regression awaits the serialized Binance WASM build.

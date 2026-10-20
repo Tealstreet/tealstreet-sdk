@@ -443,6 +443,19 @@ impl BinanceFutures {
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
             let result = match job.error {
+                Some(error) if self.is_inverse() && !job.ids.is_empty() => {
+                    #[derive(serde::Serialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct Partial<'a> {
+                        message: &'a str,
+                        partial_order_ids: &'a [String],
+                    }
+                    Err(serde_json::to_string(&Partial {
+                        message: &error,
+                        partial_order_ids: &job.ids,
+                    })
+                    .unwrap_or(error))
+                }
                 Some(error) => Err(error),
                 None => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
             };
@@ -784,7 +797,7 @@ impl BinanceFutures {
             return Vec::new();
         };
         let amount = num::adjust(opts.amount, market.precision.amount);
-        if !(opts.close == Some(true) || amount == 0.0) {
+        if amount != 0.0 && (self.options.portfolio_margin || opts.close != Some(true)) {
             return Vec::new();
         }
         cx.store
@@ -1316,7 +1329,8 @@ impl BinanceFutures {
             .positions()
             .iter()
             .any(|p| p.symbol == opts.symbol && p.side == opposite && p.contracts.abs() > 0.0);
-        let wants_close = stop_or_tp && (opts.close == Some(true) || amount == 0.0);
+        let wants_close = stop_or_tp
+            && (amount == 0.0 || (!self.options.portfolio_margin && opts.close == Some(true)));
         let use_close = wants_close && has_position;
         let position_side =
             self.position_side(cx, opts.side, opts.kind, opts.reduce_only == Some(true));

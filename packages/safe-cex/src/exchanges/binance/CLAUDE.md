@@ -47,6 +47,9 @@ not create USD-M positions. Trade-first fills emit immediately while ownership
 waits for a regular NEW or accepted snapshot.
 Accepted cancellations invalidate in-flight order snapshots. Generated-ID
 entropy failures return an error instead of sharing a broker-only ID.
+COIN-M partial placement failures reject with the proven accepted native IDs
+on `error.partialOrderIds`; subsequent placement steps stop. PM stop quantities
+honor explicit nonzero size even with `close:true`; zero means the full position.
 
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
 `Canceled`, including fills received while cancellation was in flight. Accepted
