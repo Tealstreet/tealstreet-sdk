@@ -48,9 +48,50 @@ pub enum HostEvent {
 const MAX_BATCH_MESSAGES: usize = 256;
 const MAX_BATCH_BYTES: usize = 1024 * 1024;
 
-struct QueuedEvent {
+enum QueuedInput {
+    Ready(HostEvent),
+    Deferred(Box<dyn FnOnce() -> Option<HostEvent> + Send>),
+}
+
+struct ReceivedEvent {
     event: HostEvent,
     received_at: f64,
+    local_owner: Option<mpsc::WeakUnboundedSender<String>>,
+}
+
+struct QueuedEvent {
+    event: QueuedInput,
+    received_at: f64,
+    local_owner: Option<mpsc::WeakUnboundedSender<String>>,
+}
+
+impl QueuedEvent {
+    fn ready(event: HostEvent, received_at: f64) -> Self {
+        Self {
+            event: QueuedInput::Ready(event),
+            received_at,
+            local_owner: None,
+        }
+    }
+
+    fn resolve(self) -> Option<ReceivedEvent> {
+        if self
+            .local_owner
+            .as_ref()
+            .is_some_and(|owner| owner.upgrade().is_none())
+        {
+            return None;
+        }
+        let event = match self.event {
+            QueuedInput::Ready(event) => Some(event),
+            QueuedInput::Deferred(decode) => decode(),
+        }?;
+        Some(ReceivedEvent {
+            event,
+            received_at: self.received_at,
+            local_owner: self.local_owner,
+        })
+    }
 }
 
 /// A transport's event sender. Events retain their arrival time, including
@@ -75,11 +116,20 @@ impl EventReceiver {
     }
 
     pub async fn recv(&mut self) -> Option<HostEvent> {
-        self.receiver.recv().await.map(|queued| queued.event)
+        while let Some(queued) = self.receiver.recv().await {
+            if let Some(received) = queued.resolve() {
+                return Some(received.event);
+            }
+        }
+        None
     }
 
     pub fn try_recv(&mut self) -> Result<HostEvent, mpsc::error::TryRecvError> {
-        self.receiver.try_recv().map(|queued| queued.event)
+        loop {
+            if let Some(received) = self.receiver.try_recv()?.resolve() {
+                return Ok(received.event);
+            }
+        }
     }
 }
 
@@ -111,15 +161,36 @@ impl Events {
         self.send_at(event, (self.clock)())
     }
 
-    /// Preserve the raw arrival time when decoding a received frame takes time.
+    // Network frames reserve a FIFO slot before decoding. Ownership remains on
+    // the queued slot even after its decoded result is cached for the next burst.
+    fn send_deferred_at(
+        &self,
+        received_at: f64,
+        local_owner: Option<mpsc::WeakUnboundedSender<String>>,
+        decode: impl FnOnce() -> Option<HostEvent> + Send + 'static,
+    ) -> bool {
+        self.sender
+            .send(QueuedEvent {
+                event: QueuedInput::Deferred(Box::new(decode)),
+                received_at,
+                local_owner,
+            })
+            .is_ok()
+    }
+
+    /// Preserve a transport's arrival timestamp. Custom transports should enqueue
+    /// before costly preprocessing; timestamps do not reorder racing producers.
     pub fn send_at(
         &self,
         event: HostEvent,
         received_at: f64,
     ) -> Result<(), mpsc::error::SendError<HostEvent>> {
         self.sender
-            .send(QueuedEvent { event, received_at })
-            .map_err(|error| mpsc::error::SendError(error.0.event))
+            .send(QueuedEvent::ready(event, received_at))
+            .map_err(|error| match error.0.event {
+                QueuedInput::Ready(event) => mpsc::error::SendError(event),
+                QueuedInput::Deferred(_) => unreachable!("send_at queues ready events"),
+            })
     }
 }
 
@@ -184,9 +255,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let mut flush = tokio::time::interval(flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            let has_pending = self.pending.is_some();
             tokio::select! {
                 event = async {
-                    if self.pending.is_some() { None } else { self.inbox.recv().await }
+                    if has_pending { None } else { self.inbox.recv().await }
                 } => {
                     if let Some(event) = self.pending.take().or(event) {
                         self.dispatch_ready(event, MAX_BATCH_MESSAGES);
@@ -253,52 +325,49 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn dispatch_ready(&mut self, first: QueuedEvent, max_messages: usize) -> usize {
-        if !matches!(
-            first.event,
-            HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
-        ) {
-            self.dispatch(first);
-            return 1;
-        }
         let mut next = first;
         let mut count = 0;
         let mut bytes = 0;
         loop {
-            let size = match &next.event {
-                HostEvent::WsMessage(_, text) => text.len(),
-                HostEvent::WsBinary(_, data) => data.len(),
-                _ => unreachable!("only websocket messages enter this burst"),
-            };
-            if count > 0 && bytes + size > MAX_BATCH_BYTES {
-                self.pending = Some(next);
-                break;
+            if let Some(received) = next.resolve() {
+                let size = match &received.event {
+                    HostEvent::WsMessage(_, text) => Some(text.len()),
+                    HostEvent::WsBinary(_, data) => Some(data.len()),
+                    _ => None,
+                };
+                if count > 0 && (size.is_none() || bytes + size.unwrap() > MAX_BATCH_BYTES) {
+                    // Decoding is performed once at the inbox position. If the
+                    // decoded payload cannot fit this burst, retain its result.
+                    self.pending = Some(QueuedEvent {
+                        event: QueuedInput::Ready(received.event),
+                        received_at: received.received_at,
+                        local_owner: received.local_owner,
+                    });
+                    break;
+                }
+                bytes += size.unwrap_or(0);
+                self.dispatch_received(received);
+                count += 1;
+                if size.is_none() {
+                    break;
+                }
+            } else {
+                // Suppressed socket inputs still occupy a captured-prefix slot
+                // and count toward fairness, without advancing engine time.
+                count += 1;
             }
-            bytes += size;
-            self.dispatch(next);
-            count += 1;
             if count >= max_messages || bytes >= MAX_BATCH_BYTES {
                 break;
             }
             match self.inbox.try_recv() {
-                Ok(event)
-                    if matches!(
-                        event.event,
-                        HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
-                    ) =>
-                {
-                    next = event;
-                }
-                Ok(event) => {
-                    self.pending = Some(event);
-                    break;
-                }
+                Ok(event) => next = event,
                 Err(_) => break,
             }
         }
         count
     }
 
-    fn dispatch(&mut self, queued: QueuedEvent) {
+    fn dispatch_received(&mut self, queued: ReceivedEvent) {
         let now = queued.received_at;
         self.last_dispatched_at = now;
         let engine = &mut self.engine;
@@ -520,8 +589,10 @@ mod timer_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(matches!(event.event, HostEvent::Timer(timer) if timer == normal));
-        host.dispatch(event);
+        assert!(
+            matches!(event.event, QueuedInput::Ready(HostEvent::Timer(timer)) if timer == normal)
+        );
+        host.dispatch_ready(event, 1);
         assert_eq!(host.engine.venue().fired, [normal]);
         assert!(host.timers.is_empty());
     }

@@ -145,7 +145,7 @@ fn tick_configuration_is_a_timestamped_barrier_between_mixed_bursts() {
     assert_eq!(host.engine.venue().0.len(), 2);
     assert!(matches!(
         host.pending.as_ref().unwrap().event,
-        HostEvent::TickIntervalChanged(interval) if interval.is_infinite()
+        QueuedInput::Ready(HostEvent::TickIntervalChanged(interval)) if interval.is_infinite()
     ));
     dispatch_next(&mut host);
     assert_eq!(
@@ -175,7 +175,7 @@ fn mixed_websocket_bursts_share_count_and_byte_limits() {
     assert_eq!(host.engine.venue().0.len(), 1);
     assert!(matches!(
         host.pending.as_ref().unwrap().event,
-        HostEvent::WsBinary(..)
+        QueuedInput::Ready(HostEvent::WsBinary(..))
     ));
     for index in 0..MAX_BATCH_MESSAGES {
         let event = if index % 2 == 0 {
@@ -427,5 +427,161 @@ fn deactivation_notices_preserve_action_order_after_a_timestamped_batch() {
             .map(|(now, _, _)| *now)
             .collect::<Vec<_>>(),
         [1.0, 2.0, 3.0]
+    );
+}
+
+// The decoder gate recreates a synchronous inflate on one runtime worker while
+// a second producer reports a later control event. No scheduling sleeps are used.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn socket_decode_reserves_its_inbox_position_before_later_control_events() {
+    for actor in [false, true] {
+        let mut host = host();
+        let (observer, mut receiver) = Events::channel();
+        let events = if actor { host.event_sender() } else { observer };
+        let (entered, decoding) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let control = events.clone();
+        let second_worker = tokio::spawn(async move {
+            decoding.await.unwrap();
+            control
+                .send_at(HostEvent::TickIntervalChanged(18.0), 18.0)
+                .unwrap();
+            release.send(()).unwrap();
+        });
+        let producer = tokio::spawn(async move {
+            assert!(events.send_deferred_at(17.0, None, move || {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+                Some(HostEvent::WsMessage(SocketId(1), "decoded".into()))
+            }));
+        });
+        producer.await.unwrap();
+        if actor {
+            dispatch_next(&mut host);
+            dispatch_next(&mut host);
+            assert_eq!(
+                host.engine.venue().0,
+                [
+                    (17.0, SocketId(1), "decoded".into()),
+                    (18.0, SocketId(0), "tick:18".into()),
+                ]
+            );
+        } else {
+            assert!(
+                matches!(receiver.recv().await, Some(HostEvent::WsMessage(SocketId(1), text)) if text == "decoded")
+            );
+            assert!(matches!(
+                receiver.recv().await,
+                Some(HostEvent::TickIntervalChanged(18.0))
+            ));
+        }
+        second_worker.await.unwrap();
+    }
+}
+
+#[test]
+fn deferred_decoded_byte_limits_cache_once_and_keep_later_message_separate() {
+    let mut host = host();
+    let decoded = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    host.events
+        .send_at(HostEvent::WsMessage(SocketId(1), "prefix".into()), 11.0)
+        .unwrap();
+    let calls = decoded.clone();
+    assert!(host.events.send_deferred_at(12.0, None, move || {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Some(HostEvent::WsMessage(
+            SocketId(1),
+            "x".repeat(MAX_BATCH_BYTES + 1),
+        ))
+    }));
+    host.events
+        .send_at(HostEvent::WsMessage(SocketId(1), "after".into()), 13.0)
+        .unwrap();
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 1);
+    assert_eq!(decoded.load(Ordering::SeqCst), 1);
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 2);
+    assert_eq!(host.engine.venue().0[1].0, 12.0);
+    assert_eq!(host.engine.venue().0[1].2.len(), MAX_BATCH_BYTES + 1);
+    assert_eq!(
+        decoded.load(Ordering::SeqCst),
+        1,
+        "pending must not decode twice"
+    );
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0[2],
+        (13.0, SocketId(1), "after".into())
+    );
+}
+
+#[tokio::test]
+async fn suppressed_inputs_count_toward_fairness_and_the_captured_prefix() {
+    let mut host = host();
+    for _ in 0..MAX_BATCH_MESSAGES + 3 {
+        assert!(host.events.send_deferred_at(17.0, None, || None));
+    }
+    let first = host.inbox.try_recv().unwrap();
+    assert_eq!(
+        host.dispatch_ready(first, MAX_BATCH_MESSAGES),
+        MAX_BATCH_MESSAGES
+    );
+    assert_eq!(host.inbox.len(), 3);
+    assert!(host.engine.venue().0.is_empty());
+    let late = host.events.clone();
+    assert!(host.events.send_deferred_at(18.0, None, move || {
+        late.send_at(HostEvent::WsMessage(SocketId(1), "late".into()), 19.0)
+            .unwrap();
+        Some(HostEvent::WsMessage(SocketId(1), "captured".into()))
+    }));
+    host.drain_ready_prefix(&mut |_| {}).await;
+    assert_eq!(
+        host.engine.venue().0,
+        [(18.0, SocketId(1), "captured".into())]
+    );
+    assert_eq!(
+        host.inbox.len(),
+        1,
+        "new arrivals cannot extend a control barrier"
+    );
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0[1], (19.0, SocketId(1), "late".into()));
+}
+
+#[test]
+fn locally_canceled_decoded_pending_input_is_skipped_without_decoding_twice() {
+    let mut host = host();
+    let (outgoing, _pending) = mpsc::unbounded_channel();
+    let decoded = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    host.events
+        .send_at(HostEvent::WsMessage(SocketId(1), "prefix".into()), 11.0)
+        .unwrap();
+    let calls = decoded.clone();
+    assert!(
+        host.events
+            .send_deferred_at(12.0, Some(outgoing.downgrade()), move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Some(HostEvent::WsMessage(
+                    SocketId(1),
+                    "x".repeat(MAX_BATCH_BYTES + 1),
+                ))
+            })
+    );
+    host.events
+        .send_at(HostEvent::WsMessage(SocketId(2), "live".into()), 13.0)
+        .unwrap();
+    dispatch_next(&mut host);
+    assert_eq!(decoded.load(Ordering::SeqCst), 1);
+    assert_eq!(host.engine.venue().0.len(), 1);
+    drop(outgoing); // An action drain can locally close this socket between bursts.
+    dispatch_next(&mut host);
+    assert_eq!(decoded.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        host.engine.venue().0,
+        [
+            (11.0, SocketId(1), "prefix".into()),
+            (13.0, SocketId(2), "live".into()),
+        ]
     );
 }

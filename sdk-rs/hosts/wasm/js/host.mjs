@@ -39,25 +39,95 @@ export class EngineHost {
     this.wsScratchBusy = false;
     this.socketFallbacks = new Set();
     this.disposed = false;
+    this.ingress = [];
+    this.ingressDraining = false;
+    this.ingressDelivery = false;
+    this.ingressTimer = undefined;
+    this.queuedCommands = new Set();
+    this.queuedHttp = new Set();
+  }
+
+  /** Reserve an asynchronous raw arrival before decoding can yield. */
+  reserveIngress() {
+    if (this.disposed) return () => {};
+    const entry = { ready: false, deliver: undefined, reserved: true };
+    this.ingress.push(entry);
+    return (deliver) => {
+      if (entry.ready || this.disposed) return;
+      entry.ready = true;
+      entry.deliver = deliver;
+      this.drainIngress();
+    };
+  }
+
+  ordered(deliver) {
+    if (this.ingressDelivery) {
+      this.ingressDelivery = false;
+      return deliver();
+    }
+    if (this.ingress.length || this.ingressDraining) {
+      this.ingress.push({ ready: true, deliver });
+      this.drainIngress();
+    } else return deliver();
+  }
+
+  drainIngress() {
+    if (this.disposed || this.ingressDraining) return;
+    this.ingressDraining = true;
+    // Reentrant callbacks belong to the next finite prefix.
+    const count = this.ingress.length;
+    try {
+      for (let i = 0; i < count && !this.disposed && this.ingress[0]?.ready; i++) {
+        const entry = this.ingress.shift();
+        this.ingressDelivery = entry.reserved === true;
+        try { entry.deliver?.(); }
+        finally { this.ingressDelivery = false; }
+      }
+    } finally {
+      this.ingressDraining = false;
+      if (!this.disposed && this.ingress[0]?.ready && this.ingressTimer === undefined) {
+        this.ingressTimer = this.transport.setTimeout(() => {
+          this.ingressTimer = undefined;
+          this.drainIngress();
+        }, 0);
+      }
+    }
   }
 
   start() {
     if (this.disposed) return;
-    this.run(this.engine.start(this.transport.now()));
+    const now = this.transport.now();
+    this.ordered(() => { if (!this.disposed) this.run(this.engine.start(now)); });
   }
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
-    this.drainMessages();
-    if (this.disposed) return Promise.reject(new Error('engine disposed'));
     const reply = command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
+    let json;
+    try { json = JSON.stringify(reply === undefined ? command : { ...command, command: reply }); }
+    catch (error) { return Promise.reject(error); }
+    const now = this.transport.now();
+    return new Promise((resolve, reject) => {
+      this.queuedCommands.add(reject);
+      this.ordered(() => {
+        this.queuedCommands.delete(reject);
+        if (this.disposed) { reject(new Error('engine disposed')); return; }
+        try { resolve(this.dispatchCommand(json, reply, now)); }
+        catch (error) { reject(error); }
+      });
+    });
+  }
+
+  dispatchCommand(json, reply, now) {
+    this.drainMessages();
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
     let actions;
     try {
-      actions = this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now());
+      actions = this.engine.command(json, now);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -84,9 +154,14 @@ export class EngineHost {
    */
   flush(marketOnly = false) {
     if (this.disposed) return;
+    const now = this.transport.now();
+    this.ordered(() => this.dispatchFlush(marketOnly, now));
+  }
+
+  dispatchFlush(marketOnly, now) {
     this.drainMessages();
     if (this.disposed) return;
-    const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
+    const frame = this.engine.takeFrame(now, marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
@@ -94,6 +169,7 @@ export class EngineHost {
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
     if (this.disposed) throw new Error('engine disposed');
+    this.drainIngress();
     this.drainMessages();
     if (this.disposed) throw new Error('engine disposed');
     return this.engine.snapshotFrame(this.transport.now()).buffer;
@@ -101,6 +177,7 @@ export class EngineHost {
 
   accountId() {
     if (this.disposed) throw new Error('engine disposed');
+    this.drainIngress();
     this.drainMessages();
     if (this.disposed) throw new Error('engine disposed');
     return this.engine.accountId?.();
@@ -109,6 +186,13 @@ export class EngineHost {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.ingressTimer !== undefined) this.transport.clearTimeout(this.ingressTimer);
+    this.ingressTimer = undefined;
+    this.ingress.length = 0;
+    for (const reject of this.queuedCommands) reject(new Error('engine disposed'));
+    this.queuedCommands.clear();
+    for (const resolve of this.queuedHttp) resolve();
+    this.queuedHttp.clear();
     for (const controller of this.requests.values()) controller.abort();
     this.requests.clear();
     if (this.batchTimer !== undefined) this.transport.clearTimeout(this.batchTimer);
@@ -132,40 +216,67 @@ export class EngineHost {
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }) {
     if (this.disposed) return;
-    const { engine, transport } = this;
-    this.drainMessages();
+    const { engine } = this;
+    // A caller may reuse a whole-body buffer while its headers wait in FIFO.
+    if (body instanceof Uint8Array) {
+      if (this.ingress.length || this.ingressDraining) body = Uint8Array.from(body);
+      const bytes = body;
+      const complete = this.httpEvent((now) => {
+        this.run(engine.httpStart(id, status, headers, now));
+        if (this.disposed) return;
+        try {
+          for (let at = 0; at < bytes.length && !this.disposed; at += CHUNK_BYTES)
+            this.run(engine.httpChunk(id, bytes.subarray(at, at + CHUNK_BYTES), now));
+        } catch (error) {
+          if (!this.disposed) this.run(engine.httpFailed(id, String(error?.message ?? error), now));
+          return;
+        }
+        if (!this.disposed) this.run(engine.httpEnd(id, now));
+      });
+      if (complete) await complete;
+      return;
+    }
+    const started = this.httpEvent((now) => engine.httpStart(id, status, headers, now));
+    if (started) await started;
     if (this.disposed) return;
-    this.run(engine.httpStart(id, status, headers, transport.now()));
     try {
-      if (body instanceof Uint8Array) {
-        for (let at = 0; at < body.length; at += CHUNK_BYTES) {
-          this.drainMessages();
-          if (this.disposed) return;
-          this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
-        }
-      } else {
-        for await (const chunk of body) {
-          if (this.disposed) return;
-          this.drainMessages();
-          if (this.disposed) return;
-          for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
-            this.drainMessages();
-            if (this.disposed) return;
-            this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
-          }
-        }
+      for await (const chunk of body) {
+        if (this.disposed) return;
+        const bytes = this.ingress.length || this.ingressDraining ? Uint8Array.from(chunk) : chunk;
+        const sent = this.httpEvent((now) => {
+          for (let at = 0; at < bytes.length && !this.disposed; at += CHUNK_BYTES)
+            this.run(engine.httpChunk(id, bytes.subarray(at, at + CHUNK_BYTES), now));
+        });
+        if (sent) await sent;
+        if (this.disposed) return;
       }
     } catch (error) {
       if (this.disposed) return;
-      this.drainMessages();
-      if (this.disposed) return;
-      this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+      await this.httpEvent((now) => engine.httpFailed(id, String(error?.message ?? error), now));
       return;
     }
     if (this.disposed) return;
-    this.drainMessages();
+    await this.httpEvent((now) => engine.httpEnd(id, now));
+  }
+
+  httpEvent(actions) {
+    const now = this.transport.now();
     if (this.disposed) return;
-    this.run(engine.httpEnd(id, transport.now()));
+    const deliver = () => {
+      this.drainMessages();
+      if (!this.disposed) this.run(actions(now));
+    };
+    if (!this.ingress.length && !this.ingressDraining) return deliver();
+    return new Promise((resolve, reject) => {
+      this.queuedHttp.add(resolve);
+      this.ordered(() => {
+        this.queuedHttp.delete(resolve);
+        try {
+          deliver();
+          resolve();
+        } catch (error) { reject(error); }
+      });
+    });
   }
 
   singleMessage(socket, text, now, preferBytes = false) {
@@ -192,6 +303,16 @@ export class EngineHost {
   message(socket, data, receivedAt) {
     if (this.disposed) return;
     const now = receivedAt ?? this.transport.now();
+    if (this.ingressDelivery) this.ingressDelivery = false;
+    else if (this.ingress.length || this.ingressDraining) {
+      const owned = data instanceof Uint8Array ? Uint8Array.from(data) : data;
+      this.ordered(() => this.deliverMessage(socket, owned, now));
+      return;
+    }
+    this.deliverMessage(socket, data, now);
+  }
+
+  deliverMessage(socket, data, now) {
     if (!this.batchMessages) {
       this.run(typeof data === 'string' ? this.singleMessage(socket, data, now, true)
         : this.engine.wsBinary(socket, data, now));
@@ -223,17 +344,23 @@ export class EngineHost {
     this.batchTimer = undefined;
     const messages = this.messages;
     const mixed = this.hasBinaryMessages;
+    const singletonClock = Number.isFinite(messages[1]);
     this.messages = [];
     this.messageBytes = 0;
     this.hasBinaryMessages = false;
+    // Validate the entire captured prefix before any partition changes state.
+    for (let i = 1; i < messages.length; i += 3) {
+      messages[i] = +messages[i];
+      if (!Number.isFinite(messages[i])) throw new Error('invalid websocket batch arrival time');
+    }
     // A singleton still waits for this scheduled drain or event barrier. Avoid
     // packing it when the single-message entry point has identical input types;
     // unusual clocks/payloads retain the batch encoder's validation/coercion.
-    if (messages.length === 3 && typeof messages[2] === 'string' && Number.isFinite(messages[1])) {
+    if (messages.length === 3 && typeof messages[2] === 'string' && singletonClock) {
       this.run(this.singleMessage(messages[0], messages[2], messages[1]));
       return;
     }
-    if (messages.length === 3 && messages[2] instanceof Uint8Array && Number.isFinite(messages[1])) {
+    if (messages.length === 3 && messages[2] instanceof Uint8Array && singletonClock) {
       this.run(this.engine.wsBinary(messages[0], messages[2], messages[1]));
       return;
     }
@@ -242,10 +369,6 @@ export class EngineHost {
     // Older binary-capable engines lack the mixed batch ABI. Preserve their
     // ordered delivery and deferred actions without pretending they batch.
     if (mixed && typeof this.engine.wsEvents !== 'function') {
-      for (let i = 0; i < messages.length; i += 3) {
-        messages[i + 1] = +messages[i + 1];
-        if (!Number.isFinite(messages[i + 1])) throw new Error('invalid websocket batch arrival time');
-      }
       for (let i = 0; i < messages.length && !this.disposed; i += 3) {
         const data = messages[i + 2];
         const actions = data instanceof Uint8Array ? this.engine.wsBinary(messages[i], data, messages[i + 1])
@@ -310,9 +433,7 @@ export class EngineHost {
       if (!this.disposed) await this.receive(id, response);
     } catch (error) {
       if (this.disposed) return;
-      this.drainMessages();
-      if (this.disposed) return;
-      this.run(this.engine.httpFailed(id, String(error?.message ?? error), this.transport.now()));
+      await this.httpEvent((now) => this.engine.httpFailed(id, String(error?.message ?? error), now));
     } finally {
       this.requests.delete(id);
     }
@@ -341,9 +462,11 @@ export class EngineHost {
             fired = true;
             this.socketFallbacks.delete(handle);
             if (this.disposed) return;
-            this.drainMessages();
-            if (this.disposed) return;
-            this.run(engine.wsClose(id, 1006, transport.now()));
+            const now = transport.now();
+            this.ordered(() => {
+              this.drainMessages();
+              if (!this.disposed) this.run(engine.wsClose(id, 1006, now));
+            });
           }, 0);
           if (!fired && !this.disposed) this.socketFallbacks.add(handle);
           else if (this.disposed) transport.clearTimeout(handle);
@@ -354,31 +477,40 @@ export class EngineHost {
           channel: action.channel,
           context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
+          onIngress: () => this.reserveIngress(),
           onOpen: () => {
             if (this.disposed) return;
-            this.drainMessages();
-            if (this.disposed) return;
-            this.run(engine.wsOpen(id, transport.now()));
+            const now = transport.now();
+            this.ordered(() => {
+              this.drainMessages();
+              if (!this.disposed) this.run(engine.wsOpen(id, now));
+            });
           },
           onMessage: (text, receivedAt) => this.message(id, text, receivedAt),
           onBinary: (data, receivedAt) => {
             if (this.disposed || !this.sockets.has(id)) return;
             if (typeof engine.wsBinary === 'function') this.message(id, data, receivedAt);
             else {
-              this.drainMessages();
-              if (this.disposed || !this.sockets.has(id)) return;
-              const active = this.sockets.get(id);
-              this.sockets.delete(id);
-              active?.close();
-              this.run(engine.wsClose(id, 1003, receivedAt ?? transport.now()));
+              const now = receivedAt ?? transport.now();
+              this.ordered(() => {
+                this.drainMessages();
+                if (this.disposed || !this.sockets.has(id)) return;
+                const active = this.sockets.get(id);
+                this.sockets.delete(id);
+                active?.close();
+                this.run(engine.wsClose(id, 1003, now));
+              });
             }
           },
           onClose: (code, receivedAt) => {
             if (this.disposed || !this.sockets.has(id)) return;
-            this.drainMessages();
-            if (this.disposed) return;
-            this.sockets.delete(id);
-            this.run(engine.wsClose(id, code ?? 1006, receivedAt ?? transport.now()));
+            const now = receivedAt ?? transport.now();
+            this.ordered(() => {
+              this.drainMessages();
+              if (this.disposed || !this.sockets.has(id)) return;
+              this.sockets.delete(id);
+              this.run(engine.wsClose(id, code ?? 1006, now));
+            });
           },
         });
         if (this.disposed) socket.close();
@@ -401,10 +533,13 @@ export class EngineHost {
         transport.clearTimeout(this.timers.get(id));
         const handle = transport.setTimeout(() => {
           if (this.disposed) return;
-          this.drainMessages();
-          if (this.disposed) return;
-          this.timers.delete(id);
-          this.run(engine.timer(id, transport.now()));
+          const now = transport.now();
+          this.ordered(() => {
+            this.drainMessages();
+            if (this.disposed) return;
+            this.timers.delete(id);
+            this.run(engine.timer(id, now));
+          });
         }, Math.max(0, action.at - transport.now()));
         this.timers.set(id, handle);
         break;
@@ -471,7 +606,7 @@ async function* chunks(stream) {
 }
 
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
-export const socketMessages = (onMessage, onError, onClose = () => {}, binary = false) => {
+export const socketMessages = (onMessage, onError, onClose = () => {}, binary = false, onIngress) => {
   // Retain the incoming three-argument binary form as well as FIFO close hooks.
   if (typeof onClose === 'boolean') { binary = onClose; onClose = () => {}; }
   let pending;
@@ -479,6 +614,15 @@ export const socketMessages = (onMessage, onError, onClose = () => {}, binary = 
   let failed = false;
   let cancelled = false;
   let closeQueued = false;
+  const reservations = new Set();
+  const reserve = () => {
+    const settle = onIngress?.();
+    if (settle) reservations.add(settle);
+    return (deliver) => {
+      if (settle) { reservations.delete(settle); settle(deliver); }
+      else deliver?.();
+    };
+  };
   const enqueue = (task) => {
     const next = (pending ?? Promise.resolve()).then(task, task);
     pending = next;
@@ -501,28 +645,40 @@ export const socketMessages = (onMessage, onError, onClose = () => {}, binary = 
   const receive = (data, receivedAt = Date.now()) => {
     if (!accepting || cancelled) return;
     if (typeof data === 'string' && !pending) return onMessage(data, receivedAt);
+    const commit = reserve();
+    // Views/ArrayBuffers can be reused as soon as the raw callback returns.
+    if (data instanceof ArrayBuffer) data = data.slice(0);
+    else if (ArrayBuffer.isView(data)) data = Uint8Array.from(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
     return enqueue(async () => {
-      if (cancelled || failed) return;
+      if (cancelled || failed) { commit(); return; }
+      let text;
       try {
-        const text = await decode(data);
-        if (!cancelled && !failed) onMessage(text, receivedAt);
+        text = await decode(data);
       } catch (error) {
         if (!cancelled && !failed) {
           failed = true;
           accepting = false;
-          onError(error, receivedAt);
-        }
+          commit(() => { if (!cancelled) onError(error, receivedAt); });
+        } else commit();
+        return;
       }
+      commit(() => { if (!cancelled) onMessage(text, receivedAt); });
     });
   };
   receive.close = (code, receivedAt = Date.now()) => {
     if (closeQueued || cancelled) return;
     closeQueued = true;
     accepting = false;
+    const commit = reserve();
     const report = () => { if (!cancelled) onClose(code, receivedAt); };
-    return pending ? enqueue(report) : report();
+    return pending ? enqueue(() => commit(report)) : commit(report);
   };
-  receive.cancel = () => { cancelled = true; accepting = false; };
+  receive.cancel = () => {
+    cancelled = true;
+    accepting = false;
+    for (const settle of reservations) settle();
+    reservations.clear();
+  };
   return receive;
 };
 
@@ -541,7 +697,7 @@ export const nativeTransport = () => {
   WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
+  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose, onIngress }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     let reported = false;
@@ -555,9 +711,10 @@ export const nativeTransport = () => {
       else onBinary?.(data, receivedAt);
     }, (_error, receivedAt) => {
       closing = true;
-      receive.close(1007, receivedAt);
+      receive.cancel();
+      reportClose(1007, receivedAt);
       ws.close();
-    }, reportClose, binary);
+    }, reportClose, binary, onIngress);
     const close = (code, receivedAt) => {
       closing = true;
       if (localClose) reportClose(code, receivedAt);

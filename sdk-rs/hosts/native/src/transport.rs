@@ -7,14 +7,114 @@ use crate::{Events, HostEvent, now_ms};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
 use std::io::Read;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio_tungstenite::tungstenite::{
     Message,
     client::IntoClientRequest,
     http::{HeaderName, HeaderValue},
 };
+
+// A remote close is queued behind preceding raw frames. Local cancellation is
+// distinguished by sender ownership, not receiver closure: a remote task may
+// already have exited while the host still needs to consume its final fills.
+struct SocketIngress {
+    outgoing: mpsc::WeakUnboundedSender<String>,
+    closed: AtomicBool,
+    failed: Notify,
+    health: Option<(Arc<RoutingState>, String)>,
+}
+
+impl SocketIngress {
+    fn new(
+        outgoing: mpsc::WeakUnboundedSender<String>,
+        health: Option<(Arc<RoutingState>, String)>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            outgoing,
+            closed: AtomicBool::new(false),
+            failed: Notify::new(),
+            health,
+        })
+    }
+
+    fn enqueue_frame(
+        self: &Arc<Self>,
+        events: &Events,
+        socket: SocketId,
+        binary: bool,
+        message: Message,
+        received_at: f64,
+    ) -> bool {
+        let state = self.clone();
+        events.send_deferred_at(received_at, Some(self.outgoing.clone()), move || {
+            if state.outgoing.upgrade().is_none() || state.closed.load(Ordering::Acquire) {
+                return None;
+            }
+            match decode_frame(socket, binary, message) {
+                Ok(event) => {
+                    if let Some((routing, key)) = &state.health {
+                        match &event {
+                            HostEvent::WsMessage(_, text) => routing.message(key, text),
+                            HostEvent::WsBinary(..) => routing.binary_message(key),
+                            _ => unreachable!("decoded socket payload"),
+                        }
+                    }
+                    Some(event)
+                }
+                Err(()) => {
+                    state.closed.store(true, Ordering::Release);
+                    state.failed.notify_one();
+                    Some(HostEvent::WsClosed(socket, 1007))
+                }
+            }
+        })
+    }
+
+    fn enqueue_close(
+        self: &Arc<Self>,
+        events: &Events,
+        socket: SocketId,
+        code: u16,
+        received_at: f64,
+    ) {
+        let state = self.clone();
+        events.send_deferred_at(received_at, Some(self.outgoing.clone()), move || {
+            if state.outgoing.upgrade().is_none() || state.closed.swap(true, Ordering::AcqRel) {
+                None
+            } else {
+                Some(HostEvent::WsClosed(socket, code))
+            }
+        });
+    }
+}
+
+fn decode_frame(socket: SocketId, binary: bool, message: Message) -> Result<HostEvent, ()> {
+    match message {
+        Message::Text(text) => Ok(HostEvent::WsMessage(socket, text.to_string())),
+        Message::Binary(bytes) if binary => Ok(HostEvent::WsBinary(socket, bytes.to_vec())),
+        Message::Binary(bytes) => {
+            let mut decoded = Vec::new();
+            let result = if bytes.starts_with(&[0x1f, 0x8b]) {
+                flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
+            } else if bytes.first() == Some(&0x78) {
+                flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
+            } else {
+                decoded.extend_from_slice(&bytes);
+                Ok(decoded.len())
+            };
+            result.map_err(|_| ())?;
+            String::from_utf8(decoded)
+                .map(|text| HostEvent::WsMessage(socket, text))
+                .map_err(|_| ())
+        }
+        _ => unreachable!("only data frames are queued for decoding"),
+    }
+}
 
 pub trait Transport {
     /// Open a socket; report it on `events` and return where to send text.
@@ -194,6 +294,7 @@ impl Transport for NetworkTransport {
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
+        let outgoing_owner = outgoing.downgrade();
         let routing = self.routing.clone();
         let headers = headers
             .into_iter()
@@ -219,6 +320,7 @@ impl Transport for NetworkTransport {
                     ),
                     None => (url, direct_headers, None, None),
                 };
+                let ingress = SocketIngress::new(outgoing_owner, routing.clone().zip(key));
                 let opening = async {
                     let mut ws = open_socket(&target, headers).await?;
                     if let Some(upstream) = relay {
@@ -264,30 +366,20 @@ impl Transport for NetworkTransport {
                 let code = loop {
                     tokio::select! {
                         message = ws.next() => match message {
-                            Some(Ok(Message::Text(text))) => {
+                            Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                                // Moving tungstenite's owned payload reserves its inbox
+                                // position before inflate, UTF-8 conversion, or routing health.
                                 let received_at = now_ms();
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                                if events.send_at(HostEvent::WsMessage(socket, text.to_string()), received_at).is_err() { return; }
-                            }
-                            Some(Ok(Message::Binary(bytes))) if binary => {
-                                let received_at = now_ms();
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
-                                if events.send_at(HostEvent::WsBinary(socket, bytes.to_vec()), received_at).is_err() { return; }
-                            }
-                            Some(Ok(Message::Binary(bytes))) => {
-                                let received_at = now_ms();
-                                let mut decoded = Vec::new();
-                                let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
-                                    else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
-                                    else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
-                                let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                                if events.send_at(HostEvent::WsMessage(socket, text), received_at).is_err() { return; }
+                                if !ingress.enqueue_frame(&events, socket, binary, message, received_at) { return; }
                             }
                             Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break 1006; } }
                             Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),
                             Some(Ok(_)) => {}
                             Some(Err(_)) | None => break 1006,
+                        },
+                        _ = ingress.failed.notified() => {
+                            let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
+                            return;
                         },
                         text = pending.recv() => match text {
                             Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break 1006; } }
@@ -295,7 +387,7 @@ impl Transport for NetworkTransport {
                         },
                     }
                 };
-                let _ = events.send(HostEvent::WsClosed(socket, code));
+                ingress.enqueue_close(&events, socket, code, now_ms());
             };
             tokio::select! {
                 biased;
@@ -426,5 +518,124 @@ impl Transport for NetworkTransport {
                 let _ = events.send(HostEvent::HttpFailed(id, error));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod ingress_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn compressed(text: &str, gzip: bool) -> Vec<u8> {
+        if gzip {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(text.as_bytes()).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(text.as_bytes()).unwrap();
+            encoder.finish().unwrap()
+        }
+    }
+
+    #[test]
+    fn remote_task_exit_keeps_prior_compressed_text_and_binary_before_close() {
+        let (events, mut receiver) = Events::channel();
+        let (outgoing, pending) = mpsc::unbounded_channel();
+        let ingress = SocketIngress::new(outgoing.downgrade(), None);
+        for (message, binary) in [
+            (Message::binary(compressed("gzip雪", true)), false),
+            (Message::binary(compressed("zlib🌊", false)), false),
+            (Message::binary("plain雪".as_bytes()), false),
+            (Message::text("text"), false),
+            (Message::binary(vec![0xff, 0x00]), true),
+        ] {
+            assert!(ingress.enqueue_frame(&events, SocketId(1), binary, message, 17.0));
+        }
+        ingress.enqueue_close(&events, SocketId(1), 1000, 19.0);
+        // Remote task exit closes its receiver. The host still owns outgoing.
+        drop(pending);
+        assert!(outgoing.is_closed());
+        for expected in ["gzip雪", "zlib🌊", "plain雪", "text"] {
+            assert!(
+                matches!(receiver.try_recv().unwrap(), HostEvent::WsMessage(SocketId(1), text) if text == expected)
+            );
+        }
+        assert!(
+            matches!(receiver.try_recv().unwrap(), HostEvent::WsBinary(SocketId(1), bytes) if bytes == [0xff, 0x00])
+        );
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            HostEvent::WsClosed(SocketId(1), 1000)
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn invalid_decode_reports_one_1007_and_cancels_later_inputs() {
+        for invalid in [vec![0x1f, 0x8b, 0x00], vec![0x78, 0xff], vec![0xff]] {
+            let (events, mut receiver) = Events::channel();
+            let (outgoing, _pending) = mpsc::unbounded_channel();
+            let ingress = SocketIngress::new(outgoing.downgrade(), None);
+            assert!(ingress.enqueue_frame(
+                &events,
+                SocketId(1),
+                false,
+                Message::text("before"),
+                16.0
+            ));
+            assert!(ingress.enqueue_frame(
+                &events,
+                SocketId(1),
+                false,
+                Message::binary(invalid),
+                17.0
+            ));
+            assert!(ingress.enqueue_frame(
+                &events,
+                SocketId(1),
+                false,
+                Message::text("after"),
+                18.0
+            ));
+            ingress.enqueue_close(&events, SocketId(1), 1000, 19.0);
+            assert!(!ingress.closed.load(Ordering::Acquire), "no eager decode");
+            assert!(
+                matches!(receiver.recv().await, Some(HostEvent::WsMessage(_, text)) if text == "before")
+            );
+            assert!(matches!(
+                receiver.recv().await,
+                Some(HostEvent::WsClosed(SocketId(1), 1007))
+            ));
+            tokio::time::timeout(Duration::from_secs(1), ingress.failed.notified())
+                .await
+                .unwrap();
+            assert!(matches!(
+                receiver.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ));
+        }
+
+        let (events, mut receiver) = Events::channel();
+        let (outgoing, _pending) = mpsc::unbounded_channel();
+        let ingress = SocketIngress::new(outgoing.downgrade(), None);
+        assert!(ingress.enqueue_frame(
+            &events,
+            SocketId(1),
+            false,
+            Message::binary(compressed("canceled", true)),
+            17.0
+        ));
+        ingress.enqueue_close(&events, SocketId(1), 1000, 19.0);
+        drop(outgoing); // Local cancellation suppresses work that was never dispatched.
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
     }
 }

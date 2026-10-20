@@ -970,6 +970,13 @@ Default and explicit browser paths share `engine-cache` initialization by family
 never initialize the same family module twice while an account is alive. CI checks
 each family against `sdk-rs/harness/wasm-budgets.json`.
 
+Native, Workers and relay socket transports reserve asynchronous raw arrivals
+before Blob/decompression work yields. The host commits the ready FIFO prefix;
+later commands, HTTP callbacks, timers and flushes wait behind unresolved input.
+Keep this reservation hook when wrapping a transport. Synchronous snapshots and
+account-identity reads observe the committed prefix and exclude unresolved input.
+Arrival and queued control timestamps retain their original values.
+
 ## Orderly Rust engine
 
 Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue

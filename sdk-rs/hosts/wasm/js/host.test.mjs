@@ -264,10 +264,15 @@ test('singleton undefined or empty actions are accepted and engine throws retain
   f.host.dispose();
 });
 
-test('nonfinite and coercible clocks retain the batch encoding path', () => {
+test('nonfinite clocks reject before crossing and coercible clocks retain batch encoding', () => {
   const f = fixture();
   f.engine.wsMessage = () => assert.fail('invalid or coercible clocks must retain batch semantics');
-  for (const now of [NaN, Infinity, -Infinity, '7', new Number(8)]) {
+  for (const now of [NaN, Infinity, -Infinity]) {
+    f.arrivals.get('1').onMessage('payload', now);
+    assert.throws(f.tick, /invalid websocket batch arrival time/);
+    assert.deepEqual(f.calls, []);
+  }
+  for (const now of ['7', new Number(8)]) {
     f.arrivals.get('1').onMessage('payload', now);
     f.tick();
     const row = f.calls.pop();
@@ -276,7 +281,8 @@ test('nonfinite and coercible clocks retain the batch encoding path', () => {
   }
   const error = new Error('batch validation failed');
   f.engine.wsMessages = () => { throw error; };
-  f.arrivals.get('1').onMessage('payload', NaN);
+  f.arrivals.get('1').onMessage('payload', 1);
+  f.arrivals.get('2').onMessage('payload', 2);
   assert.throws(f.tick, (actual) => actual === error);
   f.host.dispose();
 });
@@ -286,6 +292,32 @@ test('nonstring singleton payloads retain the encoder rejection path', () => {
   f.engine.wsMessage = () => assert.fail('nonstring payload must not reach the single-message API');
   f.arrivals.get('1').onMessage(new String('payload'), 7);
   assert.throws(f.tick, TypeError);
+  f.host.dispose();
+});
+
+test('every partition timestamp is validated before any batch reaches the engine', () => {
+  const f = fixture();
+  f.arrivals.get('1').onMessage('a'.repeat(12_000), 1);
+  assert.throws(() => f.arrivals.get('2').onMessage('b'.repeat(10_000), NaN), /invalid websocket batch arrival time/);
+  assert.deepEqual(f.calls, [], 'an invalid later partition must not partially apply the prefix');
+  f.host.dispose();
+});
+
+test('raw ingress drains a finite prefix before reentrant arrivals', async () => {
+  const f = fixture({ batchMessages: false });
+  f.engine.wsMessage = (socket, text, now) => {
+    f.calls.push(['single', [[socket, now, text]]]);
+    return text === 'first' ? '[{"op":"log","level":"info","message":"reenter"}]' : '';
+  };
+  f.host.handlers.onLog = () => f.send(2, 'reentrant');
+  const settle = f.arrivals.get('1').onIngress();
+  const command = f.host.command({ op: 'subscribeOrderBook', symbol: 'before reentrant' });
+  settle(() => f.arrivals.get('1').onMessage('first', 17));
+  await command;
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'command']);
+  f.tick();
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'command', 'single']);
+  assert.equal(f.calls[2][1][0][2], 'reentrant');
   f.host.dispose();
 });
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { gzipSync, deflateSync } from 'node:zlib';
 import { test } from 'node:test';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
+import { workersTransport } from './workers.mjs';
 
 const delayedGzip = (text) => {
   let release;
@@ -11,6 +12,213 @@ const delayedGzip = (text) => {
   }([gzipSync(text)]);
   return { data, release };
 };
+
+const ingressFixture = () => {
+  let now = 17, timer;
+  const events = [], handlers = new Map();
+  const engine = {
+    wsMessage: (id, text, at) => { events.push(['message', id, at, text]); return ''; },
+    timer: (_id, at) => { events.push(['timer', at]); return ''; },
+    command: (text, at) => { events.push(['command', at, JSON.parse(text).symbol]); return ''; },
+    httpStart: (_id, _status, _headers, at) => { events.push(['httpStart', at]); return ''; },
+    httpChunk: (_id, bytes, at) => { events.push(['httpChunk', at, [...bytes]]); return ''; },
+    httpEnd: (_id, at) => { events.push(['httpEnd', at]); return ''; },
+    wsClose: (id, code, at) => { events.push(['close', id, at, code]); return ''; },
+    snapshotFrame: () => new Uint8Array([events.length]),
+    accountId: () => String(events.length),
+    takeFrame: () => { events.push(['flush']); },
+  };
+  engine.wsMessages = (bytes) => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let at = 0; at < bytes.length;) {
+      const size = view.getUint32(at + 4, true);
+      engine.wsMessage(view.getUint32(at, true), new TextDecoder().decode(bytes.subarray(at + 16, at + 16 + size)), view.getFloat64(at + 8, true));
+      at += 16 + size;
+    }
+    return '';
+  };
+  const host = new EngineHost(engine, {
+    now: () => now,
+    setTimeout: (fn) => { timer = fn; return fn; }, clearTimeout() {},
+    connect: (url, callbacks) => { handlers.set(url, callbacks); return { send() {}, close() {} }; },
+  });
+  for (const id of [1, 2]) host.execute({ op: 'wsConnect', socket: id, url: String(id) });
+  const receive = (id) => {
+    const h = handlers.get(String(id));
+    return socketMessages(h.onMessage, (_error, at) => h.onClose(1007, at), h.onClose, false, h.onIngress);
+  };
+  return { host, events, receive, at: (value) => { now = value; }, fire: () => timer() };
+};
+
+test('raw decode reservations fence timers, commands, HTTP and synchronous prefix reads', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('fill');
+  const pending = f.receive(1)(delayed.data, 17);
+  f.at(18);
+  f.host.execute({ op: 'setTimer', timer: 9, at: 18 });
+  f.fire();
+  const command = { op: 'subscribeOrderBook', symbol: 'original' };
+  const commanded = f.host.command(command);
+  command.symbol = 'mutated';
+  const bytes = new Uint8Array([7]);
+  const response = f.host.receive(4, { status: 200, body: bytes });
+  bytes[0] = 99;
+  assert.deepEqual(f.events, []);
+  assert.deepEqual([...new Uint8Array(f.host.snapshot())], [0]);
+  assert.equal(f.host.accountId(), '0');
+  f.host.flush();
+  delayed.release();
+  await pending;
+  await commanded;
+  await response;
+  assert.deepEqual(f.events, [
+    ['message', 1, 17, 'fill'], ['timer', 18], ['command', 18, 'original'],
+    ['httpStart', 18], ['httpChunk', 18, [7]], ['httpEnd', 18], ['flush'],
+  ]);
+  f.host.dispose();
+});
+
+test('raw reservations order another socket and remote close before later controls', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('first'), first = f.receive(1);
+  const pending = first(delayed.data, 17);
+  f.at(18);
+  f.receive(2)('second', 18);
+  const closed = first.close(1000, 19);
+  f.at(20);
+  f.host.execute({ op: 'setTimer', timer: 9, at: 20 }); f.fire();
+  assert.deepEqual(f.events, []);
+  delayed.release(); await pending; await closed;
+  assert.deepEqual(f.events, [['message', 1, 17, 'first'], ['message', 2, 18, 'second'], ['close', 1, 19, 1000], ['timer', 20]]);
+  f.host.dispose();
+});
+
+test('an available whole HTTP body keeps its original callback position and owned bytes', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('first');
+  const pending = f.receive(1)(delayed.data, 17);
+  f.at(18);
+  const bytes = new Uint8Array([7]);
+  const response = f.host.receive(4, { status: 200, body: bytes });
+  bytes[0] = 99;
+  f.at(19);
+  const command = f.host.command({ op: 'subscribeOrderBook', symbol: 'after response' });
+  f.at(100); delayed.release();
+  await pending; await response; await command;
+  assert.deepEqual(f.events, [
+    ['message', 1, 17, 'first'], ['httpStart', 18], ['httpChunk', 18, [7]], ['httpEnd', 18],
+    ['command', 19, 'after response'],
+  ]);
+  f.host.dispose();
+});
+
+test('disposal settles HTTP waiting on raw decode without pulling its stream', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('disposed');
+  const pending = f.receive(1)(delayed.data, 17);
+  let pulled = false;
+  const body = async function* () { pulled = true; yield new Uint8Array([7]); };
+  const response = f.host.receive(4, { status: 200, body: body() });
+  f.host.dispose(); await response;
+  assert.equal(pulled, false);
+  assert.deepEqual(f.events, []);
+  delayed.release(); await pending;
+});
+
+test('an available stream chunk keeps owned bytes and its position before later commands', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('first');
+  let releaseChunk;
+  const ready = new Promise((resolve) => { releaseChunk = resolve; });
+  const bytes = new Uint8Array([7]);
+  const body = async function* () { await ready; yield bytes; };
+  f.at(1);
+  const response = f.host.receive(4, { status: 200, body: body() });
+  f.at(17); const pending = f.receive(1)(delayed.data, 17);
+  f.at(18); releaseChunk();
+  await new Promise(setImmediate);
+  bytes[0] = 99;
+  f.at(19);
+  const command = f.host.command({ op: 'subscribeOrderBook', symbol: 'after chunk' });
+  f.at(100); delayed.release();
+  await pending; await response; await command;
+  assert.deepEqual(f.events, [
+    ['httpStart', 1], ['message', 1, 17, 'first'], ['httpChunk', 18, [7]],
+    ['command', 19, 'after chunk'], ['httpEnd', 100],
+  ]);
+  f.host.dispose();
+});
+
+test('cancellation and disposal settle raw reservations and reject deferred commands', async () => {
+  const f = ingressFixture(), delayed = delayedGzip('cancelled'), receive = f.receive(1);
+  const pending = receive(delayed.data, 17);
+  f.at(18);
+  const command = f.host.command({ op: 'subscribeOrderBook', symbol: 'after cancel' });
+  receive.cancel(); await command;
+  assert.deepEqual(f.events, [['command', 18, 'after cancel']]);
+  delayed.release(); await pending;
+  const second = delayedGzip('disposed');
+  const unresolved = f.receive(2)(second.data, 19);
+  const rejected = f.host.command({ op: 'fetchBalance' });
+  f.host.dispose();
+  await assert.rejects(rejected, /engine disposed/);
+  second.release(); await unresolved;
+  assert.deepEqual(f.events, [['command', 18, 'after cancel']]);
+});
+
+for (const kind of ['native', 'workers']) for (const malformed of [false, true]) {
+  test(`${kind} transport reserves raw decode and close positions across sockets${malformed ? ' on failure' : ''}`, async (t) => {
+    const physical = [];
+    class Socket {
+      listeners = new Map();
+      constructor() { physical.push(this); }
+      addEventListener(type, fn) { this.listeners.set(type, fn); }
+      emit(type, data) { this.listeners.get(type)?.(data); }
+      accept() {}
+      send() {}
+      close() { this.emit('close', { code: 1000 }); }
+    }
+    const original = { fetch: globalThis.fetch, socket: globalThis.WebSocket, builtin: process.getBuiltinModule, now: Date.now };
+    t.after(() => {
+      globalThis.fetch = original.fetch; globalThis.WebSocket = original.socket;
+      process.getBuiltinModule = original.builtin; Date.now = original.now;
+    });
+    let transport;
+    if (kind === 'native') {
+      globalThis.WebSocket = Socket; process.getBuiltinModule = () => undefined;
+      transport = nativeTransport();
+    } else {
+      globalThis.fetch = async () => ({ webSocket: new Socket() });
+      transport = workersTransport();
+    }
+    let now = 1, fire, complete;
+    const finished = new Promise((resolve) => { complete = resolve; });
+    Date.now = () => now;
+    transport.now = () => now;
+    transport.setTimeout = (fn) => { fire = fn; return fn; };
+    transport.clearTimeout = () => {};
+    const events = [];
+    const engine = {
+      wsOpen: () => '',
+      wsMessage: (id, text, at) => { events.push(['message', id, at, text]); return ''; },
+      wsClose: (id, code, at) => { events.push(['close', id, at, code]); return ''; },
+      timer: (_id, at) => { events.push(['timer', at]); complete(); return ''; },
+    };
+    const host = new EngineHost(engine, transport, {}, { batchMessages: false });
+    t.after(() => host.dispose());
+    for (const id of [1, 2]) host.execute({ op: 'wsConnect', socket: id, url: 'wss://fixture/' + id });
+    await Promise.resolve(); await Promise.resolve();
+    let release;
+    const ready = new Promise((resolve) => { release = resolve; });
+    const data = new class extends Blob { async arrayBuffer() { await ready; return super.arrayBuffer(); } }([
+      malformed ? new Uint8Array([0x1f, 0x8b, 0]) : gzipSync('first'),
+    ]);
+    now = 17; physical[0].emit('message', { data });
+    now = 18; physical[1].emit('message', { data: 'second' });
+    now = 19; physical[0].emit('close', { code: 1000 });
+    now = 20; host.execute({ op: 'setTimer', timer: 9, at: 20 }); fire();
+    assert.deepEqual(events, []);
+    release(); await finished;
+    assert.deepEqual(events, malformed
+      ? [['close', 1, 17, 1007], ['message', 2, 18, 'second'], ['timer', 20]]
+      : [['message', 1, 17, 'first'], ['message', 2, 18, 'second'], ['close', 1, 19, 1000], ['timer', 20]]);
+  });
+}
 
 test('text is synchronous and binary feeds retain message order', async () => {
   const got = [];
@@ -23,6 +231,18 @@ test('text is synchronous and binary feeds retain message order', async () => {
   receive(new TextEncoder().encode('fourth').buffer);
   for (let i=0; i<50 && got.length<5; i++) await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(got, ['Ping', '{"n":1}', 'second', '{"n":3}', 'fourth']);
+});
+
+test('ready text does not allocate a raw reservation', () => {
+  let reservations = 0;
+  const received = [];
+  const receive = socketMessages((text) => received.push(text), assert.fail, () => {}, false, () => {
+    reservations++;
+    return (deliver) => deliver?.();
+  });
+  receive('first'); receive('second');
+  assert.equal(reservations, 0);
+  assert.deepEqual(received, ['first', 'second']);
 });
 
 test('invalid compression reaches the transport error callback', async () => {
@@ -89,8 +309,10 @@ test('native transport queues remote close behind gzip and stamps the raw callba
   try { transport = nativeTransport(); }
   finally { globalThis.WebSocket = originalSocket; process.getBuiltinModule = originalBuiltin; }
   const calls = [];
+  let crossings = 0;
   const engine = {
     wsMessages: (bytes) => {
+      crossings++;
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       for (let at = 0; at < bytes.length;) {
         const size = view.getUint32(at + 4, true);
@@ -117,6 +339,7 @@ test('native transport queues remote close behind gzip and stamps the raw callba
   compressed.release();
   for (let i = 0; i < 50 && calls.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.deepEqual(calls, [['message', 17, 'last fill'], ['message', 18, 'later text'], ['close', 1000, 19]]);
+  assert.equal(crossings, 1, 'ready decoded messages retain one crossing before their close barrier');
   host.dispose();
   const disposed = new EngineHost(engine, transport);
   disposed.execute({ op: 'wsConnect', socket: 2, url: 'wss://fixture' });

@@ -817,7 +817,7 @@ describe('Bybit Brazil routing carries the site identity on every transport', ()
   });
 });
 
-const connectedRelay = async (binary = false) => {
+const connectedRelay = async (binary = false, onIngress?: NonNullable<Parameters<Transport['connect']>[1]['onIngress']>) => {
   setWsRelayEnabled(true);
   const listeners = new Map<string, (event?: unknown) => void>();
   const relay = {
@@ -833,13 +833,41 @@ const connectedRelay = async (binary = false) => {
   const url = 'wss://stream.bybit.com/v5/private';
   routed.connect(url, handlers('private'));
   routed.connect(url, handlers('private'));
-  const handler = { ...handlers('private'), binary, onBinary: vi.fn() };
+  const handler = { ...handlers('private'), binary, onBinary: vi.fn(), onIngress };
   const socket = routed.connect(url, handler);
   await vi.waitFor(() => expect(listeners.has('message')).toBe(true));
   return { relay, handler, socket, emit: (data: unknown) => listeners.get('message')!({ data }), listeners, raw };
 };
 
 describe('relay binary frames obey the native transport text contract', () => {
+  it('reserves raw relay decode and close positions before delivery', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    let release!: (bytes: ArrayBuffer) => void;
+    const bytes = new Promise<ArrayBuffer>((resolve) => { release = resolve; });
+    class DelayedBlob extends NodeBlob {
+      override arrayBuffer(): Promise<ArrayBuffer> { return bytes; }
+    }
+    const slots: Array<{ ready: boolean; deliver?: () => void }> = [];
+    const onIngress = vi.fn(() => {
+      const slot = { ready: false, deliver: undefined as (() => void) | undefined };
+      slots.push(slot);
+      return (deliver?: () => void) => { slot.ready = true; slot.deliver = deliver; };
+    });
+    const { emit, handler, listeners, raw } = await connectedRelay(false, onIngress);
+    raw.now.mockReturnValue(17); emit(new DelayedBlob([]));
+    raw.now.mockReturnValue(18); emit('following');
+    raw.now.mockReturnValue(19); listeners.get('close')!({ code: 1000 });
+    expect(onIngress).toHaveBeenCalledTimes(3);
+    expect(slots.every((slot) => !slot.ready)).toBe(true);
+    release(new TextEncoder().encode('first').buffer);
+    await vi.waitFor(() => expect(slots.every((slot) => slot.ready)).toBe(true));
+    expect(handler.onMessage).not.toHaveBeenCalled();
+    expect(handler.onClose).not.toHaveBeenCalled();
+    for (const slot of slots) slot.deliver?.();
+    expect(handler.onMessage.mock.calls).toEqual([['first', 17], ['following', 18]]);
+    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1000, 19);
+  });
+
   it('preserves SBE bytes and raw timestamps before control text and remote close', async () => {
     vi.stubGlobal('Blob', NodeBlob);
     let release!: (bytes: ArrayBuffer) => void;

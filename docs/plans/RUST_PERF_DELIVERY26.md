@@ -308,3 +308,44 @@ finite-prefix fairness and batch bounds. No clock clamping. Independently
 review repairs, run affected source/actual-WASM checks, commit, refresh shared
 controls only where needed, and declare a fresh final collection. No public
 performance measurements or numerical tuning occurred in this repair phase.
+
+
+## Ordered ingress repair checkpoint
+
+The JS fix validates every captured timestamp before any partition crossing.
+Asynchronous raw frames/close callbacks reserve host-wide FIFO positions;
+ready text keeps its direct batching path. Later commands, timers, HTTP, opens,
+closes and flushes wait behind unresolved input, retaining captured times.
+Synchronous snapshot/account reads expose committed prefix state. Cancellation,
+decode failures and disposal settle reservations/waiters. Available whole HTTP
+responses enter atomically before later commands; streamed chunks retain their
+observed readiness. Consecutive ready decoded messages still share one crossing.
+Native/Workers/SDK relay propagation and public declarations/docs are updated.
+
+Native queues owned raw input before expensive decoding, resolves it at the
+actor/observer inbox position, and applies routing health there. Decoded limits,
+finite-prefix counts and cached over-cap payloads remain correct. Local socket
+ownership is rechecked after intervening actions without decoding twice;
+remote task exit preserves final queued fills. Malformed data closes once with
+1007 and suppresses stale queued input. This fixes expensive decode overtaking;
+it does not promise globally ordered wall clocks for arbitrary racing producers.
+
+Four JS regressions and the deterministic two-worker native ordering case
+proved RED before the fixes. Native's first full check also caught an existing
+`tokio::spawn` compatibility regression: an inline async capture required a
+Send-only decoder to be Sync. Capture the pending boolean first instead, keeping
+selection behavior and the decoder contract. All failed logs/proofs are retained.
+
+Independent JS and native reviews pass. All 2,575 Rust tests/204 groups pass
+(zero failures/ignored), as do fmt/bans and strict native/WASM workspace Clippy.
+Repository checks pass 44 typecheck, 28 lint, 27 test tasks; harness 644.
+Actual WASM checks pass SDK 423/13 files, host 167 and parity/lifecycle 28 tests.
+All eight repaired JS source hashes and 234 binary artifacts stayed unchanged
+through these checks. `RUST_PERF_DELIVERY26_INGRESS_REPAIR.json.gz` records proof.
+
+Origin advanced to `5e92f93a8a` (PR #1341 product semantics, Bybit/OKX products)
+during verification. Commit this checked repair, then merge that landing and
+review integration before final release/measurement. Build a matching physical
+original control and preserve every prior control/cohort with its source label.
+No public performance samples ran in this repair phase; the full task remains
+pending the final expanded gates and before/after margins.

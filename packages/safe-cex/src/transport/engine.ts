@@ -529,13 +529,15 @@ export const createEngineTransport = (
               if (!closed) {
                 closing = true;
                 pending.length = 0;
-                decode!.close(1007, receivedAt);
+                decode!.cancel();
+                finish(1007, receivedAt);
                 // Browser close() forbids protocol error codes.
                 relay.close();
               }
             },
             finish,
             handlers.binary,
+            handlers.onIngress,
           );
           const close = (code: number) => {
             closing = true;

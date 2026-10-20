@@ -4,6 +4,9 @@ export interface Socket {
   close(): void;
 }
 
+/** Complete one raw arrival after decoding, or cancel it without a callback. */
+export type IngressReservation = (deliver?: () => void) => void;
+
 export interface HttpResponse {
   status: number;
   /** `name: value` lines. */
@@ -24,7 +27,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { binary?: boolean; onBinary?(data: Uint8Array, receivedAt?: number): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array, receivedAt?: number): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void; /** Reserve asynchronous decode and remote-close positions at raw arrival. */ onIngress?(): IngressReservation },
   ): Socket;
   request(request: {
     method: string;
@@ -75,6 +78,7 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  /** Reads the committed FIFO prefix synchronously; unresolved decodes are excluded. */
   accountId(): string | undefined;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: { batchMessages?: boolean });
   start(): void;
@@ -82,6 +86,7 @@ export class EngineHost {
   command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
+  /** Reads the committed FIFO prefix synchronously; unresolved decodes are excluded. */
   snapshot(): ArrayBuffer;
   drainMessages(): void;
   dispose(): void;
@@ -96,5 +101,5 @@ export interface SocketMessages {
   cancel(): void;
 }
 export function socketMessages(onMessage: (text: string, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose?: (code?: number, receivedAt?: number) => void): SocketMessages;
-export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose: ((code?: number, receivedAt?: number) => void) | undefined, binary: boolean | undefined): SocketMessages;
+export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose: ((code?: number, receivedAt?: number) => void) | undefined, binary: boolean | undefined, onIngress?: () => IngressReservation): SocketMessages;
 export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, binary: boolean): SocketMessages;
