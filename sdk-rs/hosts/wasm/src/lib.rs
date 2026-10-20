@@ -223,6 +223,9 @@ struct EngineOptions {
     public_feed: Option<PublicFeedOptions>,
     #[serde(default)]
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    #[cfg(feature = "venue-blofin")]
+    #[serde(default)]
+    broker_attribution: bool,
     #[cfg(feature = "venue-bybit")]
     #[serde(default)]
     enable_inverse_markets: bool,
@@ -914,6 +917,7 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "venue-blofin")]
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
+                broker_attribution: options.broker_attribution,
                 read_credentials: options.read_credentials.clone(),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,

@@ -360,7 +360,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
@@ -564,6 +564,7 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
+        ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,

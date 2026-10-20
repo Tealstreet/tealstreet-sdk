@@ -822,3 +822,29 @@ An exact new original control is already built and independently audited:
 446Rust/config,35 protected inputs,29 fresh internal compiles,9 bindings,
 Node/web WASM12174466bytes identical. Old controls and failed samples remain
 untouched. New final cohort remains unstarted; PR1344 remains draft.
+
+## Startup/broker merge checkpoint
+
+Merge production landing `9c34020741` plus docs-only commits through `702a62050c`.
+Preserve broker attribution, KuCoin full-ID cancellation continuation and explicit
+account-scope cancel-all, and Bitrue's corrected private time-in-force mapping.
+The new BloFin WASM field uses canonical `venue-blofin` gating. Preserve batching,
+optional ingress APIs, family isolation and the lazy-codec native import repair.
+
+Apply incoming startup signing-clock resets after module/crypto setup, before
+startup; TS clock installation follows `loadTs`. Retain the original measurement
+CPU/wall start, initial heap and final pre-GC cutoffs, fixture lease and readiness
+continuity. Independent merge review passes. Update only the clock test's const
+to let extraction anchor, keeping all its runtime assertions. Full harness670,
+typecheck44, lint28 and repository test27 tasks pass. Preserve the first typecheck
+failure from the incoming broker test fake missing `wsMessages`; add that stub
+without changing assertions. Full Rust451-input verification is still running;
+formatting, bans and native all-target Clippy pass so far.
+
+Prepare one new KuCoin futures private tape against the committed merged source;
+reuse63 verified tapes and the exact40/64 roster. Original control29 is exact
+`9c34020741`, independently physically audited; the newer landing commits alter
+only `RUST_AUDITS.md` and `RUST_QUALITY.md`. Shared-helper refresh and configuration
+remain drafts, with no final gate children or frozen collection. Rebuild current
+families and complete actual integrations, final size review and source checks
+before freezing the existing Node22 no-retry collection protocol.

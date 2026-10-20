@@ -7,7 +7,7 @@ import { venueOf } from './venues.mjs';
 import { deterministicReplay } from './polling.mjs';
 
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
-const clockSource = source.slice(source.indexOf('const clockStart = '), source.indexOf('const config = '));
+const clockSource = source.slice(source.indexOf('let clockStart = '), source.indexOf('const config = '));
 const resets = [...source.matchAll(/if \(isPrivate\) clockStart = performance\.now\(\);/g)];
 
 // Run the actual clock setup without loading engines, fixtures, or exchange workers.

@@ -41,8 +41,8 @@ const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
 const metadata = records.find((record) => record.type === 'meta');
-const clockStart = performance.now();
-// Keep signing/freshness clocks continuous through startup; only Tape.play
+let clockStart = performance.now();
+// Start after module setup, then keep signing/freshness clocks continuous through startup; only Tape.play
 // scheduling is relative to readiness. Rebasing Date.now breaks venue clocks.
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 const config = records.find((record) => record.type === 'config') ?? {};
@@ -166,6 +166,7 @@ async function runRust() {
   const encoder = new TextEncoder();
   const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
+  clockStart = performance.now();
   const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
@@ -456,8 +457,6 @@ async function runTs() {
   const heapBefore = await baselineBeforeSetup({ baseline, initialize: initializeReplay });
   const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
-  const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
-  clock?.install();
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -565,6 +564,9 @@ async function runTs() {
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   await venue.loadTs?.({ isPrivate });
+  clockStart = performance.now();
+  const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
+  clock?.install();
   const store = new DefaultStore();
   const mainStore = new DefaultStore();
   // Exercise the production browser-worker packer, including its ticker
