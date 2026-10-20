@@ -671,6 +671,11 @@ pub trait Venue {
     /// Per-request continuation: what to do with the response.
     type Pending;
 
+    /// Account identity is available only after authenticated discovery.
+    fn account_id(&self) -> Option<&str> {
+        None
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -725,11 +730,15 @@ pub struct Engine<V: Venue> {
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    #[cfg(feature = "book-deltas")]
     book_deltas: bool,
+    #[cfg(feature = "book-deltas")]
     book_baselines: HashMap<String, BookBaseline>,
+    #[cfg(feature = "book-deltas")]
     book_market_rows: Vec<(String, String)>,
 }
 
+#[cfg(feature = "book-deltas")]
 struct BookBaseline {
     market: u32,
     id: String,
@@ -743,8 +752,11 @@ impl<V: Venue> Engine<V> {
             store: Store::default(),
             io: Io::default(),
             started: false,
+            #[cfg(feature = "book-deltas")]
             book_deltas: false,
+            #[cfg(feature = "book-deltas")]
             book_baselines: HashMap::new(),
+            #[cfg(feature = "book-deltas")]
             book_market_rows: Vec::new(),
         }
     }
@@ -763,6 +775,7 @@ impl<V: Venue> Engine<V> {
 
     /// Networked hosts opt into level deltas. Browser consumers retain full
     /// books by default. Switching modes starts a fresh full-book baseline.
+    #[cfg(feature = "book-deltas")]
     pub fn set_book_deltas(&mut self, enabled: bool) {
         if self.book_deltas != enabled {
             self.book_deltas = enabled;
@@ -781,6 +794,7 @@ impl<V: Venue> Engine<V> {
 
     /// Force a full BOOK on the next flush, including when another client
     /// joins an existing upstream subscription.
+    #[cfg(feature = "book-deltas")]
     pub fn request_book_resync(&mut self, symbol: &str) {
         self.book_baselines.remove(symbol);
         let mut cx = Cx {
@@ -789,6 +803,10 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         cx.book_changed(symbol);
+    }
+
+    pub fn account_id(&self) -> Option<&str> {
+        self.venue.account_id()
     }
 
     pub fn start(&mut self, now: f64) {
@@ -804,6 +822,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        #[cfg(feature = "book-deltas")]
         match &event {
             Event::Command(Command::SubscribeOrderBook { symbol }) => {
                 self.request_book_resync(symbol);
@@ -1012,55 +1031,60 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
-        let markets_match =
-            !self.book_deltas
+        #[cfg(feature = "book-deltas")]
+        let write_books = {
+            let markets_match = !self.book_deltas
                 || (self.book_market_rows.len() == self.store.markets().len()
                     && self.book_market_rows.iter().zip(self.store.markets()).all(
                         |((symbol, id), market)| symbol == &market.symbol && id == &market.id,
                     ));
-        if self.book_deltas {
-            self.book_baselines.retain(|symbol, _| {
-                self.venue.book(symbol).is_some() && self.store.market_index(symbol).is_some()
-            });
-            if store && !markets_match {
-                self.book_market_rows = self
-                    .store
-                    .markets()
-                    .iter()
-                    .map(|market| (market.symbol.clone(), market.id.clone()))
-                    .collect();
-                let symbols: Vec<_> = self
-                    .venue
-                    .books()
-                    .filter_map(|(symbol, _)| {
-                        let market = self.store.market_index(symbol)?;
-                        let id = &self.store.markets()[market as usize].id;
-                        self.book_baselines
-                            .get(symbol)
-                            .is_none_or(|baseline| baseline.market != market || &baseline.id != id)
-                            .then(|| symbol.to_owned())
-                    })
-                    .collect();
-                for symbol in symbols {
-                    self.request_book_resync(&symbol);
+            if self.book_deltas {
+                self.book_baselines.retain(|symbol, _| {
+                    self.venue.book(symbol).is_some() && self.store.market_index(symbol).is_some()
+                });
+                if store && !markets_match {
+                    self.book_market_rows = self
+                        .store
+                        .markets()
+                        .iter()
+                        .map(|market| (market.symbol.clone(), market.id.clone()))
+                        .collect();
+                    let symbols: Vec<_> = self
+                        .venue
+                        .books()
+                        .filter_map(|(symbol, _)| {
+                            let market = self.store.market_index(symbol)?;
+                            let id = &self.store.markets()[market as usize].id;
+                            self.book_baselines
+                                .get(symbol)
+                                .is_none_or(|baseline| {
+                                    baseline.market != market || &baseline.id != id
+                                })
+                                .then(|| symbol.to_owned())
+                        })
+                        .collect();
+                    for symbol in symbols {
+                        self.request_book_resync(&symbol);
+                    }
                 }
             }
-        }
+            // A market-only flush must not publish row indexes ahead of MARKETS.
+            !self.book_deltas || store || markets_match
+        };
         let buffer = std::mem::take(&mut self.io.frame);
         let mut w = FrameWriter::new(buffer, now);
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        // A market-only flush must not publish row indexes ahead of MARKETS.
-        let write_books = !self.book_deltas || store || markets_match;
-        for symbol in self.io.changed_books[..self.io.changed_books_active]
-            .iter()
-            .filter(|_| write_books)
-        {
+        let books = self.io.changed_books[..self.io.changed_books_active].iter();
+        #[cfg(feature = "book-deltas")]
+        let books = books.filter(|_| write_books);
+        for symbol in books {
             if let (Some(book), Some(market)) =
                 (self.venue.book(symbol), self.store.market_index(symbol))
             {
+                #[cfg(feature = "book-deltas")]
                 if self.book_deltas {
                     let id = &self.store.markets()[market as usize].id;
                     match self.book_baselines.get_mut(symbol) {
@@ -1090,9 +1114,9 @@ impl<V: Venue> Engine<V> {
                             }
                         }
                     }
-                } else {
-                    book.write(market, &mut w);
+                    continue;
                 }
+                book.write(market, &mut w);
             }
         }
         let candles: Vec<_> = self
@@ -1124,7 +1148,12 @@ impl<V: Venue> Engine<V> {
         }
         let empty = w.is_empty();
         let frame = w.finish();
+        #[cfg(feature = "book-deltas")]
         if write_books {
+            self.io.changed_books_active = 0;
+        }
+        #[cfg(not(feature = "book-deltas"))]
+        {
             self.io.changed_books_active = 0;
         }
         if let Some(pending) = pending {
@@ -1281,6 +1310,7 @@ mod streaming_tests {
             .collect()
     }
 
+    #[cfg(feature = "book-deltas")]
     fn change_book(
         engine: &mut Engine<StreamVenue>,
         side: crate::book::BookSide,
@@ -1302,6 +1332,7 @@ mod streaming_tests {
         );
     }
 
+    #[cfg(feature = "book-deltas")]
     fn book_sections(frame: &[u8]) -> Vec<(u16, Vec<u8>)> {
         crate::wire::sections(frame)
             .filter(|(kind, _)| matches!(*kind, section::BOOK | section::BOOK_DELTA))
@@ -1309,6 +1340,7 @@ mod streaming_tests {
             .collect()
     }
 
+    #[cfg(feature = "book-deltas")]
     #[test]
     fn deltas_coalesce_net_changes_and_snapshots_do_not_consume_the_baseline() {
         use crate::book::BookSide::{Asks, Bids};
@@ -1349,6 +1381,7 @@ mod streaming_tests {
         assert!(engine.take_frame(3.).is_none());
     }
 
+    #[cfg(feature = "book-deltas")]
     #[test]
     fn deltas_resync_on_book_reset_subscription_and_market_identity_changes() {
         use crate::book::BookSide::Bids;
@@ -1401,6 +1434,7 @@ mod streaming_tests {
         );
     }
 
+    #[cfg(feature = "book-deltas")]
     #[test]
     fn delta_baselines_are_removed_with_books_and_markets_and_modes_can_switch() {
         use crate::book::BookSide::Bids;

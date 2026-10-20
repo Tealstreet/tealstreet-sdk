@@ -36,6 +36,7 @@ safe-cex-venue-cryptocom = { path = "venues/cryptocom" }
 safe-cex-venue-okx = { path = "venues/okx" }
 safe-cex-venue-kucoin = { path = "venues/kucoin" }
 safe-cex-venue-weex = { path = "venues/weex" }
+safe-cex-venue-phemex = { path = "venues/phemex" }
 safe-cex-venue-woo = { path = "venues/woo" }
 safe-cex-native = { path = "hosts/native" }
 
@@ -92,10 +93,14 @@ opt-level = "z"
 [profile.release.package.safe-cex-venue-bybit]
 opt-level = 3
 
+# Its steady public decoder also needs throughput optimization to beat the TS oracle.
 [profile.release.package.safe-cex-venue-bingx]
 opt-level = 3
 
 [profile.release.package.safe-cex-venue-weex]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-phemex]
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-orderly]
@@ -114,3 +119,6 @@ opt-level = 3
 
 [profile.release.package.safe-cex-engine]
 opt-level = 3
+
+[profile.release.package.safe-cex-venue-coinbase]
+opt-level = "z"

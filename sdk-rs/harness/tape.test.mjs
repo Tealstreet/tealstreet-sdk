@@ -1170,12 +1170,97 @@ test('Backpack cancellation client IDs stay exact while only valid creation IDs 
   assert.equal(tape.respond('DELETE', cancel, '{"clientId":42}').status, 200);
 });
 
+test('replay readiness waits for the first recorded socket before deriving subscriptions', async () => {
+  const url = 'wss://stream.crypto.com/exchange/v1/market';
+  const tape = new Tape([{ type: 'ws', t: 0, url, socket: 0, text: 'ticker' }], {}, false, 200);
+  const seen = [];
+  let marketsReady = false;
+  const played = tape.play(undefined, async () => seen.push(`ready:${marketsReady}`));
+  await new Promise(setImmediate);
+  assert.deepEqual(seen, []);
+  // The production venue commits its seed before opening this socket.
+  marketsReady = true;
+  tape.connect(url, () => seen.push('opened'), () => seen.push('frame'));
+  assert.equal(await played, 1);
+  assert.deepEqual(seen, ['opened', 'ready:true', 'frame']);
+});
+
+for (const delayedAuth of [false, true]) test(`first-socket startup fence preserves authenticated Phemex bootstrap before readiness (${delayedAuth ? 'delayed auth' : 'immediate auth'})`, async () => {
+  const url = 'wss://ws.phemex.com';
+  const authAck = JSON.stringify({ id: 999, error: null, result: { status: 'success' } });
+  const snapshot = JSON.stringify({ type: 'snapshot', orders_p: [] });
+  const ticker = JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [] });
+  const tape = new Tape([
+    { type: 'ws', t: 0, url, bootstrap: true, text: authAck },
+    { type: 'ws', t: 0, url, bootstrap: true, text: snapshot },
+    { type: 'ws', t: 0, url, text: ticker },
+  ], venueOf('phemex'), true, 200, 'rust');
+  const seen = [];
+  const publicSocket = tape.connect(url,
+    () => tape.send(publicSocket, JSON.stringify({ method: 'perp_market24h_pack_p.subscribe', params: [] })),
+    () => seen.push('public-ticker'),
+  );
+  const privateSocket = tape.connect(url, () => {
+    const authenticate = () => {
+      const expiry = Math.floor(Date.now() / 1000 + 60);
+      const signature = createHmac('sha256', 'replay-secret').update('replay-key' + expiry).digest('hex');
+      tape.send(privateSocket, JSON.stringify({ id: 999, method: 'user.auth', params: ['API', 'replay-key', signature, expiry] }));
+    };
+    // Opening notification occurs first; bootstrap must wake when auth later
+    // identifies the private socket, even without stream-routing venue flags.
+    if (delayedAuth) setTimeout(authenticate, 10);
+    else authenticate();
+  }, (text) => {
+    if (JSON.parse(text).id === 999) {
+      seen.push('private-auth-ack');
+      tape.send(privateSocket, JSON.stringify({ method: 'aop_p.subscribe', params: [] }));
+    } else seen.push('private-snapshot');
+  });
+  assert.equal(await tape.play(undefined, async () => {
+    assert.deepEqual(seen, ['private-auth-ack', 'private-snapshot']);
+    assert.equal(tape.audit.ready(), true);
+    seen.push('ready');
+  }), 1);
+  assert.deepEqual(seen, ['private-auth-ack', 'private-snapshot', 'ready', 'public-ticker']);
+  assert.deepEqual(tape.audit.errors(), []);
+});
+
+test('shared public/private routing rejects ambiguous closes and keeps physical socket ordinals', async () => {
+  const url = 'wss://example.test/shared';
+  const seen = [];
+  const tape = new Tape([], {
+    socketMatches: (socket, text) => Boolean(socket.private) === JSON.parse(text).private,
+    onSocketSend: (socket, text) => { socket.private = JSON.parse(text).private; },
+  }, true, 200);
+  const publicSocket = tape.connect(url, () => {}, () => seen.push('public'), (code) => seen.push(`closed-public:${code}`));
+  const privateSocket = tape.connect(url, () => {}, () => seen.push('private'));
+  tape.send(privateSocket, '{"private":true}');
+  await new Promise(setImmediate);
+  await tape.deliverFrame({ type: 'ws', url, text: '{"private":false}' });
+  await tape.deliverFrame({ type: 'ws', url, text: '{"private":true}' });
+  await assert.rejects(tape.deliverFrame({ type: 'close', url }), /Ambiguous close/);
+  assert.equal(publicSocket.closed, false);
+  assert.equal(privateSocket.closed, false);
+  await tape.deliverFrame({ type: 'close', url, socket: 0, code: 1006 });
+  const replacement = tape.connect(url, () => {}, () => seen.push('replacement'));
+  await new Promise(setImmediate);
+  assert.deepEqual([publicSocket.ordinal, privateSocket.ordinal, replacement.ordinal], [0, 1, 2]);
+  await tape.deliverFrame({ type: 'ws', url, socket: 1, text: '{"private":true}' });
+  await tape.deliverFrame({ type: 'ws', url, socket: 2, text: '{"private":false}' });
+  assert.deepEqual(seen, ['public', 'private', 'closed-public:1006', 'private', 'replacement']);
+});
 test('venue socket keys preserve bullet tokens while normalizing generated connection IDs', async () => {
   const venue = { volatileQueryFields: ['connectId'] };
   const urlKey = (value) => canonicalUrl(value, new Set(), venue);
   const tape = new Tape([], venue);
   let received;
-  tape.connect('wss://bullet.test/socket?token=public&connectId=runtime', () => {}, (text) => { received = text; });
+  tape.connect(
+    'wss://bullet.test/socket?token=public&connectId=runtime',
+    () => {},
+    (text) => {
+      received = text;
+    },
+  );
   await new Promise(setImmediate);
   const socket = await tape.socketFor('wss://bullet.test/socket?token=public&connectId=recorded', undefined, 0);
   socket.onMessage('depth');
@@ -1191,7 +1276,11 @@ test('recorded welcomes establish readiness once without consuming business fram
   ];
   const tape = new Tape(records, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
   const observed = [];
-  tape.connect(url, () => observed.push('open'), (text) => observed.push(JSON.parse(text).type));
+  tape.connect(
+    url,
+    () => observed.push('open'),
+    (text) => observed.push(JSON.parse(text).type),
+  );
   const frames = await tape.play(undefined, async () => {
     await new Promise(setImmediate);
     assert.deepEqual(observed, ['open', 'welcome']);
@@ -1203,32 +1292,47 @@ test('recorded welcomes establish readiness once without consuming business fram
 
 test('startup replay never invents a welcome or pulls one past business traffic', async () => {
   const url = 'wss://bullet.test/endpoint?token=recorded';
-  for (const rows of [[], [
-    { type: 'ws', t: 1, url, text: '{"type":"message"}' },
-    { type: 'ws', t: 2, url, text: '{"type":"welcome"}' },
-  ]]) {
+  for (const rows of [
+    [],
+    [
+      { type: 'ws', t: 1, url, text: '{"type":"message"}' },
+      { type: 'ws', t: 2, url, text: '{"type":"welcome"}' },
+    ],
+  ]) {
     const tape = new Tape(rows, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
     const observed = [];
-    tape.connect(url, () => {}, (text) => observed.push(text));
+    tape.connect(
+      url,
+      () => {},
+      (text) => observed.push(text),
+    );
     await new Promise(setImmediate);
     assert.deepEqual(observed, []);
   }
 });
 
-
 test('KuCoin shared Tape binds signed headers, caller IDs, body types and response stages', () => {
   const venue = venueOf('kucoin');
   const url = 'https://api-futures.kucoin.com/api/v1/orders';
   const body = JSON.stringify({ symbol: 'XBTUSDTM', clientOid: 'caller-exact', size: '2' });
-  const tape = new Tape([
-    { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-exact' }] },
-    { type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{}', availableAfter: 10 },
-  ], venue, true);
+  const tape = new Tape(
+    [
+      { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-exact' }] },
+      { type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{}', availableAfter: 10 },
+    ],
+    venue,
+    true,
+  );
   const headers = (payload) => {
     const timestamp = String(Date.now());
     const hmac = (value) => createHmac('sha256', 'replay-secret').update(value).digest('base64');
-    return { 'KC-API-KEY': 'replay-key', 'KC-API-KEY-VERSION': '2', 'KC-API-TIMESTAMP': timestamp,
-      'KC-API-PASSPHRASE': hmac('replay-passphrase'), 'KC-API-SIGN': hmac(timestamp + 'POST/api/v1/orders' + (payload ?? '')) };
+    return {
+      'KC-API-KEY': 'replay-key',
+      'KC-API-KEY-VERSION': '2',
+      'KC-API-TIMESTAMP': timestamp,
+      'KC-API-PASSPHRASE': hmac('replay-passphrase'),
+      'KC-API-SIGN': hmac(timestamp + 'POST/api/v1/orders' + (payload ?? '')),
+    };
   };
   tape.time = 9;
   assert.equal(tape.respond('POST', url, body, headers(body)).status, 599);
@@ -1249,21 +1353,30 @@ test('KuCoin shared Tape audits the recorded welcome, topics and JSON pong acros
   const url = endpoint + '?token=public-token&connectId=recorded';
   const topic = '/contractMarket/snapshot:XBTUSDTM';
   const records = [
-    { type: 'http', method: 'POST', url: 'https://api-futures.kucoin.com/api/v1/bullet-public', status: 200,
-      body: JSON.stringify({ code: '200000', data: { token: 'public-token', instanceServers: [{ endpoint }] } }) },
+    {
+      type: 'http',
+      method: 'POST',
+      url: 'https://api-futures.kucoin.com/api/v1/bullet-public',
+      status: 200,
+      body: JSON.stringify({ code: '200000', data: { token: 'public-token', instanceServers: [{ endpoint }] } }),
+    },
     { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
     { type: 'ws', t: 2, url, socket: 0, text: JSON.stringify({ type: 'message', topic }) },
   ];
   const tape = new Tape(records, venue, false, 500, 'rust');
   const observed = [];
-  const socket = tape.connect(endpoint + '?token=public-token&connectId=runtime', () => {}, (text) => {
-    const message = JSON.parse(text);
-    observed.push(message);
-    if (message.type === 'welcome') {
-      tape.send(socket, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }));
-      tape.send(socket, '{"type":"ping","id":"heartbeat"}');
-    }
-  });
+  const socket = tape.connect(
+    endpoint + '?token=public-token&connectId=runtime',
+    () => {},
+    (text) => {
+      const message = JSON.parse(text);
+      observed.push(message);
+      if (message.type === 'welcome') {
+        tape.send(socket, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }));
+        tape.send(socket, '{"type":"ping","id":"heartbeat"}');
+      }
+    },
+  );
   const ticks = [];
   const frames = await tape.play((t) => ticks.push(t));
   await new Promise(setImmediate);
@@ -1280,30 +1393,55 @@ test('startup welcomes match socket ordinals and cannot bypass recorded closes',
   const venue = { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' };
   const tape = new Tape([{ type: 'ws', t: 1, url, socket: 1, text: '{"type":"welcome"}' }], venue);
   const seen = [];
-  tape.connect(url, () => {}, () => seen.push(0));
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push(0),
+  );
   await new Promise(setImmediate);
   assert.deepEqual(seen, []);
-  tape.connect(url, () => {}, () => seen.push(1));
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push(1),
+  );
   await new Promise(setImmediate);
   assert.deepEqual(seen, [1]);
-  const closed = new Tape([
-    { type: 'close', t: 0, url, socket: 0 },
-    { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
-  ], venue);
-  closed.connect(url, () => {}, () => assert.fail('welcome bypassed close'));
+  const closed = new Tape(
+    [
+      { type: 'close', t: 0, url, socket: 0 },
+      { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
+    ],
+    venue,
+  );
+  closed.connect(
+    url,
+    () => {},
+    () => assert.fail('welcome bypassed close'),
+  );
   await new Promise(setImmediate);
 });
 
 test('factory keeps command stage, response time, headers and generated-ID validation independent', () => {
   const url = 'https://api.bitget.com/api/v2/mix/order/modify-order';
-  const response = (requestBody, extras) => ({ type: 'http', method: 'POST', url, requestBody, status: 200, body: '{\"code\":\"00000\"}', ...extras });
+  const response = (requestBody, extras) => ({
+    type: 'http',
+    method: 'POST',
+    url,
+    requestBody,
+    status: 200,
+    body: '{\"code\":\"00000\"}',
+    ...extras,
+  });
   const stagedVenue = {
     rust: 'bitget',
     checkRequest: (_method, _url, _body, headers) => headers?.auth === 'fixture',
   };
-  const tape = createTape([
-    response({ orderId: '1', newClientOid: 'expected' }, { afterCommand: 2, availableAfter: 100 }),
-  ], stagedVenue, true);
+  const tape = createTape(
+    [response({ orderId: '1', newClientOid: 'expected' }, { afterCommand: 2, availableAfter: 100 })],
+    stagedVenue,
+    true,
+  );
   const body = { orderId: '1', newClientOid: 'fresh' };
   const headers = { auth: 'fixture' };
   tape.commandIndex = 1;
@@ -1325,11 +1463,17 @@ test('missing recorded welcome keeps readiness bounded and wrong tokens never ma
   const url = 'wss://bullet.test/socket?token=public';
   const venue = { startupMessage: (record) => JSON.parse(record.text).type === 'welcome' };
   const tape = new Tape([], venue, false, 25);
-  tape.connect(url, () => {}, () => assert.fail('invented welcome'));
-  await assert.rejects(tape.play(undefined, () => new Promise(() => {})), /Replay startup/);
+  tape.connect(
+    url,
+    () => {},
+    () => assert.fail('invented welcome'),
+  );
+  await assert.rejects(
+    tape.play(undefined, () => new Promise(() => {})),
+    /Replay startup/,
+  );
   await assert.rejects(tape.socketFor(url.replace('public', 'private')), /socket/);
 });
-
 
 {
   const URL = 'https://example.test/order';
@@ -1454,6 +1598,65 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
 
+test('Coinbase same-URL sockets retain exact channel and product scope across batches and unsubscribe', async () => {
+  const url = 'wss://advanced-trade-ws.coinbase.com';
+  const tape = new Tape([], VENUES.coinbase, false, 20);
+  const receivedA = [],
+    receivedB = [];
+  const a = tape.connect(
+    url,
+    () => {},
+    (text) => receivedA.push(JSON.parse(text)),
+  );
+  const b = tape.connect(
+    url,
+    () => {},
+    (text) => receivedB.push(JSON.parse(text)),
+  );
+  await new Promise(setImmediate);
+  const send = (socket, channel, product_ids, type = 'subscribe') =>
+    tape.send(socket, JSON.stringify({ type, channel, product_ids }));
+  send(a, 'level2', ['BTC-USD', 'ETH-USD']);
+  send(a, 'heartbeats', []);
+  send(b, 'level2', ['SOL-USD']);
+  send(b, 'candles', ['ETH-USD']);
+  const frame = (channel, product) => ({
+    url,
+    text: JSON.stringify({
+      channel,
+      sequence_num: 0,
+      events: [{ type: 'snapshot', product_id: product, updates: [] }],
+    }),
+  });
+  for (const product of ['BTC-USD', 'ETH-USD', 'SOL-USD']) {
+    const record = frame('l2_data', product);
+    const socket = await tape.socketFor(url, record.text);
+    assert.equal(socket, product === 'SOL-USD' ? b : a);
+    tape.deliver(socket, record.text);
+  }
+  const candle = frame('candles', 'ETH-USD');
+  const candleSocket = await tape.socketFor(url, candle.text);
+  assert.equal(candleSocket, b);
+  tape.deliver(candleSocket, candle.text);
+  assert.deepEqual(
+    receivedA.map((r) => r.events[0].product_id),
+    ['BTC-USD', 'ETH-USD'],
+  );
+  assert.deepEqual(
+    receivedB.map((r) => [r.channel, r.events[0].product_id]),
+    [
+      ['l2_data', 'SOL-USD'],
+      ['candles', 'ETH-USD'],
+    ],
+  );
+  send(a, 'level2', ['ETH-USD'], 'unsubscribe');
+  assert.equal(await tape.socketFor(url, frame('l2_data', 'BTC-USD').text), a);
+  assert.equal(await tape.socketFor(url, candle.text), b);
+  await assert.rejects(tape.socketFor(url, frame('l2_data', 'ETH-USD').text), /replay timeout/);
+  tape.close(a);
+  await assert.rejects(tape.socketFor(url, frame('l2_data', 'BTC-USD').text), /replay timeout/);
+  tape.close(b);
+});
 
 test('wait markers advance virtual timers and onTick without sockets or commands, including Bitget', async () => {
   const clock = new ReplayClock(1000);
@@ -1464,16 +1667,22 @@ test('wait markers advance virtual timers and onTick without sockets or commands
     tape.deliverFrame = () => assert.fail('wait delivered a Bitget frame');
     tape.respond = () => assert.fail('wait performed an HTTP request');
     const observed = [];
-    const count = await tape.play((time) => observed.push(['tick', time]), undefined,
-      () => assert.fail('wait executed a command'), clock,
-      () => setTimeout(() => observed.push(['timer']), 10));
+    const count = await tape.play(
+      (time) => observed.push(['tick', time]),
+      undefined,
+      () => assert.fail('wait executed a command'),
+      clock,
+      () => setTimeout(() => observed.push(['timer']), 10),
+    );
     assert.equal(count, 1);
     assert.equal(tape.time, 50);
     assert.equal(Date.now(), 1050);
     assert.deepEqual(observed, [['timer'], ['tick', 50]]);
     assert.equal(tape.commandIndex, 0);
     assert.deepEqual(tape.results, []);
-  } finally { clock.restore(); }
+  } finally {
+    clock.restore();
+  }
 });
 
 test('paced waits observe real timer work without socket traffic or extra commands', async () => {
@@ -1483,9 +1692,16 @@ test('paced waits observe real timer work without socket traffic or extra comman
   let fired = false;
   const ticks = [];
   const before = performance.now();
-  const count = await tape.play((time) => ticks.push(time), undefined,
-    () => assert.fail('wait executed a command'), undefined,
-    () => setTimeout(() => { fired = true; }, 5));
+  const count = await tape.play(
+    (time) => ticks.push(time),
+    undefined,
+    () => assert.fail('wait executed a command'),
+    undefined,
+    () =>
+      setTimeout(() => {
+        fired = true;
+      }, 5),
+  );
   assert(performance.now() - before >= 25);
   assert.equal(fired, true);
   assert.equal(count, 1);

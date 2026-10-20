@@ -34,6 +34,8 @@ pub struct HttpRoute {
     pub authorize: bool,
     pub authorization_header: String,
     pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub header_aliases: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tunnel_url: Option<String>,
 }
@@ -46,8 +48,35 @@ impl Default for HttpRoute {
             authorize: false,
             authorization_header: "Authorization".into(),
             headers: BTreeMap::new(),
+            header_aliases: BTreeMap::new(),
             tunnel_url: None,
         }
+    }
+}
+
+impl HttpRoute {
+    pub(crate) fn alias_headers(&self, headers: &mut Vec<(String, String)>) -> Result<(), String> {
+        for (source, target) in &self.header_aliases {
+            if source.eq_ignore_ascii_case(target) {
+                continue;
+            }
+            let Some(value) = headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(source))
+                .map(|(_, value)| value.clone())
+            else {
+                continue;
+            };
+            if headers
+                .iter()
+                .any(|(name, previous)| name.eq_ignore_ascii_case(target) && *previous != value)
+            {
+                return Err("Engine HTTP header alias conflicts with an existing header".into());
+            }
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case(source));
+            insert_header(headers, target.clone(), value);
+        }
+        Ok(())
     }
 }
 
@@ -962,7 +991,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 48);
+        assert_eq!(examples.len(), 52);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
@@ -1008,6 +1037,11 @@ mod tests {
                 assert_eq!(
                     actual.headers, http.expected.route.headers,
                     "{} HTTP headers",
+                    example.name
+                );
+                assert_eq!(
+                    actual.header_aliases, http.expected.route.header_aliases,
+                    "{} HTTP header aliases",
                     example.name
                 );
                 assert_eq!(
@@ -1060,5 +1094,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn header_aliases_are_optional_case_insensitive_and_reject_conflicts() {
+        let old: HttpRoute = serde_json::from_str(r#"{"mode":"direct","prefix":"","authorize":false,"authorizationHeader":"Authorization","headers":{}}"#).unwrap();
+        assert!(old.header_aliases.is_empty());
+        assert!(
+            !serde_json::to_string(&old)
+                .unwrap()
+                .contains("headerAliases")
+        );
+        let route = HttpRoute {
+            header_aliases: BTreeMap::from([(
+                "Authorization".into(),
+                "Coinbase-Authorization".into(),
+            )]),
+            ..HttpRoute::default()
+        };
+        let mut headers = vec![("aUtHoRiZaTiOn".into(), "Bearer venue-jwt".into())];
+        route.alias_headers(&mut headers).unwrap();
+        assert_eq!(
+            headers,
+            vec![("Coinbase-Authorization".into(), "Bearer venue-jwt".into())]
+        );
+        let mut missing = vec![];
+        route.alias_headers(&mut missing).unwrap();
+        assert!(missing.is_empty());
+        let mut conflicting = vec![
+            ("Authorization".into(), "Bearer venue-jwt".into()),
+            ("coinbase-authorization".into(), "Bearer conflict".into()),
+        ];
+        let error = route.alias_headers(&mut conflicting).unwrap_err();
+        assert_eq!(
+            error,
+            "Engine HTTP header alias conflicts with an existing header"
+        );
+        assert!(!error.contains("Bearer"));
     }
 }

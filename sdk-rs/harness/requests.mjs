@@ -100,16 +100,23 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   return value;
 };
 
-const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
-  .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
-  .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
-  .map(([key, value]) => {
-    if (CLIENT_IDS.has(key)) return [key, value];
-    if (!/^[\[{]/.test(value.trimStart())) return [key, value];
-    try { return [key, JSON.stringify(normalize(parseJson(value), callerIds))]; }
-    catch { return [key, value]; }
-  })
-  .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv))).toString();
+const canonicalParams = (params, callerIds, options = {}) =>
+  new URLSearchParams(
+    [...params]
+      .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
+      .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
+      .filter(([key, value]) => callerIds.has(value) || !options.generatedQueryId?.(key, value))
+      .map(([key, value]) => {
+        if (CLIENT_IDS.has(key)) return [key, value];
+        if (!/^[\[{]/.test(value.trimStart())) return [key, value];
+        try {
+          return [key, JSON.stringify(normalize(parseJson(value), callerIds))];
+        } catch {
+          return [key, value];
+        }
+      })
+      .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv)),
+  ).toString();
 
 export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
@@ -123,7 +130,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (body instanceof URLSearchParams) {
-    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds)}`;
+    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds, options)}`;
     body = Object.fromEntries(body);
   }
   let parsed;
@@ -132,7 +139,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   } catch {
     if (typeof body === 'string' && body.includes('=')) {
       const form = new URLSearchParams(body);
-      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds)}`;
+      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds, options)}`;
       parsed = Object.fromEntries(form);
     } else {
       return `${prefix} ${body}`;
@@ -150,9 +157,21 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
 };
 
 export const subscriptionMessage = (message) => {
-  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  const method = String(
+    message.method ?? message.reqType ?? message.op ?? message.event ?? message.type ?? '',
+  ).toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+    return {
+      op,
+      topics: ['heartbeats', 'user'].includes(message.channel)
+        ? [message.channel]
+        : message.product_ids.map((product) => `${message.channel}.${product}`),
+    };
+  }
+  if (typeof message.channel === 'string' && message.product_ids === undefined)
+    return { op, topics: [message.channel] };
   const topics =
     message.params?.channels ??
     message.params ??
@@ -164,14 +183,19 @@ export const subscriptionMessage = (message) => {
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
-  try { message = typeof text === 'string' ? JSON.parse(text) : text; }
-  catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  try {
+    message = typeof text === 'string' ? JSON.parse(text) : text;
+  } catch {
+    return `WS ${canonicalUrl(url, callerIds, options)} ${text}`;
+  }
   if (options.socketMessage) {
     message = options.socketMessage(message);
     if (message === undefined) return undefined;
   }
   message = options.subscriptionMessage?.(message) ?? message;
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
+  const method = String(
+    message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '',
+  ).toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
     if (message?.params?.cb_id !== undefined) {
@@ -181,11 +205,22 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
+  if (options.phemexProtocol && ['server.ping', 'server.pong'].includes(method)) return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    // Phemex's independent socket audit validates these clocks and HMAC bytes.
+    // Keep the API kind/key exact while comparing fresh connection signatures.
+    if (
+      options.phemexProtocol &&
+      method === 'user.auth' &&
+      Array.isArray(message.params) &&
+      message.params.length === 4
+    ) {
+      message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
+    }
     // KuCoin TS disables public acknowledgements while Rust requests them.
     // The audit independently checks token identity and privateChannel.
     if (options.rust === 'kucoin') delete message.response;
@@ -206,9 +241,13 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
       message.args = message.args.map((arg) => {
         const nested = typeof arg === 'string';
         const payload = nested ? parseJson(arg) : arg;
-        const normalized = { ...payload, timestamp: '<timestamp>', sign: '<signature>',
+        const normalized = {
+          ...payload,
+          timestamp: '<timestamp>',
+          sign: '<signature>',
           ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
-          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) };
+          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
+        };
         return nested ? JSON.stringify(normalized) : normalized;
       });
     }
@@ -238,21 +277,36 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
+  const method = String(
+    message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '',
+  ).toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
+    if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+      if (['heartbeats', 'user'].includes(message.channel))
+        return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
+      return message.product_ids.map((product) =>
+        subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options),
+      );
+    }
+    if (typeof message.channel === 'string' && message.product_ids === undefined)
+      return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
     if (typeof message.topic === 'string') {
       const colon = message.topic.indexOf(':');
       const channel = colon < 0 ? message.topic : message.topic.slice(0, colon);
       const symbols = colon < 0 ? undefined : message.topic.slice(colon + 1);
-      return (symbols === undefined ? [channel] : symbols.split(',').map((symbol) => `${channel}:${symbol}`))
-        .map((topic) => subscriptionKey(url, { ...message, topic }, callerIds, options));
+      return (symbols === undefined ? [channel] : symbols.split(',').map((symbol) => `${channel}:${symbol}`)).map(
+        (topic) => subscriptionKey(url, { ...message, topic }, callerIds, options),
+      );
     }
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) =>
         subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
       );
     }
-    if (options.productSubscriptions && Array.isArray(message.product_ids)) return message.product_ids.map((product) => subscriptionKey(url, {...message,product_ids:[product]},callerIds,options));
+    if (options.productSubscriptions && Array.isArray(message.product_ids))
+      return message.product_ids.map((product) =>
+        subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options),
+      );
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field)
       return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));

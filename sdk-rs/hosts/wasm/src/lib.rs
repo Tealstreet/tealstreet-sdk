@@ -2,11 +2,12 @@
 //!
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
-//! JSON array string, or an empty string when there are none. `wsMessage`
-//! returns `undefined` instead, avoiding empty-string decoding on the hot path.
+//! JSON array string, or an empty string when there are none. `wsMessageActions`
+//! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
 #[cfg(not(any(
     feature = "paradex",
     feature = "bitrue",
+    feature = "coinbase",
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
@@ -19,6 +20,7 @@
     feature = "mexc",
     feature = "bitget",
     feature = "backpack",
+    feature = "phemex",
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
@@ -27,7 +29,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, coinbase, lighter, orderly, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -53,6 +55,8 @@ use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
 };
+#[cfg(feature = "coinbase")]
+use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
@@ -71,6 +75,8 @@ use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "paradex")]
 use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
+#[cfg(feature = "phemex")]
+use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -79,6 +85,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
@@ -87,6 +94,9 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn account_id(&self) -> Option<String> {
+        Engine::account_id(self).map(str::to_owned)
+    }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
@@ -121,6 +131,7 @@ struct KucoinExtra {
 }
 
 #[cfg(any(
+    feature = "coinbase",
     feature = "paradex",
     feature = "binance",
     feature = "apexomni",
@@ -135,6 +146,7 @@ struct KucoinExtra {
     feature = "bitget",
     feature = "bitrue",
     feature = "backpack",
+    feature = "phemex",
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
@@ -145,6 +157,9 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    spot_only: bool,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -156,6 +171,7 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "coinbase",
         feature = "paradex",
         feature = "binance",
         feature = "apexomni",
@@ -167,6 +183,7 @@ struct EngineOptions {
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "phemex",
         feature = "orderly",
         feature = "lighter",
         feature = "bitget",
@@ -179,6 +196,7 @@ struct EngineOptions {
     #[serde(default)]
     key: Option<String>,
     #[cfg(any(
+        feature = "coinbase",
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
@@ -191,6 +209,7 @@ struct EngineOptions {
         feature = "bitget",
         feature = "bitrue",
         feature = "backpack",
+        feature = "phemex",
         feature = "weex",
         feature = "hyperliquid",
         feature = "kraken",
@@ -466,6 +485,7 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "coinbase",
         feature = "paradex",
         feature = "binance",
         feature = "apexomni",
@@ -480,6 +500,7 @@ impl WasmEngine {
         feature = "bitget",
         feature = "bitrue",
         feature = "backpack",
+        feature = "phemex",
         feature = "weex",
         feature = "hyperliquid",
         feature = "kraken",
@@ -507,6 +528,17 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "coinbase")]
+            "coinbase" | "coinbasespot" => Box::new(Engine::new(
+                Coinbase::new(CoinbaseOptions {
+                    key: options.key.unwrap_or_default(),
+                    secret: options.secret.unwrap_or_default(),
+                    public_data_only: options.public_data_only,
+                    spot_only: venue == "coinbasespot" || options.spot_only,
+                    testnet: options.testnet,
+                })
+                .map_err(|error| JsError::new(&error))?,
+            )),
             #[cfg(feature = "paradex")]
             "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
                 testnet: options.testnet,
@@ -603,6 +635,13 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "mexc")]
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "phemex")]
+            "phemex" => Box::new(Engine::new(PhemexPerpetuals::new(PhemexOptions {
+                testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
@@ -760,11 +799,25 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = wsMessage)]
-    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
+    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> String {
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
-        let actions = self.inner.drain();
-        (!actions.is_empty()).then(|| encode(&actions))
+        self.flush()
+    }
+
+    /// Like `wsMessage`, returning `undefined` when there are no host actions.
+    /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
+    #[wasm_bindgen(js_name = wsMessageActions)]
+    pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
+        let actions = self.ws_message(socket, text, now);
+        (!actions.is_empty()).then_some(actions)
+    }
+
+    /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
+    #[wasm_bindgen(js_name = wsMessageBytes)]
+    pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
+        let text = std::str::from_utf8(bytes).ok()?;
+        self.ws_message_actions(socket, text, now)
     }
 
     #[wasm_bindgen(js_name = wsBinary)]
@@ -833,6 +886,11 @@ impl WasmEngine {
         let command = safe_cex_engine::command::decode_command(command_json)?;
         self.inner.handle(now, Event::Command(command));
         Ok(self.flush())
+    }
+
+    #[wasm_bindgen(js_name = accountId)]
+    pub fn account_id(&self) -> Option<String> {
+        self.inner.account_id()
     }
 
     /// Everything that changed since the previous call as one flush frame
@@ -923,6 +981,99 @@ mod tests {
     use safe_cex_engine::Command;
     #[cfg(feature = "asterdex")]
     use safe_cex_engine::model::{CancelOrderRef, StpMode};
+
+    #[derive(Default)]
+    struct Messages {
+        actions: Vec<Action>,
+    }
+
+    impl AnyEngine for Messages {
+        fn account_id(&self) -> Option<String> {
+            None
+        }
+
+        fn start(&mut self, _now: f64) {}
+        fn handle(&mut self, _now: f64, event: Event<'_>) {
+            if let Event::WsMessage { socket, text } = event
+                && text != "quiet"
+            {
+                for prefix in ["first", "second"] {
+                    self.actions.push(Action::WsSend {
+                        socket,
+                        text: format!("{prefix}:{text}"),
+                    });
+                }
+            }
+        }
+        fn drain(&mut self) -> Vec<Action> {
+            std::mem::take(&mut self.actions)
+        }
+        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<&[u8]> {
+            None
+        }
+        fn snapshot(&mut self, _now: f64) -> &[u8] {
+            &[]
+        }
+    }
+
+    #[test]
+    fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
+        let engine = || WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut legacy = engine();
+        let mut optional = engine();
+        assert_eq!(legacy.ws_message(7, "quiet", 1.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 1.), None);
+        let expected = legacy.ws_message(7, "payload", 2.);
+        assert_eq!(
+            expected,
+            r#"[{"op":"wsSend","socket":7,"text":"first:payload"},{"op":"wsSend","socket":7,"text":"second:payload"}]"#
+        );
+        assert_eq!(
+            optional.ws_message_actions(7, "payload", 2.),
+            Some(expected)
+        );
+        assert_eq!(legacy.ws_message(7, "quiet", 3.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
+    }
+
+    #[test]
+    fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
+        let mut legacy = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut bytes = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        // A rejected byte message must neither handle an event nor drain existing actions.
+        bytes.inner.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(7),
+                text: "pending",
+            },
+        );
+        for invalid in [
+            &[0xff][..],
+            &[0xc0, 0xaf],
+            &[0xed, 0xa0, 0x80],
+            &[0xf0, 0x9f],
+        ] {
+            assert_eq!(bytes.ws_message_bytes(7, invalid, 2.), None);
+        }
+        assert_eq!(
+            bytes.ws_message_bytes(7, b"quiet", 3.),
+            Some(legacy.ws_message(7, "pending", 1.))
+        );
+        for text in ["", "ASCII", "é漢🦀\u{fffd}", "a\0b"] {
+            assert_eq!(
+                bytes.ws_message_bytes(7, text.as_bytes(), 4.),
+                Some(legacy.ws_message(7, text, 4.))
+            );
+            assert_eq!(bytes.ws_message_bytes(7, b"quiet", 5.), None);
+        }
+    }
 
     #[cfg(feature = "asterdex")]
     #[test]

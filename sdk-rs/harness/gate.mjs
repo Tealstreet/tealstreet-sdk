@@ -10,8 +10,16 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
+import {
+  fixBlofinAccount,
+  fixWeexConditionals,
+  fixPhemexAccount,
+  fixLighterFills,
+  fixLighterCommands,
+  fixKrakenOutput,
+} from './known-ts-fixes.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
@@ -151,6 +159,20 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // Independent documented payload oracle; paired public spot reference repairs
+  // leave the real TS Store/worker serialization and measured CPU/memory intact.
+  coinbase: (ts) => fixCoinbase(ts, tapeRecords),
+  coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
+  phemex(ts) {
+    // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
+    if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
+    // Phemex zero-open ticker changes remain finite.
+    for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
+    // TS recovery reads missing/unknown affected sides and preserves nonzero
+    // full-snapshot rows while recovering the other hedged leg.
+    // Native tests also guard exact row versions/absence fences, confirmed
+    // cancellation finality, preserved trigger sources and exact split lots.
+  },
   // Paired production fixes, compared without rewriting either replay result:
   // preserve full-depth incremental books; verify subscription acknowledgements;
   // fence polled candles against newer trades and reject older trade buckets;
@@ -760,12 +782,16 @@ for (let run = 0; run < runs; run++) {
   // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
   // synthetic tape declares independent documented query expectations; never
   // derive this reference from the Rust result.
-  if (values.venue === 'kucoin') tapeRecords.filter((r) => r.type === 'command').forEach((record, index) => {
-    if (record.expected !== undefined) {
-      if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op)) throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
-      ts.commands[index] = { ok: record.expected };
-    }
-  });
+  if (values.venue === 'kucoin')
+    tapeRecords
+      .filter((r) => r.type === 'command')
+      .forEach((record, index) => {
+        if (record.expected !== undefined) {
+          if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op))
+            throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
+          ts.commands[index] = { ok: record.expected };
+        }
+      });
   if (!sameCommandResults(ts.commands, rust.commands))
     differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   normalizeBingxPublic(ts);
@@ -839,10 +865,18 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
-if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
+if (venue.family === 'orderly')
+  console.log(
+    `(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`,
+  );
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
+  );
+
+if (venue.family === 'coinbase')
+  console.log(
+    `(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; native JWT and independent oracles checked)`,
   );
 
 const failures = [...differences];

@@ -171,3 +171,24 @@ Isolated parser-feature checks, single-venue size preflight, Binance public and
 private gates, and the final branch-range secret-scan refresh remain before PR
 creation. The extra Paradex size preflight is warranted by its existing narrow
 single-venue budget margin; no budget or gate threshold changes are planned.
+
+### Landing integration — Coinbase/Phemex and size preflight
+
+Merged origin/feat/rust-rewrite at 5c0e437faf before final gates, preserving all
+twenty-two venue features, authenticated account identity discovery and native
+routing header aliases. Independent consumer review confirms the landing's
+optional BALANCE coin tail matches the Rust writer and JS decoder, and the
+BOOK_DELTA/FrameApplier contract remains intact.
+
+The isolated Paradex preflight caught a genuine size regression: 1,269,717
+bytes against the unchanged 1,258,291-byte budget. A runtime opt-in alone did
+not eliminate producer code from WASM. The engine now gates baseline state,
+reset generations and producer branches behind `book-deltas`; native always
+enables it through a target-specific dependency, so workspace WASM builds also
+omit it. The pure writer, wire section and JS reconstruction remain available.
+Default Book layout/clone behavior and the direct full-book flush path are
+preserved. No gate or budget was relaxed.
+
+Independent review of the concrete feature separation passes with no findings.
+Isolated default engine tests: 66 passed; enabled profile: 69 passed; both
+all-target clippy profiles pass. Final size and updated acceptance runs follow.

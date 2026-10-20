@@ -2,6 +2,16 @@
 # https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
 # Exact commit/path/rule/line only; production source and future changes stay scanned.
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
+# Coinbase test sessions use the literal non-credential organizations/test/apiKeys/test.
+7109423877ec7595c9e7735bf2065f6a31ca494d:sdk-rs/venues/coinbase/tests/history.rs:generic-api-key:52
+c410bfed862bd1f75962c1a69fb8a0151c4a6a85:sdk-rs/venues/coinbase/tests/account.rs:generic-api-key:27
+c62a5408611859b331a221d25bff85c81e88cbc0:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:30
+# PEM delimiter strings only: parser labels, then intentionally invalid AAAA test input.
+5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:259
+5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:566
+# Synthetic Phemex websocket HMAC vector, independently generated from literal
+# test key "key" and secret "secret"; the flagged hex string is a signature.
+8b9da50d11d154e7ff999a0cf2823f4b7b49879f:sdk-rs/venues/phemex/tests/sign.rs:generic-api-key:52
 # Kraken replay fixture only: base64 of the literal "replay-secret", paired
 # with "replay-key" and independently checked by kraken-protocol.mjs. No account.
 # Exact historical fingerprint; future source and credential changes stay scanned.

@@ -330,6 +330,7 @@ impl Transport for NetworkTransport {
                     for (name, value) in &route.headers {
                         insert_header(&mut headers, name.clone(), value.clone());
                     }
+                    route.alias_headers(&mut headers)?;
                     if route.authorize {
                         let token = (routing.as_ref().unwrap().tokens)().await?;
                         if !token.is_empty() {

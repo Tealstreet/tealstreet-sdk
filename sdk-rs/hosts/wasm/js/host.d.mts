@@ -49,13 +49,18 @@ export interface EngineHandlers {
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
+  accountId?(): string | undefined;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
+  wsMessage(socket: number, text: string, now: number): string;
+  /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
+  wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  /** Optional UTF-8 entry; invalid bytes are ignored without changing engine state. */
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary?(socket: number, data: Uint8Array, now: number): string;
-  wsMessage(socket: number, text: string, now: number): string | undefined;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
@@ -65,6 +70,7 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  accountId(): string | undefined;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
   start(): void;
   /** Resolves with the command's result for commands that report one. */

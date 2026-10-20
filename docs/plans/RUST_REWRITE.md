@@ -319,7 +319,9 @@ The runnable example uses Binance; the server API accepts other venue engines.
 `BOOK_DELTA` carries only changed `[price, amount]` levels since the previous
 flush (zero deletes). Full `BOOK` replaces the baseline on subscription,
 resnapshot/gap, or market identity changes. Local WASM consumers retain full
-books by default. Network consumers reconstruct sorted levels and cumulative
+books by default. The engine's `book-deltas` feature is enabled by the native
+host; default WASM builds omit the producer and baseline state while retaining
+the shared wire decoder. Network consumers reconstruct sorted levels and cumulative
 totals. A new connection first establishes the current flush boundary before
 its snapshot, so snapshot interleaving cannot omit a later reverted level.
 A slow client is disconnected instead of dropping frames; reconnect starts
@@ -390,8 +392,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| GRVT, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| GRVT, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 
@@ -441,11 +444,11 @@ order amount/filled and display remaining; their position notional is the native
 contract quantity. The worker adapter retains these native quantities in the
 existing TS `extra` fields alongside coin balances.
 
-After the optional coin columns, a `BALANCE` payload may append full per-currency
-balances: `u32 count`, `u32 currency[count]` string references, 8-byte padding,
-then f64 columns `used[count]`, `free[count]`, `total[count]`, `upnl[count]`.
-Currency-only frames first emit the empty coin extension. Absent currency tails
-leave that table unspecified; an appended zero count explicitly clears it.
-Legacy scalar and coin-only payloads retain their exact layout. The host exposes
-the full values as `currencies: Record<string, Balance>` alongside aggregate
-values and the existing optional `coins` table.
+The collateral tail may itself append a spot currency table: `u32 count`, `u32 flags`,
+`u32 currency[count]` string references, 8-byte padding, then f64 columns
+`total`, `free`, `used`, `upnl`. The optional table preserves reserved quantities;
+an absent table leaves currencies unspecified, while an appended zero count
+clears them. Flag bit 0 leaves collateral unspecified, preserving its independent
+absent-versus-empty contract. Writers without collateral insert an empty collateral table before
+this extension. Existing collateral-only and 32-byte balance frames retain their
+layout.

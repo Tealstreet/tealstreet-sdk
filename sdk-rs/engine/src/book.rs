@@ -1,12 +1,15 @@
 //! Price-sorted order book. Levels are (price, amount) pairs; cumulative totals
 //! are computed only when the book is written to a frame, not on every update.
 use crate::wire::{FrameWriter, section};
+#[cfg(feature = "book-deltas")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // A venue may replace the whole Book on a gap. Instance-local counters would
 // mistake two separately loaded snapshots for the same generation.
+#[cfg(feature = "book-deltas")]
 static NEXT_RESET: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(feature = "book-deltas")]
 fn next_reset() -> u64 {
     NEXT_RESET.fetch_add(1, Ordering::Relaxed)
 }
@@ -18,14 +21,17 @@ pub enum BookSide {
 }
 
 #[derive(Debug)]
+#[cfg_attr(not(feature = "book-deltas"), derive(Clone, Default))]
 pub struct Book {
     /// Highest price first.
     bids: Vec<(f64, f64)>,
     /// Lowest price first.
     asks: Vec<(f64, f64)>,
+    #[cfg(feature = "book-deltas")]
     reset: u64,
 }
 
+#[cfg(feature = "book-deltas")]
 impl Default for Book {
     fn default() -> Self {
         Self {
@@ -36,6 +42,7 @@ impl Default for Book {
     }
 }
 
+#[cfg(feature = "book-deltas")]
 impl Clone for Book {
     fn clone(&self) -> Self {
         Self {
@@ -54,7 +61,10 @@ impl Clone for Book {
 
 impl Book {
     pub fn clear(&mut self) {
-        self.reset = next_reset();
+        #[cfg(feature = "book-deltas")]
+        {
+            self.reset = next_reset();
+        }
         self.bids.clear();
         self.asks.clear();
     }
@@ -65,7 +75,10 @@ impl Book {
 
     /// Replace one side with already-sorted levels (venue snapshots arrive sorted).
     pub fn load_sorted(&mut self, side: BookSide, levels: impl IntoIterator<Item = (f64, f64)>) {
-        self.reset = next_reset();
+        #[cfg(feature = "book-deltas")]
+        {
+            self.reset = next_reset();
+        }
         let target = self.side_mut(side);
         target.clear();
         target.extend(levels.into_iter().filter(|(_, amount)| *amount != 0.0));
@@ -73,7 +86,10 @@ impl Book {
 
     /// Adopt a decoded snapshot without allocating a second copy of its levels.
     pub fn load_sorted_owned(&mut self, side: BookSide, mut levels: Vec<(f64, f64)>) {
-        self.reset = next_reset();
+        #[cfg(feature = "book-deltas")]
+        {
+            self.reset = next_reset();
+        }
         levels.retain(|(_, amount)| *amount != 0.0);
         *self.side_mut(side) = levels;
     }
@@ -111,6 +127,7 @@ impl Book {
         &self.asks
     }
 
+    #[cfg(feature = "book-deltas")]
     pub(crate) fn reset_generation(&self) -> u64 {
         self.reset
     }
@@ -244,13 +261,16 @@ mod tests {
         }
         let previous = actual.clone();
         let mut rebuilt = previous.clone();
-        let allocation = rebuilt.bids.as_ptr();
-        rebuilt.clone_from(&previous);
-        assert_eq!(
-            allocation,
-            rebuilt.bids.as_ptr(),
-            "baseline copying reuses capacity"
-        );
+        #[cfg(feature = "book-deltas")]
+        {
+            let allocation = rebuilt.bids.as_ptr();
+            rebuilt.clone_from(&previous);
+            assert_eq!(
+                allocation,
+                rebuilt.bids.as_ptr(),
+                "baseline copying reuses capacity"
+            );
+        }
         // Cover removals before, within and after surviving levels, inserts
         // between levels, unchanged rows and complete removal of one side.
         for price in [30., 15., 1.] {
