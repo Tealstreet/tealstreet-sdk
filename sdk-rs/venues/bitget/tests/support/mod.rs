@@ -19,6 +19,7 @@ pub struct Harness {
     pub closed: Vec<SocketId>,
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
@@ -37,6 +38,7 @@ impl Harness {
             closed: vec![],
             timers: vec![],
             done: vec![],
+            failures: vec![],
             logs: vec![],
             command_errors: vec![],
             command_notices: vec![],
@@ -104,7 +106,8 @@ impl Harness {
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.legacy_text())))
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push(error);
                 }
                 Action::Notice(Notice::StartupFailed { error }) => {
                     panic!("unexpected Bitget startup failure: {error}")

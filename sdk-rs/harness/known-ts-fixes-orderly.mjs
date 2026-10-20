@@ -296,12 +296,12 @@ function correctOrders(account, records, lastPairCommand) {
     const raw = metadata.get(order.id);
     if (!raw) return true;
     const rawType = raw.type ?? raw.order_type;
-    if (['POST_ONLY', 'IOC', 'FOK'].includes(rawType)) change(order, 'type', undefined, 'limit', 'native limit variant');
+    if (['POST_ONLY', 'IOC', 'FOK'].includes(rawType)) missing(order, 'type', 'limit', 'native limit variant');
     const caller = raw.clientOrderId ?? raw.client_order_id;
     if (caller != null && caller !== '') change(order, 'clientOrderId', null, String(caller), 'missing client ID');
     if (order.type === 'limit' && tif(rawType)) missing(order, 'timeInForce', tif(rawType), 'missing native TIF');
     if (['stop_market', 'take_profit_market', 'trailing_stop_market'].includes(order.type)) change(order, 'trigger', null, 'mark_price', 'missing MarkPrice trigger');
-    if (rawType === 'MARKET' && number(raw.price ?? raw.order_price ?? 0) === 0) change(order, 'price', undefined, 0, 'missing zero market price');
+    if (rawType === 'MARKET' && number(raw.price ?? raw.order_price ?? 0) === 0) missing(order, 'price', 0, 'missing zero market price');
     if (finals.has(order.id)) change(order, 'status', 'open', orderStatus(finals.get(order.id)), 'ignored parent terminal status');
     return true;
   });
