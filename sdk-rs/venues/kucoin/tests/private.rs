@@ -41,11 +41,13 @@ impl Harness {
             .iter()
             .find_map(|a| match a {
                 Action::WsConnect {
+                    binary,
                     socket,
                     url,
                     channel,
                     context,
                 } if url.contains("/private?") => {
+                    assert!(!binary, "KuCoin sockets use the text protocol");
                     assert_eq!(*channel, Some(SocketChannel::Private));
                     assert_eq!(
                         context.as_ref().expect("routing feed context").feed,

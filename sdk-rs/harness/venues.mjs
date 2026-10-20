@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import { paradexProtocol } from './paradex-protocol.mjs';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
@@ -513,6 +514,16 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  paradex: {
+    ...paradexProtocol,
+    rust: 'paradex',
+    ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
+    // Effective position leverage differs from configured cross-margin leverage.
+    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
+      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
+    })),
+    tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
   apexomni: {
     rust: 'apexomni',
     ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
