@@ -1164,11 +1164,19 @@ mod product_semantics {
             let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
             if kind == 11 {
                 assert_eq!(
-                    u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap()),
+                    u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
                     1
                 );
+                let data = &frame[at + 8..at + 8 + len];
+                let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+                assert_eq!(count, 1);
+                let rows = (4 + 12 * count).next_multiple_of(8);
                 assert_eq!(
-                    f64::from_le_bytes(frame[at + 8 + len - 8..at + 8 + len].try_into().unwrap()),
+                    f64::from_le_bytes(data[rows..rows + 8].try_into().unwrap()),
+                    50000.0
+                );
+                assert_eq!(
+                    f64::from_le_bytes(data[rows + 8..rows + 16].try_into().unwrap()),
                     0.01
                 );
                 found = true;
