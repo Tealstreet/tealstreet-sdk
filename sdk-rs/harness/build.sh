@@ -19,7 +19,7 @@ if [[ $# -gt 0 ]]; then
   esac
   if [[ $2 == paradex ]]; then
     # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
-    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level=2'
+    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
       --config 'profile.release.package.safe-cex-engine.opt-level=2')
   elif [[ $2 == bitrue ]]; then
     # Spend standalone size headroom on decoder throughput; combined builds keep the size profile.

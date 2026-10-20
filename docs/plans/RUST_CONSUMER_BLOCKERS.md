@@ -557,6 +557,18 @@ publish an empty snapshot or dispose the previous good engine.
   judging rule applies; lifecycle shape alone is not a bug. The bridge audit
   follow-up remains queued until PR #1342 has merged.
 
+- Post-parity preflight: root typecheck 44 tasks and lint 28 tasks pass.
+  Incoming `Action::SignPayload` exposes one exhaustive match in the lane's
+  TxFlow test pump; explicitly reject unexpected delegated signing there,
+  retaining the test's fail-closed behavior. No production change is needed.
+  CI proves the inherited Paradex host-2/engine-2 profile is too large with
+  this lane: 1,292,122 bytes against unchanged 1,258,291. Restore host `z`
+  while retaining landing's engine-2 setting; other profiles/thresholds stay
+  unchanged. Native compile/replay checks remain required. Full SDK unit
+  verification records one 60-second metadata-construction timeout during
+  concurrent work; retain the failure and classify through an isolated run
+  with the same deadline before attributing it or changing source.
+
 ## Historical public replay metrics (6afa artifact)
 
 Prior acceptance runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,

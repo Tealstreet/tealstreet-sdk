@@ -79,6 +79,9 @@ impl Rig {
                     Action::WsConnectWithHeaders { .. } => {
                         panic!("unexpected authenticated upgrade")
                     }
+                    Action::SignPayload { .. } => {
+                        panic!("unexpected delegated signing request")
+                    }
                 }
             }
             if self.engine.has_actions() {
