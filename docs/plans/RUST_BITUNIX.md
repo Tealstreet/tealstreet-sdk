@@ -1402,3 +1402,49 @@ openAt0/readyAt0/holds0. Node24BitunixTSfull28,694frames/150events/errors0
 passesunderconcurrenthelperload+same15sdeadline. No protocolduration,
 timeout/hash/metric/threshold edits. Source released; unchangedBitunix3run
 thenrebuiltBinanceprivate/public controlsrunningsequentiallyCPUquiet.
+
+Bitunixrebuiltcontrols onreviewedcoalescedclockPASS:42frameprivate and
+unchanged3runpublic28,694frames/697markets/tickers/2books/all150events.
+TS/Rust main914.3/824.5ms, steady616.4/464.2ms, retained3.8/2.4MB, peak
+31.7/16.4MB; module792,113/1,258,291bytes. No protocol/hash/deadline changes.
+Binancerebuiltcontrolsrunsequentiallynext; no perfgate/buildoverlap.
+
+BinancerebuiltcontrolsPASS: private14frames/2markets andunchanged3runpublic
+873frames/917markets/783tickers/2books. TS/Rust main247.4/148.8ms, steady
+135.4/69.1ms, retained4.2/2.4MB, peak33.7/12.8MB; module762,710bytes.
+Bitunix/Phemex/Binance controlsallgreen; checkpointbeforenextcombinedmerge.
+
+### Combined landing: Coinbase, Polymarket, GRVT
+
+Merge reviewedorigin5d7589f296 aftercontrols (briefre-read;processunchanged).
+Plan nativepreserves83JSON/binary/scratch/identity/reservationguards; add
+accountID andpredictionsections13/14/pruning inlockstepwithJS. Reserve
+predictiontables plus6metadata strings/market inclUTF8bytes with0/63/64
+unique/shared/longstring no-reallocproofs. New285venue+3engine+2Bybittests
+expectedbeforeourproofs; fullnativechecks, preserveallpriorvenueproduction.
+
+Currencycompatibilityplan revised fromearlierincomingheaderproposal: old
+Frame.balance readslegacyrefs+4 andused/free/total/upnl, ignoresfooterbytes.
+Incomingunversionednewheader+reorderedcolumns ambiguousatN2/samelength.
+KEEPoldlayoutwhole; appendvalidated8-byteversionedmagic+flagsFOOTERonlyfor
+newexplicitCoinbaseStoreopt-in/defaultfalse. Oldreadersdecodecorrectvalues,
+newreaderrecognizesexactfooter/knownbits; absencevsSome[]collateral retained.
+ReservetheOLDtablebytes+8onlywhenfooteremitted. Frozenlegacy0/1/2/63/64
+bytes,crossmodeallocation,distinctcolumns, malformedfooter/sectionboundaries
+proofs required. UpdateRUST_REWRITEcurrencycontract; noheaderheuristics.
+
+Hosts/SDKunion25factories/aliases inclBitunixsecret/bytesfastpath/boundedraw
+transport; CoinbasekeyJSON/mode/routingJWTalias/accountID/CFMbridge, GRVT
+route-derivedsessionProxy/uint64CID/globalcancel, Polytypedauth/prediction
+main+workerhydrate/clear. CoinbaseCIDrejectcontrolchars/nativeboundaries.
+HarnessexplicitShared+typed profiles for3venues, actualsocket/closedauth/
+topicstates, officialHTTPSpublicGETscopes, duplicateheaderrejection, nonce/
+CIDoriginaltype/routescoping, GRVTsessionactivationonlyonactualHTTPdelivery.
+Keep455logicalstartup+strictbooks/candles/outbound/signedmemory/peakbackbone;
+rejectincomingconstructorbaseline/final-bookwaivers. Addconstructornegative
+probes andallnewvariantgates; nativeupstreampacinggaps flaggedforseparate
+quantification, no retimingwithoutconcretegatecausality.
+
+Independentphase+adversarialreviews, fullnative/SDK/helpers androotchecks,
+3newvenuebuild/public/privategates precedereadiness. Expected25matrixrows,
+29public/54private plusBitget4/Aster3cases; require35exactheadgreenCIchecks.
