@@ -1511,6 +1511,8 @@ fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
     );
     assert!(h.engine.store().order(ORDER_ID).is_some());
     assert!(h.engine.store().order("new-1").is_none());
+}
+
 #[test]
 fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
     let mut h = ready();
