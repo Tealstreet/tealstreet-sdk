@@ -26,7 +26,7 @@ const aliases = {
   bybit: ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'],
   cryptocom: ['cryptocom'],
   hyperliquid: ['hyperliquid'],
-  lighter: ['lighter'],
+  lighter: ['lighter', 'lighter-robinhood'],
   mexc: ['mexc'],
   orderly: ['orderly', 'tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],

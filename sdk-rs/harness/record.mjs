@@ -21,6 +21,7 @@ const { values } = parseArgs({
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
     'options-env': { type: 'string' },
+    'tealstreet-ws-route': { type: 'boolean', default: false },
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
@@ -48,11 +49,21 @@ const write = (record) => {
   try { return tape.write(`${JSON.stringify(timeline(policy.sanitize({ t: Date.now() - started, ...record }), loaded))}\n`); }
   catch { recordingFailed = true; throw new Error('Recording refused a protocol record that was not replay-safe'); }
 };
-write({ type: 'meta', epoch: started, private: false, source: 'live' });
+write({ type: 'meta', epoch: started, private: false, source: 'live', ...(values['tealstreet-ws-route'] ? { transport: 'tealstreet-ws-route' } : {}) });
 if (policy.replayOptions) write({ type: 'config', options: policy.replayOptions });
 else if (options.endpoints) write({ type: 'config', options });
 
-const live = nativeTransport();
+let live = nativeTransport();
+if (values['tealstreet-ws-route']) {
+  const [{ createEngineTransport }, { tealstreetTransport }] = await Promise.all([
+    import('../../packages/safe-cex/src/transport/engine.ts'),
+    import('../../packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts'),
+  ]);
+  live = createEngineTransport(values.venue, {
+    ...options, transport: tealstreetTransport, tealstreetWsRoute: true,
+    tealstreetProxy: false, tealstreetTunnel: false,
+  }, live);
+}
 const ordinals = new Map();
 const tickerSymbols = new Set();
 const recording = {
@@ -62,8 +73,7 @@ const recording = {
     const socket = ordinals.get(key) ?? 0;
     ordinals.set(key, socket + 1);
     const connection = live.connect(url, {
-      binary: handlers.binary,
-      headers: handlers.headers,
+      ...handlers,
       onOpen: () => {
         write({ type: 'open', url, socket });
         handlers.onOpen();
@@ -153,7 +163,7 @@ const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
     venue.rust,
-    JSON.stringify(options),
+    JSON.stringify({ ...options, ...recording.engineOptions }),
   ),
   recording,
   {

@@ -85,6 +85,28 @@ fn refresh(e: &mut Engine<Grvt>, timer: TimerId, body: &str) -> Vec<Action> {
     respond(e, &request, body, "")
 }
 #[test]
+fn refresh_cannot_enable_retired_product_kinds_from_an_unexpected_catalog() {
+    let (mut e, timer) = boot();
+    let mut catalog = CATALOG.strip_suffix("]}").unwrap().to_owned();
+    for (kind, id) in [
+        ("FUTURE", "BTC_USDT_Fut_20Oct23"),
+        ("CALL", "BTC_USDT_Call_20Oct23_2800"),
+        ("PUT", "BTC_USDT_Put_20Oct23_2800"),
+    ] {
+        catalog.push_str(&format!(r#",{{"i":"{id}","ih":"0x030502","b":"BTC","q":"USDT","k":"{kind}","ts":"0.1","ms":"0.001","bd":9,"qd":6}}"#));
+    }
+    catalog.push_str("]}");
+    let actions = refresh(&mut e, timer, &catalog);
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].id, "BTC_USDT_Perp");
+    assert_eq!(e.store().tickers().len(), 1);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("get_all_initial_leverage")))
+    );
+}
+#[test]
 fn catalog_refresh_preserves_authenticated_rails_and_fetches_new_market_limits() {
     let (mut e, timer) = boot();
     assert_eq!(

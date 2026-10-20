@@ -173,6 +173,10 @@ jobs:
           - venue: lighter
             books: ETH,BTC
             private_script: rust:private-tape-lighter
+          - venue: lighter-robinhood
+            family: lighter
+            books: ETH,BTC
+            private_script: rust:private-tape-lighter-robinhood
           - venue: bitrue
             books: E-BTC-USDT,E-ETH-USDT
             private_script: rust:private-tape-bitrue
@@ -232,12 +236,12 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex-wasm test
       - name: Build the venue family wasm package
         if: matrix.venue != 'binance'
-        run: yarn rust:build-wasm --venue ${{ matrix.venue }}
+        run: yarn rust:build-wasm --venue ${{ matrix.family || matrix.venue }}
       - name: Check the venue family wasm size budget
-        run: yarn workspace @tealstreet/safe-cex-wasm check-sizes --venue ${{ matrix.venue }}
+        run: yarn workspace @tealstreet/safe-cex-wasm check-sizes --venue ${{ matrix.family || matrix.venue }}
       - name: Lint the isolated venue family
         working-directory: sdk-rs
-        run: cargo clippy --locked -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features venue-${{ matrix.venue }} -- -D warnings
+        run: cargo clippy --locked -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features venue-${{ matrix.family || matrix.venue }} -- -D warnings
       - name: Harness protocol regressions
         if: matrix.venue == 'binance'
         run: yarn rust:test-harness
@@ -251,6 +255,11 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Lighter testnet deployment signing and replay
+        if: matrix.venue == 'lighter' || matrix.venue == 'lighter-robinhood'
+        run: |
+          yarn rust:private-tape-lighter --venue '${{ matrix.venue }}' --testnet --out sdk-rs/harness/tapes/lighter-testnet-private.jsonl
+          yarn rust:gate --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --runs 1 --books ''
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |

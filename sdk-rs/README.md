@@ -61,14 +61,6 @@ a context token callback to `NetworkTransport::with_routing`; see
 into the native host. Secondary signing keys remain unsupported and fail before
 engine startup, so the host cannot silently bypass their distinct read egress.
 
-From the repository root, `corepack yarn rust:build-wasm` builds a separate
-browser/Workers and Node package for each venue family. Use
-`corepack yarn rust:build-wasm --venue hyperliquid` to build one family.
-Bindings live under `hosts/wasm/pkg/{web,node}/<family>/`; aliases such as
-`coinbasespot` share their family's package. SDK and Workers loaders select
-the family before loading WASM. Cargo's default features retain all venues
-for workspace checks; release packages use one `venue-<family>` feature.
-CI checks each family against `harness/wasm-budgets.json`.
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape

@@ -15,6 +15,7 @@ if [[ $# -gt 0 ]]; then
     exit 2
   fi
   case "$2" in
+    lighter-robinhood) set -- --venue lighter ;;
     coinbasespot) set -- --venue coinbase ;;
     tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) set -- --venue orderly ;;
   esac

@@ -84,3 +84,21 @@ Origin advanced to `86ed5e3d2e` (Lighter variants) during these checks. Commit
 this checked merge, then integrate that landing before release: still 26
 families, now 34 public profiles and 61 private variants. No final release or
 performance numbers are claimed for this checkpoint.
+
+## Latest landing integration
+
+Merge `02e9db0e8b`: Lighter Robinhood shares the Lighter binary, including its
+remote signer/provider options; CI normalizes its family selector while keeping
+separate public, private and testnet gates. Incoming GRVT futures fixture and
+product assertions remain intact. Build CLI accepts the Robinhood alias.
+Independent alias, conflict and constructor reviews pass.
+
+All 2,502 Rust tests in 200 groups pass (zero failures/ignored), as do fmt/bans
+and strict native all-target/WASM workspace Clippy. Latest repository checks
+pass 44 typecheck, 28 lint and 27 test tasks; serialized harness 630 and focused
+host 118 pass. Mocked loader tests cannot transform missing newly registered
+family export files yet (four failures retained); rerun after release creates
+all 26 packages. No assertions or thresholds were relaxed. The original
+`86ed5e3d2e` control is building separately; all 264 production Rust/config/host/
+build entries are byte-identical to `02e9db0e8b`, whose changes affect GRVT
+fixtures/tests/docs. Final shared fixtures/helpers will match in both arms.

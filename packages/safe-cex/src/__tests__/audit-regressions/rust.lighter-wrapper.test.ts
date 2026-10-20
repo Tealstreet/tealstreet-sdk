@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, PlaceOrderOpts } from '../../types';
+import type { ExchangeName, ExchangeOptions, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,7 +9,7 @@ import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
 const exchanges: RustEngineExchange[] = [];
-const setup = (options: Partial<ExchangeOptions> = {}) => {
+const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lighter') => {
   const commands: Array<Record<string, unknown>> = [];
   const noop = () => '[]';
   const engine: WasmEngineLike = {
@@ -38,7 +38,7 @@ const setup = (options: Partial<ExchangeOptions> = {}) => {
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
-  const exchange = new RustEngineExchange('lighter', { key: '', secret: '', ...options }, store);
+  const exchange = new RustEngineExchange(name, { key: '', secret: '', ...options }, store);
   exchanges.push(exchange);
   return { exchange, construct, commands };
 };
@@ -52,22 +52,23 @@ const order = (extra: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
 });
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-describe('Rust Lighter wrapper contract', () => {
-  it('registers lighter independently of the Robinhood deployment', () => {
+describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contract', (name) => {
+  const variantSetup = (options: Partial<ExchangeOptions> = {}) => setup(options, name);
+  it('registers lighter and the distinct Robinhood deployment', () => {
     expect(isRustVenue('lighter')).toBe(true);
-    expect(isRustVenue('lighter-robinhood')).toBe(false);
+    expect(isRustVenue('lighter-robinhood')).toBe(true);
   });
   it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])(
     'starts public without a complete signer tuple %j',
     async (options) => {
-      const { exchange, construct } = setup(options);
+      const { exchange, construct } = variantSetup(options);
       expect(exchange.isPublicDataOnly).toBe(true);
       await exchange.start();
       expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
     },
   );
   it('forwards the distinct account and API key indices and fee/slippage options', async () => {
-    const { exchange, construct } = setup({
+    const { exchange, construct } = variantSetup({
       secret: 'private',
       applicationId: '718895',
       apiKeyIndex: '0',
@@ -75,7 +76,7 @@ describe('Rust Lighter wrapper contract', () => {
     });
     expect(exchange.isPublicDataOnly).toBe(false);
     await exchange.start();
-    expect(construct.mock.calls[0][0]).toBe('lighter');
+    expect(construct.mock.calls[0][0]).toBe(name);
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
       applicationId: '718895',
       apiKeyIndex: '0',
@@ -85,8 +86,57 @@ describe('Rust Lighter wrapper contract', () => {
       lighterStopSlippagePct: 2.5,
     });
   });
+  it('preserves remote-only private account reads without serializing callbacks', async () => {
+    const sign = vi.fn();
+    const { exchange, construct } = variantSetup({
+      apiKeyIndex: '0',
+      applicationId: '42',
+      remoteSigner: { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} },
+    });
+    expect(exchange.isPublicDataOnly).toBe(false);
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
+      publicDataOnly: false,
+      lighterRemoteSigner: true,
+      apiKeyIndex: '0',
+    });
+    expect(JSON.parse(construct.mock.calls[0][1]).remoteSigner).toBeUndefined();
+    expect(sign).not.toHaveBeenCalled();
+  });
+  it('keeps payload-only startup public and explicit public-only authoritative', async () => {
+    const { exchange, construct } = variantSetup({ key: 'account', apiKeyIndex: '0', payloadSigner: vi.fn() });
+    expect(exchange.isPublicDataOnly).toBe(true);
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
+    const explicit = variantSetup({ publicDataOnly: true, secret: 'local', apiKeyIndex: '0' });
+    expect(explicit.exchange.isPublicDataOnly).toBe(true);
+  });
+  it('normalizes the existing TS API-key-index input format before crossing WASM', async () => {
+    const { exchange, construct } = variantSetup({ secret: 'local', apiKeyIndex: ' key 3 ' });
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).apiKeyIndex).toBe('3');
+  });
+  it.each(['999', '-1', 'bad', '', undefined])(
+    'rejects invalid API signing index %s during validation without starting',
+    async (apiKeyIndex) => {
+      const { exchange, construct } = variantSetup({ apiKeyIndex });
+      expect(await exchange.validateAccount()).toEqual({
+        error: 'Invalid API key index. Expected an integer from 0 to 255.',
+      });
+      expect(construct).not.toHaveBeenCalled();
+    },
+  );
+  it('forwards legacy provider selection so it cannot silently enable local trading', async () => {
+    const { exchange, construct } = variantSetup({
+      secret: 'local',
+      apiKeyIndex: '0',
+      extra: { lighterSignerProvider: 'legacy' } as ExchangeOptions['extra'],
+    });
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).lighterSignerProvider).toBe('legacy');
+  });
   it('preserves exact integrator indices above the JS safe integer range', async () => {
-    const { exchange, construct } = setup({
+    const { exchange, construct } = variantSetup({
       secret: 'private',
       applicationId: '718895',
       apiKeyIndex: '1',
@@ -98,21 +148,21 @@ describe('Rust Lighter wrapper contract', () => {
   it.each([OrderType.Limit, OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit, OrderType.Conditional])(
     'rejects caller IDs on %s before any host command',
     async (type) => {
-      const { exchange, commands } = setup();
+      const { exchange, commands } = variantSetup();
       await exchange.start();
       await expect(exchange.placeOrder(order({ type, clientOrderId: 'caller' }))).rejects.toThrow();
       expect(commands).toEqual([]);
     },
   );
   it('rejects the whole batch and never mints an apparently supported caller ID', async () => {
-    const { exchange, commands } = setup();
+    const { exchange, commands } = variantSetup();
     await exchange.start();
     expect(exchange.mintClientOrderId(order())).toBeUndefined();
     await expect(exchange.placeOrders([order(), order({ clientOrderId: 'caller', stopLoss: 90 })])).rejects.toThrow();
     expect(commands).toEqual([]);
   });
   it('keeps caller slippage and normalizes execution time ranges to integer milliseconds', async () => {
-    const { exchange, commands } = setup();
+    const { exchange, commands } = variantSetup();
     await exchange.start();
     await exchange.placeOrder(order({ maxSlippagePct: 3 }));
     await exchange.fetchHistoricalFills({ symbol: 'ETH', from: 1700000000.123, to: 1700000001456.9 });

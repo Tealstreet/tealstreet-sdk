@@ -31,6 +31,7 @@ const families = Object.freeze({
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
   lighter: 'lighter',
+  'lighter-robinhood': 'lighter',
   mexc: 'mexc',
   orderly: 'orderly',
   'tealstreet-dex': 'orderly',

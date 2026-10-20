@@ -731,6 +731,7 @@ const KNOWN_TS_FIXES = {
 };
 
 for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
+KNOWN_TS_FIXES['lighter-robinhood'] = KNOWN_TS_FIXES.lighter;
 
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
@@ -890,7 +891,7 @@ for (let run = 0; run < runs; run++) {
       }
       ts.subscriptions = [...feeds].sort();
     }
-    if (values.venue === 'lighter') {
+    if (['lighter', 'lighter-robinhood'].includes(values.venue)) {
       KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }
