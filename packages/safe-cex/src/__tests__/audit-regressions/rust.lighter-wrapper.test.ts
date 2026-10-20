@@ -24,6 +24,7 @@ const setup = (options: Partial<ExchangeOptions> = {}) => {
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
+    wsMessages: noop,
     wsClose: noop,
     httpStart: noop,
     httpChunk: noop,

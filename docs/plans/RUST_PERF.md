@@ -675,3 +675,13 @@ choose whether a production change is justified; predeclare final balanced
 before/after comparisons only once sources/builds are frozen. No favorable
 stopping or hidden initial regressions. Merge phase79 JS host tests currently
 pass, including newly landed routed transport/Workers constructor tests.
+
+
+Merge27d146111d is committed with independent native and JS integration reviews
+passing. Harness215/215, native35/35, host79/79, routed socket181/181 and
+collateral reservation1/1 pass; repository lint28tasks pass. Root retained
+raw arrival clocks through the newly landed routed transport wrapper and relay
+remote-close FIFO (local close still cancels decoding), with two counterexamples.
+Typecheck first run found only the incoming Lighter WasmEngineLike mock lacking
+wsMessages; add the method and rerun. Full14release builds and fresh pinned
+control are in progress under heavy shared-host load; no CPU samples taken.
