@@ -355,3 +355,9 @@ updated TxFlow transport characterization pass. An actual Wasm startup proof
 through the production registry is being added separately. The Coinbase-merged
 release build and workspace checks continue; no Rust production edits followed
 the merge.
+
+Production registry real-Wasm proof passes 2/2: empty API key with distinct
+wallet/agent credentials, markets/tickers/account loading, flat-account leverage
+7 bridged independently of positions, wallet subscriptions on correctly tagged
+native sockets, required headers/public routing, and mainnet rejection before
+I/O. Full merged-state checks and final combined replay follow.
