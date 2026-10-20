@@ -164,7 +164,12 @@ impl KucoinSpot {
                 }
             },
             WriteKind::Amend(old) => match serde_json::from_str::<Ack>(data.get()) {
-                Ok(ack) => job.ids.push(ack.new_order_id.unwrap_or(old).into()),
+                Ok(ack) => job.ids.push(
+                    ack.new_order_id
+                        .filter(|id| !id.is_empty())
+                        .unwrap_or(old)
+                        .into(),
+                ),
                 Err(e) => {
                     cx.done(job.command, Err(e.to_string()));
                     return;

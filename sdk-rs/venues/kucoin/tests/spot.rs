@@ -585,25 +585,28 @@ fn caller_symbol_cancels_an_order_before_any_snapshot_has_seen_it() {
 }
 #[test]
 fn caller_symbol_native_amend_works_before_the_order_is_cached() {
-    let mut h = H::new(true);
-    h.command(Command::AmendOrderWithSymbol {
-        command: 1,
-        id: "uncached-order".into(),
-        symbol: "ETH-USDT".into(),
-        price: Some(12.345),
-        amount: Some(2.345),
-    });
-    let r = h.http("/hf/orders/alter");
-    assert_eq!(
-        serde_json::from_str::<Value>(r.body.as_deref().unwrap()).unwrap(),
-        json!({"symbol":"ETH-USDT","orderId":"uncached-order","newPrice":"12.35","newSize":"2.35"})
-    );
-    h.respond(
-        &r,
-        200,
-        r#"{"code":"200000","data":{"newOrderId":"amended"}}"#,
-    );
-    assert_eq!(h.done(1).unwrap(), json!(["amended"]));
+    for (data, expected) in [
+        (json!({}), "uncached-order"),
+        (json!({"newOrderId":null}), "uncached-order"),
+        (json!({"newOrderId":""}), "uncached-order"),
+        (json!({"newOrderId":"amended"}), "amended"),
+    ] {
+        let mut h = H::new(true);
+        h.command(Command::AmendOrderWithSymbol {
+            command: 1,
+            id: "uncached-order".into(),
+            symbol: "ETH-USDT".into(),
+            price: Some(12.345),
+            amount: Some(2.345),
+        });
+        let r = h.http("/hf/orders/alter");
+        assert_eq!(
+            serde_json::from_str::<Value>(r.body.as_deref().unwrap()).unwrap(),
+            json!({"symbol":"ETH-USDT","orderId":"uncached-order","newPrice":"12.35","newSize":"2.35"})
+        );
+        h.respond(&r, 200, &json!({"code":"200000","data":data}).to_string());
+        assert_eq!(h.done(1).unwrap(), json!([expected]));
+    }
 }
 #[test]
 fn malformed_active_order_rows_never_commit_partial_or_empty_reconciliation() {
