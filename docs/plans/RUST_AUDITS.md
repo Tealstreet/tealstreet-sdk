@@ -184,3 +184,22 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   spot vault signs as vault (TS as master) — confirm; more terminal statuses;
   `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
   not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
+
+### Binance family
+- The known USD-M amend double exposure also hits PM, where TS throws on -2011
+  and Rust re-places (`binance/src/trading.rs:530`): a regression.
+- Medium: PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`);
+  REST candles with `from`+`limit` return the oldest N instead of newest, no
+  1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
+  reject (`trading.rs:397,700`); PM `close: true` with an amount closes the whole
+  position (`trading.rs:1087`); COIN-M unpriced coin excluded from totals
+  (TS counts 1:1 — confirm); CancelOrders with unknown ids reports success
+  without sending (`trading.rs:224`); history maps `EXPIRED_IN_MATCH` to filled
+  (`history.rs:687`); spot/COIN-M history returns plain `[]` instead of
+  unsupported; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
+- Low: fixed `recvWindow`; closePosition conflict cancel in batches; Binance UI
+  STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
+- Confirm (TS bugs Rust fixed): fill price `L` not `ap`; spot fill price on
+  market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
+  `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
+  COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
