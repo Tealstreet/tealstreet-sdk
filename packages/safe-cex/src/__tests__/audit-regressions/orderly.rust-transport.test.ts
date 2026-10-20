@@ -63,9 +63,8 @@ afterEach(() => {
   setDefaultTransport(directTransport);
   setRustEngineTransport(nativeTransport);
   setWasmEngineLoader(async () => {
-    const module = await import('@tealstreet/safe-cex-wasm/engine');
-    if (typeof module.default === 'function') await module.default();
-    return module;
+    const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
+    return loadEngine();
   });
 });
 

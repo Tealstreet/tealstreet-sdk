@@ -8,32 +8,39 @@ import { directTransport } from '../../transport/direct';
 
 const wasm = vi.hoisted(() => ({ initialize: vi.fn(), generation: 0, engines: [] as WasmEngineLike[] }));
 
-vi.mock('@tealstreet/safe-cex-wasm/engine', () => ({
-  default: wasm.initialize,
-  WasmEngine: class {
-    private readonly generation = wasm.generation;
+vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
+  const engineModule = {
+    WasmEngine: class {
+      private readonly generation = wasm.generation;
 
-    constructor() {
-      wasm.engines.push(this);
-    }
+      constructor() {
+        wasm.engines.push(this);
+      }
 
-    start = () => '';
-    command = () => '';
-    takeFrame = () => undefined;
-    snapshotFrame = () => {
-      if (this.generation !== wasm.generation) throw new Error('WASM instance replaced under a live engine');
-      return Uint8Array.of(this.generation);
-    };
-    wsOpen = () => '';
-    wsMessage = () => '';
-    wsClose = () => '';
-    httpStart = () => '';
-    httpChunk = () => '';
-    httpEnd = () => '';
-    httpFailed = () => '';
-    timer = () => '';
-  },
-}));
+      start = () => '';
+      command = () => '';
+      takeFrame = () => undefined;
+      snapshotFrame = () => {
+        if (this.generation !== wasm.generation) throw new Error('WASM instance replaced under a live engine');
+        return Uint8Array.of(this.generation);
+      };
+      wsOpen = () => '';
+      wsMessage = () => '';
+      wsClose = () => '';
+      httpStart = () => '';
+      httpChunk = () => '';
+      httpEnd = () => '';
+      httpFailed = () => '';
+      timer = () => '';
+    },
+  };
+  return {
+    loadEngine: async () => {
+      await wasm.initialize();
+      return engineModule;
+    },
+  };
+});
 
 const accounts: RustEngineExchange[] = [];
 
@@ -131,7 +138,9 @@ it('lets a new account retry failed default initialization while failed accounts
 
 it('keeps custom loader invocation under the registered loader’s control', async () => {
   const { account, setWasmEngineLoader } = await setup();
-  const module = await import('@tealstreet/safe-cex-wasm/engine');
+  const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
+  const module = await loadEngine();
+  wasm.initialize.mockClear();
   const custom = vi.fn(async () => module);
   setWasmEngineLoader(custom);
   await Promise.all([account().start(), account().start()]);

@@ -26,10 +26,10 @@
       "default": "./pkg/node/safe_cex_wasm.js"
     },
     "./engine": {
-      "types": "./js/engine.d.mts",
-      "browser": "./pkg/web/safe_cex_wasm.js",
-      "node": "./pkg/node/safe_cex_wasm.js",
-      "default": "./pkg/web/safe_cex_wasm.js"
+      "types": "./js/loader.d.mts",
+      "browser": "./js/engine.web.mjs",
+      "node": "./js/engine.node.mjs",
+      "default": "./js/engine.web.mjs"
     }
   },
   "scripts": {

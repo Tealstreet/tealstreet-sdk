@@ -347,3 +347,11 @@ Removed the obsolete aggregate funding handler. The independent harness now
 records subscription rejection as failure instead of trusting sent topics.
 Three public cases failed before fixes; public23tests and harness182tests now
 pass. Independent code-correctness re-review reports no remaining findings.
+
+CI exposed a clean-checkout import failure: the engine package export resolved
+directly to generated, ignored WASM glue. Committed conditional Node/browser
+loader entries now defer their literal generated imports until engine startup;
+the SDK's shared initialization promise still covers import and web init.
+With generated artifacts temporarily absent, all10affected CI files plus the
+loader regression pass (11files/468tests). Artifacts restored; real SDK WASM44
+tests, package typecheck/lint and independent code-correctness review pass.

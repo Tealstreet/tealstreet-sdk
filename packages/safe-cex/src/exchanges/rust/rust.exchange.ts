@@ -122,9 +122,8 @@ const defaultWasmLoader = (): Promise<WasmEngineModule> =>
   (defaultWasmInitialization ??= (async () => {
     // wasm-bindgen initialization replaces module-wide memory, including the
     // pointers held by existing accounts. Share pending and completed startup.
-    const module = await import('@tealstreet/safe-cex-wasm/engine');
-    if (typeof module.default === 'function') await module.default();
-    return module;
+    const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
+    return loadEngine();
   })().catch((error) => {
     defaultWasmInitialization = undefined;
     throw error;
