@@ -106,6 +106,13 @@ fn newly_shared_unsupported_commands_complete_without_reads_writes_or_store_muta
     ] {
         for command in [
             Command::FetchStpMode { command: 102 },
+            Command::AmendOrderWithSymbol {
+                command: 102,
+                id: "unseen".into(),
+                symbol: "BTCUSDT".into(),
+                price: Some(100.0),
+                amount: None,
+            },
             Command::SetStpMode {
                 command: 102,
                 mode: StpMode::ExpireBoth,

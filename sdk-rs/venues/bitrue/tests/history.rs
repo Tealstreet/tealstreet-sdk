@@ -1,4 +1,4 @@
-use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
+use safe_cex_engine::model::{Limits, Market, MinMax, Order, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query, Response};
 use safe_cex_venue_bitrue::{Bitrue, Options};
 const SYMBOL: &str = "E-BTC-USDT";
@@ -342,23 +342,225 @@ fn a_full_filtered_native_page_reports_incomplete_instead_of_false_absence() {
     assert!(result(&mut e).unwrap_err().starts_with("INCOMPLETE:"));
 }
 
-#[test]
-fn client_order_id_lookup_fails_explicitly_without_sending_an_http_read() {
-    let mut e = engine();
+// TS oracle: the inherited client-ID helper checks the symbol-scoped
+// store, then Bitrue.fetchOrdersForSymbol's documented v2 openOrders schema.
+// Closed orders are not queried, so absence must never be definitive.
+#[derive(serde::Deserialize)]
+struct Lookup {
+    found: bool,
+    order: Option<LookupOrder>,
+    definitive: Option<bool>,
+}
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LookupOrder {
+    id: String,
+    symbol: String,
+    client_order_id: Option<String>,
+    filled: f64,
+    remaining: f64,
+    time_in_force: Option<String>,
+    extra: Option<std::collections::BTreeMap<String, f64>>,
+}
+const LOOKUP_ROW: &str = r#"{"orderId":2334151155877155281,"clientOrderId":"caller-id","price":59000,"origQty":0.004,"executedQty":0.001,"status":"PART_FILLED","type":"LIMIT","side":"BUY","action":"OPEN","transactTime":1700000000123}"#;
+fn lookup(e: &mut Engine<Bitrue>, symbol: &str, client_order_id: &str) {
     query(
-        &mut e,
+        e,
         Query::OrderByClientId {
-            symbol: SYMBOL.into(),
-            client_order_id: "caller-id".into(),
+            symbol: symbol.into(),
+            client_order_id: client_order_id.into(),
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(
-        !actions
-            .iter()
-            .any(|action| matches!(action, Action::Http(_)))
+}
+fn lookup_request(e: &mut Engine<Bitrue>) -> HttpRequest {
+    e.drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap()
+}
+fn lookup_result(e: &mut Engine<Bitrue>) -> Lookup {
+    serde_json::from_str(&result(e).unwrap()).unwrap()
+}
+fn fetched_order() -> Order {
+    Order {
+        id: "2334151155877155281".into(),
+        parent_id: None,
+        status: safe_cex_engine::model::OrderStatus::Open,
+        symbol: SYMBOL.into(),
+        kind: safe_cex_engine::model::OrderType::Limit,
+        side: safe_cex_engine::model::OrderSide::Buy,
+        price: 59000.0,
+        amount: 0.004,
+        filled: 0.001,
+        remaining: 0.003,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some("caller-id".into()),
+        time_in_force: None,
+        last_update: 1700000000123.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: Some(safe_cex_engine::model::OrderExtra {
+            remaining_native: Some(0.003),
+            filled_in_placement_units: Some(0.001),
+            ..Default::default()
+        }),
+    }
+}
+#[test]
+fn client_lookup_reads_native_open_orders_exactly_without_mutating_account_state() {
+    let mut e = engine();
+    lookup(&mut e, SYMBOL, "caller-id");
+    let r = lookup_request(&mut e);
+    assert_eq!(r.method, safe_cex_engine::Method::Get);
+    assert_eq!(
+        r.url,
+        "https://fapi.bitrue.com/fapi/v2/openOrders?contractName=E-BTC-USDT"
     );
-    assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandDone { command: 99, result: Err(error) })
-        if error.contains("client-order-ID lookup is unsupported"))));
+    assert!(
+        r.headers
+            .iter()
+            .any(|(key, value)| *key == "X-CH-APIKEY" && value == "key")
+    );
+    response(
+        &mut e,
+        r,
+        &format!(r#"{{"code":"0","data":[{LOOKUP_ROW}]}}"#),
+    );
+    let found = lookup_result(&mut e);
+    assert!(found.found);
+    assert_eq!(found.definitive, None);
+    let order = found.order.unwrap();
+    assert_eq!(order.id, "2334151155877155281");
+    assert_eq!(order.client_order_id.as_deref(), Some("caller-id"));
+    assert_eq!(order.symbol, SYMBOL);
+    assert_eq!(order.filled, 0.001);
+    assert_eq!(order.remaining, 0.003);
+    assert_eq!(order.time_in_force.as_deref(), Some("GoodTillCancel"));
+    assert!(order.extra.is_none());
+    assert!(e.store().orders().is_empty());
+    assert!(!e.store().loaded().orders);
+}
+#[test]
+fn client_lookup_cache_hit_does_not_send_a_request_and_is_symbol_scoped() {
+    let mut e = engine();
+    let order = fetched_order();
+    e.store_mut().upsert_order(order.clone());
+    lookup(&mut e, SYMBOL, "caller-id");
+    let found = lookup_result(&mut e);
+    assert!(found.found);
+    assert_eq!(found.order.unwrap().id, order.id);
+    lookup(&mut e, "E-ETH-USDT", "caller-id");
+    let r = lookup_request(&mut e);
+    assert!(r.url.ends_with("contractName=E-ETH-USDT"));
+    response(&mut e, r, r#"{"code":"0","data":[]}"#);
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
+    assert!(missing.order.is_none());
+    assert_eq!(e.store().orders(), &[order]);
+}
+#[test]
+fn client_lookup_checks_identity_exactly_and_never_claims_closed_order_absence() {
+    for id in ["missing", "CALLER-ID", "", "0", "undefined"] {
+        let mut e = engine();
+        lookup(&mut e, SYMBOL, id);
+        let r = lookup_request(&mut e);
+        response(
+            &mut e,
+            r,
+            &format!(r#"{{"code":"0","data":[{LOOKUP_ROW}]}}"#),
+        );
+        let missing = lookup_result(&mut e);
+        assert!(!missing.found);
+        assert_eq!(missing.definitive, Some(false));
+    }
+}
+#[test]
+fn client_lookup_rejects_partial_or_failed_snapshots_without_definitive_misses() {
+    for body in [
+        format!(r#"{{"code":"0","data":[{LOOKUP_ROW},{{"orderId":"malformed"}}]}}"#),
+        format!(r#"{{"code":"0","data":[{LOOKUP_ROW},{LOOKUP_ROW}]}}"#),
+        format!(
+            r#"{{"code":"0","data":[{}]}}"#,
+            LOOKUP_ROW.replace("\"side\":\"BUY\"", "\"side\":\"wrong\"")
+        ),
+        format!(
+            r#"{{"code":"0","data":[{}]}}"#,
+            LOOKUP_ROW.replace(
+                "\"price\":59000",
+                "\"contractName\":\"E-ETH-USDT\",\"price\":59000"
+            )
+        ),
+        r#"{"code":"0"}"#.into(),
+        r#"{"code":"-1","msg":"read denied"}"#.into(),
+    ] {
+        let mut e = engine();
+        lookup(&mut e, SYMBOL, "caller-id");
+        let r = lookup_request(&mut e);
+        response(&mut e, r, &body);
+        let missing = lookup_result(&mut e);
+        assert!(!missing.found, "{body}");
+        assert_eq!(missing.definitive, Some(false));
+        assert!(e.store().orders().is_empty());
+    }
+}
+#[test]
+fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects() {
+    let mut e = engine();
+    lookup(&mut e, SYMBOL, "caller-id");
+    let order = fetched_order();
+    e.store_mut().upsert_order(order.clone());
+    for _ in 0..4 {
+        let r = lookup_request(&mut e);
+        e.handle(
+            1700000000000.0,
+            Event::HttpFailed {
+                request: r.id,
+                error: "network",
+            },
+        );
+    }
+    let found = lookup_result(&mut e);
+    assert!(found.found);
+    assert_eq!(found.order.unwrap().id, order.id);
+    assert_eq!(e.store().orders(), &[order]);
+}
+#[test]
+fn client_lookup_without_private_credentials_never_asserts_definitive_absence() {
+    let mut e = Engine::new(Bitrue::new(Options::default()));
+    lookup(&mut e, SYMBOL, "caller-id");
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
+}
+
+#[test]
+fn client_lookup_preserves_ts_native_and_parent_identity_aliases() {
+    let mut e = engine();
+    let mut order = fetched_order();
+    order.parent_id = Some("parent-id".into());
+    e.store_mut().upsert_order(order);
+    for id in ["2334151155877155281", "parent-id"] {
+        lookup(&mut e, SYMBOL, id);
+        assert!(lookup_result(&mut e).found);
+    }
+}
+
+#[test]
+fn lookup_copy_retains_other_extra_fields_and_does_not_clear_store_unit_metadata() {
+    let mut e = engine();
+    let mut order = fetched_order();
+    order.extra.as_mut().unwrap().remaining_notional = Some(177.0);
+    e.store_mut().upsert_order(order.clone());
+    lookup(&mut e, SYMBOL, "caller-id");
+    let found = lookup_result(&mut e).order.unwrap();
+    assert_eq!(
+        found.extra.unwrap(),
+        std::collections::BTreeMap::from([("remainingNotional".into(), 177.0)])
+    );
+    assert_eq!(e.store().orders(), &[order]);
 }

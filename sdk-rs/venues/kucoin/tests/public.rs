@@ -946,3 +946,32 @@ fn bullet_failures_back_off_and_timed_out_token_responses_cannot_connect() {
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
     );
 }
+
+#[test]
+fn spot_symbol_amend_rejects_once_without_io_or_state_changes_on_futures() {
+    let unstarted = Engine::new(Kucoin::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    for (mut engine, command) in [(unstarted, 71), (ready().0, 72)] {
+        engine.drain_actions().for_each(drop);
+        let before = engine.snapshot_frame(0.0).to_vec();
+        engine.handle(
+            0.0,
+            Event::Command(Command::AmendOrderWithSymbol {
+                command,
+                id: "unseen".into(),
+                symbol: "BTC-USDT".into(),
+                price: Some(100.0),
+                amount: None,
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
+            command: id, result: Err(error),
+        })] if *id == command && error.contains("unsupported"))
+        );
+        assert_eq!(engine.snapshot_frame(0.0), before);
+    }
+}

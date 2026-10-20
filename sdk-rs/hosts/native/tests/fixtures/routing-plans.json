@@ -1,5 +1,1874 @@
 [
   {
+    "name": "kucoin-private-default-how",
+    "exchange": "kucoin",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoin-private-explicit-false-how",
+    "exchange": "kucoin",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoin-public-direct",
+    "exchange": "kucoin",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api-futures.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-private-default-how",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-private-explicit-false-how",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-public-direct",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-secondary-private-how",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "how",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "readHeader": "KC-API-KEY",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "how",
+        "prefix": "https://secondary.invalid/spot",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {},
+        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/spot/https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/spot",
+          "mode": "how",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-secondary-public-cors",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "readHeader": "KC-API-KEY",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "direct",
+        "prefix": "https://secondary.invalid/spot",
+        "authorize": true,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "Origin": "https://trade.tealstreet.io",
+          "Referer": "https://trade.tealstreet.io/",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-dest": "empty"
+        }
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://secondary.invalid/spot/https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "https://secondary.invalid/spot",
+          "mode": "direct",
+          "authorize": true,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "Origin": "https://trade.tealstreet.io",
+            "Referer": "https://trade.tealstreet.io/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "empty"
+          },
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "kucoinspot-secondary-direct-provider",
+    "exchange": "kucoinspot",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "readHeader": "KC-API-KEY",
+      "readPublic": true,
+      "readHttp": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {}
+      },
+      "ws": {
+        "public": {},
+        "private": {},
+        "business": {}
+      },
+      "wsHeaders": {},
+      "venueWsHeaders": {},
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api.kucoin.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {},
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://venue.invalid/opaque-public",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-public",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "private",
+        "original": "wss://venue.invalid/opaque-private",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-private",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "business",
+        "original": "wss://venue.invalid/opaque-business",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://venue.invalid/opaque-business",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
     "name": "breakout-direct-provider",
     "exchange": "breakoutprop",
     "plan": {

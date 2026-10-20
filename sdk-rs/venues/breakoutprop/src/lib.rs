@@ -1153,7 +1153,8 @@ impl Venue for BreakoutProp {
             }
             Command::Query { command, query } => history::query(cx, command, query),
             Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
-            Command::FetchStpMode { command }
+            Command::AmendOrderWithSymbol { command, .. }
+            | Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. } => {

@@ -135,6 +135,28 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(store.markets[0]).toMatchObject({ symbol, precision: { amount: 10 } });
     expect(store.orders[0]).toMatchObject({ id: orderId, amount: 100, filled: 0, remaining: 100 });
     expect(main.store.orders[0].id).toBe(orderId);
+    // Prove this goes through the engine cache, not BaseExchange's JS store.
+    const cachedOrders = store.orders;
+    store.update({ orders: [] });
+    const lookupRequestsBefore = requests.filter((request) =>
+      new URL(request.url).pathname.endsWith('/openOrders'),
+    ).length;
+    expect(await bounded(exchange.findOrderByClientOrderId(symbol, 'seed-caller'), 'cached lookup')).toMatchObject({
+      found: true,
+      order: { id: orderId, clientOrderId: 'seed-caller', symbol },
+    });
+    expect(requests.filter((request) => new URL(request.url).pathname.endsWith('/openOrders'))).toHaveLength(
+      lookupRequestsBefore,
+    );
+    store.update({ orders: cachedOrders });
+    expect(await bounded(exchange.findOrderByClientOrderId(symbol, 'missing-caller'), 'open lookup')).toEqual({
+      found: false,
+      definitive: false,
+    });
+    const lookupRequest = requests.filter((request) => new URL(request.url).pathname.endsWith('/openOrders')).at(-1)!;
+    expect(lookupRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/openOrders?contractName=${symbol}`);
+    expect(lookupRequest.method).toBe('GET');
+    expect(lookupRequest.headers['X-CH-APIKEY']).toBe('replay-key');
     expect(await bounded(exchange.fetchLeverageForSymbol(symbol), 'leverage')).toMatchObject({
       buyLeverage: 25,
       sellLeverage: 25,

@@ -1107,6 +1107,12 @@ impl Venue for Polymarket {
                     ids: orders.into_iter().map(|o| o.id).collect(),
                 },
             ),
+            Command::AmendOrderWithSymbol { command, .. } => {
+                cx.done(
+                    command,
+                    Err("Symbol-scoped amendment is unsupported".into()),
+                );
+            }
             command @ (Command::PlaceOrders { .. }
             | Command::CancelOrders { .. }
             | Command::AmendOrder { .. }

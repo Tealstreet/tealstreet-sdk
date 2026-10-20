@@ -21,6 +21,15 @@ export class Responses {
       if (!this.queues.has(id)) this.queues.set(id, []);
       this.queues.get(id).push(record);
     }
+    for (const queue of this.queues.values()) {
+      if (!queue.some((record) => record.requestOrdinal !== undefined)) continue;
+      const ordinals = queue.map((record) => record.requestOrdinal);
+      if (ordinals.some((ordinal) => !Number.isSafeInteger(ordinal) || ordinal < 0)
+          || new Set(ordinals).size !== queue.length) {
+        throw new Error('HTTP request ordinals must be unique nonnegative integers within each queue');
+      }
+      queue.sort((a, b) => a.requestOrdinal - b.requestOrdinal);
+    }
   }
   respond(method, url, body, commandIndex = 0, timeOrMatch = 0, timeOrHeaders, matchHeaders) {
     // Time, signed headers and pre-consumption validation are independent inputs.
