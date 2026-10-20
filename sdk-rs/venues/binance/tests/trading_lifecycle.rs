@@ -642,3 +642,70 @@ fn spot_cancel_all_keeps_cross_symbol_client_reuse_and_fences_the_old_native() {
         assert_eq!(h.engine.store().order("maker"), Some(&before));
     }
 }
+
+#[test]
+fn historical_spot_lifecycle_before_trade_keeps_delivery_progress_and_the_new_row() {
+    let emitted = |h: &mut Harness| {
+        let Some(frame) = h.engine.take_frame(h.now) else {
+            return Vec::new();
+        };
+        let Some((_, payload)) =
+            safe_cex_engine::wire::sections(frame).find(|(kind, _)| *kind == 11)
+        else {
+            return Vec::new();
+        };
+        let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+        let start = (4 + 12 * count).next_multiple_of(8);
+        (0..count)
+            .map(|index| {
+                let at = start + 16 * index;
+                (
+                    f64::from_le_bytes(payload[at..at + 8].try_into().unwrap()),
+                    f64::from_le_bytes(payload[at + 8..at + 16].try_into().unwrap()),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    for ack_first in [false, true] {
+        for same_symbol in [false, true] {
+            let mut h = ready(Variant::Spot);
+            h.event(Event::Command(Command::CancelSymbolOrders {
+                command: 103,
+                symbol: "BTCUSDT".into(),
+            }));
+            let cancel = h.take("/api/v3/openOrders");
+            if same_symbol {
+                reuse_spot_id(&mut h);
+            } else {
+                h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":44,"s":"ETHUSDT","c":"maker","S":"BUY","o":"LIMIT","X":"NEW","x":"NEW","p":"100","L":"0","q":"9","z":"0","l":"0"}}"#);
+            }
+            let before = h.engine.store().order("maker").unwrap().clone();
+            let _ = emitted(&mut h);
+            if ack_first {
+                h.reply(cancel.id, 200, "", "[]");
+            }
+            // The cumulative cancellation total includes a trade whose actual
+            // execution report arrives later; this lifecycle frame is not a fill.
+            h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":12,"s":"BTCUSDT","c":"cancel-request","C":"maker","S":"BUY","o":"LIMIT","X":"CANCELED","x":"CANCELED","p":"9000","L":"0","q":"7","z":"3","l":"0"}}"#);
+            assert!(emitted(&mut h).is_empty());
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+            fill(&mut h, Variant::Spot, "3", "PARTIALLY_FILLED");
+            fill(&mut h, Variant::Spot, "3", "PARTIALLY_FILLED");
+            assert_eq!(
+                emitted(&mut h),
+                vec![(9100.0, 1.0)],
+                "ack_first={ack_first} same_symbol={same_symbol}"
+            );
+            if !ack_first {
+                h.reply(cancel.id, 200, "", "[]");
+            }
+            fill(&mut h, Variant::Spot, "3", "PARTIALLY_FILLED");
+            assert!(emitted(&mut h).is_empty());
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+            assert!(h.result(103).unwrap().is_ok());
+            h.advance(10_000.0);
+            h.respond("/api/v3/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"9000","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}]"#);
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+        }
+    }
+}

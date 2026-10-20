@@ -185,6 +185,8 @@ against the freshly merged base before implementing on a fresh follow-up branch:
 - History maps `EXPIRED_IN_MATCH` as canceled.
 - Spot/COIN-M history reports unsupported rather than plain empty lists.
 - Sign with `recvWindow` from options.
+- Separate Spot delivery progress from quantified cancel acknowledgements, which
+  can otherwise suppress the matching later TRADE (reverified inherited gap).
 
 Leave every `Confirm`/owner-decision item untouched. Repeat phased independent
 reviews, regression tests, all touched-family gates, PR reviews posted to the
@@ -306,3 +308,25 @@ Raw logs: `/tmp/audit-bb-<profile>-{public,private}.log`, selected builds/sizes
 scripted/documented, without live credentials or funded trading. Existing
 committed public fixtures remain the CI regression oracle; the additional fresh
 captures were also trimmed and gated separately without replacing that coverage.
+
+### Final Spot cursor review correction
+
+- Read-only baseline comparison confirmed that quantified Spot cancel ACKs
+  already advance the execution cursor without emitting a fill at `bd94abb524`.
+  The subsequent matching TRADE is suppressed. This inherited notification gap
+  is now recorded in `RUST_AUDITS.md` and added to the authorized follow-up;
+  this first patch claims derivative execution corrections, not complete Spot
+  execution delivery.
+- The new foreign-symbol historical-event branch introduced a related regression
+  after an **unquantified** cancel: a non-TRADE CANCELED packet advanced the cursor
+  before the genuine TRADE. The correction retains terminal proof without
+  advancing delivery quantity on lifecycle packets, and delivers later TRADE
+  progress independently of terminal flags. Four ACK-order/symbol permutations
+  assert exact fill price/quantity once, preserved new row and stale-read rejection.
+  All 139 Binance tests, strict Clippy and formatting pass; independent review
+  reran 20 lifecycle plus 9 execution-event tests and closed the finding.
+- The initial combined build passes 443 compiled SDK WASM tests, 76 host tests,
+  16 product-semantic tests and 9 scripted live-smoke controls. The Spot-only
+  correction requires a new Binance selected artifact, its nine replay reruns
+  and final combined boundary checks. Bybit and AsterDEX source/artifacts remain
+  unchanged; their recorded replay evidence still applies.

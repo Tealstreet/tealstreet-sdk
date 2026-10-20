@@ -76,6 +76,9 @@ Medium:
   Bybit Demo/Hyro (`account.rs:1824`).~~ Fixed: write/event revision fences plus native terminal retention
   cover in-flight reads and replica-stale reads issued after acknowledgement.
 - REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.
+- Binance Spot quantified cancel acknowledgement can advance the execution
+  cursor before its matching TRADE, losing the execution notification. Reverified
+  on `bd94abb524`; tracked for the Binance follow-up after the derivative fixes.
 - BloFin replays pre-session fills (`blofin/src/account.rs:1231`).
 - Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`,
   kraken spot ignores checksum, asterdex/lighter keep books while waiting.

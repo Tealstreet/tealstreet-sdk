@@ -2089,17 +2089,12 @@ impl BinanceFutures {
                 .copied()
                 .unwrap_or_default();
             let filled = num::parse(&event.z);
-            let previously_terminal = terminal;
             let terminal = terminal
                 || matches!(
                     event.status.as_ref(),
                     "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
                 );
-            if (self.account.unquantified_cancels.contains(&key) || !previously_terminal)
-                && event.x == "TRADE"
-                && filled > previous
-                && num::parse(&event.l) > 0.0
-            {
+            if event.x == "TRADE" && filled > previous && num::parse(&event.l) > 0.0 {
                 cx.fill(Fill {
                     order_id: id,
                     symbol: event.s.to_string(),
@@ -2114,14 +2109,12 @@ impl BinanceFutures {
                     self.account.unquantified_cancels.remove(&key);
                 }
             }
+            // Lifecycle totals do not prove that their trades were delivered.
             self.account
                 .native_executed
                 .entry(key)
-                .and_modify(|seen| {
-                    seen.0 = seen.0.max(filled);
-                    seen.1 |= terminal;
-                })
-                .or_insert((filled, terminal));
+                .and_modify(|seen| seen.1 |= terminal)
+                .or_insert((previous, terminal));
             return;
         }
         let amount = num::parse(&event.q);
