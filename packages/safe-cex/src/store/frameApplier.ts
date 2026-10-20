@@ -219,6 +219,7 @@ export class FrameApplier {
           ...(orders.clientOrderId(i) !== undefined && { clientOrderId: orders.clientOrderId(i) }),
           ...(orders.parentId(i) !== undefined && { parentId: orders.parentId(i) }),
           ...(enums.timeInForce !== undefined && { timeInForce: enums.timeInForce as Order['timeInForce'] }),
+          ...(trigger && { triggerType: trigger }),
           ...(enums.type === 'take_profit_market' && trigger && { tpTriggerType: trigger }),
           ...((enums.type === 'stop_market' || enums.type === 'trailing_stop_market') && trigger && { slTriggerType: trigger }),
           ...(finite(orders.takeProfit[i]) !== undefined && { takeProfit: orders.takeProfit[i] }),
@@ -470,12 +471,17 @@ export class FrameApplier {
     const rows = frame.fills();
     const fills: OrderFillEvent[] = [];
     for (let i = 0; i < (rows?.count ?? 0); i++) {
+      const realizedPnl = rows!.realizedPnl?.[i];
+      const fee = rows!.fee?.[i];
       fills.push({
         id: rows!.orderId(i),
+        orderId: rows!.orderId(i),
         symbol: this.symbol(rows!.market[i]),
         side: rows!.side[i] === 0 ? OrderSide.Buy : OrderSide.Sell,
         price: rows!.rows[i * 2],
         amount: rows!.rows[i * 2 + 1],
+        ...(realizedPnl !== undefined && Number.isFinite(realizedPnl) && { realizedPnl }),
+        ...(fee !== undefined && Number.isFinite(fee) && { fee }),
       } as OrderFillEvent);
     }
     return fills;

@@ -174,6 +174,9 @@ export interface FillRows {
   side: Uint32Array;
   /** `[price, amount]` per execution. */
   rows: Float64Array;
+  /** Optional financial tails; NaN means unreported, including legacy rows. */
+  realizedPnl?: Float64Array;
+  fee?: Float64Array;
   orderId(i: number): string;
 }
 

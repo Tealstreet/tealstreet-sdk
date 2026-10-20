@@ -13,9 +13,9 @@ pub mod wire;
 
 pub use credentials::ReadCredentials;
 pub use engine::{
-    Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
-    PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget,
-    SocketChannel, SocketContext, SocketId, TimerId, Venue,
+    Action, Command, CommandId, Cx, Engine, Event, Fill, FillFinancials, HttpRequest, LogLevel,
+    Method, Notice, PayloadSignRequest, PollTimerBounds, Query, RequestId, RequestRoute, Response,
+    SignatureTarget, SocketChannel, SocketContext, SocketId, TimerId, Venue,
 };
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;

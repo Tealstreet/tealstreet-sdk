@@ -150,6 +150,14 @@ pub struct Fill {
     pub amount: f64,
 }
 
+/// Optional financial values for a live execution, in its venue's event
+/// convention. This is separate from historical execution PnL normalization.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FillFinancials {
+    pub realized_pnl: Option<f64>,
+    pub fee: Option<f64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SocketChannel {
     Public,
@@ -471,7 +479,7 @@ struct Io<P> {
     changed_books: Vec<String>,
     changed_books_active: usize,
     candles: Vec<(String, String, Candle)>,
-    fills: Vec<Fill>,
+    fills: Vec<(Fill, Option<FillFinancials>)>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
 }
@@ -961,7 +969,17 @@ impl<P> Cx<'_, P> {
 
     /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.fills.push(fill);
+        self.io.fills.push((fill, None));
+    }
+
+    /// Preserve optional per-execution financials without inventing values for
+    /// cumulative/order-derived fills. Missing/nonfinite values stay absent.
+    pub fn fill_with_financials(&mut self, fill: Fill, mut financials: FillFinancials) {
+        financials.realized_pnl = financials.realized_pnl.filter(|v| v.is_finite());
+        financials.fee = financials.fee.filter(|v| v.is_finite());
+        let financials =
+            (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
+        self.io.fills.push((fill, financials));
     }
 }
 
@@ -1730,17 +1748,27 @@ impl<V: Venue> Engine<V> {
         if !fills.is_empty() {
             w.begin(section::FILLS);
             w.u32(fills.len() as u32);
-            let orders: Vec<u32> = fills.iter().map(|f| w.string(&f.order_id)).collect();
+            let orders: Vec<u32> = fills.iter().map(|(f, _)| w.string(&f.order_id)).collect();
             w.u32s(orders);
-            w.u32s(fills.iter().map(|f| {
+            w.u32s(fills.iter().map(|(f, _)| {
                 self.store
                     .market_index(&f.symbol)
                     .unwrap_or(crate::wire::NONE)
             }));
-            w.u32s(fills.iter().map(|f| f.side as u32));
+            w.u32s(fills.iter().map(|(f, _)| f.side as u32));
             w.pad();
-            for f in &fills {
+            for (f, _) in &fills {
                 w.f64s([f.price, f.amount]);
+            }
+            if fills.iter().any(|(_, financials)| financials.is_some()) {
+                w.f64s(fills.iter().map(|(_, financials)| {
+                    financials.and_then(|v| v.realized_pnl).unwrap_or(f64::NAN)
+                }));
+                w.f64s(
+                    fills
+                        .iter()
+                        .map(|(_, financials)| financials.and_then(|v| v.fee).unwrap_or(f64::NAN)),
+                );
             }
             w.end();
         }
@@ -1826,6 +1854,113 @@ fn apply_signature(
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
+
+    fn execution() -> Fill {
+        Fill {
+            order_id: "9007199254740995".into(),
+            symbol: "A".into(),
+            side: OrderSide::Buy,
+            price: 99.,
+            amount: 1.,
+        }
+    }
+
+    #[test]
+    fn fill_financials_leave_legacy_bytes_identical_when_absent() {
+        for financials in [
+            None,
+            Some(FillFinancials::default()),
+            Some(FillFinancials {
+                realized_pnl: Some(f64::NAN),
+                fee: Some(f64::INFINITY),
+            }),
+        ] {
+            let mut engine = frame_engine();
+            engine.store.set_markets(vec![market("A")]);
+            engine.take_frame(0.);
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            if let Some(financials) = financials {
+                cx.fill_with_financials(execution(), financials);
+            } else {
+                cx.fill(execution());
+            }
+            let frame = engine.take_frame(1.).unwrap();
+            let fills = crate::wire::sections(frame)
+                .find(|(kind, _)| *kind == section::FILLS)
+                .unwrap()
+                .1;
+            let mut expected = Vec::new();
+            for word in [1u32, 0, 0, OrderSide::Buy as u32] {
+                expected.extend(word.to_le_bytes());
+            }
+            for value in [99f64, 1.] {
+                expected.extend(value.to_le_bytes());
+            }
+            assert_eq!(
+                fills, expected,
+                "absent financials must preserve the old payload"
+            );
+            assert!(engine.take_frame(1.).is_none(), "fill must flush once");
+        }
+    }
+
+    #[test]
+    fn fill_financial_columns_preserve_missing_zero_and_negative_values_once() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.fill(execution());
+            cx.fill_with_financials(
+                execution(),
+                FillFinancials {
+                    realized_pnl: Some(0.),
+                    fee: Some(0.),
+                },
+            );
+            cx.fill_with_financials(
+                execution(),
+                FillFinancials {
+                    realized_pnl: Some(-3.5),
+                    fee: Some(f64::NAN),
+                },
+            );
+        }
+        assert!(
+            crate::wire::sections(engine.account_snapshot_frame(1.))
+                .all(|(kind, _)| kind != section::FILLS)
+        );
+        let frame = engine.take_market_frame(1.).unwrap();
+        let fills = crate::wire::sections(frame)
+            .find(|(kind, _)| *kind == section::FILLS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 3);
+        assert_eq!(fills.len(), 136);
+        let floats: Vec<_> = fills[40..]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|value| f64::from_le_bytes(*value))
+            .collect();
+        assert_eq!(&floats[..6], &[99., 1., 99., 1., 99., 1.]);
+        assert!(floats[6].is_nan());
+        assert_eq!(&floats[7..9], &[0., -3.5]);
+        assert!(floats[9].is_nan());
+        assert_eq!(floats[10], 0.);
+        assert!(floats[11].is_nan());
+        assert!(engine.take_market_frame(1.).is_none());
+        assert!(engine.take_frame(1.).is_none());
+    }
 
     #[test]
     fn command_errors_are_attributed_before_done_but_replyless_errors_stay_visible() {

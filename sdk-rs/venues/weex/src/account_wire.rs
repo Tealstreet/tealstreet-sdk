@@ -462,4 +462,25 @@ pub struct FillRow<'a> {
     pub fill_size: f64,
     #[serde(deserialize_with = "number")]
     pub fill_value: f64,
+    #[serde(default, deserialize_with = "optional_fill_number")]
+    pub fill_fee: Option<f64>,
+    #[serde(default, deserialize_with = "optional_fill_number")]
+    pub realize_pnl: Option<f64>,
+}
+
+// Optional financial metadata must not suppress an otherwise valid execution.
+fn optional_fill_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum N<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Str<'a>),
+        Other(serde::de::IgnoredAny),
+    }
+    let value = match N::deserialize(d)? {
+        N::Bare(n) => Some(n),
+        N::Text(s) => s.parse().ok(),
+        N::Other(_) => None,
+    };
+    Ok(value.filter(|n| n.is_finite()))
 }

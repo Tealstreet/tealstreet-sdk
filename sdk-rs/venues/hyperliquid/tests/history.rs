@@ -67,6 +67,7 @@ fn inclusive_fill_paging_preserves_distinct_identical_executions_and_rebate_sign
     let rows = result(&mut e);
     assert_eq!(rows.as_array().unwrap().len(), 2);
     assert_eq!(rows[0]["commission"], -0.01);
+    assert_eq!(rows[0]["realizedPnl"], 2., "historical PnL remains gross");
     assert!(rows[0].get("positionSide").is_none());
 }
 #[test]

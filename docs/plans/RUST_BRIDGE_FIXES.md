@@ -829,3 +829,24 @@ The artifact also contains the financial/native-first-identity source frozen
 for that rebuild; it does not contain subsequent parser or identity batches.
 Public fixtures prove the real account ABI and mapping, not funded private
 reconciliation or REST resync completion. Bulk closes are the following slice.
+
+### Phase 5 financial/wire checkpoint
+
+Implemented optional financial fill tails without changing legacy row prefixes
+or bytes when metadata is absent. Native HL/MEXC/WEEX producers preserve their
+established live conventions and execution dedup/counts; historical gross PnL
+remains unchanged. Independent review caught HL's old default-zero raw fields
+inventing reported zeroes: native presence now remains optional, net PnL needs
+both reported values, and fee presence is independent. Generic triggerType and
+fill orderId now reach SDK consumers; the actual chaser accepts decoded fills.
+Native/host/SDK financial source and fixture reviews PASS after that fix.
+
+Checks: 368 core plus three-venue native cases, including six new functions and
+a strengthened history assertion; strict native Clippy, fmt/bans and whitespace
+checks pass. All 149 host JS tests pass, including 20 wire cases. Five new SDK
+frame/transfer/chaser cases, SDK types and strict scoped lint pass. An initial
+SDK fixture used the wrong enum export and exact float equality for chaser's
+derived filledSize; these fixtures were corrected without changing production
+math. The independent frame fixture also now encodes generic triggerType.
+Actual producer-to-SDK acceptance remains part of final combined private gates;
+the component evidence is explicitly separate from the 48 public account tests.

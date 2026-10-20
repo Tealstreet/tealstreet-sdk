@@ -3,7 +3,7 @@
 use crate::{Connection, HEARTBEAT_MS, MexcFutures, Pending, WS, sign, wire::*};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
+use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
@@ -401,13 +401,19 @@ impl MexcFutures {
                     return;
                 }
                 if raw.vol > 0.0 {
-                    cx.fill(Fill {
-                        order_id: raw.order_id.to_string(),
-                        symbol,
-                        side: side(raw.side),
-                        price: raw.price,
-                        amount: raw.vol * m.contract_size.unwrap_or(1.0),
-                    });
+                    cx.fill_with_financials(
+                        Fill {
+                            order_id: raw.order_id.to_string(),
+                            symbol,
+                            side: side(raw.side),
+                            price: raw.price,
+                            amount: raw.vol * m.contract_size.unwrap_or(1.0),
+                        },
+                        FillFinancials {
+                            realized_pnl: raw.profit.or(raw.realized_pnl),
+                            fee: raw.fee.map(f64::abs),
+                        },
+                    );
                 }
             }
             "push.personal.position.mode" => {

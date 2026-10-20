@@ -19,6 +19,12 @@ pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         Err(serde::de::Error::custom("nonfinite number"))
     }
 }
+// Preserve field absence without accepting explicit invalid/null values that
+// the existing required-number decoder rejects.
+fn reported_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    number(d).map(Some)
+}
+
 pub fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     #[derive(Deserialize)]
     struct N(#[serde(deserialize_with = "number")] f64);
@@ -301,10 +307,10 @@ pub struct FillRow<'a> {
     pub dir: Cow<'a, str>,
     #[serde(default, deserialize_with = "optional_number")]
     pub start_position: Option<f64>,
-    #[serde(default, deserialize_with = "number")]
-    pub closed_pnl: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub fee: f64,
+    #[serde(default, deserialize_with = "reported_number")]
+    pub closed_pnl: Option<f64>,
+    #[serde(default, deserialize_with = "reported_number")]
+    pub fee: Option<f64>,
     #[serde(default, borrow)]
     pub fee_token: Cow<'a, str>,
     #[serde(default)]

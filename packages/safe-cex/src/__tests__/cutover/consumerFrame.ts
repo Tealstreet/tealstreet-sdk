@@ -149,7 +149,7 @@ export function consumerFrame(
       (row.close === undefined ? 0 : (8 | (row.close ? 4 : 0)) << 16) |
       (rejection.indexOf(row.extra?.rejectReason) << 20) |
       (tif.indexOf(row.timeInForce) << 24) |
-      (trigger.indexOf(row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType) << 28);
+      (trigger.indexOf(row.triggerType ?? (row.type === 'take_profit_market' ? row.tpTriggerType : row.slTriggerType)) << 28);
     table(
       7,
       [

@@ -314,6 +314,10 @@ impl Hyperliquid {
                     request.valid = false;
                     return;
                 };
+                // Historical queries keep their established zero defaults and
+                // gross realized-PnL convention, independent of live metadata.
+                let fee = fill.fee.unwrap_or(0.);
+                let closed_pnl = fill.closed_pnl.unwrap_or(0.);
                 if fill.time < request.from || fill.time > request.to {
                     return;
                 }
@@ -353,9 +357,9 @@ impl Hyperliquid {
                         price: fill.px,
                         qty: fill.sz,
                         side: side(&fill.side),
-                        commission: fill.fee,
+                        commission: fee,
                         commission_asset: asset.into(),
-                        realized_pnl: fill.closed_pnl,
+                        realized_pnl: closed_pnl,
                         maker: !fill.crossed,
                         venue_reported_revenue: fill.builder_fee.map(f64::abs),
                         venue_reported_revenue_asset: fill.builder_fee.map(|_| asset.to_owned()),
@@ -367,19 +371,11 @@ impl Hyperliquid {
                         &fill.fee_token
                     };
                     for (kind, value, category, suffix) in [
-                        ("REALIZED_PNL", fill.closed_pnl, "realized_pnl", "pnl"),
+                        ("REALIZED_PNL", closed_pnl, "realized_pnl", "pnl"),
                         (
-                            if fill.fee < 0.0 {
-                                "REBATE"
-                            } else {
-                                "COMMISSION"
-                            },
-                            -fill.fee,
-                            if fill.fee < 0.0 {
-                                "rebate"
-                            } else {
-                                "commission"
-                            },
+                            if fee < 0.0 { "REBATE" } else { "COMMISSION" },
+                            -fee,
+                            if fee < 0.0 { "rebate" } else { "commission" },
                             "fee",
                         ),
                     ] {

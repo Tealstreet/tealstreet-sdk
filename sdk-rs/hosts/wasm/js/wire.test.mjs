@@ -492,3 +492,78 @@ test('frame envelope refuses truncated section headers, payloads and trailing by
   extra.set(new Uint8Array(buffer));
   assert.throws(() => new Frame(extra.buffer), /trailing/);
 });
+
+function fillFrame(rows, financials) {
+  const count = rows.length;
+  const data = Math.ceil((4 + count * 12) / 8) * 8;
+  const length = data + count * 16 + (financials ? count * 16 : 0);
+  return numericFrame([
+    { kind: SECTION.FILLS, length, write(view, at) {
+      view.setUint32(at, count, true);
+      for (let i = 0; i < count; i++) {
+        view.setUint32(at + 4 + i * 4, NONE, true);
+        view.setUint32(at + 4 + count * 4 + i * 4, i, true);
+        view.setUint32(at + 4 + count * 8 + i * 4, i % 2, true);
+        view.setFloat64(at + data + i * 16, rows[i][0], true);
+        view.setFloat64(at + data + i * 16 + 8, rows[i][1], true);
+        if (financials) {
+          view.setFloat64(at + data + count * 16 + i * 8, financials[i][0], true);
+          view.setFloat64(at + data + count * 24 + i * 8, financials[i][1], true);
+        }
+      }
+    } },
+    { kind: SECTION.STATUS, length: 16, write(view, at) {
+      view.setUint32(at, 31, true);
+      view.setFloat64(at + 8, 123, true);
+    } },
+  ]);
+}
+
+test('legacy fills retain exact row offsets without consuming the following section', () => {
+  for (const rows of [[], [[100, 2]], [[100, 2], [101, 3]]]) {
+    const frame = fillFrame(rows);
+    const fills = frame.fills();
+    assert.equal(fills.count, rows.length);
+    assert.deepEqual([...fills.rows], rows.flat());
+    assert.deepEqual([...fills.market], rows.map((_, i) => i));
+    assert.deepEqual([...fills.side], rows.map((_, i) => i % 2));
+    assert.equal(fills.realizedPnl, undefined);
+    assert.equal(fills.fee, undefined);
+    if (rows.length) assert.equal(fills.orderId(0), undefined);
+    assert.equal(frame.status().latency, 123);
+  }
+});
+
+test('fill financial tails survive transfer with missing, zero and negative values', () => {
+  const frame = fillFrame([[100, 2], [101, 3], [102, 4]], [[NaN, NaN], [0, 0], [-3.5, -0.25]]);
+  const fills = frame.fills();
+  assert.deepEqual([...fills.rows], [100, 2, 101, 3, 102, 4]);
+  assert.deepEqual([...fills.realizedPnl], [NaN, 0, -3.5]);
+  assert.deepEqual([...fills.fee], [NaN, 0, -0.25]);
+  // A reader using only the legacy prefix still sees the unchanged values.
+  const section = frame.first(SECTION.FILLS);
+  const legacy = new Float64Array(frame.buffer, section.offset + 40, 6);
+  assert.deepEqual([...legacy], [...fills.rows]);
+  assert.equal(frame.status().loaded, 31);
+});
+
+test('fill decoder rejects truncated and ambiguous tails before constructing column views', () => {
+  for (const length of [0, 1, 4, 8, 16, 24, 40, 48, 56]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length, write(view, at) {
+      if (length >= 4) view.setUint32(at, 2, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section/);
+  }
+  for (const count of [0x10000000, 0x80000000, 0xffffffff]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length: 8, write(view, at) {
+      view.setUint32(at, count, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section count/);
+  }
+  for (const length of [40, 56, 64]) {
+    const frame = numericFrame([{ kind: SECTION.FILLS, length, write(view, at) {
+      view.setUint32(at, 1, true);
+    } }]);
+    assert.throws(() => frame.fills(), /invalid fill section length/);
+  }
+});

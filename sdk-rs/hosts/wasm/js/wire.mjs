@@ -436,12 +436,26 @@ export class Frame {
     const section = this.first(SECTION.FILLS);
     if (!section) return undefined;
     const { buffer } = this;
+    if (section.offset % 8 || section.length < 4) throw new Error('invalid fill section header');
     const count = new Uint32Array(buffer, section.offset, 1)[0];
+    // Bound the count before constructing typed views or aligning offsets.
+    // Arithmetic alignment avoids the 32-bit wrap of the legacy helper.
+    const end = section.offset + section.length;
+    if (count > Math.floor((section.length - 4) / 28)) throw new Error('invalid fill section count');
+    const data = Math.ceil((section.offset + 4 + count * 12) / 8) * 8;
+    const legacyEnd = data + count * 16;
+    if (legacyEnd > end || (end !== legacyEnd && end !== legacyEnd + count * 16))
+      throw new Error('invalid fill section length');
     const orderId = new Uint32Array(buffer, section.offset + 4, count);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const side = new Uint32Array(buffer, section.offset + 4 + count * 8, count);
-    const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 12), count * 2);
-    return { count, market, side, rows, orderId: (i) => this.string(orderId[i]) };
+    const rows = new Float64Array(buffer, data, count * 2);
+    return { count, market, side, rows, orderId: (i) => this.string(orderId[i]),
+      ...(end !== legacyEnd ? {
+        realizedPnl: new Float64Array(buffer, legacyEnd, count),
+        fee: new Float64Array(buffer, legacyEnd + count * 8, count),
+      } : {}),
+    };
   }
 }
 

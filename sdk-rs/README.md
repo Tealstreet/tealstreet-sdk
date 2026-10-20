@@ -93,3 +93,19 @@ TypeScript retirement are separate adoption work.
 Older tapes classify public/private sockets sharing a URL from authentication;
 explicit connection ordinals take precedence. Request matching preserves caller
 IDs and JSON wire types; only generated IDs and documented volatile fields vary.
+
+## Live execution financials
+
+`Cx::fill` retains the original FILLS payload. Venues with authoritative
+per-execution values can use `fill_with_financials`: if either optional value is
+finite, the payload appends one realized-PnL f64 column followed by one fee f64
+column, both indexed by the existing fill rows. Missing values are NaN; zero is
+retained. The JavaScript reader exposes optional `realizedPnl` and `fee` arrays.
+Legacy rows, IDs and event counts are unchanged, and account snapshots never
+consume these events. Synthetic or cumulative-order fills do not invent values.
+
+Financial conventions remain those of each live venue event. Hyperliquid close
+events report net realized PnL (`closedPnl - fee`) and the execution fee; opening
+fills omit both. MEXC and WEEX retain their live realized-PnL fields and absolute
+fees. This does not change the separate gross realized-PnL convention used by
+historical execution queries.

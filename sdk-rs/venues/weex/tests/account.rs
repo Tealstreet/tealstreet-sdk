@@ -993,3 +993,34 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         }
     }
 }
+
+#[test]
+fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing_dedup() {
+    let (mut e, actions) = started(true);
+    let socket = private_socket(&actions);
+    let text = r#"{"e":"fill","d":[{"id":"f1","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100"},{"id":"f2","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":"-2","realizePnl":"0"},{"id":"f3","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":0,"realizePnl":-3},{"id":"f4","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":{},"realizePnl":"NaN"}]}"#;
+    for _ in 0..2 {
+        e.handle(NOW, Event::WsMessage { socket, text });
+    }
+    let frame = e.take_market_frame(NOW).unwrap();
+    let payload = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 4);
+    assert_eq!(payload.len(), 184);
+    let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+    for row in 0..4 {
+        assert_eq!([value(56 + row * 16), value(64 + row * 16)], [1000., 0.1]);
+    }
+    assert!(value(120).is_nan());
+    assert_eq!([value(128), value(136)], [0., -3.]);
+    assert!(
+        value(144).is_nan(),
+        "malformed metadata cannot discard a valid fill"
+    );
+    assert!(value(152).is_nan());
+    assert_eq!([value(160), value(168)], [2., 0.]);
+    assert!(value(176).is_nan());
+    assert!(e.take_market_frame(NOW).is_none());
+}
