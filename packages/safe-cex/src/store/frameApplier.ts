@@ -331,7 +331,12 @@ export class FrameApplier {
       changed = true;
       break;
     }
-    if (changed) this.store.update(update);
+    // A current-state read is not another independent venue observation. Its
+    // pending stream frame still owns order/position freshness when it arrives.
+    if (changed) {
+      if (frame.accountRead?.()) this.store.update(update, false, 'account-read');
+      else this.store.update(update);
+    }
   }
 
   private symbol(market: number): string {

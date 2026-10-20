@@ -1601,6 +1601,8 @@ impl<V: Venue> Engine<V> {
         let mut writer = FrameWriter::new(buffer, now);
         self.store
             .write(&self.store.account_snapshot(), &mut writer);
+        writer.begin(section::ACCOUNT_READ);
+        writer.end();
         self.io.snapshot = writer.finish();
         &self.io.snapshot
     }
@@ -2056,7 +2058,8 @@ mod streaming_tests {
                 section::POSITIONS,
                 section::BALANCE,
                 section::SETTINGS,
-                section::STATUS
+                section::STATUS,
+                section::ACCOUNT_READ
             ]
         );
         for kind in [section::ORDERS, section::POSITIONS, section::SETTINGS] {

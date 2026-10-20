@@ -70,7 +70,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
   );
   running.push(exchange);
   const setNativeHedged = (isHedged: boolean) => { nativeSettings.isHedged = isHedged; };
-  return { exchange, construct, commands, store, setNativeHedged };
+  return { exchange, construct, commands, store, setNativeHedged, engine };
 };
 
 describe('Aster Rust wrapper account and typed command boundary', () => {
@@ -219,7 +219,9 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   });
 
   it('serves engine-owned public metadata and the account alias query', async () => {
-    const { exchange, store, commands, setNativeHedged } = fixture();
+    const { exchange, store, commands, setNativeHedged, engine } = fixture();
+    // This case reads native account mode; other fixtures keep the older ABI.
+    engine.accountSnapshotFrame = () => engine.takeFrame(0, false)!;
     store.update({
       markets: [
         {

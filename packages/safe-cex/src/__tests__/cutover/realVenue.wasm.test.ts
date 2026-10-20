@@ -15,10 +15,19 @@ import {
 } from '../../exchanges/rust/rust.exchange';
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
 import { realVenue } from './realVenue';
+
+const accountApplier = (store: DefaultStore, name: ExchangeName) => new FrameApplier(
+  store,
+  ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(name),
+  name === 'bitgetinverse',
+  ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(name),
+  name === 'binanceinverse',
+);
 
 // Clock synchronization is host policy. Supplying a local server-time source
 // keeps the real worker lifecycle without its unrelated live Bybit time read.
@@ -152,7 +161,8 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       worker.sendSnapshot();
       expect(frames.length).toBeGreaterThan(before);
       const lateStore = new DefaultStore();
-      new FrameApplier(lateStore).apply(new Frame(frames.at(-1)!));
+      const lateApplier = accountApplier(lateStore, name);
+      lateApplier.apply(new Frame(frames.at(-1)!));
       // A late HTTP reply may update native state just after the periodic
       // flush. Wait for the real store mirror to catch up with the snapshot;
       // this is bounded eventual consistency, not an artificial local flush.
@@ -236,6 +246,64 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
             ),
           ).toBe(true);
       }
+
+      // Current-account reads use the real native ABI even in public fixtures.
+      // Native spot/default position rails need not be empty: derive the exact
+      // private baseline with the same published-unit decoder as the worker.
+      const exchange = worker.exchange as RustEngineExchange;
+      const baselineFrame = new Frame(exchange.snapshotFrame()!);
+      const baseline = new DefaultStore();
+      accountApplier(baseline, name).apply(baselineFrame);
+      lateApplier.apply(baselineFrame);
+      const baselineBooks = lateApplier.books(baselineFrame);
+      const privateBaseline = structuredClone({
+        orders: baseline.orders,
+        positions: baseline.positions,
+        balance: baseline.balance,
+        fetchedLeverage: baseline.fetchedLeverage,
+      });
+      const symbol = baseline.markets[0].symbol;
+      worker.store.update({
+        orders: [{
+          id: `ghost-order-${name}`, symbol, side: OrderSide.Buy,
+          status: OrderStatus.Open, type: OrderType.Limit,
+          price: 100, amount: 1, remaining: 1, filled: 0, reduceOnly: false, lastUpdate: 1,
+        }],
+        positions: [{
+          id: `ghost-position-${name}`, symbol, side: PositionSide.Long,
+          contracts: 1, entryPrice: 100, notional: 100, leverage: 2,
+          unrealizedPnl: 0, liquidationPrice: 50,
+        }],
+        balance: { free: 987654, used: 123456, total: 1111110, upnl: 42 },
+      });
+      const workerIds = { ...worker.store.updateIds };
+      const lateIds = { ...lateStore.updateIds };
+      const workerTickers = structuredClone(worker.store.tickers);
+      const lateTickers = structuredClone(lateStore.tickers);
+      const fills = vi.fn();
+      exchange.on('fill', fills);
+      const previousFrames = frames.length;
+      exchange.syncAccountState();
+      expect(frames.length).toBe(previousFrames + 1);
+      const accountFrame = new Frame(frames.at(-1)!);
+      expect.soft(accountFrame.accountRead(), `${name}: missing transferred ACCOUNT_READ marker`).toBe(true);
+      lateApplier.apply(accountFrame);
+      for (const store of [worker.store, lateStore]) {
+        expect(store.orders).toEqual(privateBaseline.orders);
+        expect(store.positions).toEqual(privateBaseline.positions);
+        expect(store.balance).toEqual(privateBaseline.balance);
+        expect(store.fetchedLeverage).toEqual(privateBaseline.fetchedLeverage);
+      }
+      expect.soft(worker.store.updateIds, `${name}: account reads must not invent worker freshness`).toEqual(workerIds);
+      expect.soft(lateStore.updateIds, `${name}: transferred account reads must not invent main freshness`).toEqual(lateIds);
+      expect(worker.store.tickers).toEqual(workerTickers);
+      expect(lateStore.tickers).toEqual(lateTickers);
+      expect(lateApplier.books(accountFrame)).toEqual([]);
+      expect(lateApplier.books(baselineFrame)).toEqual(baselineBooks);
+      expect(accountFrame.candles()).toBeUndefined();
+      expect(accountFrame.fills()).toBeUndefined();
+      expect(fills).not.toHaveBeenCalled();
+      exchange.off('fill', fills);
     },
     20_000,
   );

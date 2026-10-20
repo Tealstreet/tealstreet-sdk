@@ -806,3 +806,26 @@ domains unchanged. Verify routes/signing, required/missing/large IDs,
 public-only/missing credentials and malformed/error results. GRVT tests separate
 main/trading IDs and stale-session responses; Paradex tests expired JWT queue
 and refresh. Native batches precede consolidated SDK/standalone integration.
+
+### SDK current-state and read-freshness checkpoint
+
+Current native queries, default cancel-all symbol selection and direct CLI/
+chaser decisions now synchronize the engine state. ACCOUNT_READ applies and
+forwards rows without manufacturing streaming observation counters. Independent
+SDK, CLI/chaser and read-freshness reviews PASS. Checks pass: 501 SDK cases in
+32 files (25 new account controls), 545 CLI cases in 15 files (ten new decision
+controls), 18 chaser-instance cases, SDK/CLI types and strict scoped lint.
+Core/host marker checks and source reviews pass; ordinary Store bulk counters
+and venue-global cancel-all paths retain their assertions.
+
+The new actual Binance case proved RED on the previous combined artifact in
+exactly marker presence and worker/main freshness, while native ghost clearing
+already worked. After the official rebuild all 48 registered actual venue cases
+pass, including real worker transfer, native private baseline restoration,
+read marker/counters and public/event preservation. Both web/node artifacts are
+12,474,948 bytes, SHA256
+e5afbf13da1938ee254d045e34609745ec001205f114d1a44152ee06ba128b38.
+The artifact also contains the financial/native-first-identity source frozen
+for that rebuild; it does not contain subsequent parser or identity batches.
+Public fixtures prove the real account ABI and mapping, not funded private
+reconciliation or REST resync completion. Bulk closes are the following slice.

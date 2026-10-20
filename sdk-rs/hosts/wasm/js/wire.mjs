@@ -22,6 +22,7 @@ export const SECTION = {
   INSTRUMENT_CLASSIFICATIONS: 16,
   DERIVATIVE_PRODUCTS: 17,
   POSITION_GREEKS: 18,
+  ACCOUNT_READ: 19,
 };
 
 export const NONE = 0xffffffff;
@@ -158,6 +159,13 @@ export class Frame {
 
   string(index) {
     return this.strings?.get(index);
+  }
+
+  /** A synchronous read does not represent a fresh streaming observation. */
+  accountRead() {
+    const section = this.first(SECTION.ACCOUNT_READ);
+    if (section && section.length !== 0) throw new Error('Invalid account read marker');
+    return section !== undefined;
   }
 
   /** Markets, replacing any earlier table: row i is market index i. */

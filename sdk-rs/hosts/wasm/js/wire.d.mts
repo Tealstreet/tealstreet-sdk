@@ -18,6 +18,7 @@ export const SECTION: {
   INSTRUMENT_CLASSIFICATIONS: 16;
   DERIVATIVE_PRODUCTS: 17;
   POSITION_GREEKS: 18;
+  ACCOUNT_READ: 19;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -182,6 +183,7 @@ export class Frame {
   /** Engine time of the flush, ms. */
   readonly time: number;
   string(index: number): string | undefined;
+  accountRead(): boolean;
   markets(): MarketTable | undefined;
   predictionMarkets(): PredictionMarketTable | undefined;
   instrumentClassifications(): InstrumentClassificationTable | undefined;

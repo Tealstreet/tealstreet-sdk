@@ -295,6 +295,7 @@ export interface Exchange {
   validateAccount: () => Promise<ValidateAccountResult>;
   fetchPositions: (symbols?: string[]) => Promise<Position[]>;
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
+  syncAccountState: () => void;
   start: () => Promise<void>;
   nuke: (tries?: number) => Promise<void>;
   nukePositions: (tries?: number) => Promise<void>;
@@ -769,6 +770,9 @@ export class BaseExchange implements Exchange {
     await Promise.reject(new Error('Not implemented'));
     return [];
   };
+
+  /** Synchronize an in-process native account mirror before a store-based decision. No network refresh. */
+  syncAccountState = (): void => {};
 
   fetchMarkets = async (): Promise<Market[]> => {
     await Promise.reject(new Error('Not implemented'));

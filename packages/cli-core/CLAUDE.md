@@ -44,6 +44,14 @@ every brand; `brand.flags` only decides which spelling help shows.
 
 ## Preprocess pipeline (`src/preprocess/`)
 
+Native exchanges expose an optional `syncAccountState()` read seam. Connected
+commands call it before selecting orders/positions or sizing. Account-dependent
+preprocess constants, loops and conditions synchronize before reading the store;
+conditions repeat that read per check. This is a local native-state snapshot,
+not network refresh. Session management and ticker-only predicates stay usable
+without a private snapshot. Read failures follow the normal visible command
+error path rather than placing against a stale mirror.
+
 Every command string runs through `preprocessCommand` before dispatch:
 
 1. **`expandRepeats`** — `repeat N (...)` blocks expand recursively

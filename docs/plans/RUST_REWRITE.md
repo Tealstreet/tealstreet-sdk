@@ -114,6 +114,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 16 | `INSTRUMENT_CLASSIFICATIONS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][3]` (native symbolType, marketRegion, underlyingTicker); absent and explicitly empty strings differ |
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
+| 19 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve

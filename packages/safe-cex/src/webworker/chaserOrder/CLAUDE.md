@@ -5,6 +5,12 @@ that follow a target price (typically chasing the bid/ask). One
 `ChaserOrderInstance` per active chase; lifecycle managed by
 `chaserOrderManagerInstance` (singleton).
 
+Creation synchronizes the exchange's current native account state before
+capturing its starting position. A pending frame flush must not make the chase
+target start from a stale position; unavailable native state fails before any
+placement. TS exchanges keep their ordinary local store read through a no-op
+Base seam.
+
 Completed chasers are not history rows. Every internal completion path routes
 through `cleanupInstance`, which detaches listeners, cancels remaining IDs, and
 splices the instance from the singleton. The postprocessor also excludes a

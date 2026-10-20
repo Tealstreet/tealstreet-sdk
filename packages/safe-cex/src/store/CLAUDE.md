@@ -109,6 +109,13 @@ bumps from `update()`, a wholesale refresh can be pruned as
 unchanged. If you add a new bulk-replacement helper, bump the
 relevant `updateIds.*`.
 
+Native `ACCOUNT_READ` frames are the explicit exception: FrameApplier uses
+`update(changes, false, 'account-read')` to apply and notify their current values
+without advancing order/position freshness. Reading the same native state is
+not another venue observation; the pending ordinary stream frame owns that
+freshness increment. The marker travels with transferred frames so worker and
+main apply the same rule. Ordinary bulk updates retain their existing counters.
+
 An attempted mutation of a missing row is a no-op: `removeOrder` and
 `updatePosition` must not advance an updateId unless they find and mutate the
 target. Advancing the counter without notifying makes the next unrelated store

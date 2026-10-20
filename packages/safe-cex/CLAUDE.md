@@ -89,8 +89,20 @@ migration guidance to the explicit port policy. Existing gateway/application
 owners must adopt this API deliberately; a Rust registry entry does not migrate
 their configuration. The policy controls live feed ownership, not routing,
 credentials, supported venue products, or whether explicit public REST queries
-are allowed. `fetchBalance` reads current native reconciled state, as do the
-Rust adapter's other store-backed account reads.
+are allowed.
+
+Rust `fetchOrders`, `fetchPositions`, `fetchBalance` and `fetchPositionMode` wait
+for the relevant native readiness flags on cold starts, then apply and forward
+the current native account snapshot. This closes the store-flush delay without
+requesting a network resync. Public-only engines with no requested private
+readiness reject once metadata is ready; explicitly loaded native empties remain
+valid. Missing account-snapshot support, terminal engines
+and disposal reject instead of returning cached rows. Synchronous in-process
+decisions can call `syncAccountState()` once native metadata is ready; the Base
+implementation is a harmless no-op for TS adapters. Native account reads carry
+an explicit frame marker so both worker and main preserve observation freshness
+counters; ordinary stream frames still advance them. Recursive notification
+readers reuse the already-applied state rather than publishing another snapshot.
 
 ## Rust engine failure
 

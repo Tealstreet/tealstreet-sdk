@@ -294,6 +294,7 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   private pollingPolicy?: { interval: number | null; promise?: Promise<void> };
+  private syncingAccountState = false;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
@@ -1110,6 +1111,14 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
 
+  cancelAllOrders = async () => {
+    const symbols = new Set((await this.fetchOrders()).map((order) => order.symbol));
+    for (const symbol of symbols) {
+      if (this.isDisposed) break;
+      await this.cancelSymbolOrders(symbol);
+    }
+  };
+
   getAccount = async (): Promise<ExchangeAccount> => {
     if (['coinbase', 'coinbasespot'].includes(this.name)) {
       if (!this.host) await this.start();
@@ -1131,7 +1140,7 @@ export class RustEngineExchange extends BaseExchange {
   setAllLeverage = async (leverage: number) => {
     if (orderlyNames.has(this.name)) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
-      for (const position of this.store.positions) {
+      for (const position of await this.fetchPositions()) {
         if (!this.isDisposed) await this.setLeverage(position.symbol, leverage);
       }
     }
@@ -1174,7 +1183,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   // The engine reconciles orders and positions itself; reads serve its state.
-  /** Public reads wait for native data, independently of private reconciliation. */
+  /** Reads wait only for their native sections, independently of unrelated reconciliation. */
   private untilNativeData = (flag: number, label: string): Promise<void> => {
     const ready = new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
@@ -1185,7 +1194,12 @@ export class RustEngineExchange extends BaseExchange {
       };
       const wake = () => {
         const failure = this.engineFailure ?? this.startupFailure;
-        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during public read'));
+        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during native read'));
+        else if (
+          this.isPublicDataOnly &&
+          this.nativeLoaded & LOADED_FLAG.MARKETS &&
+          (flag & (LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) & ~this.nativeLoaded) !== 0
+        ) finish(new Error(`Native ${label} is unavailable for a public-data-only account`));
         else if (
           (this.nativeLoaded & flag) === flag &&
           (!(flag & LOADED_FLAG.TICKERS) || !this.sharedPublicFeed || this.sharedPublicReady)
@@ -1196,7 +1210,7 @@ export class RustEngineExchange extends BaseExchange {
       this.startupWaiters.add(wake);
       wake();
     });
-    // Own the background startup rejection even when a public read finishes first.
+    // Own the background startup rejection even when one native section finishes first.
     void this.start().catch((error: unknown) => {
       this.startupFailure ??= error instanceof Error ? error : new Error(String(error));
       for (const wake of this.startupWaiters) wake();
@@ -1221,8 +1235,28 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) throw new Error('Exchange disposed');
   };
 
-  /** Native reconciliation owns refresh; account consumers read the current balance. */
-  fetchBalance = async () => this.store.balance;
+  /** Read native account state without consuming deltas or requesting network reconciliation. */
+  override syncAccountState = (): void => {
+    this.assertEngineAlive();
+    if (!this.host) throw new Error('Rust engine is not started');
+    if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) throw new Error('Native market catalog is not ready');
+    // Store state commits before notification; nested decision readers can use
+    // that state without recursively publishing another account snapshot.
+    if (this.syncingAccountState) return;
+    this.syncingAccountState = true;
+    try {
+      this.receiveFrame(this.host.accountSnapshot());
+    } finally {
+      this.syncingAccountState = false;
+    }
+    this.assertEngineAlive();
+  };
+
+  fetchBalance = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.BALANCE, 'balance');
+    this.syncAccountState();
+    return this.store.balance;
+  };
 
   fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
     this.assertOptionQueries();
@@ -1251,13 +1285,23 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  fetchOrders = async (symbols?: string[]) =>
-    symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;
+  fetchOrders = async (symbols?: string[]) => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.ORDERS, 'orders');
+    this.syncAccountState();
+    return symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;
+  };
 
-  fetchPositions = async (symbols?: string[]) =>
-    symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+  fetchPositions = async (symbols?: string[]) => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.POSITIONS, 'positions');
+    this.syncAccountState();
+    return symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+  };
 
-  fetchPositionMode = async () => Boolean(this.store.options.isHedged);
+  fetchPositionMode = async () => {
+    await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.POSITIONS, 'position mode');
+    this.syncAccountState();
+    return Boolean(this.store.options.isHedged);
+  };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
     if (this.name === 'breakoutprop') throw new Error('Not implemented');

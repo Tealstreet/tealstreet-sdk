@@ -39,6 +39,8 @@ pub mod section {
     pub const INSTRUMENT_CLASSIFICATIONS: u16 = 16;
     pub const DERIVATIVE_PRODUCTS: u16 = 17;
     pub const POSITION_GREEKS: u16 = 18;
+    /// Current account read, not a new streaming observation.
+    pub const ACCOUNT_READ: u16 = 19;
 }
 
 pub mod status_flag {

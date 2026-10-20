@@ -3,6 +3,24 @@ import { test } from 'node:test';
 
 import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState } from './wire.mjs';
 
+test('account read markers survive transfer and do not change legacy frames', () => {
+  const buffer = new ArrayBuffer(24);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, SECTION.ACCOUNT_READ, true);
+  assert.equal(new Frame(structuredClone(buffer)).accountRead(), true);
+  view.setUint16(16, SECTION.STATUS, true);
+  assert.equal(new Frame(buffer).accountRead(), false);
+  const invalid = new ArrayBuffer(32);
+  new Uint8Array(invalid).set(new Uint8Array(buffer));
+  const bad = new DataView(invalid);
+  bad.setUint16(16, SECTION.ACCOUNT_READ, true);
+  bad.setUint32(20, 8, true);
+  assert.throws(() => new Frame(invalid).accountRead(), /Invalid account read marker/);
+});
+
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
   const encoded = strings.map((text) => encoder.encode(text));

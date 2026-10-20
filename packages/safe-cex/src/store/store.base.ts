@@ -528,7 +528,7 @@ export class DefaultStore implements Store {
     this.updateOrdersStatus(orders, status);
   };
 
-  update = (changes: StoreUpdate, fromWorker = false) => {
+  update = (changes: StoreUpdate, fromWorker = false, source?: 'account-read') => {
     let normalizedChanges: Partial<Writable<StoreUpdate>> = changes;
     const ensureMutableChanges = () => {
       if (normalizedChanges === changes) {
@@ -622,10 +622,10 @@ export class DefaultStore implements Store {
     // skipping the bump, which left consumers like `ChaserOrderManager`
     // — gating their per-frame `data.orders.filter(...)` work on
     // `data.updateIds.orders` — blind to wholesale changes.
-    if (normalizedChanges.orders !== undefined && !shouldAdoptWorkerOrderUpdateId) {
+    if (normalizedChanges.orders !== undefined && !shouldAdoptWorkerOrderUpdateId && source !== 'account-read') {
       this.state.updateIds.orders += 1;
     }
-    if (normalizedChanges.positions !== undefined && !shouldAdoptWorkerPositionUpdateId) {
+    if (normalizedChanges.positions !== undefined && !shouldAdoptWorkerPositionUpdateId && source !== 'account-read') {
       this.state.updateIds.positions += 1;
     }
 
