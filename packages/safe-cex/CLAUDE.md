@@ -45,6 +45,14 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 `docs/plans/RUST_REWRITE.md` for deletion blockers; no TS venue may be removed
 merely because its name is registered in Rust.
 
+## Exchange event listeners
+
+`BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
+One throwing listener cannot starve later listeners for the same event; errors
+are reported through `console.error` with venue, event and original cause.
+Reporting emits no error/log event, so failures in those listeners cannot recurse.
+The inherited once/off/context and subscription-snapshot behavior stays intact.
+
 ## Rust public-feed ownership
 
 Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or

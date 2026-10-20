@@ -228,15 +228,122 @@ fn success(response: Response<'_>) -> Result<(), String> {
     struct Envelope<'a> {
         #[serde(borrow)]
         error: Option<&'a serde_json::value::RawValue>,
+        #[serde(borrow)]
+        message: Option<&'a serde_json::value::RawValue>,
     }
-    if !(200..300).contains(&response.status) {
-        return Err(format!("Paradex HTTP {}", response.status));
-    }
-    if let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(response.body)
-        && let Some(error) = envelope.error
-        && !matches!(error.get(), "null" | "\"\"")
-    {
-        return Err("Paradex request rejected".into());
+    let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
+    let error = envelope
+        .as_ref()
+        .and_then(|e| e.error)
+        .filter(|error| !matches!(error.get(), "null" | "\"\""));
+    if !(200..300).contains(&response.status) || error.is_some() {
+        let mut details = Vec::new();
+        if let Some(error) = error {
+            if let Ok(text) = serde_json::from_str::<std::borrow::Cow<'_, str>>(error.get()) {
+                details.push(text.into_owned());
+            } else {
+                #[derive(serde::Deserialize)]
+                struct Detail {
+                    code: Option<String>,
+                    message: Option<String>,
+                }
+                if let Ok(detail) = serde_json::from_str::<Detail>(error.get()) {
+                    details.extend(detail.code);
+                    details.extend(detail.message);
+                }
+            }
+        }
+        if let Some(message) = envelope
+            .and_then(|e| e.message)
+            .and_then(|m| serde_json::from_str::<std::borrow::Cow<'_, str>>(m.get()).ok())
+            .filter(|m| !m.is_empty())
+        {
+            details.push(message.into_owned());
+        }
+        let context = if (200..300).contains(&response.status) {
+            "Paradex request rejected".into()
+        } else {
+            format!("Paradex HTTP {}", response.status)
+        };
+        return Err(if details.is_empty() {
+            context
+        } else {
+            let detail: String = details.join(": ").chars().take(512).collect();
+            format!("{context}: {detail}")
+        });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn rejection_retains_only_structured_venue_reasons_with_status_context() {
+        for (status, body, expected) in [
+            (
+                400,
+                r#"{"error":"INVALID_PRICE","message":"outside price bands","signature":"private"}"#,
+                "Paradex HTTP 400: INVALID_PRICE: outside price bands",
+            ),
+            (
+                200,
+                r#"{"error":{"code":"REJECTED","message":"not enough margin"}}"#,
+                "Paradex request rejected: REJECTED: not enough margin",
+            ),
+            (503, "sensitive upstream dump", "Paradex HTTP 503"),
+            (
+                200,
+                r#"{"error":"REJECTED","message":123}"#,
+                "Paradex request rejected: REJECTED",
+            ),
+            (
+                200,
+                r#"{"error":"REJECTED","message":{"detail":"denied"}}"#,
+                "Paradex request rejected: REJECTED",
+            ),
+            (
+                400,
+                r#"{"message":"market is inactive"}"#,
+                "Paradex HTTP 400: market is inactive",
+            ),
+        ] {
+            assert_eq!(
+                success(Response {
+                    status,
+                    headers: "",
+                    body
+                })
+                .unwrap_err(),
+                expected
+            );
+        }
+        for body in ["", "{}", r#"{"error":null}"#, r#"{"error":""}"#] {
+            assert!(
+                success(Response {
+                    status: 200,
+                    headers: "",
+                    body
+                })
+                .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn rejection_details_are_bounded_without_dumping_other_response_fields() {
+        let body = format!(
+            r#"{{"error":"REJECTED","message":"{}","headers":"not for logging"}}"#,
+            "reason".repeat(200)
+        );
+        let error = success(Response {
+            status: 400,
+            headers: "",
+            body: &body,
+        })
+        .unwrap_err();
+        assert_eq!(error.chars().count(), "Paradex HTTP 400: ".len() + 512);
+        assert!(!error.contains("not for logging"));
+    }
 }

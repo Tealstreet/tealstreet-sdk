@@ -392,7 +392,6 @@ impl Paradex {
             Ok(crate::sbe::Public::Other) => {}
             Err(error) => {
                 cx.log(LogLevel::Warning, error);
-                self.public_recover(cx);
             }
         }
     }

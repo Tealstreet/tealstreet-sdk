@@ -275,3 +275,11 @@ fabricates funding. Final all-source gates continue against this artifact.
 Owner wind-down: finish this public-startup PR/reviews/green CI/merge, then stop
 without starting the planned private-row/ticker/app-payload follow-up. Record
 all unmerged assignment items with file locations in the requested aimux handoff.
+
+Latest landing `f895a98f26` includes Paradex/listener PR#1352. Normal integration
+retains both the nullable-summary and malformed-SBE public regressions; independent
+Paradex and SDK emitter integration reviews pass. The zero-balance artifact
+passed445 actual Wasm SDK cases before this new integration. Full root tests
+have exposed additional old mock loaders that preload JS flags without native
+frames; repair their scripted startup evidence, keeping runtime decoded proof
+and existing timeouts. Repeat final affected gates against the integrated source.
