@@ -357,6 +357,9 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, String> {
+        if opts.stp_mode.is_some() {
+            return Err("Per-order self-trade prevention is unsupported on GRVT".into());
+        }
         if opts.bybit_bbo.is_some() || opts.bybit_slippage_tolerance_ticks.is_some() {
             return Err("Bybit-specific order options are unsupported on GRVT".into());
         }
@@ -663,6 +666,7 @@ impl Grvt {
                                 client_order_id: None,
                                 max_slippage_pct: None,
                                 close: Some(false),
+                                stp_mode: None,
                                 bybit_bbo: None,
                                 bybit_slippage_tolerance_ticks: None,
                             };
@@ -1097,6 +1101,7 @@ impl Grvt {
                         client_order_id: None,
                         max_slippage_pct: None,
                         close: source.close,
+                        stp_mode: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
                     };

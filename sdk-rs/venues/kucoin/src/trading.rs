@@ -442,6 +442,7 @@ impl Kucoin {
             },
             trigger_price: None,
             max_slippage_pct: None,
+            stp_mode: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
             stop_loss: sl,

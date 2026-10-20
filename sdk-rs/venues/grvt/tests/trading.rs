@@ -153,6 +153,7 @@ fn opts() -> PlaceOrderOpts {
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
         close: None,
+        stp_mode: None,
     }
 }
 fn command(e: &mut Engine<Grvt>, c: Command) -> Vec<Action> {
@@ -373,6 +374,93 @@ fn bybit_specific_options_reject_the_entire_batch_before_any_write() {
                 .any(|action| matches!(action, Action::Http(_)))
         );
     }
+}
+#[test]
+fn unsupported_self_trade_prevention_rejects_the_entire_batch_before_any_write() {
+    for mode in [
+        StpMode::ExpireTaker,
+        StpMode::ExpireMaker,
+        StpMode::ExpireBoth,
+    ] {
+        let mut e = boot();
+        let mut unsupported = opts();
+        unsupported.client_order_id = Some("2".into());
+        unsupported.stp_mode = Some(mode);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 32,
+                orders: vec![opts(), unsupported],
+            },
+        );
+        assert!(
+            done(&actions, 32)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("self-trade prevention")
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
+#[test]
+fn foreign_commands_fail_without_bypassing_known_order_cancellation_identity() {
+    let mut e = boot();
+    for request in [
+        Command::CancelOrdersWithSymbols {
+            command: 33,
+            orders: vec![CancelOrderRef {
+                id: "42".into(),
+                symbol: "BTC_USDT_PERP".into(),
+            }],
+        },
+        Command::FetchStpMode { command: 33 },
+        Command::SetStpMode {
+            command: 33,
+            mode: StpMode::ExpireBoth,
+        },
+        Command::FetchAccount { command: 33 },
+        Command::FetchOrderBook {
+            command: 33,
+            symbol: "BTC_USDT_PERP".into(),
+            limit: None,
+        },
+    ] {
+        let actions = command(&mut e, request);
+        assert!(
+            done(&actions, 33)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("Unsupported GRVT command")
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+    let request = http(
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 34,
+                ids: vec!["42".into()],
+            },
+        ),
+        "cancel_order",
+    );
+    assert_eq!(
+        request.body.as_deref(),
+        Some(r#"{"sa":"9007199254740993","oi":"0x1234"}"#)
+    );
+    let actions = reply(&mut e, &request, 200, r#"{"r":{"a":true}}"#);
+    assert!(done(&actions, 34).unwrap().is_ok());
 }
 #[test]
 fn both_brackets_are_distinct_reducing_opposite_side_market_triggers() {

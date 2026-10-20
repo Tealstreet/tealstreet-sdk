@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
+import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
@@ -44,7 +44,11 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
 const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((r) => r.type === 'meta');
 // Pin generated timestamps and freshness windows to the tape, across processes.
-let clockStart = performance.now();
+// Keep this wall clock continuous through startup: venue clocks may measure
+// elapsed real Date/dayjs time since their initial sync. Rebasing only Date.now
+// at readiness would move their signatures ahead of the freshness oracle.
+// Tape.play owns a separate readiness-relative clock for record scheduling.
+const clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -275,9 +279,6 @@ async function runRust() {
       return host.command({ op, ...commandArgs(rest) });
     },
     clock,
-    () => {
-      if (isPrivate) clockStart = performance.now();
-    },
   );
   await settle();
   tape.assertWritesConsumed();
@@ -307,7 +308,7 @@ async function runRust() {
   }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
-    const row = { symbol: markets.symbol(tickers.market[i]) };
+    const row = { symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]) };
     for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
     tickerRows.push(row);
   }
@@ -372,10 +373,19 @@ async function tsCommand(exchange, store, record) {
     case 'setPositionMode':
       await exchange.changePositionMode(args.hedged);
       return [];
+    case 'fetchStpMode':
+      return exchange.fetchStpMode();
+    case 'setStpMode':
+      await exchange.changeStpMode(args.mode);
+      return [];
     case 'findOrderByClientOrderId':
       return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage':
       return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchAccount':
+      return exchange.getAccount();
+    case 'fetchOrderBook':
+      return exchange.fetchOrderBook(args.symbol, args.limit);
     case 'fetchFills':
       return exchange.fetchHistoricalFills(args);
     case 'fetchOrderHistory':
@@ -433,7 +443,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   return {
     hedged: status?.hedged ?? false,
-    balance,
+    balance: {
+      used: balance.used,
+      free: balance.free,
+      total: balance.total,
+      upnl: balance.upnl,
+      ...(venue.inverseNativeAmounts ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
+    },
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
@@ -591,6 +608,7 @@ async function runTs() {
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
+  await venue.prepareTsTransport?.(exchange, adapter);
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
@@ -621,9 +639,6 @@ async function runTs() {
     },
     (record) => tsCommand(exchange, store, record),
     clock,
-    () => {
-      if (isPrivate) clockStart = performance.now();
-    },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
@@ -652,6 +667,7 @@ async function runTs() {
           total: store.balance.total,
           upnl: store.balance.upnl,
           ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.

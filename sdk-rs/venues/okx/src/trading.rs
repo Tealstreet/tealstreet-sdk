@@ -704,6 +704,7 @@ impl Okx {
                     tp_trigger_type: o.trigger_type,
                     client_order_id: None,
                     close: o.close,
+                    stp_mode: None,
                     max_slippage_pct: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,

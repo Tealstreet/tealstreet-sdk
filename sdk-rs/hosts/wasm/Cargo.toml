@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 grvt = ["dep:safe-cex-venue-grvt"]
+asterdex = ["dep:safe-cex-venue-asterdex"]
 lighter = ["dep:safe-cex-venue-lighter"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
@@ -20,6 +21,7 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 default = [
     "grvt",
+    "asterdex",
     "lighter",
     "woo",
     "bitrue",
@@ -47,6 +49,7 @@ orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
 safe-cex-venue-grvt = { workspace = true, optional = true }
+safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }
 safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }
 safe-cex-venue-woo = { workspace = true, optional = true }
 safe-cex-venue-bitrue = { workspace = true, optional = true }

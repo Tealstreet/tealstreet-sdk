@@ -1174,6 +1174,13 @@ impl Venue for Grvt {
             | Command::Query { command, .. } => {
                 cx.done(command, Err("GRVT private phase pending".into()))
             }
+            Command::CancelOrdersWithSymbols { command, .. }
+            | Command::FetchStpMode { command }
+            | Command::SetStpMode { command, .. }
+            | Command::FetchAccount { command }
+            | Command::FetchOrderBook { command, .. } => {
+                cx.done(command, Err("Unsupported GRVT command".into()))
+            }
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

@@ -190,6 +190,7 @@ export class Tape {
       passphrase: 'replay-passphrase',
       ...venue.replayCredentials,
     };
+    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.callerIds = callerIdsOf(records);
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
@@ -355,7 +356,7 @@ export class Tape {
 
   respond(method, url, body, headers) {
     try {
-      this.venue.validateRequest?.({ method, url, body, headers });
+      this.validateRequest?.({ method, url, body, headers });
       this.requestAudit?.validate({ method, url, body, headers });
     } catch (error) {
       this.invalidSignatures++;

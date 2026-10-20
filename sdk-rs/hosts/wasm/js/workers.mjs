@@ -136,8 +136,9 @@ export const workersTransport = () => ({
       },
     };
   },
-  async request({ method, url, headers, body, signal }) {
-    const deadline = AbortSignal.timeout(20_000);
+  async request({ method, url, headers, body, signal, route, timeoutMs }) {
+    if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
+    const deadline = AbortSignal.timeout(Math.max(1, timeoutMs ?? 20_000));
     const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));

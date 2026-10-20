@@ -10,6 +10,7 @@ pub mod wire;
 
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
-    Query, RequestId, Response, SocketChannel, SocketContext, SocketId, TimerId, Venue,
+    Query, RequestId, RequestRoute, Response, SocketChannel, SocketContext, SocketId, TimerId,
+    Venue,
 };
 pub use store::Store;

@@ -159,6 +159,7 @@ fn catalog_only_refresh_keeps_rails_and_updates_signing_hash_and_decimal_metadat
                 sl_trigger_type: None,
                 client_order_id: Some("101".into()),
                 close: None,
+                stp_mode: None,
                 max_slippage_pct: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,

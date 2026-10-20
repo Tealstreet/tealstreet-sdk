@@ -1,11 +1,12 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
-import { Signature, Wallet, parseUnits, verifyTypedData } from 'ethers';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
 let lighterVerifier;
@@ -512,7 +513,9 @@ export const VENUES = {
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);
-    const signer = new Wallet(secret).address;
+    const signer = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1';
+    let crypto;
+    const initializeCrypto = () => crypto ??= createRequire(import.meta.url)('ethers');
     const account = 'fixture-account';
     const builder = '0xee8f3559f298fffa79b8253437969d15b5dccff3';
     const instruments = {
@@ -536,6 +539,9 @@ export const VENUES = {
     const attempts = new Map();
     return {
       rust: 'grvt',
+      initializeReplay(_impl, options) {
+        if (!options.publicDataOnly) initializeCrypto();
+      },
       ts: { module: `${root}/grvt/grvt.exchange.ts`, className: 'GrvtExchange', name: 'grvt' },
       tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
@@ -618,6 +624,7 @@ export const VENUES = {
         if (created < now - 30_000_000_000n || created > now + 30_000_000_000n
           || expires < now + 3_570_000_000_000n || expires > now + 3_630_000_000_000n)
           throw new Error('Invalid GRVT signature clock');
+        const { Signature, parseUnits, verifyTypedData } = initializeCrypto();
         const message = {
           subAccountID: o.sa, isMarket: o.im,
           timeInForce: { GOOD_TILL_TIME: 1, ALL_OR_NONE: 2, IMMEDIATE_OR_CANCEL: 3, FILL_OR_KILL: 4 }[o.ti],
@@ -769,6 +776,29 @@ export const VENUES = {
       },
     };
   })(),
+  asterdex: {
+    initializeReplay: initializeAsterCrypto,
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',

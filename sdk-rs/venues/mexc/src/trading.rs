@@ -666,6 +666,7 @@ impl MexcFutures {
                         take_profit: o.take_profit,
                         client_order_id: None,
                         close: o.close,
+                        stp_mode: None,
                         max_slippage_pct: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,

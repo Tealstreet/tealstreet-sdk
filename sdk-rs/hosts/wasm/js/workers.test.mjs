@@ -284,3 +284,52 @@ test('Workers applies factory protocol options after caller flags while retainin
     } finally { object.leave(client); }
   }
 });
+
+test('Workers requests honor typed deadlines through response bodies and consume routing metadata', async (t) => {
+  const deadlines = [];
+  const requests = [];
+  t.mock.method(AbortSignal, 'timeout', (milliseconds) => {
+    const controller = new AbortController();
+    deadlines.push({ milliseconds, controller });
+    return controller.signal;
+  });
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push({ url, init });
+    return {
+      status: 200,
+      headers: new Map(),
+      body: new ReadableStream({
+        start(controller) {
+          init.signal.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
+        },
+      }),
+    };
+  });
+  const transport = workersTransport();
+  await transport.request({ method: 'GET', url: 'https://venue.test/default', headers: {} });
+  const result = await transport.request({
+    method: 'GET', url: 'https://venue.test/time', headers: {}, route: 'direct', timeoutMs: 5_000,
+  });
+  assert.deepEqual(deadlines.map(({ milliseconds }) => milliseconds), [20_000, 5_000]);
+  assert.equal(requests[1].url, 'https://venue.test/time');
+  for (const { init } of requests) {
+    assert.equal(Object.hasOwn(init, 'route'), false);
+    assert.equal(Object.hasOwn(init, 'timeoutMs'), false);
+  }
+  const read = result.body[Symbol.asyncIterator]().next();
+  const rejected = assert.rejects(read, /clock deadline/);
+  deadlines[1].controller.abort(new Error('clock deadline'));
+  await rejected;
+  assert.equal(requests[1].init.signal.aborted, true);
+  deadlines[0].controller.abort();
+});
+
+test('standalone Workers reject unconfigured CORS before fetching or allocating a deadline', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch');
+  const timeout = t.mock.method(AbortSignal, 'timeout');
+  await assert.rejects(workersTransport().request({
+    method: 'GET', url: 'https://venue.test/time', headers: {}, route: 'publicCors', timeoutMs: 5_000,
+  }), /Public CORS request routing is not configured/);
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.equal(timeout.mock.callCount(), 0);
+});
