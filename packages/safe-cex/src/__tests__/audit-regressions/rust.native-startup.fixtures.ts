@@ -37,3 +37,31 @@ export function installNativeStartupFrames(
       consumerFrame({ ...store.serialize(), ...structuredClone(native()) }, undefined, false, undefined, true),
     );
 }
+
+const readyMarket = {
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+} as StoreData['markets'][number];
+
+/** A frame carrying every dataset native startup requires, public or private. */
+export const nativeReadyFrame = (): Uint8Array =>
+  new Uint8Array(
+    consumerFrame({
+      markets: [readyMarket],
+      tickers: [
+        {
+          id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
+          percentage: 0, fundingRate: 0, volume: 0, quoteVolume: 0, openInterest: 0,
+        } as StoreData['tickers'][number],
+      ],
+      balance: { used: 0, free: 0, total: 0, upnl: 0 },
+      orders: [],
+      positions: [],
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    }),
+  );

@@ -11,6 +11,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 const accounts: RustEngineExchange[] = [];
 const auth = (
@@ -49,18 +50,7 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
         ? '[]'
         : JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
-    takeFrame: () =>
-      new Uint8Array(
-        consumerFrame({
-          loaded: {
-            markets: true,
-            tickers: true,
-            balance: true,
-            orders: true,
-            positions: true,
-          },
-        }),
-      ),
+    takeFrame: nativeReadyFrame,
     snapshotFrame: () => new Uint8Array(consumerFrame({ markets: [], tickers: [] })),
     wsMessage: () => {
       if (trapMessages) throw new WebAssembly.RuntimeError('unreachable');

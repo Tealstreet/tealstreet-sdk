@@ -15,6 +15,7 @@ import {
 } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 // Audited TS getAccount implementations and inherited product aliases. Keep this
 // independent from production dispatch, including Kraken Spot's balance command.
@@ -107,18 +108,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
         },
       ]);
     },
-    takeFrame: () =>
-      new Uint8Array(
-        consumerFrame({
-          loaded: {
-            markets: true,
-            tickers: true,
-            orders: true,
-            positions: true,
-            balance: true,
-          },
-        }),
-      ),
+    takeFrame: nativeReadyFrame,
     snapshotFrame: () =>
       new Uint8Array(
         consumerFrame({

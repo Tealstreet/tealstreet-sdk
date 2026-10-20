@@ -13,6 +13,7 @@ import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { LogSeverity } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 const accounts: RustEngineExchange[] = [];
 const aliases = ['coinbase', 'coinbasespot'] as const;
@@ -62,12 +63,7 @@ function fixture(name: (typeof aliases)[number], saved: Partial<ExchangeOptions>
         ? '[]'
         : JSON.stringify([{ op: 'done', command: command.command, result: 'null' }]);
     },
-    takeFrame: () =>
-      new Uint8Array(
-        consumerFrame({
-          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-        }),
-      ),
+    takeFrame: nativeReadyFrame,
     snapshotFrame: () => new Uint8Array(consumerFrame({ markets: [], tickers: [] })),
     wsOpen: idle,
     wsMessage: idle,
