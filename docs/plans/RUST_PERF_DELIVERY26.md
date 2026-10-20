@@ -878,3 +878,18 @@ overlay explicitly rather than relabeling old build command receipts.
 
 Actual WASM integration, final size review and the fixed40/64 measurement
 collection remain next. No current-cohort performance result is available yet.
+
+Final JavaScript input freeze SHA
+`4e7a8c2a96889cdeb4d4131f934080c71895e91f1dfcc9c17eb1b4a91160b0a1`
+pins `8150295a7c` over the unchanged7bc Rust build. Independent physical overlay
+audit SHA `5906590285a1fe7842c867ae6fe755d4e044ebcec3b822bc4abfa0e2e81af8e5`
+confirms exactly2 JavaScript differences,1,006 other inputs unchanged and all243
+bindings unchanged. Original build command provenance stays7bc.
+
+Apply the independently reviewed cap formula only to26 measured breaches;
+Paradex stays unchanged. The official size check now passes54 Node/web entries.
+Publish every old/actual/new value in `RUST_PERF_FAMILY_SIZES.md`; preserve the
+original failed check. Size proof SHA
+`fac8acd15de47824d08df018608f2a5f9bb56328c0e84c9f4caf489dae4cb8ef`.
+The actual15-command integration suite is running once against frozen current
+inputs; the fixed40/64 performance collection has not started.
