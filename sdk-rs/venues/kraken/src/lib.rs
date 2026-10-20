@@ -8,7 +8,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -38,7 +38,7 @@ pub enum Pending {
     Candles {
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         generation: Option<u64>,
         rows: Vec<Candle>,
         failed: bool,
@@ -77,7 +77,7 @@ pub struct Kraken {
     trading: trading::Trading,
     public: Connection,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
     ticker_symbols: Vec<String>,
     ticker_revision: u64,
@@ -301,7 +301,7 @@ impl Kraken {
         cx: &mut Cx<'_, Pending>,
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -312,7 +312,13 @@ impl Kraken {
             }
             return;
         }
-        let (resolution, step) = interval_spec(&interval);
+        let Some(resolution) = resolution(interval) else {
+            if let Some(c) = command {
+                cx.done(c, Err(interval.unsupported("Kraken")));
+            }
+            return;
+        };
+        let step = interval.ms();
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
@@ -322,7 +328,7 @@ impl Kraken {
             return;
         }
         let generation = if command.is_none() {
-            let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) else {
+            let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) else {
                 return;
             };
             if s.in_flight {
@@ -380,18 +386,10 @@ impl Kraken {
         cx.log(LogLevel::Warning, error);
     }
 }
-fn interval_spec(interval: &str) -> (&str, f64) {
-    match interval {
-        "1m" => ("1m", 60_000.0),
-        "5m" => ("5m", 300_000.0),
-        "15m" => ("15m", 900_000.0),
-        "30m" => ("30m", 1_800_000.0),
-        "4h" => ("4h", 14_400_000.0),
-        "12h" => ("12h", 43_200_000.0),
-        "1d" => ("1d", 86_400_000.0),
-        "1w" => ("1w", 604_800_000.0),
-        _ => ("1h", 3_600_000.0),
-    }
+// Kraken Futures chart resolutions are the TS spellings.
+fn resolution(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
+    matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
     type Pending = Pending;
@@ -748,7 +746,7 @@ impl Venue for Kraken {
                 if command.is_none()
                     && !self
                         .candles
-                        .get(&(symbol.clone(), interval.clone()))
+                        .get(&(symbol.clone(), interval))
                         .is_some_and(|s| Some(s.generation) == generation)
                 {
                     return;
@@ -772,14 +770,14 @@ impl Venue for Kraken {
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(c) = command {
                     cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
-                } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.in_flight = false;
                     s.next_poll = cx.now + 5_000.0;
                     if let Some(latest) = rows.last().copied()
                         && s.last
                             .is_none_or(|old| latest.timestamp >= old.timestamp && latest != old)
                     {
-                        cx.candle(&symbol, &interval, latest);
+                        cx.candle(&symbol, interval, latest);
                         s.last = Some(latest);
                     }
                 }
@@ -887,6 +885,10 @@ impl Venue for Kraken {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
+                if resolution(interval).is_none() {
+                    cx.log(LogLevel::Error, interval.unsupported("Kraken"));
+                    return;
+                }
                 if cx.store.market(&symbol).is_none() {
                     return;
                 }
@@ -894,7 +896,7 @@ impl Venue for Kraken {
                 let generation = self.generation;
                 let s = self
                     .candles
-                    .entry((symbol.clone(), interval.clone()))
+                    .entry((symbol.clone(), interval))
                     .or_insert_with(|| CandleState {
                         generation,
                         ..Default::default()

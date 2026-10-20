@@ -56,19 +56,35 @@ fn ws_v2_alias_ticker_book_and_depth_window() {
     );
     assert_eq!(e.venue().book("XBT/USD").unwrap().best_bid(), Some(103.));
 }
+// Kraken Spot has no 6h/12h OHLC. TS served 4h candles under those intervals;
+// they are now rejected so a chart never shows another interval's bars.
 #[test]
-fn candle_fallback_request_and_alias_stream_fanout() {
+fn inexact_candle_intervals_are_rejected_not_served_from_a_smaller_one() {
+    use safe_cex_engine::model::Interval;
     let (mut e, s, _) = ready(true);
-    for tf in ["4h", "6h", "12h"] {
+    for tf in [Interval::H4, Interval::H6, Interval::H12] {
         e.handle(
             NOW,
             Event::Command(Command::SubscribeCandles {
                 symbol: "XBT/USD".into(),
-                interval: tf.into(),
+                interval: tf,
             }),
         );
     }
-    e.drain_actions().for_each(drop);
+    let errors: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            "Kraken Spot does not support 6h candles",
+            "Kraken Spot does not support 12h candles"
+        ]
+    );
     message(
         &mut e,
         s,
@@ -77,9 +93,23 @@ fn candle_fallback_request_and_alias_stream_fanout() {
     e.handle(
         NOW,
         Event::Command(Command::FetchCandles {
+            command: 6,
+            symbol: "XBT/USD".into(),
+            interval: Interval::H12,
+            from_ms: Some(NOW),
+            to_ms: None,
+            limit: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 6, result: Err(e) }) if e == "Kraken Spot does not support 12h candles")));
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
             command: 7,
             symbol: "XBT/USD".into(),
-            interval: safe_cex_engine::model::Interval::H12,
+            interval: Interval::H4,
             from_ms: Some(NOW),
             to_ms: None,
             limit: None,

@@ -667,7 +667,7 @@ impl ApexOmni {
                 );
                 last.volume =
                     safe_cex_engine::num::round_half_up((last.volume + volume) * factor) / factor;
-                cx.candle(s, i, *last);
+                cx.candle(s, *i, *last);
             }
         }
         true

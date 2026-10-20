@@ -13,6 +13,7 @@ pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
+    Interval,
     Candle, DerivativeProduct, InstrumentClassification, Limits, Market, MinMax, Precision,
     ProductKind, Ticker,
 };
@@ -237,7 +238,7 @@ pub struct BybitLinear {
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
     clock_offset_ms: f64,
@@ -247,21 +248,22 @@ pub struct BybitLinear {
 }
 
 /// Bybit kline interval codes.
-fn interval_code(interval: &str) -> Option<&'static str> {
+fn interval_code(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match interval {
-        "1m" => "1",
-        "3m" => "3",
-        "5m" => "5",
-        "15m" => "15",
-        "30m" => "30",
-        "1h" => "60",
-        "2h" => "120",
-        "4h" => "240",
-        "6h" => "360",
-        "12h" => "720",
-        "1d" => "D",
-        "1w" => "W",
-        "1M" => "M",
+        M1 => "1",
+        M3 => "3",
+        M5 => "5",
+        M15 => "15",
+        M30 => "30",
+        H1 => "60",
+        H2 => "120",
+        H4 => "240",
+        H6 => "360",
+        H12 => "720",
+        D1 => "D",
+        W1 => "W",
+        Mo1 => "M",
         _ => return None,
     })
 }
@@ -660,7 +662,7 @@ impl BybitLinear {
         format!("orderbook.{depth}.{symbol}")
     }
 
-    fn kline_topic(symbol: &str, interval: &str) -> Option<String> {
+    fn kline_topic(symbol: &str, interval: Interval) -> Option<String> {
         Some(format!("kline.{}.{symbol}", interval_code(interval)?))
     }
 
@@ -1083,15 +1085,15 @@ impl BybitLinear {
         let Some(interval) = self
             .candles
             .keys()
-            .find(|(s, i)| s == symbol && interval_code(i) == Some(code))
-            .map(|(_, interval)| interval.clone())
+            .find(|(s, i)| s == symbol && interval_code(*i) == Some(code))
+            .map(|(_, interval)| *interval)
         else {
             return;
         };
         for k in &event.data {
             cx.candle(
                 symbol,
-                &interval,
+                interval,
                 Candle {
                     timestamp: k.start / 1000.0,
                     open: float(&k.open),
@@ -1148,7 +1150,7 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         add: bool,
     ) {
         if self.category_for(&symbol) == Category::Option
@@ -1157,11 +1159,8 @@ impl BybitLinear {
             cx.log(LogLevel::Warning, "Bybit has no candles for this product");
             return;
         }
-        let Some(topic) = Self::kline_topic(&symbol, &interval) else {
-            cx.log(
-                LogLevel::Warning,
-                format!("Bybit has no {interval} candles"),
-            );
+        let Some(topic) = Self::kline_topic(&symbol, interval) else {
+            cx.log(LogLevel::Error, interval.unsupported("Bybit"));
             return;
         };
         let key = (symbol, interval);
@@ -1185,7 +1184,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
         if self.category_for(symbol) == Category::Option {
@@ -1197,7 +1196,7 @@ impl BybitLinear {
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(command, Err(format!("Bybit has no {interval} candles")));
+            cx.done(command, Err(interval.unsupported("Bybit")));
             return;
         };
         let query = Query::new()
@@ -1664,7 +1663,7 @@ impl Venue for BybitLinear {
                     self.candles
                         .keys()
                         .filter(|(symbol, _)| self.owns_symbol(symbol))
-                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
+                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, *interval)),
                 );
                 self.subscribe(cx, "subscribe", &topics);
             }
@@ -1828,7 +1827,7 @@ impl Venue for BybitLinear {
                 limit,
                 from_ms,
                 to_ms,
-            } => self.fetch_candles(cx, command, &symbol, &interval, (limit, from_ms, to_ms)),
+            } => self.fetch_candles(cx, command, &symbol, interval, (limit, from_ms, to_ms)),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }

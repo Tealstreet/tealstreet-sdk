@@ -101,7 +101,7 @@ pub struct TxFlow {
     node: Connection,
     api: Connection,
     books: HashMap<String, Ladder>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
     ticker_queue: VecDeque<u32>,
     seed_tickers: Vec<Ticker>,
     ticker_timer: Option<TimerId>,
@@ -398,11 +398,10 @@ impl TxFlow {
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
                     if let Some(symbol) = self.coin_symbol(&row.s)
-                        && self
-                            .candles
-                            .contains_key(&(symbol.to_owned(), row.i.to_string()))
+                        && let Some(interval) = Interval::parse(&row.i)
+                        && self.candles.contains_key(&(symbol.to_owned(), interval))
                     {
-                        cx.candle(symbol, &row.i, row.candle());
+                        cx.candle(symbol, interval, row.candle());
                     }
                 };
                 let raw = data.get();
@@ -457,17 +456,21 @@ impl TxFlow {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         add: bool,
     ) {
-        if !valid_interval(&interval)
-            || (cx.store.loaded().markets && !self.assets.contains_key(&symbol))
-        {
+        if !supported(interval) {
+            if add {
+                cx.log(LogLevel::Error, interval.unsupported("TxFlow"));
+            }
+            return;
+        }
+        if cx.store.loaded().markets && !self.assets.contains_key(&symbol) {
             return;
         }
         let count = self
             .candles
-            .entry((symbol.clone(), interval.clone()))
+            .entry((symbol.clone(), interval))
             .or_default();
         if add {
             *count += 1;
@@ -479,7 +482,7 @@ impl TxFlow {
             if *count > 0 {
                 return;
             }
-            self.candles.remove(&(symbol.clone(), interval.clone()));
+            self.candles.remove(&(symbol.clone(), interval));
         }
         if let Some(asset) = self.assets.get(&symbol) {
             self.subscribe(
@@ -489,7 +492,7 @@ impl TxFlow {
                 Sub {
                     r#type: "candle",
                     coin: Some(&asset.to_string()),
-                    interval: Some(&interval),
+                    interval: Some(interval.as_str()),
                     user: None,
                     instrument_id: None,
                 },
@@ -512,13 +515,13 @@ impl TxFlow {
             cx.done(command, Err("Market not found".into()));
             return;
         };
-        if !valid_interval(&interval) {
-            cx.done(command, Err("Unsupported candle interval".into()));
+        if !supported(interval) {
+            cx.done(command, Err(interval.unsupported("TxFlow")));
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
         let start = from_ms
-            .unwrap_or(end - interval_ms(&interval) * f64::from(limit.unwrap_or(500).min(1500)))
+            .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)))
             .max(0.0);
         if !start.is_finite()
             || !end.is_finite()
@@ -547,7 +550,7 @@ impl TxFlow {
             r#type: "candleSnapshot",
             req: Req {
                 coin: asset.to_string(),
-                interval: &interval,
+                interval: interval.as_str(),
                 start_time: start.floor() as u64,
                 end_time: end.floor() as u64,
             },
@@ -624,7 +627,7 @@ impl Venue for TxFlow {
                 .filter_map(|(symbol, interval)| {
                     self.assets
                         .get(symbol)
-                        .map(|asset| (*asset, interval.clone()))
+                        .map(|asset| (*asset, *interval))
                 })
                 .collect::<Vec<_>>();
             for (asset, interval) in candles {
@@ -635,7 +638,7 @@ impl Venue for TxFlow {
                     Sub {
                         r#type: "candle",
                         coin: Some(&asset.to_string()),
-                        interval: Some(&interval),
+                        interval: Some(interval.as_str()),
                         user: None,
                         instrument_id: None,
                     },
@@ -1022,20 +1025,8 @@ impl Venue for TxFlow {
         )
     }
 }
-fn valid_interval(interval: &str) -> bool {
-    matches!(
-        interval,
-        "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d"
-    )
-}
-fn interval_ms(interval: &str) -> f64 {
-    let (n, unit) = interval.split_at(interval.len() - 1);
-    n.parse::<f64>().unwrap_or(1.0)
-        * match unit {
-            "m" => 60_000.0,
-            "h" => 3_600_000.0,
-            "d" => 86_400_000.0,
-            "w" => 604_800_000.0,
-            _ => 2_592_000_000.0,
-        }
+// TxFlow's candle codes are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(interval, M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1)
 }

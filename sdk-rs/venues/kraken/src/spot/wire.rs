@@ -1,4 +1,5 @@
 use crate::wire::{number, optional_number};
+use safe_cex_engine::model::Interval;
 use serde::{
     Deserialize, Deserializer,
     de::{MapAccess, Visitor},
@@ -133,16 +134,19 @@ pub struct Ohlc<'a> {
     #[serde(deserialize_with = "number")]
     pub volume: f64,
 }
-pub fn interval(tf: &str) -> Option<u32> {
+/// Kraken Spot OHLC minutes. Only exact intervals: a smaller native interval
+/// would publish its candles under the requested one.
+pub fn interval(tf: Interval) -> Option<u32> {
+    use Interval::*;
     Some(match tf {
-        "1m" | "3m" => 1,
-        "5m" => 5,
-        "15m" => 15,
-        "30m" => 30,
-        "1h" | "2h" => 60,
-        "4h" | "6h" | "12h" => 240,
-        "1d" => 1440,
-        "1w" => 10080,
+        M1 => 1,
+        M5 => 5,
+        M15 => 15,
+        M30 => 30,
+        H1 => 60,
+        H4 => 240,
+        D1 => 1440,
+        W1 => 10080,
         _ => return None,
     })
 }

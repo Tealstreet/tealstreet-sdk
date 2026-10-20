@@ -53,7 +53,7 @@ pub struct KrakenSpot {
     ws_symbols: HashMap<String, String>,
     ws_canonical: HashMap<String, String>,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     ticker_symbols: Vec<String>,
     poll: Option<TimerId>,
     markets_in_flight: bool,
@@ -348,7 +348,7 @@ impl Venue for KrakenSpot {
         }
         let mut sent = HashSet::new();
         for (symbol, tf) in self.candles.keys() {
-            if let Some(i) = interval(tf)
+            if let Some(i) = interval(*tf)
                 && sent.insert((symbol, i))
             {
                 self.subscribe(
@@ -471,9 +471,9 @@ impl Venue for KrakenSpot {
                                 .ws_canonical
                                 .get(&*o.symbol)
                                 .map_or(&*o.symbol, String::as_str)
-                            && interval(tf) == Some(o.interval)
+                            && interval(*tf) == Some(o.interval)
                         {
-                            cx.candle(symbol, tf, candle);
+                            cx.candle(symbol, *tf, candle);
                         }
                     }
                 });
@@ -672,28 +672,30 @@ impl Venue for KrakenSpot {
                 symbol,
                 interval: tf,
             } => {
-                if let Some(i) = interval(&tf) {
-                    let count = self.candles.entry((symbol.clone(), tf)).or_default();
-                    *count += 1;
-                    if *count == 1 {
-                        self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
-                    }
+                let Some(i) = interval(tf) else {
+                    cx.log(LogLevel::Error, tf.unsupported("Kraken Spot"));
+                    return;
+                };
+                let count = self.candles.entry((symbol.clone(), tf)).or_default();
+                *count += 1;
+                if *count == 1 {
+                    self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
                 }
             }
             Command::UnsubscribeCandles {
                 symbol,
                 interval: tf,
             } => {
-                let k = (symbol.clone(), tf.clone());
+                let k = (symbol.clone(), tf);
                 if let Some(count) = self.candles.get_mut(&k) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&k);
-                        if let Some(i) = interval(&tf)
+                        if let Some(i) = interval(tf)
                             && !self
                                 .candles
                                 .keys()
-                                .any(|(s, t)| s == &symbol && interval(t) == Some(i))
+                                .any(|(s, t)| s == &symbol && interval(*t) == Some(i))
                         {
                             self.subscribe(cx, "unsubscribe", "ohlc", &[symbol], Some(i));
                         }
@@ -707,7 +709,7 @@ impl Venue for KrakenSpot {
                 from_ms,
                 ..
             } => {
-                if let Some(i) = interval(&tf) {
+                if let Some(i) = interval(tf) {
                     let pair = self
                         .pairs
                         .get(&symbol)
@@ -727,7 +729,7 @@ impl Venue for KrakenSpot {
                         },
                     );
                 } else {
-                    cx.done(command, Err("Kraken Spot unsupported interval".into()))
+                    cx.done(command, Err(tf.unsupported("Kraken Spot")))
                 }
             }
             _ => {}
