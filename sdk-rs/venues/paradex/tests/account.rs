@@ -4,7 +4,7 @@ use safe_cex_engine::{Action, Command, Event, Query, SocketChannel, SocketId, wi
 use safe_cex_venue_paradex::Options;
 use support::*;
 const POSITION: &str = r#"{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG","size":"2","average_entry_price":"100","unrealized_pnl":"4","realized_positional_pnl":"1","last_updated_at":1700000000000}"#;
-const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
+const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","instruction":"GTC","time_in_force":"GTC","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
 fn options() -> Options {
     Options {
         key: Some(format!("0x{}1", "0".repeat(63))),
@@ -444,8 +444,16 @@ fn pongs_cannot_keep_a_socket_with_missing_subscription_acknowledgements_alive()
 }
 
 #[test]
-fn auth_requires_an_empty_object_and_subscription_acks_require_the_expected_channel() {
-    for invalid in ["false", "[]", "\"ok\"", "{\"authenticated\":true}"] {
+fn auth_requires_a_documented_object_and_subscription_acks_require_the_expected_channel() {
+    for invalid in [
+        "false",
+        "[]",
+        "\"ok\"",
+        "{\"authenticated\":true}",
+        "{\"node_id\":null}",
+        "{\"node_id\":0}",
+        "{\"node_id\":\"\"}",
+    ] {
         let (mut h, socket) = loaded();
         h.e.handle(h.now, Event::WsOpened { socket });
         h.collect();
@@ -578,4 +586,67 @@ fn mixed_instrument_snapshots_and_streams_only_emit_registered_perpetual_markets
     );
     assert_eq!(h.e.store().positions().len(), 1);
     assert_eq!(h.e.store().positions()[0].symbol, "BTC-USD-PERP");
+}
+
+#[test]
+fn documented_auth_node_id_and_idle_binary_heartbeats_need_no_text_ping() {
+    let (mut h, socket) = loaded();
+    h.e.handle(h.now, Event::WsOpened { socket });
+    h.collect();
+    message(
+        &mut h,
+        socket,
+        r#"{"jsonrpc":"2.0","id":0,"result":{"node_id":"a1b2c3d4e5f6g7h8"}}"#,
+    );
+    for (index, channel) in [
+        "orders.ALL",
+        "positions",
+        "balance_events",
+        "account",
+        "fills.ALL",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":{},"result":{{"channel":"{channel}"}}}}"#,
+                index + 1
+            ),
+        );
+    }
+    assert!(h.sent().iter().any(|text| text.contains("orders.ALL")));
+    let start = h.now;
+    let mut watchdog = h.timer_at(start + 5_000.);
+    let mut heartbeat = vec![16, 0, 40, 0, 1, 0, 2, 0];
+    heartbeat.extend_from_slice(&[0; 16]);
+    for i in 1..=5 {
+        h.now = start + f64::from(i) * 20_000.;
+        h.e.handle(
+            h.now,
+            Event::WsBinary {
+                socket,
+                data: &heartbeat,
+            },
+        );
+        h.e.handle(h.now, Event::TimerFired { timer: watchdog });
+        h.collect();
+        watchdog = h.timer_at(h.now + 5_000.);
+    }
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    assert!(!h.sent().iter().any(|text| text.contains("ping")));
+    h.now += 90_000.;
+    h.e.handle(h.now, Event::TimerFired { timer: watchdog });
+    h.collect();
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
 }

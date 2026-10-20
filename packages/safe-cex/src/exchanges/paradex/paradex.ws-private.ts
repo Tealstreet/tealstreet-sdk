@@ -16,7 +16,6 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
   private messageId = 0;
   private readonly seenFills = new Set<string>();
   private authRequestId?: number;
-  private pingInterval?: NodeJS.Timeout;
   private ordersThrottleTimeout?: NodeJS.Timeout;
   private lastPositionFetchTime = 0;
   private positionFetchThrottleMs = 500;
@@ -56,7 +55,6 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       this.authenticated = false;
       this.authRequestId = undefined;
       this.parent.log('Paradex private WebSocket connected', LogSeverity.Info);
-      this.ping();
       await this.authenticate();
     }
   };
@@ -96,8 +94,12 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
           // this.parent.log(`WebSocket result for request ${data.id}: ${JSON.stringify(data.result)}`, LogSeverity.Debug);
 
           // Authentication response to latest auth request.
-          // Paradex returns empty result {} on successful authentication.
+          // The documented result is {node_id}; older servers returned {}.
           if (this.authRequestId !== undefined && data.id === this.authRequestId && !this.authenticated) {
+            const result = data.result;
+            if (!result || typeof result !== 'object' || Array.isArray(result) ||
+              Object.keys(result).some((key) => key !== 'node_id') ||
+              ('node_id' in result && (typeof result.node_id !== 'string' || !result.node_id))) return;
             this.authenticated = true;
             this.parent.log('Paradex private WebSocket authenticated', LogSeverity.Info);
 
@@ -112,7 +114,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
           }
 
           // Log subscription confirmations
-          if (data.result.channel) {
+          if (data.result && typeof data.result === 'object' && data.result.channel) {
             this.parent.log(`Successfully subscribed to channel: ${data.result.channel}`, LogSeverity.Info);
           }
         }
@@ -500,23 +502,12 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     return mapping[status] || OrderStatus.Open;
   };
 
-  ping = () => {
-    if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
-    }
-
-    this.pingInterval = setTimeout(() => {
-      if (!this.isDisposed && this.isConnected) {
-        this.ping();
-      }
-    }, 30000);
-  };
+  // The upstream uses RFC6455 control pings, answered by the socket library.
+  protected treatAnyMessageAsPong = true;
+  ping = () => undefined;
+  getWatchdogStaleThresholdMs = () => 90_000;
 
   dispose = () => {
-    if (this.pingInterval) {
-      clearTimeout(this.pingInterval);
-      this.pingInterval = undefined;
-    }
     if (this.ordersThrottleTimeout) {
       clearTimeout(this.ordersThrottleTimeout);
       this.ordersThrottleTimeout = undefined;

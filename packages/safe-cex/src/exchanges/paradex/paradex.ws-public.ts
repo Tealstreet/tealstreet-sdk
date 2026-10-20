@@ -35,7 +35,6 @@ type DepthState = {
 
 export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   connectUrl = '';
-  private pingInterval?: NodeJS.Timeout;
   private orderbookCallbacks: Map<string, Set<(orderbook: OrderBook) => void>> = new Map();
   private orderbooks = new Map<string, DepthState>();
   private tradeSubscriptionCounts: Map<string, number> = new Map();
@@ -64,7 +63,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     // alone does not push frequently enough for live UX.
     bbo: [(data: Data) => this.handleBBOUpdate(data)],
     // markets_summary kept for slow-changing fields (volume, openInterest, fundingRate)
-    // that bbo doesn't carry. Throttled aggregate; do NOT rely on it for bid/ask.
+    // that bbo doesn't carry. Every event updates its market; no global throttle.
     markets_summary: [(data: Data) => this.handleMarketSummaryUpdate(data)],
     order_book: [(data: Data) => this.handleOrderbookUpdate(data)],
     trades: [(data: Data) => this.handleTradesUpdate(data)],
@@ -88,7 +87,6 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   onOpen = () => {
     if (!this.isDisposed) {
       this.parent.log('Paradex public WebSocket connected', LogSeverity.Info);
-      this.ping();
       this.sentTradeSymbols.clear();
       this.pendingSubscribeRequests.clear();
       this.clearOrderbooks();
@@ -171,23 +169,12 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     }
   };
 
-  ping = () => {
-    if (this.isConnected) {
-      this.send(JSON.stringify({ type: 'ping' }));
-    }
-
-    this.pingInterval = setTimeout(() => {
-      if (!this.isDisposed && this.isConnected) {
-        this.ping();
-      }
-    }, 30000);
-  };
+  // The upstream uses RFC6455 control pings, answered by the socket library.
+  protected treatAnyMessageAsPong = true;
+  ping = () => undefined;
+  getWatchdogStaleThresholdMs = () => 90_000;
 
   dispose = () => {
-    if (this.pingInterval) {
-      clearTimeout(this.pingInterval);
-      this.pingInterval = undefined;
-    }
     this.subscriptionRetryTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
     this.subscriptionRetryTimeouts.clear();
     this.ohlcvPollingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));

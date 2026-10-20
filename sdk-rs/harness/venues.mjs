@@ -3,6 +3,7 @@
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
+import { paradexProtocol } from './paradex-protocol.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -143,6 +144,12 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  paradex: {
+    ...paradexProtocol,
+    rust: 'paradex',
+    ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
+    tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,

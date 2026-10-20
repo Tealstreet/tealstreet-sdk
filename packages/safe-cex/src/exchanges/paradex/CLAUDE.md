@@ -140,7 +140,7 @@ Axios request interceptor flow:
 1. Wait for SDK initialization
 2. Get JWT token from manager
 3. Send JSON-RPC 2.0 auth message: `{jsonrpc: "2.0", method: "auth", params: {bearer: token}, id: <trackedRequestId>}`
-4. Auth response: Empty result `{}` on success; response id is matched against the tracked auth request id
+4. Auth response: Result `{node_id: "…"}` (or legacy `{}`) on success; response id is matched against the tracked auth request id
 5. On successful auth, subscribe to private channels
 
 ## Startup Sequence
@@ -239,7 +239,11 @@ carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JW
 
 **Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
-**Ping/pong**: Sends `{ type: "ping" }` every 30 seconds via `setTimeout` (`paradex.ws-public.ts:116-126`).
+**Keepalive**: The venue uses RFC6455 control pings; socket libraries answer with
+control pongs automatically ([official keepalive contract](https://github.com/tradeparadex/paradex-docs/blob/main/fern/pages/websockets/introduction.mdx)).
+Application JSON pings are rejected (including
+JSON-RPC `ping`, which is not an API method). SBE heartbeat template 40 refreshes
+liveness during idle periods. The stale-message watchdog reconnects after 90 seconds.
 
 **Subscription format**:
 

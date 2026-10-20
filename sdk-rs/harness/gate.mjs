@@ -123,7 +123,8 @@ const KNOWN_TS_FIXES = {
   // fence polled candles against newer trades and reject older trade buckets;
   // apply every per-market BBO/summary update; emit unique private executions;
   // clear closed positions and classify CLOSED orders without reopening them;
-  // negotiate and decode the venue's mandatory SBE 1:2 wire protocol; preserve
+  // negotiate/decode mandatory SBE 1:2; use RFC6455 rather than invalid JSON
+  // heartbeats and accept the documented auth node identity; preserve
   // venue JWT Authorization beside Tealstreet-Authorization on routed requests;
   // preserve native client IDs and canonical time-in-force; derive account UPnL
   // from positions; support idempotent cross-margin/one-way mode settings;

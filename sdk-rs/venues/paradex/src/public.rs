@@ -39,7 +39,6 @@ pub(crate) struct Public {
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
     received: f64,
-    ping_at: f64,
     attempts: u32,
     next_rpc: u64,
     subscriptions: HashMap<u64, Subscription>,
@@ -242,8 +241,7 @@ impl Paradex {
         self.public.open = true;
         self.public.attempts = 0;
         self.public.received = cx.now;
-        self.public.ping_at = cx.now;
-        cx.send(socket, r#"{"type":"ping"}"#);
+        // RFC6455 ping/pong is handled by the host; idle SBE heartbeats feed the watchdog.
         let symbols: Vec<_> = cx
             .store
             .markets()
@@ -1027,12 +1025,6 @@ impl Paradex {
             }
             if self.public.socket.is_none() {
                 return true;
-            }
-            if cx.now - self.public.ping_at >= 30_000. {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, r#"{"type":"ping"}"#);
-                }
-                self.public.ping_at = cx.now;
             }
             let stale: Vec<_> = self
                 .public

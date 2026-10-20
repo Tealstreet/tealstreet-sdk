@@ -7,7 +7,7 @@ publish.workspace = true
 [dependencies]
 safe-cex-engine.workspace = true
 safe-cex-crypto.workspace = true
-starknet-core.workspace = true
+starknet-crypto.workspace = true
 alloy-primitives.workspace = true
 serde.workspace = true
 serde_json.workspace = true

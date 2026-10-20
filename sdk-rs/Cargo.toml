@@ -45,14 +45,13 @@ getrandom = { version = "=0.2.17", features = ["js"] }
 
 # EIP-712/secp256k1.
 alloy-dyn-abi = { version = "=1.7.3", features = ["eip712"] }
-alloy-signer = { version = "=2.5.0", features = ["eip712"] }
-alloy-signer-local = { version = "=2.5.0", default-features = false, features = ["eip712"] }
+alloy-signer = { version = "=2.5.0" }
+alloy-signer-local = { version = "=2.5.0", default-features = false }
 
 # P5a Ed25519 and Starknet/SNIP-12 primitives; no provider/client dependency.
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 starknet-crypto = { version = "=0.8.1", default-features = false, features = ["std"] }
-starknet-core = { version = "=0.16.0", default-features = false, features = ["std"] }
 
 # P5a zkLink Rescue/MuSig fork; plonk is required, multicore deliberately disabled.
 franklin-crypto = { git = "https://github.com/zkLinkProtocol/franklin-crypto.git", rev = "6ba7708bd0db5142fc55800addcf211d30e65cfa", default-features = false, features = ["plonk"] }

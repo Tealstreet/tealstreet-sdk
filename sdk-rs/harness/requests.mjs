@@ -114,6 +114,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
+  if (options.socketMessage) {
+    message = options.socketMessage(message);
+    if (message === undefined) return undefined;
+  }
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;

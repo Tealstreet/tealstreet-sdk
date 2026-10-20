@@ -74,7 +74,6 @@ pub struct Account {
     subscriptions: HashMap<u64, String>,
     subscriptions_started: f64,
     received: f64,
-    ping_at: f64,
     opened_at: f64,
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
@@ -118,7 +117,6 @@ impl Account {
             subscriptions: HashMap::new(),
             subscriptions_started: 0.,
             received: 0.,
-            ping_at: 0.,
             opened_at: 0.,
             watchdog: None,
             reconnect: None,
@@ -400,9 +398,8 @@ impl Account {
         self.auth_rpc = None;
         self.subscriptions.clear();
         self.received = cx.now;
-        self.ping_at = cx.now;
         self.opened_at = cx.now;
-        cx.send(socket, r#"{"type":"ping"}"#);
+        // Hosts answer RFC6455 pings; the server's SBE heartbeat proves idle liveness.
         self.watchdog = Some(cx.set_timer(5_000.));
         self.send_auth(cx);
     }
@@ -441,12 +438,25 @@ impl Account {
             return;
         }
         if message.id == self.auth_rpc && self.auth_rpc.is_some() {
+            fn node_id<'de, D: serde::Deserializer<'de>>(
+                d: D,
+            ) -> Result<Option<&'de str>, D::Error> {
+                let id = <&str>::deserialize(d)?;
+                if id.is_empty() {
+                    return Err(serde::de::Error::custom("empty Paradex node id"));
+                }
+                Ok(Some(id))
+            }
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
-            struct AuthResult {}
+            struct AuthResult<'a> {
+                #[serde(default, borrow, deserialize_with = "node_id")]
+                node_id: Option<&'a str>,
+            }
             let valid_result = message.result.is_some_and(|result| {
                 result.get().trim_start().starts_with('{')
-                    && serde_json::from_str::<AuthResult>(result.get()).is_ok()
+                    && serde_json::from_str::<AuthResult<'_>>(result.get())
+                        .is_ok_and(|r| r.node_id.is_none_or(|id| !id.is_empty()))
             });
             if message.error.is_some() || !valid_result {
                 self.token = None;
@@ -739,10 +749,6 @@ impl Account {
             {
                 self.disconnect(cx);
                 return;
-            }
-            if cx.now - self.ping_at >= 30_000. {
-                cx.send(self.socket.expect("open socket"), r#"{"type":"ping"}"#);
-                self.ping_at = cx.now;
             }
             self.watchdog = Some(cx.set_timer(5_000.));
         } else if self.reconnect == Some(timer) {

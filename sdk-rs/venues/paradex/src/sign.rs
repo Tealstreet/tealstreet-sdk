@@ -1,12 +1,7 @@
 use alloy_primitives::U256;
-use safe_cex_crypto::{eip712, sha256, starknet};
+use safe_cex_crypto::{eip712, ethereum, sha256, starknet};
 use serde::{Deserialize, Serialize};
-use starknet_core::{
-    crypto::compute_hash_on_elements,
-    types::Felt,
-    utils::{cairo_short_string_to_felt, get_contract_address, get_selector_from_name},
-};
-use std::collections::BTreeMap;
+use starknet_crypto::{Felt, pedersen_hash};
 
 const CURVE_ORDER: &str =
     "3618502788666131213697322783095070105526743751716087489154079457884512865583";
@@ -103,27 +98,12 @@ fn chain_id(input: &str) -> Result<String, String> {
     {
         felt(input)?
     } else {
-        cairo_short_string_to_felt(input).map_err(|_| "Invalid Paradex chain ID")?
+        short_string(input).map_err(|_| "Invalid Paradex chain ID")?
     };
     if value == Felt::ZERO {
         return Err("Invalid Paradex chain ID".into());
     }
     Ok(format!("{value:#x}"))
-}
-
-#[derive(Serialize)]
-struct Field {
-    name: &'static str,
-    #[serde(rename = "type")]
-    kind: &'static str,
-}
-
-#[derive(Serialize)]
-struct Domain<'a> {
-    name: &'static str,
-    #[serde(rename = "chainId")]
-    chain_id: &'a str,
-    version: &'static str,
 }
 
 impl Credentials {
@@ -170,24 +150,26 @@ impl Credentials {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let mut fields =
-            vec![get_selector_from_name(&definition).map_err(|_| "Invalid Paradex signing type")?];
+        let mut fields = vec![selector(&definition).map_err(|_| "Invalid Paradex signing type")?];
         fields.extend_from_slice(values);
-        let domain = compute_hash_on_elements(&[
-            get_selector_from_name("StarkNetDomain(name:felt,chainId:felt,version:felt)")
-                .expect("ASCII type"),
-            cairo_short_string_to_felt("Paradex").expect("short string"),
+        let domain = hash_elements(&[
+            selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
+            short_string("Paradex").expect("short string"),
             felt(&self.chain_id)?,
             Felt::ONE,
         ]);
-        let hash = compute_hash_on_elements(&[
-            cairo_short_string_to_felt("StarkNet Message").expect("short string"),
+        let hash = hash_elements(&[
+            short_string("StarkNet Message").expect("short string"),
             domain,
             self.address_felt,
-            compute_hash_on_elements(&fields),
+            hash_elements(&fields),
         ]);
         let (r, s) = starknet::sign(&hash, &self.key).map_err(|_| "Paradex signing failed")?;
-        Ok(format!("[\"{r}\",\"{s}\"]"))
+        Ok(format!(
+            "[\"{}\",\"{}\"]",
+            U256::from_be_bytes(r.to_bytes_be()),
+            U256::from_be_bytes(s.to_bytes_be())
+        ))
     }
 
     pub fn auth(&self, now_ms: u64) -> Result<AuthSignature, String> {
@@ -199,8 +181,8 @@ impl Credentials {
             "Request",
             &["method", "path", "body", "timestamp", "expiration"],
             &[
-                cairo_short_string_to_felt("POST").expect("short string"),
-                cairo_short_string_to_felt("/v1/auth").expect("short string"),
+                short_string("POST").expect("short string"),
+                short_string("/v1/auth").expect("short string"),
                 Felt::ZERO,
                 Felt::from(timestamp),
                 Felt::from(expiration),
@@ -308,7 +290,7 @@ fn word(input: &str) -> Result<Felt, String> {
     {
         felt(input)
     } else {
-        cairo_short_string_to_felt(input).map_err(|_| "Invalid Paradex signing field".into())
+        short_string(input).map_err(|_| "Invalid Paradex signing field".into())
     }
 }
 
@@ -355,44 +337,74 @@ pub fn quantum(input: &str) -> Result<String, String> {
     Ok(result)
 }
 
+// Paradex uses only these fixed Cairo-0 encodings. Keeping them here avoids the
+// unrelated JSON-RPC and ABI implementations of the general Starknet SDK.
+fn short_string(input: &str) -> Result<Felt, &'static str> {
+    if !input.is_ascii() || input.len() > 31 {
+        return Err("Invalid Paradex short string");
+    }
+    let mut bytes = [0u8; 32];
+    bytes[32 - input.len()..].copy_from_slice(input.as_bytes());
+    Ok(Felt::from_bytes_be(&bytes))
+}
+
+fn selector(input: &str) -> Result<Felt, &'static str> {
+    if !input.is_ascii() {
+        return Err("Invalid Paradex selector");
+    }
+    let mut hash = ethereum::keccak256(input.as_bytes());
+    hash[0] &= 0x03; // Starknet keccak is the low 250 bits of Keccak-256.
+    Ok(Felt::from_bytes_be(&hash))
+}
+
+fn hash_elements(elements: &[Felt]) -> Felt {
+    let hash = elements
+        .iter()
+        .fold(Felt::ZERO, |hash, value| pedersen_hash(&hash, value));
+    pedersen_hash(&hash, &Felt::from(elements.len()))
+}
+
+fn account_address(public: Felt, proxy: Felt, calldata: &[Felt]) -> Felt {
+    let hash = hash_elements(&[
+        short_string("STARKNET_CONTRACT_ADDRESS").expect("short string"),
+        Felt::ZERO, // Account deployment has no deployer contract.
+        public,
+        proxy,
+        hash_elements(calldata),
+    ]);
+    // Starknet contract addresses are reduced modulo 2^251 - 256.
+    let bound: U256 = (U256::ONE << 251) - U256::from(256);
+    let address = U256::from_be_bytes(hash.to_bytes_be()) % bound;
+    Felt::from_bytes_be(&address.to_be_bytes())
+}
+
+fn ethereum_digest(chain: &str) -> Result<[u8; 32], String> {
+    let chain = unsigned(chain).map_err(|_| "Invalid Paradex Ethereum chain ID")?;
+    // EIP712Domain(string name,string version,uint256 chainId), with no
+    // verifyingContract field. Each string occupies its hashed 32-byte word.
+    let mut domain = [0u8; 128];
+    domain[..32].copy_from_slice(&ethereum::keccak256(
+        b"EIP712Domain(string name,string version,uint256 chainId)",
+    ));
+    domain[32..64].copy_from_slice(&ethereum::keccak256(b"Paradex"));
+    domain[64..96].copy_from_slice(&ethereum::keccak256(b"1"));
+    domain[96..].copy_from_slice(&chain.to_be_bytes::<32>());
+    let mut constant = [0u8; 64];
+    constant[..32].copy_from_slice(&ethereum::keccak256(b"Constant(string action)"));
+    constant[32..].copy_from_slice(&ethereum::keccak256(b"STARK Key"));
+    Ok(eip712::hash_prehashed(
+        ethereum::keccak256(&domain),
+        ethereum::keccak256(&constant),
+    ))
+}
+
 fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, String), String> {
-    #[derive(Serialize)]
-    struct Constant {
-        action: &'static str,
-    }
-    #[derive(Serialize)]
-    struct Ethereum<'a> {
-        domain: Domain<'a>,
-        types: BTreeMap<&'static str, Vec<Field>>,
-        #[serde(rename = "primaryType")]
-        primary_type: &'static str,
-        message: Constant,
-    }
     let chain = config
         .l1_chain_id
         .as_deref()
         .ok_or("Missing Paradex Ethereum chain ID")?;
-    let raw = serde_json::to_string(&Ethereum {
-        domain: Domain {
-            name: "Paradex",
-            chain_id: chain,
-            version: "1",
-        },
-        types: [(
-            "Constant",
-            vec![Field {
-                name: "action",
-                kind: "string",
-            }],
-        )]
-        .into(),
-        primary_type: "Constant",
-        message: Constant {
-            action: "STARK Key",
-        },
-    })
-    .map_err(|_| "Paradex key derivation failed")?;
-    let seed = eip712::sign_typed_data(&raw, key).map_err(|_| "Invalid Paradex Ethereum key")?;
+    let digest = ethereum_digest(chain)?;
+    let seed = ethereum::sign_digest(&digest, key).map_err(|_| "Invalid Paradex Ethereum key")?;
     let r = seed
         .strip_prefix("0x")
         .unwrap_or(&seed)
@@ -435,11 +447,111 @@ fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, Stri
     )?;
     let calldata = [
         implementation,
-        get_selector_from_name("initialize").expect("ASCII selector"),
+        selector("initialize").expect("ASCII selector"),
         Felt::TWO,
         public,
         Felt::ZERO,
     ];
-    let address = get_contract_address(public, proxy, &calldata, Felt::ZERO);
+    let address = account_address(public, proxy, &calldata);
     Ok((private, address, format!("{address:#x}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct TextVector {
+        input: String,
+        output: String,
+    }
+    #[derive(Deserialize)]
+    struct HashVector {
+        input: Vec<String>,
+        output: String,
+    }
+    #[derive(Deserialize)]
+    struct AddressVector {
+        public: String,
+        proxy: String,
+        calldata: Vec<String>,
+        output: String,
+    }
+    #[derive(Deserialize)]
+    struct EthereumVector {
+        chain: String,
+        key: String,
+        digest: String,
+        seed: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Formulas {
+        short_strings: Vec<TextVector>,
+        selectors: Vec<TextVector>,
+        hashes: Vec<HashVector>,
+        addresses: Vec<AddressVector>,
+        ethereum: Vec<EthereumVector>,
+    }
+    fn vectors() -> Formulas {
+        serde_json::from_str(include_str!("../tests/sign-formulas.json")).unwrap()
+    }
+
+    #[test]
+    fn fixed_cairo_encodings_match_independent_starknet_js() {
+        let vectors = vectors();
+        for row in vectors.short_strings {
+            assert_eq!(
+                short_string(&row.input).unwrap(),
+                felt(&row.output).unwrap()
+            );
+        }
+        for row in vectors.selectors {
+            assert_eq!(selector(&row.input).unwrap(), felt(&row.output).unwrap());
+        }
+        for row in vectors.hashes {
+            let fields: Vec<_> = row.input.iter().map(|value| felt(value).unwrap()).collect();
+            assert_eq!(hash_elements(&fields), felt(&row.output).unwrap());
+        }
+        for row in vectors.addresses {
+            let calldata: Vec<_> = row
+                .calldata
+                .iter()
+                .map(|value| felt(value).unwrap())
+                .collect();
+            assert_eq!(
+                account_address(
+                    felt(&row.public).unwrap(),
+                    felt(&row.proxy).unwrap(),
+                    &calldata
+                ),
+                felt(&row.output).unwrap()
+            );
+        }
+        assert!(short_string(&"A".repeat(32)).is_err());
+        assert!(short_string("Parádex").is_err());
+        assert!(selector("Parádex").is_err());
+    }
+
+    #[test]
+    fn fixed_eip712_digest_and_seed_match_independent_ethers() {
+        for row in vectors().ethereum {
+            let digest = ethereum_digest(&row.chain).unwrap();
+            assert_eq!(format!("0x{}", safe_cex_crypto::hex(&digest)), row.digest);
+            assert_eq!(ethereum::sign_digest(&digest, &row.key).unwrap(), row.seed);
+        }
+        for chain in [
+            "",
+            "-1",
+            "1.5",
+            " 1",
+            "0x",
+            "0xq",
+            "1e3",
+            "0x10000000000000000000000000000000000000000000000000000000000000000",
+        ] {
+            let error = ethereum_digest(chain).unwrap_err();
+            assert_eq!(error, "Invalid Paradex Ethereum chain ID");
+        }
+    }
 }

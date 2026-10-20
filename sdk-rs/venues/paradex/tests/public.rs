@@ -38,7 +38,7 @@ fn sequential_streamed_market_seed_filters_options_spot_and_inactive() {
             && h.e.store().loaded().positions
             && h.e.store().loaded().orders
     );
-    assert_eq!(h.sent().len(), 6);
+    assert_eq!(h.sent().len(), 5);
     assert!(h.sent().iter().any(|s| s.contains("bbo.BTC-USD-PERP")));
     assert!(h.sent().iter().any(|s| s.contains("trades.ETH-USD-PERP")));
     assert!(!h.sent().iter().any(|s| s.contains("order_book")));
@@ -665,4 +665,55 @@ fn preseed_subscriptions_keep_reference_counts_and_cancelled_interest_stays_canc
     assert!(h.e.book("UNKNOWN-USD-PERP").is_none());
     h.command(Command::UnsubscribeOrderBook { symbol: BTC.into() });
     assert!(h.e.book(BTC).is_none());
+}
+
+#[test]
+fn idle_sbe_heartbeats_preserve_liveness_without_invalid_application_pings() {
+    let mut h = Harness::new();
+    for (index, channel) in [
+        "bbo.BTC-USD-PERP",
+        "bbo.ETH-USD-PERP",
+        "trades.BTC-USD-PERP",
+        "trades.ETH-USD-PERP",
+        "markets_summary",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        h.ws(&format!(
+            r#"{{"jsonrpc":"2.0","id":{},"result":{{"channel":"{channel}"}}}}"#,
+            index + 1
+        ));
+    }
+    let start = h.now;
+    let mut watchdog = h.timer_at(start + 5_000.);
+    let mut heartbeat = vec![16, 0, 40, 0, 1, 0, 2, 0];
+    heartbeat.extend_from_slice(&[0; 16]);
+    for i in 1..=4 {
+        h.now = start + f64::from(i) * 20_000.;
+        h.e.handle(
+            h.now,
+            Event::WsBinary {
+                socket: h.public,
+                data: &heartbeat,
+            },
+        );
+        h.e.handle(h.now, Event::TimerFired { timer: watchdog });
+        h.collect();
+        watchdog = h.timer_at(h.now + 5_000.);
+    }
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == h.public))
+    );
+    assert!(!h.sent().iter().any(|text| text.contains("ping")));
+    h.now += 60_000.;
+    h.e.handle(h.now, Event::TimerFired { timer: watchdog });
+    h.collect();
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == h.public))
+    );
 }

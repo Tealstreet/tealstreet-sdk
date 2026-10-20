@@ -1,8 +1,5 @@
-//! Dynamic EIP-712 hashing and deterministic secp256k1 signing, without transport.
-
-use alloy_dyn_abi::TypedData;
-use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
+//! EIP-712 digest construction from venue-owned domain and struct hashes.
+//! Dynamic ABI/JSON encoding belongs only to the independent test oracle.
 
 /// Hash an EIP-712 domain separator and message struct hash.
 pub fn hash_prehashed(domain_separator: [u8; 32], struct_hash: [u8; 32]) -> [u8; 32] {
@@ -13,34 +10,12 @@ pub fn hash_prehashed(domain_separator: [u8; 32], struct_hash: [u8; 32]) -> [u8;
     crate::ethereum::keccak256(&bytes)
 }
 
-fn typed_data(raw: &str) -> Result<TypedData, String> {
-    serde_json::from_str(raw).map_err(|error| error.to_string())
-}
-
-/// Hash raw EIP-712 JSON using the domain and primary type it declares.
-pub fn hash_typed_data(raw: &str) -> Result<String, String> {
-    let data = typed_data(raw)?;
-    data.eip712_signing_hash()
-        .map(|hash| format!("{hash:#x}"))
-        .map_err(|error| error.to_string())
-}
-
-/// Sign raw EIP-712 JSON; returns Ethereum's 65-byte hex signature (v = 27/28).
-/// The message's nonce is part of the typed data; RFC6979 chooses ECDSA's nonce.
-pub fn sign_typed_data(raw: &str, private_key: &str) -> Result<String, String> {
-    let data = typed_data(raw)?;
-    let signer: PrivateKeySigner = private_key
-        .parse()
-        .map_err(|error: alloy_signer_local::LocalSignerError| error.to_string())?;
-    signer
-        .sign_dynamic_typed_data_sync(&data)
-        .map(|signature| signature.to_string())
-        .map_err(|error| error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{hash_prehashed, hash_typed_data, sign_typed_data, typed_data};
+    use super::hash_prehashed;
+    use alloy_dyn_abi::TypedData;
+    use alloy_signer::SignerSync;
+    use alloy_signer_local::PrivateKeySigner;
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -74,14 +49,19 @@ mod tests {
             );
         }
         for case in cases {
+            let data: TypedData = serde_json::from_str(&case.typed_data).unwrap();
             assert_eq!(
-                hash_typed_data(&case.typed_data).unwrap(),
+                format!("{:#x}", data.eip712_signing_hash().unwrap()),
                 case.hash,
                 "EIP-712 payload hash: {}",
                 case.name
             );
+            let signer: PrivateKeySigner = case.private_key.parse().unwrap();
             assert_eq!(
-                sign_typed_data(&case.typed_data, &case.private_key).unwrap(),
+                signer
+                    .sign_dynamic_typed_data_sync(&data)
+                    .unwrap()
+                    .to_string(),
                 case.signature,
                 "secp256k1 signature: {}",
                 case.name
@@ -92,14 +72,14 @@ mod tests {
     #[test]
     fn prehashed_digest_matches_dynamic_hash_and_ethers_signature_corpus() {
         for case in corpus() {
-            let data = typed_data(&case.typed_data).unwrap();
+            let data: TypedData = serde_json::from_str(&case.typed_data).unwrap();
             let digest = hash_prehashed(
                 data.domain.separator().into(),
                 data.hash_struct().unwrap().into(),
             );
             assert_eq!(
                 format!("0x{}", crate::hex(&digest)),
-                hash_typed_data(&case.typed_data).unwrap(),
+                format!("{:#x}", data.eip712_signing_hash().unwrap()),
                 "dynamic EIP-712 equivalence: {}",
                 case.name
             );
@@ -124,8 +104,10 @@ mod tests {
         let base = cases.iter().find(|case| case.name == "base").unwrap();
         for mutation in ["key", "payload", "nonce"] {
             let changed = cases.iter().find(|case| case.name == mutation).unwrap();
+            let data: TypedData = serde_json::from_str(&changed.typed_data).unwrap();
+            let digest = data.eip712_signing_hash().unwrap();
             assert_ne!(
-                sign_typed_data(&changed.typed_data, &changed.private_key).unwrap(),
+                crate::ethereum::sign_digest(digest.as_slice(), &changed.private_key).unwrap(),
                 base.signature,
                 "{mutation} mutation must change secp256k1 signature"
             );
@@ -133,10 +115,15 @@ mod tests {
     }
 
     #[test]
-    fn malformed_raw_input_and_invalid_key_are_errors() {
-        assert!(hash_typed_data("{").is_err());
-        let cases = corpus();
-        assert!(sign_typed_data(&cases[0].typed_data, "0x00").is_err());
-        assert!(sign_typed_data(&cases[0].typed_data, &format!("0x{}", "00".repeat(32))).is_err());
+    fn malformed_oracle_and_invalid_signing_key_are_errors() {
+        assert!(serde_json::from_str::<TypedData>("{").is_err());
+        let case = corpus().remove(0);
+        let data: TypedData = serde_json::from_str(&case.typed_data).unwrap();
+        let digest = data.eip712_signing_hash().unwrap();
+        assert!(crate::ethereum::sign_digest(digest.as_slice(), "0x00").is_err());
+        assert!(
+            crate::ethereum::sign_digest(digest.as_slice(), &format!("0x{}", "00".repeat(32)))
+                .is_err()
+        );
     }
 }

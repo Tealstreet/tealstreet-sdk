@@ -166,9 +166,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+    connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (data) => typeof data === 'string' ? onMessage(data) : onBinary?.(data), onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
@@ -447,7 +447,8 @@ async function runTs() {
     const request = input instanceof Request ? input : undefined;
     const method = init.method ?? request?.method ?? 'GET';
     const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
     return new Response([204, 205, 304].includes(status) ? null : body, { status });
   };
   // Header-capable Node sockets resolve `ws` directly instead of the global.
@@ -512,6 +513,7 @@ async function runTs() {
   const postStore = () => {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
+  await venue.loadTs?.({ isPrivate });
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
