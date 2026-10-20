@@ -492,3 +492,80 @@ test('production Kraken batch matching retains signed outer economic fields arou
   assert.notEqual(requestKey('POST',url,large('9007199254740992'),new Set(),options),
     requestKey('POST',url,large('9007199254740993'),new Set(),options),'JSON envelope decoding must retain distinct large numeric values');
 });
+
+test('production Paradex authenticates exact order economics before route-scoped typed generated/caller identity matching', () => {
+  const vectors=JSON.parse(readFileSync(new URL('../venues/paradex/tests/sign-vectors.json',import.meta.url)));
+  const c=vectors.cases.find(row=>row.environment==='prod'),order=c.orders.find(row=>!row.id);
+  const now=Date.now;Date.now=()=>c.now;
+  try {
+    const url='https://api.prod.paradex.trade/v1/orders/batch';
+    const row={market:order.market,side:order.side,type:order.type,size:order.size,...(order.price===undefined?{}:{price:order.price}),
+      signature_timestamp:c.now,signature:order.signature,client_id:'ts_runtime'};
+    const expected={...row,client_id:'generated'};
+    const tape=productionTapeFor('paradex',[{type:'http',method:'POST',url,requestBody:JSON.stringify([expected]),status:200,body:'{"orders":[{"id":"1","client_id":"$request:0.client_id"}]}'}]);
+    assert(tape.responseStore,'actual production constructor uses the shared typed store');
+    const send=(value,authorization='Bearer replay-paradex-jwt')=>tape.respond('POST',url,JSON.stringify([value]),{Authorization:authorization,'PARADEX-PARTNER':'TEALSTREET'});
+    assert.throws(()=>send(row,'wrong'),/invalid replay signature/);assert.equal(tape.missingWrites,1);
+    for(const client_id of [123,null,true,'','ts_bad\n','ts_'+'a'.repeat(22),'caller-undeclared',{},[]]) {
+      assert.throws(()=>send({...row,client_id}),/invalid replay signature/);assert.equal(tape.missingWrites,1);
+    }
+    assert.throws(()=>send({...row,size:'987654321.12345678'}),/invalid replay signature/);assert.equal(tape.missingWrites,1);
+    assert.equal(send({...row,unknownEconomic:'extra'}).status,599);assert.equal(tape.missingWrites,1);
+    const response=send(row);assert.equal(response.status,200);assert.deepEqual(JSON.parse(response.body),{orders:[{id:'1',client_id:'ts_runtime'}]});
+    assert.equal(tape.missingWrites,0);assert.equal(send(row).status,599);
+    const caller={...row,client_id:'caller-exact'};
+    const callerTape=productionTapeFor('paradex',[{type:'command',t:0,op:'placeOrders',orders:[{clientOrderId:'caller-exact'}]},
+      {type:'http',method:'POST',url,requestBody:JSON.stringify([caller]),status:200,body:'{}'}]);
+    const headers={Authorization:'Bearer replay-paradex-jwt','PARADEX-PARTNER':'TEALSTREET'};
+    assert.equal(callerTape.respond('POST',url,JSON.stringify([row]),headers).status,599);assert.equal(callerTape.missingWrites,1);
+    assert.equal(callerTape.respond('POST',url,JSON.stringify([caller]),headers).status,200);
+  } finally {Date.now=now;}
+});
+
+test('production Paradex preserves business signature fields outside independently signed order rows', () => {
+  const url='https://api.prod.paradex.trade/v1/account/margin/BTC-USD-PERP';
+  const tape=productionTapeFor('paradex',[{type:'http',method:'POST',url,requestBody:'{"leverage":10,"margin_type":"CROSS"}',status:200,body:'{}'}]);
+  const headers={Authorization:'Bearer replay-paradex-jwt'};
+  for(const field of ['signature','signature_timestamp']) {
+    assert.equal(tape.respond('POST',url,JSON.stringify({leverage:10,margin_type:'CROSS',[field]:'unknown-business-field'}),headers).status,599);
+    assert.equal(tape.missingWrites,1);
+  }
+  assert.equal(tape.respond('POST',url,'{"leverage":10,"margin_type":"CROSS"}',headers).status,200);
+});
+
+test('production Paradex socket state isolates parallel connections and closed generations', async () => {
+  const tape=productionTapeFor('paradex',[]);
+  const url='wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2';
+  const connect=()=>tape.connect(url,()=>{},()=>{});
+  let id=1;
+  const send=(socket,method,params)=>tape.send(socket,JSON.stringify({jsonrpc:'2.0',id:id++,method,params}));
+  const subscribe=(socket,channel)=>send(socket,'subscribe',{channel});
+  const authenticate=async(socket)=>{send(socket,'auth',{bearer:'replay-paradex-jwt'});await new Promise(setImmediate);for(const channel of ['orders.ALL','fills.ALL','positions','balance_events','account'])subscribe(socket,channel);};
+  const publicSocket=connect(),first=connect();subscribe(publicSocket,'markets_summary');await authenticate(first);
+  assert.equal(tape.audit.ready(),true);
+  const sibling=connect();
+  sibling.onMessage('{"jsonrpc":"2.0","params":{"channel":"fills.ALL","data":{}}}');
+  assert(tape.audit.errors().some(error=>error.includes('Unsubscribed Paradex data')));
+  tape.close(first,1000,true);assert.equal(tape.audit.ready(),false,'closed authenticated connection cannot satisfy private readiness');
+  await authenticate(sibling);assert.equal(tape.audit.ready(),true);
+  const publicSibling=connect();subscribe(publicSibling,'markets_summary');
+  send(publicSocket,'unsubscribe',{channel:'markets_summary'});
+  assert.equal(tape.audit.ready(),true,'sibling owns its independent public subscription');
+  tape.close(publicSibling,1000,true);assert.equal(tape.audit.ready(),false,'closed public connection cannot lend a topic');
+});
+
+test('production Paradex rejects case-insensitive duplicate auth headers without consuming a response', () => {
+  const url='https://api.prod.paradex.trade/v1/orders/42';
+  const tape=productionTapeFor('paradex',[{type:'http',method:'DELETE',url,status:200,body:'{}'}]);
+  for(const headers of [
+    [['Authorization','Bearer invalid'],['authorization','Bearer replay-paradex-jwt']],
+    {Authorization:'Bearer invalid',authorization:'Bearer replay-paradex-jwt'},
+    [['Authorization','Bearer replay-paradex-jwt'],['PARADEX-PARTNER','wrong'],['paradex-partner','TEALSTREET']],
+  ]) {
+    assert.throws(()=>tape.respond('DELETE',url,undefined,headers),/Duplicate Paradex request header/);
+    assert.equal(tape.missingWrites,1,'duplicate authentication metadata cannot consume an acknowledgement');
+  }
+  assert.equal(tape.respond('DELETE',url,undefined,{Authorization:'Bearer replay-paradex-jwt'}).status,200);
+  assert.equal(tape.missingWrites,0);
+  assert.equal(tape.respond('DELETE',url,undefined,{Authorization:'Bearer replay-paradex-jwt'}).status,599);
+});

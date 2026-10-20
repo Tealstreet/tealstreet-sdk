@@ -22,7 +22,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
   request(request: {
     method: string;
@@ -54,6 +54,7 @@ export interface WasmEngineLike {
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
+  wsBinary?(socket: number, data: Uint8Array, now: number): string;
   wsMessage(socket: number, text: string, now: number): string | undefined;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
@@ -80,6 +81,9 @@ export function nativeTransport(): Transport;
 export function bindSocketMessages(socket: {
   addEventListener(type: string, listener: (event: { data?: unknown; code?: number }) => void): void;
   close(): void;
-}, handlers: { onMessage(text: string): void; onClose(code?: number): void; onError?(error: unknown): void }): () => void;
+}, handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; onMessage(text: string): void; onClose(code?: number): void; onError?(error: unknown): void }): () => void;
 /** Ordered text and gzip/deflate binary WebSocket message decoding. */
 export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
+
+/** Preserve binary application frames when explicitly requested by the venue. */
+export function socketMessages(onMessage: (data: string | Uint8Array) => void, onError: (error: unknown) => void, binary: boolean | undefined): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;

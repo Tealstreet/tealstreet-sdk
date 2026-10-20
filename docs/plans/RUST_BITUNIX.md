@@ -1167,3 +1167,41 @@ Independent phase reviews, fullnative/SDK/harness checks, public/private
 artifact gates and unchanged1,258,291sizecap required. Expected21venues/
 25public/43private+priorparitycases; all31registered CI checks green before
 merge. PriorParadex sizeheadroom~18KB warrants directmeasurement.
+
+Paradex merged-source size measurement: release module1,232,780bytes,
+25,511bytes below unchanged1,258,291cap. Nativefocused engine78/Bitunix60/
+Bitrue61/Paradex107 PASS; fullnative strictClippy PASS. Production source
+keeps allprior engineguards; onlynewnative contributions are2binary ingress
+regressions and4explicittextsocket flag assertions. Host Rust buildsafe;
+JSboundedrawbinary and harness security/control-timing integration pending.
+Latestbrief explicitly requires borrowedbinary ingress onlyon negotiated
+channels and preserves existingtext/decompression; integrated accordingly.
+
+Paradex compatibility checks PASS: fullworkspace1,873tests/158groups,
+engine78/crypto27/Bitunix60/KuCoin102/WOO113/Aster104/Paradex107; bans/fmt/
+native+WASMstrictClippy. SDK288/10suites and71host/socket/wire/Worker
+checks PASS; root44typecheck/28lint PASS. Test-only actualfragmented
+16MiB+1rawmessage rejects1009, never delivers toengine and does not reset
+silence/fallback (1focusedPASS afterfullworkspacecompile). Native artifact
+production source unchanged. Hostrelay exact-onceclose/typeadapter fixes
+areTSonly. Borrowedbinary preservesmetadata/orderedclose/disposal andbounded
+legacycompressedtext.
+
+Harness418helpers/41focusedPASS; actualTSprivate33frames/15commands and
+public12,396frames/66markets/tickers/2books/38events clear.135accepted
+recordedACKtimestamps are retained as validatedwaitmarkers. Independent
+review confirms raworder auth precedes scoped signature stripping/typed
+matching and exactcallerIDs, then findsduplicateAuthorization last-wins
+canhide aninvalidfirstvalue. Bounded duplicateheader rejection+actual
+production no-consumption regression required before finalreview/gates.
+RebuiltprivateartifactPASS33frames; publicperformance waits for CPUquiet.
+
+Independent finalParadex review PASS after duplicateheaderauthfix: original
+array/casevariantobject exploit rejects before consumption; validuniqueJWT
+consumesonce then noACK remains.4production regressions independentlyPASS
+(/tmp/bitunix-paradex-independent-focused.log). No remaining findings;
+boundedreview atdiminishingreturns. Ownerfinal419helperaggregate running.
+
+Final419/419helpers+42focusedPASS; source staged/released, no markers or
+whitespaceerrors. Unchangedthree-runParadex publicartifactgate running
+withlocalchecksquiet. Checkpoint reviewedmerge before gateoutcome.

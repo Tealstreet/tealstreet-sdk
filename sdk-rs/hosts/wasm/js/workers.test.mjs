@@ -389,3 +389,21 @@ test('standalone Workers reject unconfigured CORS before fetching or allocating 
   assert.equal(fetch.mock.callCount(), 0);
   assert.equal(timeout.mock.callCount(), 0);
 });
+
+test('Worker raw binary frames preserve protocol bytes, controls and closure ordering', async () => {
+  const events = [];
+  workersTransport().connect('wss://example.test/sbe', {
+    binary: true,
+    onOpen: () => events.push('open'),
+    onBinary: (data) => events.push([...data]),
+    onMessage: (text) => events.push(text),
+    onClose: (code) => events.push(code),
+  });
+  await until(() => events[0] === 'open');
+  const { socket } = upgrades.at(-1);
+  socket.dispatch('message', { data: new Blob([Uint8Array.of(0x78, 0xff)]) });
+  socket.dispatch('message', { data: 'control' });
+  socket.close(1001);
+  await until(() => events.at(-1) === 1001);
+  assert.deepEqual(events, ['open', [0x78, 0xff], 'control', 1001]);
+});

@@ -36,12 +36,14 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
         .drain_actions()
         .find_map(|a| {
             if let Action::WsConnect {
+                binary,
                 socket,
                 url,
                 channel,
                 context,
             } = a
             {
+                assert!(!binary, "Bitrue public feed uses the text protocol");
                 assert_eq!(channel, Some(SocketChannel::Public));
                 assert!(context.is_none());
                 assert_eq!(url, "wss://fmarket-ws.bitrue.com/kline-api/ws");

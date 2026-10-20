@@ -599,3 +599,77 @@ test('public HTTP routing metadata survives actions without changing ordinary re
 test('the raw host rejects unconfigured CORS routing before touching the network', async () => {
   await assert.rejects(nativeTransport().request({method:'GET',route:'publicCors',url:'https://venue.test/time',headers:{}}),/not configured/);
 });
+
+test('raw binary frames, following text and closure retain receive order', async () => {
+  const socket = new MessageSocket();
+  const events = [];
+  const closed = deferred();
+  bindSocketMessages(socket, {
+    binary: true,
+    onBinary: (data) => events.push([...data]),
+    onMessage: (text) => events.push(text),
+    onClose: (code) => { events.push(code); closed.resolve(); },
+  });
+  socket.dispatch('message', { data: new Blob([Uint8Array.of(0x1f, 0x8b, 0xff)]) });
+  socket.dispatch('message', { data: 'control' });
+  socket.dispatch('close', { code: 1001 });
+  await closed.promise;
+  assert.deepEqual(events, [[0x1f, 0x8b, 0xff], 'control', 1001]);
+});
+
+test('raw binary frames remain bounded and reject queued messages after failure', async () => {
+  const socket = new MessageSocket();
+  const closed = deferred();
+  const messages = [];
+  bindSocketMessages(socket, {
+    binary: true,
+    onBinary: (data) => messages.push(data),
+    onMessage: (text) => messages.push(text),
+    onClose: () => closed.resolve(),
+  });
+  socket.dispatch('message', { data: new Uint8Array(16 * 1024 * 1024 + 1) });
+  socket.dispatch('message', { data: 'must not follow oversize' });
+  await closed.promise;
+  assert.deepEqual(messages, []);
+  assert.equal(socket.closes, 1);
+});
+
+test('disposing while raw binary delivery waits suppresses data, control and close callbacks', async () => {
+  const socket = new MessageSocket();
+  const started = deferred();
+  const release = deferred();
+  const events = [];
+  class DelayedBlob extends Blob {
+    async arrayBuffer() { started.resolve(); await release.promise; return super.arrayBuffer(); }
+  }
+  const dispose = bindSocketMessages(socket, {
+    binary: true,
+    onBinary: (data) => events.push(data),
+    onMessage: (text) => events.push(text),
+    onClose: (code) => events.push(code),
+  });
+  socket.dispatch('message', { data: new DelayedBlob([Uint8Array.of(0xff)]) });
+  socket.dispatch('message', { data: 'late control' });
+  socket.dispatch('close', { code: 1000 });
+  await started.promise;
+  dispose();
+  release.resolve();
+  await new Promise(setImmediate);
+  assert.deepEqual(events, []);
+});
+
+test('a transport that closes during connect reaches the engine once and leaves no socket', () => {
+  const events = [];
+  let released = 0;
+  const host = new EngineHost({ wsClose: (...args) => { events.push(args); return ''; } }, {
+    now: () => 7,
+    connect: (_url, handlers) => {
+      handlers.onClose(1006);
+      return { close: () => { released++; handlers.onClose(1006); } };
+    },
+  });
+  host.execute({ op: 'wsConnect', socket: 4, url: 'wss://example.test' });
+  assert.deepEqual(events, [[4, 1006, 7]]);
+  assert.equal(host.sockets.size, 0);
+  assert.equal(released, 1);
+});

@@ -12,6 +12,7 @@ import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { exchangeMetadata } from '../exchangeMetadata';
 import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
 import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
+import { createAPI as createParadexAPI } from '../exchanges/paradex/paradex.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { setDefaultTransport } from './registry';
@@ -709,7 +710,7 @@ describe('Bybit Brazil routing carries the site identity on every transport', ()
   });
 });
 
-const connectedRelay = async () => {
+const connectedRelay = async (binary = false) => {
   setWsRelayEnabled(true);
   const listeners = new Map<string, (event?: unknown) => void>();
   const relay = {
@@ -724,13 +725,26 @@ const connectedRelay = async () => {
   const url = 'wss://stream.bybit.com/v5/private';
   routed.connect(url, handlers('private'));
   routed.connect(url, handlers('private'));
-  const handler = handlers('private');
+  const handler = { ...handlers('private'), binary, onBinary: vi.fn() };
   const socket = routed.connect(url, handler);
   await vi.waitFor(() => expect(listeners.has('message')).toBe(true));
   return { relay, handler, socket, emit: (data: unknown) => listeners.get('message')!({ data }), listeners };
 };
 
 describe('relay binary frames obey the native transport text contract', () => {
+  it('preserves opted-in raw bytes and delivers the remote close after preceding frames', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    const { emit, handler, listeners } = await connectedRelay(true);
+    const events: unknown[] = [];
+    handler.onBinary.mockImplementation((bytes: Uint8Array) => events.push([...bytes]));
+    handler.onMessage.mockImplementation((text: string) => events.push(text));
+    handler.onClose.mockImplementation((code?: number) => events.push(code));
+    emit(new NodeBlob([new Uint8Array([0x1f, 0x8b, 0xff])]));
+    emit('control');
+    listeners.get('close')!({ code: 1001 });
+    await vi.waitFor(() => expect(events).toEqual([[0x1f, 0x8b, 0xff], 'control', 1001]));
+  });
+
   it('decodes gzip Blob, zlib bytes, UTF-8 buffers and following text in arrival order', async () => {
     // happy-dom's Blob lacks the stream method used by the production decoder.
     vi.stubGlobal('Blob', NodeBlob);
@@ -923,6 +937,46 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
     expect(raw.request).not.toHaveBeenCalled();
     expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
   });
+});
+
+describe('Paradex matches the production API factory adapter gate', () => {
+  const permutations = ([undefined, false, true] as const).flatMap((publicDataOnly) =>
+    ([undefined, false, true] as const).map((tealstreetTunnel) => ({ publicDataOnly, tealstreetTunnel })),
+  );
+
+  it.each(permutations)('publicOnly=$publicDataOnly tunnel=$tealstreetTunnel', async (flags) => {
+    const opts = options({ ...flags, paradexAddress: '0x123', subkeyAddress: '0x456', secret: '' });
+    const client = createParadexAPI(opts, { name: 'paradex' } as BaseExchange);
+    const factoryUsesHow = client.defaults.adapter === mocks.adapter;
+    const raw = makeRaw();
+    const host = createEngineTransport('paradex', opts, raw);
+    await host.request({ ...request('https://api.prod.paradex.trade/v1/orders'), headers: {
+      Authorization: 'Bearer venue-jwt', 'Content-Type': 'application/json',
+    } });
+    expect(mocks.adapter).toHaveBeenCalledTimes(factoryUsesHow ? 1 : 0);
+    expect(raw.request).toHaveBeenCalledTimes(factoryUsesHow ? 0 : 1);
+    expect(resolveEngineRoutingPlan('paradex', opts, 'https://api.prod.paradex.trade/v1').http.mode).toBe(
+      factoryUsesHow ? 'how' : 'direct',
+    );
+    const socketUrl = 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false';
+    for (const channel of ['public', 'private'] as const) {
+      host.connect(socketUrl, { channel, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() });
+    }
+    expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([socketUrl, socketUrl]);
+    host.dispose?.();
+  });
+});
+
+it('keeps the Paradex venue bearer separate from proxy authorization on both host plans', async () => {
+  const account = options({ publicDataOnly: false, tealstreetProxy: true, tealstreetTunnel: false });
+  const raw = makeRaw();
+  const routed = createEngineTransport('paradex', account, raw);
+  await routed.request({ method: 'GET', url: 'https://api.prod.paradex.trade/v1/account', headers: { Authorization: 'Bearer venue-jwt' } });
+  const config = mocks.adapter.mock.lastCall![0] as InternalAxiosRequestConfig;
+  expect(config.headers.get('Authorization')).toBe('Bearer venue-jwt');
+  expect(config.headers.get('Tealstreet-Authorization')).toBe('Bearer proxy-jwt');
+  expect(resolveEngineRoutingPlan('paradex', account, 'https://api.prod.paradex.trade/v1').http.authorizationHeader).toBe('Tealstreet-Authorization');
+  routed.dispose!();
 });
 
 describe('Aster secondary signer HTTP routing', () => {

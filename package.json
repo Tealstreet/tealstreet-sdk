@@ -26,6 +26,7 @@
     "rust:private-tape-bitget-uta": "node sdk-rs/harness/private-tape-bitget-uta.mjs",
     "rust:private-tape-bitgetinverse": "node sdk-rs/harness/private-tape-bitgetinverse.mjs",
     "rust:test-bitget-parity": "node --test sdk-rs/harness/bitget-parity.integration.mjs",
+    "rust:private-tape-paradex": "node sdk-rs/harness/private-tape-paradex.mjs",
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-bitunix": "node sdk-rs/harness/private-tape-bitunix.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",

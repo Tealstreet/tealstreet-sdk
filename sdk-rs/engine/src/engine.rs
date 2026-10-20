@@ -111,6 +111,8 @@ pub struct SocketContext {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     WsConnect {
+        /// Preserve application binary frames rather than decoding UTF-8.
+        binary: bool,
         socket: SocketId,
         url: String,
         channel: Option<SocketChannel>,
@@ -294,6 +296,10 @@ pub enum Event<'a> {
     WsOpened {
         socket: SocketId,
     },
+    WsBinary {
+        socket: SocketId,
+        data: &'a [u8],
+    },
     WsMessage {
         socket: SocketId,
         text: &'a str,
@@ -409,7 +415,7 @@ impl<P> Cx<'_, P> {
         url: impl Into<String>,
         channel: Option<SocketChannel>,
     ) -> SocketId {
-        self.connect_context(url, channel, None)
+        self.connect_context(url, channel, None, false)
     }
 
     pub fn connect_feed(
@@ -426,7 +432,17 @@ impl<P> Cx<'_, P> {
                 feed: feed.into(),
                 recover,
             }),
+            false,
         )
+    }
+
+    /// Binary protocols still receive text control responses through on_message.
+    pub fn connect_binary_channel(
+        &mut self,
+        url: impl Into<String>,
+        channel: SocketChannel,
+    ) -> SocketId {
+        self.connect_context(url, Some(channel), None, true)
     }
 
     fn connect_context(
@@ -434,9 +450,11 @@ impl<P> Cx<'_, P> {
         url: impl Into<String>,
         channel: Option<SocketChannel>,
         context: Option<SocketContext>,
+        binary: bool,
     ) -> SocketId {
         let socket = SocketId(self.io.next());
         self.io.actions.push(Action::WsConnect {
+            binary,
             socket,
             url: url.into(),
             channel,
@@ -655,6 +673,7 @@ pub trait Venue {
 
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
+    fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
     fn on_response(
@@ -750,6 +769,7 @@ impl<V: Venue> Engine<V> {
         };
         match event {
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
+            Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
             Event::HttpResponse { request, response } => {
@@ -1000,6 +1020,7 @@ mod streamed_metadata_tests {
     struct Capture {
         at: ArrayAt,
         body: Option<String>,
+        binary: Option<(SocketId, Vec<u8>)>,
         failed: bool,
     }
 
@@ -1015,7 +1036,12 @@ mod streamed_metadata_tests {
             );
         }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            self.body = Some(text.into());
+        }
+        fn on_binary(&mut self, _: &mut Cx<'_, ()>, socket: SocketId, data: &[u8]) {
+            self.binary = Some((socket, data.to_vec()));
+        }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), response: Response<'_>) {
             self.body = Some(response.body.into());
@@ -1031,6 +1057,36 @@ mod streamed_metadata_tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    #[test]
+    fn binary_ingress_preserves_raw_bytes_and_text_control_remains_independent() {
+        let mut engine = Engine::new(Capture {
+            at: ArrayAt::Root,
+            body: None,
+            binary: None,
+            failed: false,
+        });
+        let socket = SocketId(7);
+        let bytes = [0, 255, 192, 128]; // Includes NUL and invalid UTF-8.
+        engine.handle(
+            1.0,
+            Event::WsBinary {
+                socket,
+                data: &bytes,
+            },
+        );
+        assert_eq!(engine.venue().binary, Some((socket, bytes.to_vec())));
+        assert_eq!(engine.venue().body, None);
+        engine.handle(
+            2.0,
+            Event::WsMessage {
+                socket,
+                text: r#"{"result":{}}"#,
+            },
+        );
+        assert_eq!(engine.venue().body.as_deref(), Some(r#"{"result":{}}"#));
+        assert_eq!(engine.venue().binary, Some((socket, bytes.to_vec())));
     }
 
     #[test]
@@ -1056,6 +1112,7 @@ mod streamed_metadata_tests {
                 let mut engine = Engine::new(Capture {
                     at,
                     body: None,
+                    binary: None,
                     failed: false,
                 });
                 engine.start(0.0);
@@ -1368,6 +1425,61 @@ mod streaming_tests {
 #[cfg(test)]
 mod request_route_tests {
     use super::*;
+    #[test]
+    fn binary_encoding_is_opt_in_and_preserves_roles_and_owned_feed_context() {
+        let mut store = Store::default();
+        let mut io = Io::<()>::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let url = "wss://venue.test/feed";
+        let legacy = cx.connect(url);
+        let public = cx.connect_channel(url, SocketChannel::Public);
+        let feed = cx.connect_feed(url, SocketChannel::Private, String::from("private-0"), true);
+        let binary_public = cx.connect_binary_channel(url, SocketChannel::Public);
+        let binary_private = cx.connect_binary_channel(url, SocketChannel::Private);
+        let connections: Vec<_> = io
+            .actions
+            .into_iter()
+            .map(|action| match action {
+                Action::WsConnect {
+                    binary,
+                    socket,
+                    url: actual,
+                    channel,
+                    context,
+                } => {
+                    assert_eq!(actual, url);
+                    (socket, binary, channel, context)
+                }
+                _ => panic!("unexpected connection action"),
+            })
+            .collect();
+        assert_eq!(
+            connections,
+            vec![
+                (legacy, false, None, None),
+                (public, false, Some(SocketChannel::Public), None),
+                (
+                    feed,
+                    false,
+                    Some(SocketChannel::Private),
+                    Some(SocketContext {
+                        feed: "private-0".into(),
+                        recover: true
+                    })
+                ),
+                (binary_public, true, Some(SocketChannel::Public), None),
+                (binary_private, true, Some(SocketChannel::Private), None),
+            ]
+        );
+        let unique: std::collections::HashSet<_> =
+            connections.iter().map(|(socket, ..)| socket).collect();
+        assert_eq!(unique.len(), 5);
+    }
+
     #[test]
     fn route_hints_mark_only_the_requested_outbound_action() {
         let mut store = Store::default();

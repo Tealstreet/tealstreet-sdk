@@ -94,6 +94,25 @@ pub trait Transport {
     ) -> mpsc::UnboundedSender<String> {
         self.connect_channel(socket, url, headers, channel, events)
     }
+    /// Binary protocols require explicit transport support.
+    #[allow(clippy::too_many_arguments)]
+    fn connect_encoding(
+        &self,
+        binary: bool,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        if binary {
+            let _ = events.send(HostEvent::WsClosed(socket, 1003));
+            mpsc::unbounded_channel().0
+        } else {
+            self.connect_context(socket, url, headers, channel, context, events)
+        }
+    }
     /// Run a request, reporting its start, body chunks and end on `events`.
     /// Bound its lifetime and report `HttpFailed` on timeout, including the body.
     fn request(&self, request: HttpRequest, events: Events);
@@ -192,6 +211,19 @@ impl Transport for NetworkTransport {
         context: Option<safe_cex_engine::SocketContext>,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.connect_encoding(false, socket, url, headers, channel, context, events)
+    }
+
+    fn connect_encoding(
+        &self,
+        binary: bool,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
         let headers = headers
@@ -257,6 +289,11 @@ impl Transport for NetworkTransport {
                         Some(Ok(Message::Text(text))) => {
                             if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
+                        }
+                        Some(Ok(Message::Binary(bytes))) if binary => {
+                            if bytes.len() > MAX_BINARY_BYTES { break 1009; }
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
+                            let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                         }
                         Some(Ok(Message::Binary(bytes))) => {
                             let text = match binary_text(&bytes) {

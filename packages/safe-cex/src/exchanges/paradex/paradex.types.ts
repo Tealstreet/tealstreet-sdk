@@ -1,4 +1,4 @@
-import { OrderSide, OrderType } from '../../types';
+import { OrderSide, OrderType, OrderTimeInForce } from '../../types';
 
 export const RECV_WINDOW = 20_000;
 
@@ -9,12 +9,12 @@ export const BASE_URL = {
 
 export const BASE_WS_URL = {
   public: {
-    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false',
-    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false',
+    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
+    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
   },
   private: {
-    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false',
-    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false',
+    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
+    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
   },
 };
 
@@ -84,6 +84,15 @@ export const isParadexTriggerOrderType = (type: string): boolean =>
 
 export const isParadexMarketOrderType = (type: string): boolean =>
   ['MARKET', 'STOP_MARKET', 'STOP_LOSS_MARKET', 'TAKE_PROFIT_MARKET'].includes(type);
+
+export const paradexTimeInForce = (row: { instruction?: string; time_in_force?: string; post_only?: boolean }): OrderTimeInForce | undefined => {
+  if (row.post_only || row.instruction === 'POST_ONLY') return OrderTimeInForce.PostOnly;
+  const instruction = row.instruction || row.time_in_force;
+  if (instruction === 'GTC' || instruction === 'GTT') return OrderTimeInForce.GoodTillCancel;
+  if (instruction === 'IOC') return OrderTimeInForce.ImmediateOrCancel;
+  if (instruction === 'FOK') return OrderTimeInForce.FillOrKill;
+  return undefined;
+};
 
 export const ORDER_SIDE: Record<string, OrderSide> = {
   BUY: OrderSide.Buy,

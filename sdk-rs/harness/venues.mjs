@@ -4,6 +4,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest, apexRequestOptions } from './apexomni-protocol.mjs';
 import { createKrakenRequestAudit, validateKrakenSocketMessage, validateKrakenSocketFrame, krakenRequestBody, krakenCommandResult } from './kraken-protocol.mjs';
 let krakenRequestAudit;
+import { paradexProtocol } from './paradex-protocol.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { kucoin } from './kucoin.mjs';
 import { createRequire } from 'node:module';
@@ -519,6 +520,18 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  paradex: {
+    ...paradexProtocol,
+    rust: 'paradex',
+    requestKey: typedRequest,
+    ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
+    // Effective position leverage differs from configured cross-margin leverage.
+    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
+      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
+    })),
+    tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
+
   apexomni: {
     rust: 'apexomni',
     ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },

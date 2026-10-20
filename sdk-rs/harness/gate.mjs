@@ -327,6 +327,10 @@ KNOWN_TS_FIXES.woo = [];
   // both bracket siblings preserved during parent cancel/replace amendments.
   // Price-only amendments keep the observed residual quantity; invalid/no-op
   // amendments reject before cancellation and filled sources are not replaced.
+// Paradex fixes are paired in production TS: full depth/sequence recovery,
+// mandatory SBE1:2, signed payload/auth headers, exact execution identity,
+// candle ordering, margin settings and safe order amendments. No output rewrite.
+KNOWN_TS_FIXES.paradex = [];
 KNOWN_TS_FIXES.apexomni = [];
 KNOWN_TS_FIXES.kraken = {
     output: fixKrakenOutput,

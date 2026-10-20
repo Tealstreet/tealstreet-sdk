@@ -41,4 +41,7 @@ id = "generic-api-key"
 description = "Synthetic signing vectors in crate test fixtures."
 paths = [
   "sdk-rs/[^/]+/tests/",
+  # Independently generated StarkNet derivation vectors from the public,
+  # synthetic Ethereum key consisting of 32 repeated 0x11 bytes.
+  "^sdk-rs/venues/paradex/tests/sign-vectors\\.json$",
 ]

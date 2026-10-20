@@ -60,11 +60,18 @@ export class Responses {
     onMatch?.(record);
     if ((!timed && current.length > 1) || write) queue.splice(queue.indexOf(record), 1);
     let responseBody = record.body;
-    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+    if (/"\$(clientAlgoId|newClientOrderId|client_id)"/.test(responseBody)) {
       const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
       const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw ?? {};
-      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g,
         (_, field) => JSON.stringify(sent[field] ?? null, (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
+    }
+    if (responseBody.includes('"$request:')) {
+      const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw;
+      responseBody = responseBody.replace(/"\$request:([\w.]+)"/g, (_, path) =>
+        JSON.stringify(path.split('.').reduce((value, key) => value?.[key], sent) ?? null,
+          (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
     }
     return { status: record.status, headers: record.headers ?? '', body: responseBody,
       ...(Object.hasOwn(record, 'comparisonRequestBody') ? { comparisonRequestBody: record.comparisonRequestBody } : {}),

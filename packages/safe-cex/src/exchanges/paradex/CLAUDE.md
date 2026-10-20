@@ -43,7 +43,7 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 | `paradex.exchange.ts`   | Main exchange class (`ParadexExchange`) extending `BaseExchange`; all trading operations |
 | `paradex.types.ts`      | Type definitions: URLs, endpoints, order/side/status maps, response types                |
 | `paradex.sdk.ts`        | SDK integration: account init, `ParadexRequestSigner`, `ParadexJWTManager`               |
-| `paradex.ws-public.ts`  | Public WebSocket: BBO tickers, orderbook snapshots, trades, OHLCV polling                |
+| `paradex.ws-public.ts`  | Public WebSocket: BBO tickers, full-depth books, trades, OHLCV polling                |
 | `paradex.ws-private.ts` | Private WebSocket: orders, positions, balance updates with JWT auth                      |
 
 Private position events are coalesced into a throttled REST reconciliation. The
@@ -140,7 +140,7 @@ Axios request interceptor flow:
 1. Wait for SDK initialization
 2. Get JWT token from manager
 3. Send JSON-RPC 2.0 auth message: `{jsonrpc: "2.0", method: "auth", params: {bearer: token}, id: <trackedRequestId>}`
-4. Auth response: Empty result `{}` on success; response id is matched against the tracked auth request id
+4. Auth response: Result `{node_id: "…"}` (or legacy `{}`) on success; response id is matched against the tracked auth request id
 5. On successful auth, subscribe to private channels
 
 ## Startup Sequence
@@ -227,11 +227,23 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ### Public WebSocket (`paradex.ws-public.ts`)
 
-**Protocol**: JSON-RPC 2.0
+**Protocol**: JSON-RPC 2.0 control messages and binary SBE market/account data.
+Both public and private URLs explicitly negotiate `sbeSchemaId=1&sbeSchemaVersion=2`.
+The live venue rejects a JSON-only handshake. `paradex.sbe.ts` decodes the published
+schema 1:2 with checked lengths, mandatory fields and enum validation; malformed
+frames leave state untouched. The engine's host must preserve raw binary frames
+and deliver them through the binary ingress; text control messages remain text.
+Routing uses the account's existing Tealstreet resolver. Routed Paradex requests
+carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JWT
+`Authorization: Bearer …` header.
 
-**Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`
+**Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
-**Ping/pong**: Sends `{ type: "ping" }` every 30 seconds via `setTimeout` (`paradex.ws-public.ts:116-126`).
+**Keepalive**: The venue uses RFC6455 control pings; socket libraries answer with
+control pongs automatically ([official keepalive contract](https://github.com/tradeparadex/paradex-docs/blob/main/fern/pages/websockets/introduction.mdx)).
+Application JSON pings are rejected (including
+JSON-RPC `ping`, which is not an API method). SBE heartbeat template 40 refreshes
+liveness during idle periods. The stale-message watchdog reconnects after 90 seconds.
 
 **Subscription format**:
 
@@ -259,20 +271,20 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 | Channel                                               | Format    | Description                                                                                    |
 | ----------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
-| `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (throttled 100ms in handler)                                     |
+| `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (every state update is applied)                                     |
 | `trades.{market}`                                     | Automatic | Live last-price + drives in-memory OHLCV update from trade ticks                               |
 | `markets_summary`                                     | Automatic | Aggregate stream for volume_24h / open_interest / funding_rate (slow cadence)                  |
-| `order_book.{market}.snapshot@{depth}@{refresh_rate}` | On-demand | Orderbook snapshots (current implementation uses `snapshot@15@100ms`; no `@price_tick` suffix) |
+| `order_book.{market}.deltas` | On-demand | Full-depth initial snapshot, then incremental inserts/updates/deletes |
 
 **BBO handling** (`paradex.ws-public.ts`):
 
-- Throttled to 100ms (leading + trailing)
+- Applies every message synchronously, including consecutive different markets
 - Updates bid/ask/index in ticker store from per-symbol `bbo.{market}` events
 - Last price is **not** updated from bbo — that comes from the trades feed
 
 **Markets summary handling** (`paradex.ws-public.ts`):
 
-- Throttled to 100ms (leading + trailing)
+- Applies every message synchronously, including consecutive different markets
 - Used as a **secondary** source for volume / open-interest / funding rate updates only.
 - Bid/ask/last/mark/index updates come from `bbo` and `trades`, not from `markets_summary`,
   because `markets_summary` does not push at tick-rate cadence and would visibly lag the
@@ -281,11 +293,12 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 **Orderbook handling** (`paradex.ws-public.ts:190-247`):
 
-- Throttled to 100ms (leading + trailing)
-- Paradex snapshots commonly use `inserts`, `updates`, `deletes` arrays
+- Applies every delta synchronously; callbacks are throttled separately per symbol to 100ms
+- Full-depth snapshots and deltas use `inserts`, `updates`, `deletes` arrays
 - Each level: `{side: "BUY"|"SELL", price: string, size: string}`
-- Handler also tolerates `bids`/`asks` snapshot array variants, and falls back to channel-derived symbol when `data.market` is omitted
-- Updates best bid/ask in ticker store and emits to registered callbacks
+- Validates the complete update before mutation; a gap resubscribes and awaits a fresh snapshot
+- Retains the sequence floor during recovery so stale snapshots cannot rewind the book
+- Emits the complete sorted book to registered callbacks
 - On-demand subscription: `subscribeToOrderBook()` / `unsubscribeFromOrderBook()`
 - Resubscribes active orderbooks on reconnect (`paradex.ws-public.ts:396-403`)
 
@@ -300,6 +313,10 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Uses documented `/markets/klines` for 1m through 1h; wider intervals temporarily retain the public `/tradingview/history` compatibility route
 - Polls every 3 seconds (`paradex.ws-public.ts:578`)
 - Between polls, `updateOHLCVFromTrade()` constructs/updates candles from trade feed
+- Poll replies cannot replace a newer candle bucket or decrease its known volume.
+  A revision fence also retains trades received while a poll was in flight.
+  The REST candle has no observation timestamp, so equal-bucket, equal-volume
+  replies cannot prove whether their close is newer than a cached trade.
 - Only emits callback when candle data actually changes
 - `pollKey` format: `"{symbol}:{interval}"` used to track active subscriptions
 - Cleanup function stops polling, clears callbacks, clears cache
@@ -308,9 +325,17 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ### Private WebSocket (`paradex.ws-private.ts`)
 
-**Protocol**: JSON-RPC 2.0
+**Protocol**: JSON-RPC 2.0 control messages and binary SBE market/account data.
+Both public and private URLs explicitly negotiate `sbeSchemaId=1&sbeSchemaVersion=2`.
+The live venue rejects a JSON-only handshake. `paradex.sbe.ts` decodes the published
+schema 1:2 with checked lengths, mandatory fields and enum validation; malformed
+frames leave state untouched. The engine's host must preserve raw binary frames
+and deliver them through the binary ingress; text control messages remain text.
+Routing uses the account's existing Tealstreet resolver. Routed Paradex requests
+carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JWT
+`Authorization: Bearer …` header.
 
-**Connection URL**: Same as public (`wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`)
+**Connection URL**: Same as public (`wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`)
 
 **Authentication**: JWT bearer token sent via `{method: "auth", params: {bearer: token}}` immediately on open.
 
@@ -572,8 +597,8 @@ For order signatures, size and price are scaled by `1e8`:
 
 ### WebSocket
 
-- **Markets summary handler**: Throttled to 100ms (lodash `throttle` with leading+trailing)
-- **Orderbook handler**: Throttled to 100ms (lodash `throttle` with leading+trailing)
+- **BBO/markets summary handlers**: Apply every message synchronously; a global throttle would discard different markets
+- **Orderbook handler**: Every delta is applied; callbacks are throttled per symbol to 100ms (leading+trailing). Invalid updates or sequence gaps resubscribe and wait for a fresh snapshot; duplicate/older sequence numbers are ignored.
 - **Order fetch throttle**: 1-second debounce (`paradex.ws-private.ts:430-435`)
 - **Position fetch throttle**: 500ms minimum between fetches (`paradex.ws-private.ts:287-318`)
 
@@ -657,8 +682,8 @@ For order signatures, size and price are scaled by `1e8`:
 
 - **REST Livenet**: `https://api.prod.paradex.trade/v1`
 - **REST Testnet**: `https://api.testnet.paradex.trade/v1`
-- **WebSocket Livenet**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`
-- **WebSocket Testnet**: `wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false`
+- **WebSocket Livenet**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
+- **WebSocket Testnet**: `wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
 ### Differences
 
@@ -691,6 +716,9 @@ Two shape facts, both verified live and both silent failures if assumed away:
 `start_at` / `end_at` **are** honoured (a window the account has no orders in returns
 `results: []`). Worth stating only because four other venues in this epic answered a
 windowed request with their full history and no error.
+
+History and income continue through empty pages when `next` names an unvisited
+cursor; only cursor exhaustion or the existing page cap completes traversal.
 
 ## Known Quirks / Implementation Notes
 
@@ -725,7 +753,7 @@ windowed request with their full history and no error.
 
 14. **Mark/last/bid/ask sources**: bid/ask come from `bbo.{symbol}` (broadcast at startup). `last` (and a synthetic `mark`) come from `trades.{symbol}` (also broadcast). `markets_summary` is reserved for slow-changing fields (volume_24h / open_interest / funding_rate). Do **not** route bid/ask/last back through `markets_summary` — its cadence is too slow for live UX, and an earlier attempt to consolidate everything into it visibly broke watchlist/positions PnL refresh.
 
-15. **Orderbook on-demand subscription**: Orderbook channels are only subscribed when `listenOrderBook()` is called, preventing subscription to 100+ unused orderbooks. Channel shape is `order_book.{market}.snapshot@15@100ms` (`paradex.ws-public.ts`).
+15. **Orderbook on-demand subscription**: Orderbook channels are only subscribed when `listenOrderBook()` is called, preventing subscription to 100+ unused orderbooks. `order_book.{market}.deltas` preserves full depth; the former `snapshot@15@100ms` feed truncated books to fifteen levels. A new socket or recovery requires a snapshot before any delta applies. The sequence check conservatively resubscribes on a nonconsecutive sequence rather than risk publishing an incomplete book. Official schema: `tradeparadex/paradex-docs`, `fern/apis/prod_ws/asyncapi-2.6.0.yaml`, `ResponsesPriceBookUpdate`.
 
 16. **Public/private mode detection**: Paradex must not be treated as public-only just because `secret` is empty. Runtime private-mode checks must use Paradex credentials (`key`, `paradexAddress`, `subkeyAddress`).
 

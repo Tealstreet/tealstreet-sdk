@@ -5,12 +5,12 @@ import { parseRequestJson } from './request-json.mjs';
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const CLIENT_IDS = new Set(['clientOrderId', 'newClientOrderId', 'clientAlgoId']);
 const stable =
-  (callerIds, options = {}) =>
+  (callerIds, options = {}, body = false) =>
   ([name, value]) => {
     if (value === undefined || options.defaultBodyValues?.[name] === value) return false;
     if (options.ignoreGeneratedBodyId?.(name, value, callerIds, options.bodyContext)) return false;
     if (callerIds.has(value)) return true;
-    if (VOLATILE.has(name) || options.generatedId?.(name, String(value))) return false;
+    if ((VOLATILE.has(name) && !(body && options.preserveBodyFields?.includes(name))) || options.generatedId?.(name, String(value))) return false;
     return !CLIENT_IDS.has(name) || Boolean(options.generatedId);
   };
 
@@ -63,7 +63,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (body instanceof URLSearchParams || (typeof body === 'string' && !/^[\[{]/.test(body.trimStart()) && body.includes('='))) {
     const form = new URLSearchParams(body);
-    const entries = [...form].filter(stable(callerIds, options)).sort(([a], [b]) => a.localeCompare(b));
+    const entries = [...form].filter(stable(callerIds, options, true)).sort(([a], [b]) => a.localeCompare(b));
     if (!options.requestBody || new Set([...form.keys()]).size !== [...form.keys()].length)
       return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} FORM ${new URLSearchParams(entries)}`;
     body = Object.fromEntries(form);
@@ -83,7 +83,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
       ? [
           'object',
           Object.entries(payload)
-            .filter(stable(callerIds, options))
+            .filter(stable(callerIds, options, true))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([key, value]) => [key, wireValue(value, callerIds, options, key)]),
         ]
@@ -238,6 +238,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  if (options.socketMessage) {
+    message = options.socketMessage(message);
+    if (message === undefined) return undefined;
+  }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (options.bitrueProtocol) {

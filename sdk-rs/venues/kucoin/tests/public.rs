@@ -156,12 +156,14 @@ fn snapshot_pool_stays_under_session_and_frame_limits() {
         .drain_actions()
         .filter_map(|a| {
             if let Action::WsConnect {
+                binary,
                 socket,
                 url,
                 channel,
                 context,
             } = a
             {
+                assert!(!binary, "KuCoin sockets use the text protocol");
                 assert!(url.contains("?token="));
                 assert_eq!(channel, Some(SocketChannel::Public));
                 let context = context.expect("routing feed context");

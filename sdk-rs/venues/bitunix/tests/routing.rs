@@ -43,11 +43,15 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         .into_iter()
         .filter_map(|action| match action {
             Action::WsConnect {
+                binary,
                 socket,
                 url,
                 channel,
                 context,
-            } => Some((socket, url, channel.unwrap(), context.unwrap())),
+            } => {
+                assert!(!binary, "Bitunix feeds use the text protocol");
+                Some((socket, url, channel.unwrap(), context.unwrap()))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -64,11 +68,15 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
     );
     connections.extend(engine.drain_actions().filter_map(|action| match action {
         Action::WsConnect {
+            binary,
             socket,
             url,
             channel,
             context,
-        } => Some((socket, url, channel.unwrap(), context.unwrap())),
+        } => {
+            assert!(!binary, "Bitunix feeds use the text protocol");
+            Some((socket, url, channel.unwrap(), context.unwrap()))
+        }
         _ => None,
     }));
     let mut feeds = connections

@@ -152,19 +152,36 @@ export class EngineHost {
           transport.setTimeout(() => { if (!this.disposed) this.run(engine.wsClose(id, 1006, transport.now())); }, 0);
           break;
         }
+        let connecting = true;
+        let closed = false;
         const socket = transport.connect(action.url, {
+          binary: action.binary === true,
           channel: action.channel,
           context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
-          onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
-          onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },
+          onOpen: () => { if (!this.disposed && !closed) this.run(engine.wsOpen(id, transport.now())); },
+          onMessage: (text) => { if (!this.disposed && !closed) this.run(engine.wsMessage(id, text, transport.now())); },
+          onBinary: (data) => {
+            if (this.disposed || closed || (!connecting && !this.sockets.has(id))) return;
+            if (engine.wsBinary) this.run(engine.wsBinary(id, data, transport.now()));
+            else {
+              closed = true;
+              const active = this.sockets.get(id);
+              this.sockets.delete(id);
+              active?.close();
+              this.run(engine.wsClose(id, 1003, transport.now()));
+            }
+          },
           onClose: (code) => {
-            if (this.disposed) return;
+            if (this.disposed || closed || (!connecting && !this.sockets.has(id))) return;
+            closed = true;
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
         });
-        this.sockets.set(id, socket);
+        connecting = false;
+        if (closed || this.disposed) socket.close();
+        else this.sockets.set(id, socket);
         break;
       }
       case 'wsSend':
@@ -245,7 +262,7 @@ async function* chunks(stream) {
 }
 
 /** Deliver compressed binary messages and closure in receive order on every JS host. */
-export const bindSocketMessages = (socket, { onMessage, onClose, onError }) => {
+export const bindSocketMessages = (socket, { binary = false, onBinary, onMessage, onClose, onError }) => {
   let pending;
   let disposed = false;
   let ending = false;
@@ -261,7 +278,14 @@ export const bindSocketMessages = (socket, { onMessage, onClose, onError }) => {
       if (disposed || failed) return;
       if (typeof event.data === 'string') return onMessage(event.data);
       const blob = event.data instanceof Blob ? event.data : new Blob([event.data]);
+      if (binary && blob.size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
       const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (disposed) return;
+      if (binary) {
+        if (bytes.byteLength > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+        onBinary?.(bytes);
+        return;
+      }
       const stream = bytes[0] === 0x1f && bytes[1] === 0x8b
         ? blob.stream().pipeThrough(new DecompressionStream('gzip'))
         : bytes[0] === 0x78 && ((bytes[0] << 8) + bytes[1]) % 31 === 0
@@ -305,12 +329,12 @@ export const bindSocketMessages = (socket, { onMessage, onClose, onError }) => {
 };
 
 /** Ordered decoding for transports that pass raw message data as a callback. */
-export const socketMessages = (onMessage, onError) => {
+export const socketMessages = (onMessage, onError, binary = false) => {
   let receive;
   bindSocketMessages({
     addEventListener(type, listener) { if (type === 'message') receive = listener; },
     close() {},
-  }, { onMessage, onError, onClose() {} });
+  }, { binary, onBinary: onMessage, onMessage, onError, onClose() {} });
   return (data) => receive({ data });
 };
 
@@ -329,7 +353,7 @@ export const nativeTransport = () => {
   WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     let closed = false;
@@ -337,6 +361,8 @@ export const nativeTransport = () => {
     const reportClose = (code) => { if (!reported) { reported = true; closed = true; onClose(code); } };
     ws.addEventListener('open', () => { if (!closed) onOpen(); });
     const dispose = bindSocketMessages(ws, {
+      binary,
+      onBinary: (data) => { if (!closed) onBinary?.(data); },
       onMessage: (text) => { if (!closed) onMessage(text); },
       onClose: reportClose,
     });

@@ -50,6 +50,7 @@ const recording = {
     const socket = live.connect(url, {
       channel: handlers.channel,
       context: handlers.context,
+      binary: handlers.binary,
       headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, connection, socket: connection });
@@ -59,6 +60,11 @@ const recording = {
         frames++;
         write({ type: 'ws', url, connection, socket: connection, text });
         handlers.onMessage(text);
+      },
+      onBinary: (bytes) => {
+        frames++;
+        write({ type: 'ws', url, connection, socket: connection, binary: Buffer.from(bytes).toString('base64') });
+        handlers.onBinary?.(bytes);
       },
       onClose: (code) => {
         closeRecord(code);

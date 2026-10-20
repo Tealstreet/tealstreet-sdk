@@ -431,13 +431,27 @@ export class Tape {
     }
     // Share immutable canonical URL strings across every frame and both samples.
     const urls = new Map();
-    this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((frame) => {
+    const recordedContext = { books, isPrivate, tickers: venue.publicTickers?.(records) ?? [] };
+    this.frames = records.filter((r) => ['ws', 'command', 'open', 'close', 'wait'].includes(r.type)).map((frame) => {
+      frame = venue.recordedFrame?.(frame, recordedContext) ?? frame;
+      if (frame.type === 'wait' && (!Number.isFinite(frame.t) || frame.t < 0)) throw new Error('Invalid replay wait timestamp');
+      if (frame.binary !== undefined) frame = { ...frame, data: Uint8Array.from(Buffer.from(frame.binary, 'base64')) };
       if (frame.url) {
         if (!urls.has(frame.url)) urls.set(frame.url, this.canonicalize(frame.url));
         frame = { ...frame, url: urls.get(frame.url), connection: frame.connection ?? frame.socket };
       }
       return venue.prepareFrame ? venue.prepareFrame(frame) : frame;
     });
+    this.lifecycleStreams = new Map();
+    this.lifecycleSockets = new Map();
+    if (venue.subscriptionRouting) for (const frame of this.frames) {
+      if (frame.type !== 'ws' || frame.connection === undefined) continue;
+      const stream = venue.streamOf?.(frame.data ?? frame.text);
+      if (!stream) continue;
+      const key = `${frame.url} ${frame.connection}`;
+      if (!this.lifecycleStreams.has(key)) this.lifecycleStreams.set(key, new Set());
+      this.lifecycleStreams.get(key).add(stream);
+    }
     // Legacy captures omit connect anchors. Only the open cohort before the
     // first close may bootstrap readiness; later opens still drive reconnects.
     this.socketLifecycle = new Map();
@@ -537,7 +551,7 @@ export class Tape {
     try { this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds }); }
     catch (error) { this.invalidSignatures++; throw error; }
     if (this.isPrivate && this.venue.verifyRequest) {
-      try { if (!this.venue.verifyRequest({ method, url, body, headers })) throw new Error(`invalid replay signature: ${method} ${url}`); }
+      try { if (!this.venue.verifyRequest({ method, url, body, headers, callerIds: this.callerIds })) throw new Error(`invalid replay signature: ${method} ${url}`); }
       catch (error) { this.invalidSignatures++; throw error; }
     }
     const validateMatch = (record) => {
@@ -646,7 +660,7 @@ export class Tape {
     this.open.set(`${socket.url}:${socket.connection}`, socket);
     socket.onOpen();
     if (!socket.closed && !this.playing && this.venue.startupMessage) {
-      const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command'
+      const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command' && record.type !== 'wait'
         && !this.startupDelivered.has(record) && record.url === socket.url
         && (record.connection === undefined || record.connection === socket.connection));
       if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
@@ -715,6 +729,14 @@ export class Tape {
       }
     }
     this.audit?.sent(socket.rawUrl ?? socket.url, text, socket);
+    if (typeof parsed?.params?.channel === 'string') {
+      if (parsed.method === 'subscribe') socket.subscriptions.add(parsed.params.channel);
+      if (parsed.method === 'unsubscribe') socket.subscriptions.delete(parsed.params.channel);
+    }
+    for (const reply of this.venue.socketReplies?.(socket.rawUrl ?? socket.url, parsed) ?? []) {
+      setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
+    }
+    for (const waiter of [...this.waiters]) waiter();
     if (this.venue.respondToJsonPing && parsed?.type === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage(JSON.stringify({ type: 'pong', id: parsed.id }));
@@ -858,11 +880,26 @@ export class Tape {
       text: typeof textOrOrdinal === 'string' ? textOrOrdinal : undefined,
       connection: typeof textOrOrdinal === 'number' ? textOrOrdinal : ordinal };
     else if (frame.connection === undefined && frame.socket !== undefined) frame = { ...frame, connection: frame.socket };
-    const stream = frame.text && this.venue.streamOf?.(frame.text);
+    const data = frame.data ?? frame.text;
+    const stream = data && this.venue.streamOf?.(data);
+    const lifecycleKey = frame.connection === undefined ? undefined : `${frame.url} ${frame.connection}`;
+    const streams = this.venue.subscriptionRouting && lifecycleKey && this.lifecycleStreams.get(lifecycleKey);
+    const subscribed = (socket, target) => [...socket.subscriptions].some((topic) => target === topic || target.startsWith(`${topic}.`));
     const find = () => {
+      if (this.venue.subscriptionRouting && !stream && lifecycleKey) {
+        const bound = this.lifecycleSockets.get(lifecycleKey);
+        if (bound && (!bound.closed || frame.type === 'close')) return bound;
+      }
       const candidates = this.sockets.filter((socket) => socket.url === frame.url &&
         (!socket.closed || frame.type === 'close') && (socket.opened || ['open', 'close'].includes(frame.type)) &&
-        (frame.connection === undefined || socket.connection === frame.connection));
+        (this.venue.subscriptionRouting && (stream || streams?.size) || frame.connection === undefined || socket.connection === frame.connection));
+      if (this.venue.subscriptionRouting && (stream || streams?.size)) {
+        const matched = candidates.filter((socket) => stream ? subscribed(socket, stream) : [...streams].some((target) => subscribed(socket, target)));
+        if (matched.length > 1) throw new Error(`ambiguous subscribed tape socket ${frame.url} ${stream ?? 'lifecycle'}`);
+        const socket = matched[0];
+        if (socket && lifecycleKey) this.lifecycleSockets.set(lifecycleKey, socket);
+        return socket;
+      }
       if (stream) return candidates.find((socket) => socket.opened && [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)));
       if ((this.bitget || this.hyperliquid) && !frame.text && frame.connection === undefined)
         return (frame.type === 'open' && candidates.find((socket) => !socket.opened)) || candidates[0];
@@ -934,7 +971,7 @@ export class Tape {
         this.assertSubscribed(socket, message, frame.subscriptionKey);
       }
       this.validateTopic?.(socket, frame);
-      let text = frame.text;
+      let text = frame.data ?? frame.text;
       if (this.venue.bootstrapPrivateFromTape) {
         const message = JSON.parse(text);
         if (message.req_id === '@latest') {
@@ -1002,7 +1039,9 @@ export class Tape {
       this.time = frame.t;
       if (clock && !clock.active && startupReady) clock.start(frame.t);
       await clock?.advance(frame.t);
-      if (frame.type === 'command') {
+      if (frame.type === 'wait') {
+        this.venue.validateWait?.(frame, this);
+      } else if (frame.type === 'command') {
         await ensureReady();
         if (this.venue.bootstrapPrivateFromTape) {
           const account = ready(true);
