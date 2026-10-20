@@ -360,3 +360,17 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Final documentation checkpoint follows the reviewed source. Merge into
   `feat/rust-rewrite` remains conditional on green CI for that final head;
   after merging, cut `feat/rust-apexomni-followup` from the landing branch.
+
+### Kraken landing integration
+
+- Landing advanced to `7da56dc8a5` (Kraken #1323) during final CI. Integrate
+  its venue registration, protocol hooks and roster row while preserving
+  ApeX account lifecycle/signing and all 19 default venue features.
+- Disjoint SDK, WASM and harness owners audit the three-way merge. ApeX
+  native source and shared engine/crypto are unchanged; affected registration,
+  combined builds, wrapper/harness checks and replay gates repeat afterward.
+- Three-way merge reviews pass: all 19 features/dependencies/lock entries
+  match, both venue descriptors and API-only identity behavior survive,
+  and no signature or comparison thresholds change. Harness passes 286
+  tests; SDK typecheck/lint and 33 focused wrapper tests pass. Final
+  post-merge results are also posted on PR #1324 before green-CI merge.
