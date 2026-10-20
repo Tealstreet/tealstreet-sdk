@@ -104,13 +104,21 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
     assert_headers: impl Fn(&HttpRequest),
 ) {
     engine.start(1700000000123.0);
-    let initial: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(request) => Some(request),
-            _ => None,
-        })
-        .collect();
+    let mut timers = Vec::new();
+    let http = |engine: &mut Engine<V>, timers: &mut Vec<(safe_cex_engine::TimerId, f64)>| {
+        engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Http(request) => Some(request),
+                Action::SetTimer { timer, at_ms } => {
+                    timers.push((timer, at_ms));
+                    None
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let initial = http(&mut engine, &mut timers);
     assert!(!initial.is_empty());
     for request in initial {
         assert_headers(&request);
@@ -136,13 +144,7 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             },
         );
     }
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(request) => Some(request),
-            _ => None,
-        })
-        .collect();
+    let requests = http(&mut engine, &mut timers);
     let mut saw_public_bullet = false;
     let mut saw_tickers = false;
     for request in requests {
@@ -151,9 +153,9 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
         if request.url.ends_with("/allTickers") {
             saw_tickers = true;
             let tickers = if request.url.contains("/market/") {
-                r#"{"code":"200000","data":{"ticker":[]}}"#
+                r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"#
             } else {
-                r#"{"code":"200000","data":[]}"#
+                r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#
             };
             engine.handle(
                 1700000000123.0,
@@ -178,11 +180,21 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             );
         }
     }
-    for action in engine.drain_actions() {
-        if let Action::Http(request) = action {
+    // Startup reads fill the paced budget; tokens lead the next window.
+    for _ in 0..8 {
+        for request in http(&mut engine, &mut timers) {
             assert_headers(&request);
             saw_public_bullet |= request.url.ends_with("/bullet-public");
         }
+        if saw_public_bullet {
+            break;
+        }
+        let next = (0..timers.len())
+            .min_by(|&a, &b| timers[a].1.total_cmp(&timers[b].1))
+            .expect("budget window timer");
+        // Fire on the fixed clock the signature assertions are anchored to.
+        let (timer, _) = timers.remove(next);
+        engine.handle(1700000000123.0, Event::TimerFired { timer });
     }
     assert!(saw_public_bullet);
     assert!(saw_tickers);

@@ -271,6 +271,11 @@ impl AsterDex {
         mut request: Box<SignedRequest>,
         response: Result<Response<'_>, &str>,
     ) {
+        let discovery = request.public
+            && matches!(
+                &request.pending,
+                Pending::ExchangeInfo { .. } | Pending::Daily { .. }
+            );
         if let Ok(response) = response {
             let error = serde_json::from_str::<ErrorBody>(response.body).ok();
             let code = error
@@ -302,6 +307,16 @@ impl AsterDex {
                 self.begin_clock(cx);
                 return;
             }
+            if discovery
+                && (!(200..300).contains(&response.status) || code.is_some_and(|value| value < 0.0))
+            {
+                self.on_request_failed(
+                    cx,
+                    request.pending,
+                    "Aster public discovery response failed",
+                );
+                return;
+            }
             if request.retryable_status(response.status)
                 && request.is_read()
                 && request.network_retries < 3
@@ -320,7 +335,7 @@ impl AsterDex {
             self.on_response(cx, request.pending, response);
         } else {
             let error = response.unwrap_err();
-            if request.is_read() && request.network_retries < 3 {
+            if !discovery && request.is_read() && request.network_retries < 3 {
                 self.schedule_retry(cx, request);
             } else {
                 self.on_request_failed(cx, request.pending, error);
@@ -1157,9 +1172,9 @@ mod tests {
         }
         fn retry(&mut self, delay: f64) {
             let target = self.now + delay;
+            // Discovery retries use the engine's shared startup backoff.
             assert!(
-                self.timers.iter().any(|(timer, at)| *at == target
-                    && self.engine.venue().requests.retries.contains_key(timer)),
+                self.timers.iter().any(|(_, at)| *at == target),
                 "retry timer"
             );
             // A quota reset can share the retry deadline. Deliver both in
@@ -1211,18 +1226,18 @@ mod tests {
     }
 
     #[test]
-    fn public_bootstrap_has_exactly_three_bounded_status_retries() {
+    fn public_bootstrap_uses_capped_discovery_backoff_until_recovery() {
         for (status, body) in [
             (503, "upstream timeout"),
             (503, r#"{"code":-1000,"msg":"Internal error"}"#),
             (429, r#"{"code":-1003,"msg":"Too many requests"}"#),
         ] {
             let mut h = PublicHarness::new();
-            for attempt in 1..=3 {
+            for delay in [1000., 2000., 4000., 8000., 16000., 30000., 30000.] {
                 let request = h.take("/exchangeInfo");
                 h.reply(request, status, body);
                 assert!(h.requests.is_empty());
-                h.retry(f64::from(attempt) * 1000.0);
+                h.retry(delay);
             }
             let request = h.take("/exchangeInfo");
             h.reply(request, status, body);

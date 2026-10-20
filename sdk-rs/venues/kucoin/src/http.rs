@@ -35,7 +35,16 @@ fn limited(method: Method, path: &str) -> bool {
 impl Kucoin {
     pub(crate) fn http(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if limited(request.method, &request.path) {
-            self.http_budget.queue.push_back(request);
+            // Socket tokens take the next budget slot ahead of queued account
+            // reads, so reconciliation started at launch cannot delay feeds.
+            if matches!(
+                request.path.as_str(),
+                "/api/v1/bullet-public" | "/api/v1/bullet-private"
+            ) {
+                self.http_budget.queue.push_front(request);
+            } else {
+                self.http_budget.queue.push_back(request);
+            }
             self.drain_http(cx);
         } else {
             self.dispatch_http(cx, request);

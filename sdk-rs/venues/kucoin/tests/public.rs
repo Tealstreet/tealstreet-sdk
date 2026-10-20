@@ -815,7 +815,7 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 }
 
 #[test]
-fn private_snapshot_starts_once_at_launch_independent_of_welcome() {
+fn private_snapshot_starts_once_before_ticker_and_launch_independent_of_welcome() {
     let mut e = Engine::new(Kucoin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -829,14 +829,23 @@ fn private_snapshot_starts_once_at_launch_independent_of_welcome() {
         &r,
         &format!(r#"{{"code":"200000","data":[{MARKET}]}}"#),
     );
-    let r = requests(&mut e).remove(0);
+    let early = requests(&mut e);
+    assert!(
+        early.iter().any(|r| r.url.contains("/positions")),
+        "REST account snapshot must start before any ticker reply or private welcome"
+    );
+    let r = early
+        .iter()
+        .find(|r| r.url.contains("/allTickers"))
+        .unwrap();
     answer(
         &mut e,
-        &r,
+        r,
         r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#,
     );
     let launched = requests(&mut e);
-    assert!(launched.iter().any(|r| r.url.contains("/positions")));
+    // The snapshot already started at markets; launch must not issue a second one.
+    assert!(!launched.iter().any(|r| r.url.contains("/positions")));
     let tokens = launched
         .into_iter()
         .filter(|r| r.url.contains("/bullet-"))
@@ -868,7 +877,8 @@ fn private_snapshot_starts_once_at_launch_independent_of_welcome() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions")))
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions"))),
+        "welcome must not duplicate in-flight REST snapshots"
     );
     assert_eq!(
         actions

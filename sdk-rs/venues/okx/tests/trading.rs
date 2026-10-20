@@ -899,9 +899,13 @@ fn ready_with_held_reconciliation() -> (
     e.start(0.);
     let request = http(&actions(&mut e)).clone();
     reply(&mut e, &request, &envelope(MARKET), 1.);
-    let request = http(&actions(&mut e)).clone();
-    reply(&mut e, &request, &envelope(TICKER), 2.);
+    // Private startup begins with the catalogue, alongside the ticker seed.
     let out = actions(&mut e);
+    let tickers = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, tickers, &envelope(TICKER), 2.);
     let config = out
         .iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -1296,9 +1300,14 @@ fn ready_engine() -> (
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
-    reply(&mut e, &a, &envelope(TICKER), 2.0);
-    let a = actions(&mut e)
+    // Private startup begins with the catalogue, alongside the ticker seed.
+    let out = actions(&mut e);
+    let tickers = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, tickers, &envelope(TICKER), 2.0);
+    let a = out
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .unwrap();

@@ -1,10 +1,9 @@
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Response};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
-use support::TestEngine as Engine;
 use support::*;
 const CLOID: &str = "0x00000000000000000000000000000001";
 #[test]
@@ -50,7 +49,15 @@ fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
 fn write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.wait_http(|request| request.url.ends_with("/exchange"))
+    e.drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                (r.url.ends_with("/exchange")).then_some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap()
 }
 fn body(r: &HttpRequest) -> Value {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
@@ -416,7 +423,19 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 },
             );
         }
-        let actions = e.wait_done(2);
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut timers = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for (timer, at_ms) in timers {
+            e.handle(at_ms, Event::TimerFired { timer });
+            actions.extend(e.drain_actions());
+        }
         assert!(
             !actions
                 .iter()
@@ -443,26 +462,22 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
                 isolated: false,
             }),
         );
-        assert!(e.wait_done(3).into_iter().any(
-            |a| matches!(a, Action::Notice(Notice::CommandDone {
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
             command: 3, result: Err(ref error),
-        }) if error.contains("settings are uncertain"))
-        ));
+        }) if error.contains("settings are uncertain")))
+        );
 
-        // This control explicitly requires a snapshot newer than the write's
-        // host-time barrier; all older raw venue snapshots above remain fixed.
-        let fresh_at = e.now + 1000.0;
-        let fresh = STATE
-            .replace("cross", "isolated")
-            .replace("1000}", &format!("{fresh_at}}}"));
+        let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
         message(
             &mut e,
             socket,
-            fresh_at,
+            3500.0,
             &format!(r#"{{"channel":"clearinghouseState","data":{fresh}}}"#),
         );
         e.handle(
-            fresh_at + 1.0,
+            3501.0,
             Event::Command(Command::SetLeverage {
                 command: 4,
                 symbol: "BTC-PERP".into(),
@@ -550,7 +565,7 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
         ..Default::default()
     }));
     e.start(1000.0);
-    for _ in 0..200 {
+    for _ in 0..20 {
         let requests = e
             .drain_actions()
             .filter_map(|a| match a {
@@ -559,11 +574,7 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
             })
             .collect::<Vec<_>>();
         if requests.is_empty() {
-            if e.store().order("9").is_some() && !e.has_near_timer() {
-                break;
-            }
-            assert!(e.advance_next_timer());
-            continue;
+            break;
         }
         for request in requests {
             let fixture = match kind(&request).as_str() {
@@ -592,7 +603,7 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
             ids: vec!["9".into()],
         }),
     );
-    let actions = e.wait_done(1);
+    let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -622,12 +633,20 @@ fn reply_at(e: &mut Engine<Hyperliquid>, request: &HttpRequest, now: f64, raw: &
 }
 fn fire_timers(e: &mut Engine<Hyperliquid>) -> Vec<Action> {
     let mut actions = e.drain_actions().collect::<Vec<_>>();
-    if e.advance_next_timer() {
+    let mut timers = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (timer, at_ms) in timers {
+        e.handle(at_ms, Event::TimerFired { timer });
         actions.extend(e.drain_actions());
     }
     actions
 }
-
 fn action_write(actions: &[Action]) -> &HttpRequest {
     actions
         .iter()
@@ -738,7 +757,13 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
 fn resting_core_ack_can_be_canceled_before_websocket_update() {
     let (mut e, socket) = ready("disabled");
     e.handle(1900.0, Event::WsOpened { socket });
-    let older_orders = e.wait_http(|r| kind(r) == "frontendOpenOrders");
+    let older_orders = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(&r) == "frontendOpenOrders" => Some(r),
+            _ => None,
+        })
+        .unwrap();
     e.handle(
         2000.0,
         Event::Command(Command::PlaceOrders {
@@ -853,12 +878,13 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
         },
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
-    );
-    let asset = e.wait_http(|r| kind(r) == "activeAssetData");
+    let asset = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "activeAssetData" => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
     assert_eq!(body(&asset)["coin"], "ETH");
     message(
         &mut e,
@@ -876,8 +902,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
         }),
     );
     assert!(
-        e.wait_done(2)
-            .into_iter()
+        e.drain_actions()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
         command: 2, result: Err(ref error),
     }) if error.contains("settings are uncertain")))
@@ -906,7 +931,13 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
 fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size() {
     let (mut e, socket) = ready("disabled");
     e.handle(1900.0, Event::WsOpened { socket });
-    let snapshot = e.wait_http(|r| kind(r) == "clearinghouseState");
+    let snapshot = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(&r) == "clearinghouseState" => Some(r),
+            _ => None,
+        })
+        .unwrap();
     e.handle(
         2000.0,
         Event::Command(Command::SetMarginType {

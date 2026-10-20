@@ -848,6 +848,25 @@ an explicit zero mark falls through to last. These are cumulative ticker
 snapshots, so the fallback uses current native fields rather than which
 optional fields appeared in a venue delta.
 Public quotes do not mark private datasets loaded and do not change balance;
-the next authenticated account snapshot calculates balance with the current
-provider last price. Later native REST ticker seeds cannot replace provider
-quotes and reapply position valuations after restoration.
+the next authenticated account snapshot calculates balance from native reported
+PnL (or retained prior same-side PnL when omitted), preserving native equity/free.
+Shared prices can still revalue displayed positions after that snapshot. Later
+native REST ticker seeds cannot replace provider quotes and reapply position
+valuations after restoration.
+
+A partial Rust catalogue must not turn unknown owned exposure into an empty
+successful account. A REST snapshot with an unmappable nonzero position, or
+an open-order scope with an unmappable working order, warns and retains its
+previous scope. Zero unknown positions and terminal unknown orders remain
+ignorable. This bounded whole-scope guard precedes separate row-isolation work.
+
+Rust private account valuation uses the native `positions[].unrealized_pnl` and
+`position_value` when supplied (official model:
+https://github.com/elliottech/lighter-python/blob/main/docs/AccountPosition.md).
+Missing native PnL retains the prior finite valuation for the same market and
+position side; a new unvalued exposure remains visible with zero unavailable PnL
+and a warning. Realized PnL is never substituted. Aggregate balance sums the
+preserved position PnL instead of calculating a fictitious entry loss from a
+zero/missing ticker. Native account equity/free remain authoritative; a genuine
+later public quote can update position PnL, which a subsequent private snapshot
+without PnL retains. Explicit native PnL overrides conflicting public quotes.

@@ -1,9 +1,7 @@
 //! Payloads from the official info/perpetuals and websocket/subscriptions docs.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
-mod support;
-use safe_cex_engine::{Action, Command, Event, RequestId, Response, SocketId};
+use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
-use support::TestEngine as Engine;
 
 fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     engine.handle(
@@ -19,7 +17,16 @@ fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     );
 }
 fn request(engine: &mut Engine<Hyperliquid>) -> RequestId {
-    engine.wait_http(|_| true).id
+    engine
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap()
 }
 fn start() -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new(Options {
@@ -32,13 +39,6 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
         &mut e,
         id,
         r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"97500.5","markPx":"97500.5","oraclePx":"97500","prevDayPx":"95000","dayNtlVlm":"195001","openInterest":"2","funding":"0.0001"},{"midPx":"3650.25","markPx":"3650.25","szDecimals":4}]]"#,
-    );
-    let fee = e.wait_http(|r| support::kind(r) == "userFees");
-    support::reply(
-        &mut e,
-        &fee,
-        200,
-        r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
     );
     let id = request(&mut e);
     response(&mut e, id, "[null]");
@@ -72,41 +72,23 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
             ..Options::default()
         }));
         e.start(1000.0);
-        let mut socket = None;
-        for _ in 0..100 {
-            let actions = e.drain_actions().collect::<Vec<_>>();
-            let mut had_http = false;
-            for action in actions {
-                match action {
-                    Action::Http(r) => {
-                        had_http = true;
-                        let body = match support::kind(&r).as_str() {
-                            "metaAndAssetCtxs" if r.body.as_ref().unwrap().contains("xyz") => {
-                                r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#
-                            }
-                            "metaAndAssetCtxs" => r#"[{"universe":[]},[]]"#,
-                            "userFees" => "{}",
-                            "perpDexs" => r#"[null,{"name":"xyz"}]"#,
-                            "userAbstraction" => r#""disabled""#,
-                            "maxBuilderFee" => "0",
-                            "clearinghouseState" => r#"{"assetPositions":[],"time":1000}"#,
-                            "frontendOpenOrders" => "[]",
-                            other => panic!("unexpected request {other}"),
-                        };
-                        support::reply(&mut e, &r, 200, body);
-                    }
-                    Action::WsConnect { socket: id, .. } => socket = Some(id),
-                    _ => {}
-                }
-            }
-            if socket.is_some() {
-                break;
-            }
-            if !had_http {
-                assert!(e.advance_next_timer());
-            }
-        }
-        let socket = socket.unwrap();
+        let id = request(&mut e);
+        response(&mut e, id, r#"[{"universe":[]},[]]"#);
+        let id = request(&mut e);
+        response(&mut e, id, r#"[null,{"name":"xyz"}]"#);
+        let id = request(&mut e);
+        response(
+            &mut e,
+            id,
+            r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
+        );
+        let socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
         let dex_mids = e.drain_actions().any(|action| match action {
             Action::WsSend { text, .. } => {
@@ -198,7 +180,16 @@ fn posted_candle_read_preserves_body_and_streams() {
             to_ms: Some(60000.0),
         }),
     );
-    let req = e.wait_http(|r| support::kind(r) == "candleSnapshot");
+    let req = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     assert_eq!(
         req.body.as_deref(),
         Some(
@@ -283,7 +274,16 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             to_ms: Some(90_000_000.0),
         }),
     );
-    let r = e.wait_http(|r| support::kind(r) == "candleSnapshot");
+    let r = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     assert!(r.body.as_deref().unwrap().contains("\"startTime\":0"));
     response(
         &mut e,
@@ -297,25 +297,50 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
 }
 
 #[test]
-fn bootstrap_does_not_publish_a_partial_catalog_before_fees_and_dexs() {
-    let mut e = Engine::new(Hyperliquid::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
-    e.start(0.0);
-    let core = request(&mut e);
-    e.handle(573.0, Event::HttpResponse {
-        request: core,
-        response: Response { status: 200, headers: "", body: r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100"}]]"# },
-    });
-    assert!(
-        !e.store().loaded().markets,
-        "core metadata alone is not the complete startup catalog"
+fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() {
+    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    e.start(0.);
+    let id = request(&mut e);
+    response(
+        &mut e,
+        id,
+        r#"[{"universe":[{}, {"name":"BTC","szDecimals":5}, {"name":"ETH","szDecimals":4}]},[{"midPx":"999"},{"midPx":"100","markPx":"100"},{"midPx":"bad"}]]"#,
     );
-    assert!(!e.store().loaded().tickers);
-    assert!(e.store().markets().is_empty());
-    assert!(
-        !e.drain_actions()
-            .any(|action| matches!(action, Action::WsConnect { .. }))
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].id, "BTC");
+    assert_eq!(e.store().tickers()[0].last, 100.);
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+}
+
+#[test]
+fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
+    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    e.start(0.);
+    for delay in [1000., 2000., 4000., 8000., 16000., 30000., 30000.] {
+        let id = request(&mut e);
+        e.handle(
+            1000.,
+            Event::HttpFailed {
+                request: id,
+                error: "offline",
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(at, 1000. + delay);
+        e.handle(at, Event::TimerFired { timer });
+        assert!(!e.store().loaded().markets);
+    }
+    let id = request(&mut e);
+    response(
+        &mut e,
+        id,
+        r#"[{"universe":[{"name":"BTC","szDecimals":5}]},[{"midPx":"100"}]]"#,
     );
+    assert_eq!(e.store().markets().len(), 1);
 }

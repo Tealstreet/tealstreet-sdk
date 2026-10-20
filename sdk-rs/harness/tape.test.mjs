@@ -678,7 +678,8 @@ test('recorded socket closes deliver later frames to a new subscribed generation
       { type: 'open', t: 3, url: socketUrl, socket: 2 },
       { type: 'ws', t: 4, url: socketUrl, socket: 2, text: 'reconnected' },
     ];
-    const tape = new MexcTape(records);
+    // Generic connection ordinals: these sockets never authenticate or subscribe.
+    const tape = new MexcTape(records, { socketOrdinalMatches: undefined });
     const seen = [];
     tape.connect(
       socketUrl,
@@ -3717,3 +3718,33 @@ test('private replay can freeze startup timestamps while startup timers still ru
     assert.equal(observed, epoch + 100);
   } finally { clock.restore(); }
 });
+
+for (const connectionOrder of [['public', 'private'], ['private', 'public']]) {
+  test(`MEXC recorded socket roles preserve authenticated delivery when ${connectionOrder[0]} connects first`, async () => {
+    const endpoint = 'wss://contract.mexc.com/edge';
+    const tape = new Tape([], VENUES.mexc, true, 1000);
+    const seen = [];
+    for (const role of connectionOrder) {
+      const socket = tape.connect(endpoint, () => {
+        const reqTime = String(Date.now());
+        tape.send(socket, JSON.stringify(role === 'private' ? {
+          method: 'login', param: {
+            apiKey: 'replay-key', reqTime,
+            signature: createHmac('sha256', 'replay-secret').update(`replay-key${reqTime}`).digest('hex'),
+          },
+        } : { method: 'sub.ticker', param: { symbol: 'BTC_USDT' } }));
+      }, (text) => seen.push([role, JSON.parse(text).channel]));
+    }
+    await new Promise(setImmediate);
+    for (const [socket, channel, data] of [
+      [1, 'rs.login', 'success'], [1, 'push.personal.order', { orderId: '739113577038255618' }],
+      [0, 'push.ticker', { symbol: 'BTC_USDT', lastPrice: 60000 }], [1, 'pong', {}],
+    ]) {
+      await tape.deliver({ type: 'ws', url: endpoint, connection: socket, text: JSON.stringify({ channel, data }) });
+    }
+    assert.deepEqual(seen, [
+      ['private', 'rs.login'], ['private', 'push.personal.order'], ['public', 'push.ticker'], ['private', 'pong'],
+    ]);
+    assert.equal(tape.invalidSignatures, 0);
+  });
+}

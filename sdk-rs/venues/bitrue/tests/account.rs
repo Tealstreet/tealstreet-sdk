@@ -570,7 +570,8 @@ fn currency_balances_keep_both_coins_and_failed_snapshots_preserve_them() {
     assert_eq!(coins[0].currency, "USDC");
     assert_eq!(coins[0].balance.total, 30.0);
     assert_eq!(coins[0].balance.used, 10.0);
-    assert_eq!(coins[0].balance.upnl, 4.0);
+    // sumOpenRealizedAmount is realized money; no positions means no UPnL.
+    assert_eq!(coins[0].balance.upnl, 0.0);
     assert_eq!(coins[1].currency, "USDT");
     assert_eq!(h.e.store().balance().total, 100.0);
     h.fire_at(2_000.0);

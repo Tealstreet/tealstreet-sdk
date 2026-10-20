@@ -3,11 +3,10 @@
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Action, Command, Event, HttpRequest, Notice, PublicFeedPolicy, Query, SocketChannel, SocketId,
-    Venue,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Query, SocketChannel,
+    SocketId, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
-use support::TestEngine as Engine;
 const META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0},{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"0.00093722","markPx":"0.00094","prevDayPx":"0.0009","dayNtlVlm":"937.22"},{"coin":"PURR/USDC","midPx":"0.209265","markPx":"0.14","prevDayPx":"0.20432","dayNtlVlm":"8906.0"}]]"#;
 fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_policy(private, PublicFeedPolicy::Direct)
@@ -25,18 +24,9 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
     let r = take_http(&mut e);
     assert_eq!(support::kind(&r), "spotMetaAndAssetCtxs");
     support::reply(&mut e, &r, 200, META);
-    if private {
-        let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
-        support::reply(
-            &mut e,
-            &balance,
-            200,
-            r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#,
-        );
-    }
     let mut socket = None;
-    for action in e.drain_actions().collect::<Vec<_>>() {
-        match action {
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
             Action::WsConnect {
                 socket: s, channel, ..
             } => {
@@ -53,6 +43,15 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
             Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
                 support::reply(&mut e, &r, 200, "[]");
             }
+            Action::Http(r) => {
+                assert_eq!(support::kind(&r), "spotClearinghouseState");
+                support::reply(
+                    &mut e,
+                    &r,
+                    200,
+                    r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#,
+                );
+            }
             _ => {}
         }
     }
@@ -61,7 +60,15 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
     (e, s)
 }
 fn take_http(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.wait_http(|_| true)
+    e.drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap()
 }
 #[test]
 fn metadata_joins_by_coin_and_uses_token_size_precision() {
@@ -81,49 +88,6 @@ fn metadata_joins_by_coin_and_uses_token_size_precision() {
             .all(|p| p.contracts == 0.0 && p.leverage == 1.0 && p.side == PositionSide::Short)
     );
 }
-
-#[test]
-fn late_invalid_spot_context_keeps_the_entire_catalog_unpublished_until_valid_retry() {
-    for invalid in [
-        r#""NaN""#,
-        r#""1e400""#,
-        r#""bad""#,
-        "null",
-        "false",
-        "[]",
-        "{}",
-    ] {
-        let mut e = Engine::new(Hyperliquid::new_spot(Options {
-            public_data_only: true,
-            ..Options::default()
-        }));
-        e.start(1000.0);
-        let request = take_http(&mut e);
-        // The first context is valid; a malformed number occurs only in the last row.
-        let payload = META.replace(
-            r#""dayNtlVlm":"8906.0""#,
-            &format!(r#""dayNtlVlm":{invalid}"#),
-        );
-        assert_ne!(payload, META);
-        support::reply(&mut e, &request, 200, &payload);
-        assert!(e.store().markets().is_empty(), "{invalid}");
-        assert!(e.store().tickers().is_empty(), "{invalid}");
-        assert!(!e.store().loaded().markets);
-        assert!(!e.store().loaded().tickers);
-        assert!(
-            !e.drain_actions()
-                .any(|action| matches!(action, Action::WsConnect { .. }))
-        );
-        let retry = e.wait_http(|request| support::kind(request) == "spotMetaAndAssetCtxs");
-        support::reply(&mut e, &retry, 200, META);
-        assert_eq!(e.store().markets().len(), 2);
-        assert_eq!(e.store().tickers().len(), 2);
-        assert!(e.store().loaded().markets);
-        assert!(e.store().loaded().tickers);
-        assert_eq!(e.store().ticker("HFUN/USDC").unwrap().last, 0.00093722);
-    }
-}
-
 #[test]
 fn spot_subscriptions_exclude_perpetual_channels() {
     let (mut e, _) = ready(true);
@@ -216,18 +180,7 @@ fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    // Writes share the paced budget: advance its timers until the write leaves.
-    let mut actions = Vec::new();
-    for _ in 0..200 {
-        actions.extend(e.drain_actions());
-        if actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
-        {
-            break;
-        }
-        assert!(e.advance_next_timer(), "write never dispatched");
-    }
+    let actions = e.drain_actions().collect::<Vec<_>>();
     let (at, receipts) = actions
         .iter()
         .enumerate()
@@ -270,7 +223,7 @@ fn signed_spot_order_uses_shifted_asset_and_eight_decimal_cap() {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let payload: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
     let w = &payload["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
@@ -395,7 +348,7 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
             orders: vec![o],
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     let wires = p["action"]["orders"].as_array().unwrap();
     assert_eq!(p["action"]["grouping"], "normalTpsl");
@@ -424,7 +377,7 @@ fn spot_zero_bracket_prices_disable_only_the_requested_child() {
                 orders: vec![o],
             }),
         );
-        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+        let r = take_http(&mut e);
         let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
         let wires = p["action"]["orders"].as_array().unwrap();
         assert_eq!(wires.len(), 1 + children.len());
@@ -486,7 +439,7 @@ fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
             orders: vec![o],
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p["action"]["orders"][0]["p"], "0.21973");
     assert_eq!(p["action"]["orders"][0]["t"]["limit"]["tif"], "Gtc");
@@ -606,7 +559,7 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     acknowledge(
         &mut e,
         &r,
@@ -627,7 +580,7 @@ fn cancel_uses_the_same_shifted_native_asset_id_and_removes_acknowledged_order()
             ids: vec!["101".into()],
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p["action"]["cancels"][0]["a"], 10001);
     assert_eq!(p["action"]["cancels"][0]["o"], 101);
@@ -651,7 +604,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
             amount: Some(6000.0),
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     acknowledge(
         &mut e,
         &r,
@@ -669,7 +622,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         })
         .unwrap();
     e.handle(5500.0, Event::TimerFired { timer });
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     let w = &p["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
@@ -689,7 +642,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
             amount: None,
         }),
     );
-    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+    let r = take_http(&mut e);
     let fill = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.000937","sz":"1","time":5001,"tid":9,"oid":101}]}}"#;
     support::message(&mut e, s, 5001.0, fill);
     support::message(&mut e, s, 5001.0, fill);
@@ -726,7 +679,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
     assert!(e.store().positions().iter().all(|p| p.contracts == 0.0));
 }
 #[test]
-fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets() {
+fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
     let mut e = Engine::new(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
@@ -734,10 +687,8 @@ fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets()
     e.start(1000.0);
     for attempt in 0..3 {
         let r = take_http(&mut e);
-        let before = e.drain_actions().collect::<Vec<_>>();
-        assert!(!before.iter().any(|a| matches!(a, Action::Http(_))));
         e.handle(
-            e.now,
+            1000.0,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -755,16 +706,12 @@ fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets()
                 None
             }
         });
-        if attempt < 2 {
-            e.handle(
-                3000.0,
-                Event::TimerFired {
-                    timer: timer.unwrap(),
-                },
-            );
-        } else {
-            assert!(timer.is_none());
-        }
+        e.handle(
+            3000.0 + f64::from(attempt) * 30000.0,
+            Event::TimerFired {
+                timer: timer.unwrap(),
+            },
+        );
     }
 }
 
@@ -780,7 +727,7 @@ fn fills_before_resting_ack_preserve_native_executed_quantity() {
                 orders: vec![order("HFUN/USDC")],
             }),
         );
-        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+        let r = take_http(&mut e);
         for (index, size) in sizes.iter().enumerate() {
             let fill = format!(
                 r#"{{"channel":"userFills","data":{{"isSnapshot":false,"fills":[{{"coin":"@1","side":"B","px":"0.000937","sz":"{size}","time":3001,"tid":{},"oid":101}}]}}}}"#,
@@ -900,8 +847,6 @@ fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, meta);
-    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
-    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
     let socket = e
         .drain_actions()
         .find_map(|a| {
@@ -966,7 +911,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 to_ms: None,
             }),
         );
-        let r = e.wait_http(|r| support::kind(r) == "candleSnapshot");
+        let r = take_http(&mut e);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap()["req"]["coin"],
             coin
@@ -981,7 +926,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 orders: vec![o],
             }),
         );
-        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
+        let r = take_http(&mut e);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap()["action"]
                 ["orders"][0]["a"],
@@ -1132,7 +1077,16 @@ fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    let r = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
+    let r = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     let read: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(read["type"], "spotClearinghouseState");
     assert_eq!(read["user"], "0x0000000000000000000000000000000000000003");
@@ -1226,7 +1180,6 @@ fn spot_fill_frames_keep_native_order_identity_and_each_distinct_execution() {
 fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only() {
     for policy in [PublicFeedPolicy::Disabled, PublicFeedPolicy::Shared] {
         let (mut e, socket) = ready_with_policy(true, policy);
-        let ping_at = e.now + 15_000.0;
         let actions: Vec<_> = e.drain_actions().collect();
         let assert_topics = |actions: &[Action]| {
             let mut topics: Vec<String> = actions
@@ -1253,7 +1206,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
         let ping = actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == ping_at => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == 16000. => Some(*timer),
                 _ => None,
             })
             .unwrap();
@@ -1280,21 +1233,24 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"999"}}}"#,
         );
         assert_eq!(e.store().ticker("PURR/USDC").unwrap(), &ticker);
-        e.handle(ping_at, Event::TimerFired { timer: ping });
+        e.handle(16000., Event::TimerFired { timer: ping });
         assert!(
             e.drain_actions().any(
                 |a| matches!(a, Action::WsSend { text, .. } if text == r#"{"method":"ping"}"#)
             )
         );
-        e.handle(ping_at + 1000., Event::WsClosed { socket, code: 1006 });
+        e.handle(17000., Event::WsClosed { socket, code: 1006 });
         let reconnect = e
             .drain_actions()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if at_ms == ping_at + 2000. => Some(timer),
+                Action::SetTimer {
+                    timer,
+                    at_ms: 18000.,
+                } => Some(timer),
                 _ => None,
             })
             .unwrap();
-        e.handle(ping_at + 2000., Event::TimerFired { timer: reconnect });
+        e.handle(18000., Event::TimerFired { timer: reconnect });
         let next = e
             .drain_actions()
             .find_map(|a| match a {
@@ -1307,7 +1263,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
                 _ => None,
             })
             .unwrap();
-        e.handle(ping_at + 2000., Event::WsOpened { socket: next });
+        e.handle(18000., Event::WsOpened { socket: next });
         assert_topics(&e.drain_actions().collect::<Vec<_>>());
     }
 }
@@ -1388,16 +1344,41 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
     let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":77,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
-    // Reads are paced; wait_http advances the read budget's timers.
-    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
-    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
-    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
-    support::reply(&mut e, &orders, 200, rows);
+    let mut sync = None;
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, rows);
+            }
+            Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
+            Action::SetTimer {
+                timer,
+                at_ms: 11_000.0,
+            } => sync = Some(timer),
+            _ => {}
+        }
+    }
     let order = e.store().order("77").expect("resting spot order loaded");
     assert_eq!(order.symbol, "HFUN/USDC");
     assert_eq!(order.amount, 5.0);
-    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
-    support::reply(&mut e, &orders, 200, "[]");
+    e.handle(
+        11_000.0,
+        Event::TimerFired {
+            timer: sync.expect("spot sync timer"),
+        },
+    );
+    let reads: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    let orders = reads
+        .iter()
+        .find(|r| support::kind(r) == "frontendOpenOrders")
+        .expect("periodic spot open-order read");
+    support::reply(&mut e, orders, 200, "[]");
     assert!(
         e.store().order("77").is_none(),
         "order canceled elsewhere stayed open"
@@ -1415,21 +1396,46 @@ fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
     let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":78,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
-    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
-    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
-    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
-    support::reply(&mut e, &orders, 200, rows);
-    let socket = e
+    let (mut sync, mut socket) = (None, None);
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, rows);
+            }
+            Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
+            Action::SetTimer {
+                timer,
+                at_ms: 11_000.0,
+            } => sync = Some(timer),
+            Action::WsConnect { socket: s, .. } => socket = Some(s),
+            _ => {}
+        }
+    }
+    let socket = socket.unwrap();
+    e.handle(1000.0, Event::WsOpened { socket });
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, rows);
+            }
+            Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
+            _ => {}
+        }
+    }
+    assert!(e.store().order("78").is_some());
+    e.handle(
+        11_000.0,
+        Event::TimerFired {
+            timer: sync.unwrap(),
+        },
+    );
+    let stale = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::WsConnect { socket, .. } => Some(socket),
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => Some(r),
             _ => None,
         })
-        .unwrap();
-    e.handle(1000.0, Event::WsOpened { socket });
-    assert!(e.store().order("78").is_some());
-    // The next open-order read is sent before the fill and answered after it.
-    let stale = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
+        .expect("periodic read in flight");
     support::message(
         &mut e,
         socket,

@@ -464,6 +464,7 @@ KNOWN_TS_FIXES.krakenspot = {
     notes: [
       'Translate AssetPairs XBT and XDG/XXDG identities to accepted WS v2 BTC/DOGE wire symbols while preserving canonical store symbols.',
       'Value normalized BTC holdings through the market identity even when the SDK ticker uses XBT/USD.',
+      'Keep native wallet quantities and prior USD while supported conversion prices or rejected catalogue peers recover; only a clean catalogue proves an asset outside the supported aggregate scope.',
       'Parse documented decimal tick and lot steps canonically instead of exposing Math.pow ULP artifacts as extra precision.',
       'Trim subscribed book depth after each update and clear reconnect book caches.',
       'Fan supported native OHLC updates out to every requested fallback timeframe.',
@@ -479,6 +480,8 @@ KNOWN_TS_FIXES.krakenspot = {
 };
 // Price-only cancel/replace amendments re-place the remaining quantity after
 // partial execution; TS re-places the original amount and increases exposure.
+// Lighter values positions from native unrealized_pnl and position_value before
+// public prices; missing PnL retains prior same-side valuation (native tests).
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
 KNOWN_TS_FIXES.woo = ['Validate prevTs continuity and clear resync books; TS accepts unbridged depth deltas.', 'Close rejected private authentication and bound pending authentication independently of pongs.'];
   // ApeX repairs are in the TS reference; output is compared without rewriting:
@@ -576,6 +579,10 @@ KNOWN_TS_FIXES.kucoin = [
 // execution. Only the exact private fixture and exact legacy TS fills may be
 // corrected; the independent l/L table never reads or changes Rust output.
 KNOWN_TS_FIXES.bitrue = BITRUE_TS_FIXES;
+// Rust refuses zero/non-finite ticker-derived position losses and aggregates
+// position UPnL instead of treating sumOpenRealizedAmount as unrealized money;
+// fixBitrue zeroes only the exact snapshot's position-free currency UPnL TS
+// copied from sumOpenRealizedAmount.
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal
   // tapes still compare unchanged; these notes do not rewrite mismatches.
@@ -606,6 +613,7 @@ KNOWN_TS_FIXES.bitget = {
 
 KNOWN_TS_FIXES.okx = [
   'full books retain levels past a stale last trade',
+  'collateral uses proven native or public FX, never a one-dollar fallback for missing nonstable prices; retain native currencies and prior USD until valuation is available, and hand inverse margin, PnL and normalized exposure to the same recovered quote',
   'paired TS/Rust fix: untraded X-Perp blank quote fields seed and stream finite zeros and zero-open percentage stays zero; one unpriced ticker cannot abort the whole catalog',
   'public trades implement the inherited Not implemented method',
   'candle calendar bounds use UTC independently of host timezone',

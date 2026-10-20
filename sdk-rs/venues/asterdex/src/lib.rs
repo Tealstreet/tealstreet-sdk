@@ -142,6 +142,7 @@ pub struct AsterDex {
     candles: HashMap<(String, String), u32>,
     market_rules: HashMap<String, MarketRule>,
     interest_timer: Option<TimerId>,
+    startup: safe_cex_engine::startup::Backoff<bool>,
     interest_cursor: usize,
     interest_fallback: VecDeque<String>,
     interest_rows: HashMap<String, f64>,
@@ -225,6 +226,7 @@ impl AsterDex {
             candles: HashMap::new(),
             market_rules: HashMap::new(),
             interest_timer: None,
+            startup: Default::default(),
             interest_cursor: 0,
             interest_fallback: VecDeque::new(),
             interest_rows: HashMap::new(),
@@ -281,9 +283,6 @@ impl AsterDex {
         );
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.is_private() {
-            self.start_account(cx);
-        }
         self.connect_public(cx);
     }
 
@@ -811,17 +810,22 @@ impl Venue for AsterDex {
             Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
             Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
             Pending::ExchangeInfo { rows, skipped } => {
-                if response.status != 200 {
+                log_skipped_rows(cx, "market", &skipped);
+                if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
                     cx.log(LogLevel::Error, "Aster market bootstrap failed");
+                    self.startup.failed(cx, true);
                     return;
                 }
-                log_skipped_rows(cx, "market", &skipped);
                 let mut markets = Vec::with_capacity(rows.len());
                 for (market, rule) in rows {
                     self.market_rules.insert(market.symbol.clone(), rule);
                     markets.push(market);
                 }
+                self.startup.succeeded(cx, &true);
                 cx.store.set_markets(markets);
+                if self.is_private() {
+                    self.start_account(cx);
+                }
                 let path = self.path("leverageBracket");
                 let pending = Pending::MarketBrackets {
                     rows: HashMap::new(),
@@ -833,11 +837,13 @@ impl Venue for AsterDex {
                 }
             }
             Pending::Daily { rows, skipped } => {
-                if response.status != 200 {
+                log_skipped_rows(cx, "ticker", &skipped);
+                if response.status != 200 || (!skipped.is_empty() && rows.is_empty()) {
                     cx.log(LogLevel::Error, "Aster ticker bootstrap failed");
+                    self.startup.failed(cx, false);
                     return;
                 }
-                log_skipped_rows(cx, "ticker", &skipped);
+                self.startup.succeeded(cx, &false);
                 cx.store.set_tickers(rows);
                 self.request_interest(cx, true, None, false);
             }
@@ -882,22 +888,57 @@ impl Venue for AsterDex {
             Pending::Clock(_) | Pending::Trade(_) => {}
             Pending::ExchangeInfo { rows, skipped } => {
                 match serde_json::from_str::<SymbolInfo>(item) {
-                    Ok(row) if row.status == "TRADING" => rows.push(market_from_wire(row)),
+                    Ok(row) if row.status == "TRADING" => {
+                        let (market, rule) = market_from_wire(row);
+                        if market.id.is_empty()
+                            || market.base.is_empty()
+                            || market.quote.is_empty()
+                            || !market.precision.price.is_finite()
+                            || market.precision.price <= 0.0
+                            || !market.precision.amount.is_finite()
+                            || market.precision.amount <= 0.0
+                            || !rule.tick_size.is_finite()
+                            || rule.tick_size <= 0.0
+                        {
+                            skipped.push(row_symbol(item));
+                            safe_cex_engine::startup::skipped_row(cx);
+                        } else {
+                            rows.push((market, rule));
+                        }
+                    }
                     Ok(_) => {}
-                    Err(_) => skipped.push(row_symbol(item)),
+                    Err(_) => {
+                        skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
             }
             Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily>(item) {
-                Ok(row) => rows.push(Ticker {
-                    id: row.symbol.to_string(),
-                    symbol: row.symbol.into_owned(),
-                    last: num::parse(&row.last_price),
-                    percentage: num::parse(&row.price_change_percent),
-                    volume: num::parse(&row.volume),
-                    quote_volume: num::parse(&row.quote_volume),
-                    ..Ticker::default()
-                }),
-                Err(_) => skipped.push(row_symbol(item)),
+                Ok(row)
+                    if !row.symbol.trim().is_empty()
+                        && [
+                            &row.last_price,
+                            &row.price_change_percent,
+                            &row.volume,
+                            &row.quote_volume,
+                        ]
+                        .iter()
+                        .all(|text| safe_cex_engine::startup::number_or_zero(text).is_some()) =>
+                {
+                    rows.push(Ticker {
+                        id: row.symbol.to_string(),
+                        symbol: row.symbol.into_owned(),
+                        last: num::parse(&row.last_price),
+                        percentage: num::parse(&row.price_change_percent),
+                        volume: num::parse(&row.volume),
+                        quote_volume: num::parse(&row.quote_volume),
+                        ..Ticker::default()
+                    })
+                }
+                _ => {
+                    skipped.push(row_symbol(item));
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Pending::OpenInterest { rows, .. } => collect_interest(item, rows),
             Pending::Klines {
@@ -948,14 +989,20 @@ impl Venue for AsterDex {
                 ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, repeated_bulk, None),
             Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
-            _ => cx.log(
-                LogLevel::Error,
-                format!("Aster public request failed: {error}"),
-            ),
+            Pending::ExchangeInfo { .. } => self.startup.failed(cx, true),
+            Pending::Daily { .. } => self.startup.failed(cx, false),
         }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(markets) = self.startup.on_timer(timer) {
+            if markets {
+                self.bootstrap(cx);
+            } else {
+                self.seed_daily(cx);
+            }
+            return;
+        }
         if self.on_request_timer(cx, timer)
             || self.on_account_timer(cx, timer)
             || self.on_history_timer(cx, timer)

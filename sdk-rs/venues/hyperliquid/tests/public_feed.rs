@@ -106,16 +106,18 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
         assert_eq!(engine.store().setting("BTC-PERP").unwrap().leverage, 8.);
         assert_eq!(engine.store().balance().used, 30.);
         engine.drain_actions().for_each(drop);
-        let closed_at = engine.now.max(4000.);
-        engine.handle(closed_at, Event::WsClosed { socket, code: 1006 });
+        engine.handle(4000., Event::WsClosed { socket, code: 1006 });
         let timer = engine
             .drain_actions()
-            .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms == closed_at + 1000. => Some(timer),
-                _ => None,
+            .find_map(|action| {
+                if let Action::SetTimer { timer, .. } = action {
+                    Some(timer)
+                } else {
+                    None
+                }
             })
             .unwrap();
-        engine.handle(closed_at + 2000., Event::TimerFired { timer });
+        engine.handle(6000., Event::TimerFired { timer });
         let replacement = engine
             .drain_actions()
             .find_map(|action| match action {
@@ -130,7 +132,7 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
             .unwrap();
         assert_ne!(replacement, SocketId(0));
         engine.handle(
-            closed_at + 2000.,
+            6000.,
             Event::WsOpened {
                 socket: replacement,
             },
@@ -148,8 +150,7 @@ fn shared_native_prices_revalue_private_account_without_venue_public_subscriptio
     .unwrap() else {
         panic!("shared update")
     };
-    let now = engine.now;
-    engine.apply_public_feed(now, update).unwrap();
+    engine.apply_public_feed(1000., update).unwrap();
     assert_eq!(engine.store().balance().total, 1000.);
     assert_eq!(engine.store().balance().upnl, 20.);
     assert_eq!(engine.store().balance().free, 1000.);
@@ -190,8 +191,8 @@ fn shared_native_prices_revalue_private_account_without_venue_public_subscriptio
 
 #[test]
 fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
+    use safe_cex_engine::Engine;
     use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
-    use support::TestEngine as Engine;
     let mut engine = Engine::new(Hyperliquid::new(Options {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
@@ -200,47 +201,29 @@ fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
     engine.start(1000.);
-    let mode = engine.wait_http(|request| kind(request) == "userAbstraction");
-    reply(&mut engine, &mode, 200, r#""disabled""#);
-    let metadata = engine.wait_http(|request| kind(request) == "metaAndAssetCtxs");
-    reply(&mut engine, &metadata, 200, META);
-    assert!(!engine.store().loaded().markets);
-    // Keep real fee/dex discovery pending, so account_start has not installed
-    // even its default private balance. Seed only a typed cached public catalog
-    // to exercise the shared-price hook against a genuinely cold account.
-    use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
-    engine.store_mut().set_markets(vec![Market {
-        id: "BTC".into(),
-        symbol: "BTC-PERP".into(),
-        pretty_symbol: None,
-        base: "BTC".into(),
-        quote: "USDC".into(),
-        active: true,
-        precision: Precision {
-            amount: 0.00001,
-            price: 1.,
-        },
-        limits: Limits {
-            amount: MinMax { min: 0., max: 1e9 },
-            leverage: MinMax { min: 1., max: 50. },
-            price: None,
-        },
-        contract_size: Some(1.),
-        is_expiring: None,
-        is_inverse: Some(false),
-        is_spot: Some(false),
-        is_perpetual: Some(true),
-        is_read_only: None,
-        taker_fee: None,
-        maker_fee: None,
-    }]);
-    engine.store_mut().set_tickers(vec![Ticker {
-        id: "BTC".into(),
-        symbol: "BTC-PERP".into(),
-        last: 100.,
-        mark: 100.,
-        ..Default::default()
-    }]);
+    let request = engine
+        .drain_actions()
+        .find_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(&mut engine, &request, 200, META);
+    let request = engine
+        .drain_actions()
+        .find_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(kind(&request), "perpDexs");
+    // Leave remaining discovery pending: account_start has not seeded private state.
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().balance);
     let HostInput::PublicFeedUpdate(update) = decode_host_input(
@@ -249,8 +232,7 @@ fn shared_prices_cannot_mark_a_cold_private_account_loaded() {
     .unwrap() else {
         panic!("shared update")
     };
-    let now = engine.now;
-    engine.apply_public_feed(now, update).unwrap();
+    engine.apply_public_feed(1000., update).unwrap();
     assert_eq!(engine.store().ticker("BTC-PERP").unwrap().last, 110.);
     assert!(
         !engine.store().loaded().balance,

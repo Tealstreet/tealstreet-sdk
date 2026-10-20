@@ -11,8 +11,9 @@ pub struct Envelope<'a> {
     pub data: &'a serde_json::value::RawValue,
 }
 #[derive(Deserialize)]
-pub struct Meta {
-    pub universe: Vec<Instrument>,
+pub struct Meta<'a> {
+    #[serde(borrow)]
+    pub universe: Vec<&'a serde_json::value::RawValue>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,38 +166,6 @@ pub struct Clearinghouse<'a> {
     pub time: Option<f64>,
     #[serde(default)]
     pub server_time: Option<f64>,
-}
-impl Clearinghouse<'_> {
-    pub fn into_owned(self) -> Clearinghouse<'static> {
-        Clearinghouse {
-            asset_positions: self
-                .asset_positions
-                .into_iter()
-                .map(|row| {
-                    let p = row.position;
-                    AssetPosition {
-                        position: PositionRow {
-                            coin: Cow::Owned(p.coin.into_owned()),
-                            szi: p.szi,
-                            entry_px: p.entry_px,
-                            position_value: p.position_value,
-                            unrealized_pnl: p.unrealized_pnl,
-                            liquidation_px: p.liquidation_px,
-                            margin_used: p.margin_used,
-                            leverage: Leverage {
-                                kind: Cow::Owned(p.leverage.kind.into_owned()),
-                                value: p.leverage.value,
-                            },
-                        },
-                    }
-                })
-                .collect(),
-            margin_summary: self.margin_summary,
-            cross_margin_summary: self.cross_margin_summary,
-            time: self.time,
-            server_time: self.server_time,
-        }
-    }
 }
 #[derive(Deserialize)]
 pub struct AssetPosition<'a> {
@@ -365,8 +334,8 @@ pub struct UserEvents<'a> {
 
 #[derive(Deserialize)]
 pub struct SpotMeta {
-    pub universe: Vec<SpotMarket>,
-    pub tokens: Vec<SpotToken>,
+    pub universe: Vec<safe_cex_engine::startup::Row<SpotMarket>>,
+    pub tokens: Vec<safe_cex_engine::startup::Row<SpotToken>>,
 }
 #[derive(Deserialize)]
 pub struct SpotMarket {

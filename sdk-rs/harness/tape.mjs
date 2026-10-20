@@ -1112,7 +1112,8 @@ export class Tape {
       }
       const candidates = this.sockets.filter((socket) => socket.url === frame.url &&
         (!socket.closed || frame.type === 'close') && (socket.opened || ['open', 'close'].includes(frame.type)) &&
-        (this.venue.subscriptionRouting && (stream || streams?.size) || frame.connection === undefined || socket.connection === frame.connection));
+        (this.venue.subscriptionRouting && (stream || streams?.size) || frame.connection === undefined
+          || (this.venue.socketOrdinalMatches?.(socket, frame.connection) ?? socket.connection === frame.connection)));
       if (this.venue.subscriptionRouting && (stream || streams?.size)) {
         const matched = candidates.filter((socket) => stream ? subscribed(socket, stream) : [...streams].some((target) => subscribed(socket, target)));
         if (matched.length > 1) throw new Error(`ambiguous subscribed tape socket ${frame.url} ${stream ?? 'lifecycle'}`);
