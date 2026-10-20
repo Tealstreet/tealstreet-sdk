@@ -378,3 +378,16 @@ live trading, weakened parity oracle, or performance threshold changes.
   Node/web artifact manifests, and gives the combined bundle no size budget.
   All 30 fresh primary private/public replay receipts, combined consumer
   checks, PR reviews and hosted CI remain pending; no final gate claim yet.
+
+### Integrated quality acceptance (v4)
+
+- All 11 quality stages pass at runtime source `9fe87d1eed`. Native workspace
+  2876/2876 across 248 suites and standalone engine 93/93 pass; native/Wasm
+  strict Clippy, actual Wasm workspace build, format/bans and native session
+  fixture build pass. Root typecheck 44/44, lint 28/28, test tasks 27/27 pass.
+  Both safe-cex runners pass 7769 tests across 527 files each. The slower second
+  runner completed without retries, relaxed deadlines or assertion changes.
+- Receipts: `/tmp/security-v4-quality.json`; the original environment failure
+  remains under `security-v4-quality-attempt1.json`. The final matrix has
+  started: Paradex is 1222994 bytes against 1258291 and its fresh private
+  replay passes. No final-source public timing has started yet.
