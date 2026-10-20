@@ -243,3 +243,23 @@ not a TS venue defect; no KNOWN_TS_FIXES change is needed.
 On the twenty-three-venue tree, root typecheck passes 44 tasks and lint 28 tasks;
 harness unit tests pass 368/368. Full JS integration still waits for combined
 WASM artifacts, and full native/workspace checks remain in flight.
+
+### Final landing integration — GRVT
+
+Before the final Binance gates, fetched and merged 5d7589f296. GRVT adds venue
+registration/options, Workers/account routing and harness support; the landing
+also contains a small Bybit float-decoder change. It does not change the engine,
+native server/transport, frame wire or FrameApplier. Kept both GRVT registration
+and Polymarket's shared-parser feature in the single manifest conflict.
+Independent incoming-diff audit found no interaction with wire15, the native-only
+producer or command schema. Affected venue/host/WASM/harness/SDK checks follow;
+unchanged native/engine evidence above remains valid, with full combined CI
+required before merging.
+
+Twenty-three-venue acceptance before this integration: combined release build
+passes; SDK/WASM 99 tests across seven files, full host 67, cross-wire one,
+root tests 27 tasks (both SDK runners 7,252 tests / 498 files), typecheck44 and
+lint28 pass. Full workspace native tests: 2,100 across 170 groups, zero failed
+or ignored. Workspace all-target clippy, workspace WASM build/clippy, bans and
+fmt pass. One local linker environment failure was repaired by setting the
+Rust1.99 library path in the child environment; the successful rerun is recorded.
