@@ -1761,6 +1761,16 @@ mod tests {
                     &["bybit", "bybitdemo", "hyrotrader", "bybitinverse", "blofin"],
                     venue,
                 ) || any(&OKX, venue),
+                balance_info: any(
+                    &[
+                        "bybit",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bybitinverse",
+                        "bybitspot",
+                    ],
+                    venue,
+                ),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

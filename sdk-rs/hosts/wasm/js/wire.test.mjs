@@ -886,6 +886,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     options: true,
     accountTier: false,
     closedPositions: true,
+    balanceInfo: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',

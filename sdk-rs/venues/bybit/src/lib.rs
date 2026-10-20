@@ -266,6 +266,8 @@ pub struct BybitLinear {
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    /// The raw first account of the last good REST wallet read: TS `balance.info`.
+    balance_info: Option<String>,
 }
 
 /// Bybit kline interval codes.
@@ -445,6 +447,7 @@ impl BybitLinear {
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            balance_info: None,
         }
     }
 
@@ -1902,6 +1905,7 @@ impl Venue for BybitLinear {
         safe_cex_engine::Capabilities {
             options: self.category_enabled(Category::Option),
             closed_positions: !self.variant.is_spot(),
+            balance_info: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2107,6 +2111,10 @@ impl Venue for BybitLinear {
                 from_ms,
                 to_ms,
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::FetchBalanceInfo => {
+                let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
+                cx.done(command, Ok(info));
+            }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
