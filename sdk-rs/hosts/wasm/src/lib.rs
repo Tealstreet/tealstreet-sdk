@@ -8,6 +8,7 @@
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
+    feature = "apexomni",
     feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
@@ -19,13 +20,15 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx, woo, apexomni or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "apexomni")]
+use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
 #[cfg(feature = "backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "binance")]
@@ -93,6 +96,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
+    feature = "apexomni",
     feature = "woo",
     feature = "cryptocom",
     feature = "bingx",
@@ -111,6 +115,7 @@ struct EngineOptions {
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
+        feature = "apexomni",
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
@@ -132,10 +137,14 @@ struct EngineOptions {
         feature = "okx",
         feature = "weex",
         feature = "blofin",
-        feature = "bitget"
+        feature = "bitget",
+        feature = "apexomni"
     ))]
     #[serde(default)]
     passphrase: Option<String>,
+    #[cfg(feature = "apexomni")]
+    #[serde(default)]
+    omni_key_seed: Option<String>,
     #[cfg(any(feature = "hyperliquid", feature = "woo"))]
     #[serde(default)]
     application_id: Option<String>,
@@ -291,6 +300,9 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    GetAccount {
+        command: u32,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -415,6 +427,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
                 symbol,
@@ -573,6 +586,7 @@ impl WasmEngine {
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
+        feature = "apexomni",
         feature = "woo",
         feature = "cryptocom",
         feature = "bingx",
@@ -595,6 +609,16 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "apexomni")]
+            "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                omni_key_seed: options.omni_key_seed,
+                tick_interval_ms: None,
+            }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

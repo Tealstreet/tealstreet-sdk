@@ -307,9 +307,10 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
 | WOO | Implemented; [PR #1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316), adversarial fixes and gates passing |
+| ApeX Omni perpetuals | In progress on `feat/rust-apexomni`; native zkLink signing and API-key authentication, phased reviews and gates |
 | KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| Lighter, Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| Lighter, Paradex, GRVT, AsterDEX, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

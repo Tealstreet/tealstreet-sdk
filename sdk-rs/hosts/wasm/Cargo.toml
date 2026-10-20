@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+apexomni = ["dep:safe-cex-venue-apexomni"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
 bitget = ["dep:safe-cex-venue-bitget"]
@@ -16,7 +17,7 @@ blofin = ["dep:safe-cex-venue-blofin"]
 mexc = ["dep:safe-cex-venue-mexc"]
 bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
-default = ["woo", "bitrue", "binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack", "bitget"]
+default = ["apexomni", "woo", "bitrue", "binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack", "bitget"]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
 binance = ["dep:safe-cex-venue-binance"]
 bybit = ["dep:safe-cex-venue-bybit"]
@@ -24,6 +25,7 @@ hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
 
 [dependencies]
+safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-woo = { workspace = true, optional = true }
 safe-cex-venue-bitrue = { workspace = true, optional = true }
 safe-cex-venue-bitget = { path = "../../venues/bitget", optional = true }

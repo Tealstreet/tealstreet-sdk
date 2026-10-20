@@ -71,10 +71,19 @@ it is separate from the contract signature. Limit fees round upward to six
 decimal places. Confirm every detail against TS and SDK oracle, including
 boundaries and negative maker fees.
 
+The perpetual contract serializer is a 36-byte SDK payload: discriminator
+`0xfe`, account u32 BE, subaccount u8, low 16 slot bits BE, low 24 nonce bits
+BE, low 8 pair bits, direction u8, packed40 size, u120 BE price, maker fee
+magnitude u8, taker fee u8, subsidy u8. SDK oracle vectors must pin each
+truncation and the packed40 exponent/mantissa, rather than assuming the
+builder's wider types survive serialization.
+
 Caller client IDs are non-empty without whitespace, honored verbatim as
 both `clientId` and `clientOrderId` for one plain native Limit/Market order.
 Reject duplicate IDs, splitting, triggers or attached brackets before any
-batch write. Generated IDs retain the `apexomni-tealstreet-` attribution.
+batch write. The active exchange-local generator uses
+`apexomni-<account>-<milliseconds>-<six-digit-random>`; the unused utility
+generator has a different prefix and is not the placement contract.
 Split brackets must fail before signing/writes because no documented atomic
 multi-parent bracket contract exists. Amend is cancel+replace with a fresh
 generated ID and preserves both virtual siblings when editing one leg.
@@ -89,3 +98,43 @@ generated ID and preserves both virtual siblings when editing one leg.
   and private regressions, root typecheck/lint/tests, green PR CI.
 - Gate results, review findings, documented TS fixes, PR and merge commit
   will be recorded here as phases complete.
+
+### Public phase
+
+- Streamed contract config; canonical markets and native signing config;
+  zero ticker seeds, live tickers, full book snapshots/deltas, subscriptions,
+  candles/trade updates, real URLs, public role, watchdog/reconnect.
+- Focused tests: 11 passing. Independent code-correctness review found
+  rounded quote-volume division and nonempty book clearing notification;
+  both fixed with regressions, bounded re-review passing.
+- Documented venue depth contract requires continuous `data.u`; Rust waits
+  for snapshots and resubscribes on gaps. TS reference correction pending.
+
+### Signing and trading verification in progress
+
+- Detailed byte-level design/evidence: `RUST_APEXOMNI_SIGNING.md`.
+- 12 signer tests passing, including three fresh signatures captured from
+  unmodified `zklink-web-sdk-alpha@1.0.2`, Unicode IDs, packed-size boundary,
+  negative maker fee and narrowed pair/slot/nonce fields.
+- First 11 trading tests passing: caller IDs/batch preflight, split brackets,
+  fee precision, trigger rounding, independent bracket signatures, FIFO,
+  no ambiguous write retry, bounded signature rejection retry, cancellation,
+  and valid multipart leverage requests.
+- Trading review found decimal limit-fee rounding and trigger rounding
+  order; fixed. Exact whole-tick splitting and preserving both siblings on
+  ordinary amendments additionally repair TS quantity/protection bugs.
+- Account phase: 18 integration tests and one bounded-guard unit test passing.
+  Independent code-correctness review passed after silent handshake watchdog,
+  missing-passphrase preflight, bounded revision/tombstone fencing, genuine
+  execution-only notifications and acknowledged-leverage snapshot guards.
+- Queries: 11 focused tests passing; independent code-correctness review
+  passed. Native execution identity preserves distinct equal fills; TS oracle
+  correction is in progress. Unsupported income/order history stays branded
+  unsupported in the SDK; public-trades history fails explicitly.
+- Trading bounded re-review passed after decimal limit-fee and trigger-price
+  corrections. Native clippy (all targets, warnings denied) passes.
+- Initial single-venue WASM build: 954,742 bytes, below 1,258,291-byte cap.
+  Final gates await paired TS oracle fixes and strict replay integration.
+- Confirmed additional TS auth defect: resend saw transformed cancel strings
+  or platform-specific multipart internals. Retaining original semantic payload
+  makes legacy signing deterministic. Paired TS/API regressions in progress.

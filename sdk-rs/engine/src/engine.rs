@@ -125,6 +125,10 @@ pub enum Action {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    /// Venue-reported account identity; the result is a rare JSON reply.
+    FetchAccount {
+        command: CommandId,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
