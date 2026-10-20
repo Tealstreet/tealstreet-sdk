@@ -26,6 +26,9 @@ live frame transport, not these persistence or publicdata adapters. Keep their
 exports and policies until an application migration explicitly replaces them.
 See `docs/plans/RUST_REWRITE.md`, “Native frame server migration”.
 
+The session adapter and adoption example are in `src/frameSession/README.md`;
+deployed application routes, authorization and shell features remain caller-owned.
+
 ## PublicExchangeFactory Rust lifecycle
 
 - A current-hour Redis hit hydrates a lazy exchange without opening sockets or
@@ -51,5 +54,3 @@ See `docs/plans/RUST_REWRITE.md`, “Native frame server migration”.
   public engine outside the factory; refresh disposes that old provider source.
 - Native factory conformance: build WASM, then run
   `corepack yarn -s workspace @tealstreet/safe-cex-server test-wasm`.
-The session adapter and adoption example are in `src/frameSession/README.md`;
-deployed application routes, authorization and shell features remain caller-owned.

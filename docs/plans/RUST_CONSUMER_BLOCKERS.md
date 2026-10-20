@@ -162,3 +162,55 @@ publish an empty snapshot or dispose the previous good engine.
 - Fan-out proof uses actual `ExchangeWorker` instances, real MessagePorts and
   structured-clone transfers in Node; it is not a separate browser-worker
   process or deployed-gateway acceptance test.
+
+- Initial Direct replay controls passed 12 public timing/memory gates and 19
+  private correctness gates. Final bindings with the Shared-only store fix are
+  11,388,401 bytes, SHA-256
+  `afeee9aae01738d58881552b52e5f64579c8818e0b1208d8d9329636f4f6d710`.
+  Full current Rust workspace 2,464/202 suites and strict WASM32 Clippy PASS.
+  Current-asset CLI/MCP/RN seven tests, server eleven WASM cases and isolated
+  MCP package build/smoke PASS; packaged bytes match that checksum.
+- The full SDK rerun exposed a fixture freshness timing error: the first worker
+  JWT was checked after another startup and REST polling, beyond the oracle's
+  strict five-second issuance window. `221b826cb6` verifies actual packets at
+  send time using the unchanged independent cryptographic oracle, retaining the
+  result for later assertions. Independent review, six shared cases, SDK types
+  and explicit file lint PASS. A full SDK rerun and final-artifact replay batch
+  follow; public timing gates run alone, private correctness cases use two
+  independent processes at a time.
+
+- Final full SDK rerun after the fixture correction PASS: 391/391 in 14 files
+  (29.19s). Final native workspace 2,464 tests / 202 result suites, current
+  wasm32 strict Clippy, seven consumer tests and eleven factory WASM cases
+  PASS on `afeee9aa…6d710`. The final-artifact replay batch is running with
+  three-run public medians sequentially and one-run private correctness in
+  pairs; no builds or other owned checks run during public measurements.
+
+## Final public replay metrics
+
+Three-run medians on the final `afeee9aa…6d710` combined binary. Values are
+TypeScript → Rust. Public gates enforce main-thread CPU, steady CPU and
+retained memory; process CPU is an additional diagnostic. Private replay
+controls enforce correctness only. Existing documented fixtures are reused;
+this consumer change adds no live venue capture or new TS protocol correction.
+
+| Profile | Main CPU ms | Steady CPU ms | Process CPU ms | Retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| binance | 179.8 → 92.6 | 98.1 → 33.8 | 240.6 → 164.1 | 18.5 → 5.2 |
+| binancespot | 517.2 → 385.3 | 225.8 → 111.5 | 690.1 → 529.3 | 27.9 → 11.8 |
+| binanceinverse | 161.3 → 69.0 | 108.8 → 35.7 | 191.9 → 106.8 | 14.2 → 3.0 |
+| binancepm | 170.7 → 93.0 | 95.2 → 34.0 | 225.9 → 164.4 | 18.4 → 5.2 |
+| hyperliquid | 342.6 → 59.3 | 23.2 → 20.8 | 431.6 → 149.6 | 24.7 → 3.8 |
+| coinbase | 804.4 → 310.2 | 464.8 → 87.2 | 1012.5 → 426.0 | 39.1 → 21.7 |
+| phemex | 369.7 → 113.9 | 255.3 → 40.0 | 463.2 → 186.0 | 20.5 → 5.6 |
+| asterdex | 174.0 → 99.4 | 65.2 → 45.3 | 299.7 → 210.9 | 28.2 → 7.5 |
+| txflow | 74.8 → 55.1 | 13.0 → 9.3 | 119.3 → 100.2 | 17.9 → 2.6 |
+| grvt | 168.3 → 153.6 | 111.4 → 94.9 | 202.2 → 255.9 | 27.2 → 2.8 |
+| lighter | 291.5 → 177.4 | 191.3 → 103.1 | 386.3 → 301.8 | 17.6 → 3.9 |
+| apexomni | 78.1 → 36.6 | 47.1 → 6.1 | 109.3 → 81.0 | 21.8 → 3.4 |
+
+All 12 public controls PASS. GRVT process CPU is higher in this run;
+its gated main/steady CPU and retained memory remain below TS. Public
+main-thread speedups range from 1.10× to 5.78×; retained memory reductions
+range from 1.80× to 9.58×. No benchmark builds/tests ran concurrently with
+these public measurements in this lane.
