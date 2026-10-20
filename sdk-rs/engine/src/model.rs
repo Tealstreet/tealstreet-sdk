@@ -206,6 +206,13 @@ pub struct OrderExtra {
     pub reject_reason: Option<RejectReason>,
 }
 
+/// Order identity supplied by the caller when cancellation precedes reconciliation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelOrderRef {
+    pub id: String,
+    pub symbol: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {

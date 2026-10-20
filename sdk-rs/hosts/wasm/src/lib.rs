@@ -26,7 +26,7 @@ compile_error!(
     "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
-use safe_cex_engine::model::{PlaceOrderOpts, StpMode};
+use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
@@ -407,6 +407,10 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    CancelOrdersWithSymbols {
+        command: u32,
+        orders: Vec<CancelOrderRef>,
+    },
     AmendOrder {
         command: u32,
         id: String,
@@ -544,6 +548,9 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            CommandIn::CancelOrdersWithSymbols { command, orders } => {
+                Self::CancelOrdersWithSymbols { command, orders }
+            }
             CommandIn::AmendOrder {
                 command,
                 id,
@@ -1057,6 +1064,17 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn cancellation_with_symbols_preserves_caller_identity() {
+        let wire: CommandIn = serde_json::from_str(
+            r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"22542179","symbol":"BTCUSDT"}]}"#,
+        ).unwrap();
+        assert!(
+            matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
+            if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
+        );
+    }
 
     #[test]
     fn forwards_leverage_metadata_command() {

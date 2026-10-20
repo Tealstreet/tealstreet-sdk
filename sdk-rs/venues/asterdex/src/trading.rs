@@ -4,8 +4,8 @@ use crate::account::venue_error;
 use crate::sign::{Query, Version};
 use crate::{AsterDex, Options, Pending};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType, StpMode,
-    TimeInForce,
+    CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
+    StopTriggerType, StpMode, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::Deserialize;
@@ -16,7 +16,7 @@ pub struct Request {
     call: Call,
 }
 enum Call {
-    Place,
+    Place(String),
     Cancel {
         id: String,
         filled_at_amend: Option<f64>,
@@ -35,6 +35,7 @@ struct Planned {
 }
 #[derive(Default)]
 struct Job {
+    reserved_places: usize,
     steps: VecDeque<Planned>,
     ids: Vec<String>,
     successes: usize,
@@ -42,9 +43,15 @@ struct Job {
     continue_on_error: bool,
     result: Option<String>,
 }
+// Above the venue open-order limit; never evict cancellation routing for a live ACK.
+const MAX_ACKNOWLEDGED_ORDERS: usize = 10_000;
+
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    // Placement ACKs can precede both REST reconciliation and the private NEW.
+    // Keep routing provenance only until Store/terminal sees the ID or cancellation.
+    acknowledged: HashMap<String, String>,
 }
 
 /// TS's exact decimal policy: plain decimals, at most 18 fractional digits,
@@ -165,21 +172,64 @@ impl AsterDex {
         let (id, job) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
+                let mut error = None;
                 let orders = ids
                     .iter()
-                    .filter_map(|id| cx.store.order(id).cloned())
+                    .filter_map(|id| {
+                        let symbol = cx
+                            .store
+                            .order(id)
+                            .map(|order| order.symbol.clone())
+                            .or_else(|| self.trading.acknowledged.get(id).cloned());
+                        if let Some(symbol) = symbol {
+                            Some(CancelOrderRef {
+                                id: id.clone(),
+                                symbol,
+                            })
+                        } else {
+                            error = Some(format!(
+                                "Order {id} not found; cancellation requires its symbol"
+                            ));
+                            None
+                        }
+                    })
                     .collect::<Vec<_>>();
-                (command, Ok(self.plan_cancel(&orders, true)))
+                (
+                    command,
+                    self.plan_cancel_refs(&orders).map(|mut job| {
+                        job.error = error;
+                        job
+                    }),
+                )
+            }
+            Command::CancelOrdersWithSymbols { command, orders } => {
+                (command, self.plan_cancel_refs(&orders))
             }
             Command::CancelSymbolOrders { command, symbol } => {
-                let orders = cx
+                let mut orders = cx
                     .store
                     .orders()
                     .iter()
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
-                    .cloned()
+                    .map(|o| CancelOrderRef {
+                        id: o.id.clone(),
+                        symbol: o.symbol.clone(),
+                    })
                     .collect::<Vec<_>>();
-                (command, Ok(self.plan_cancel(&orders, true)))
+                self.trading.acknowledged.retain(|id, _| {
+                    cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
+                });
+                orders.extend(
+                    self.trading
+                        .acknowledged
+                        .iter()
+                        .filter(|(_, s)| **s == symbol)
+                        .map(|(id, symbol)| CancelOrderRef {
+                            id: id.clone(),
+                            symbol: symbol.clone(),
+                        }),
+                );
+                (command, self.plan_cancel_refs(&orders))
             }
             Command::AmendOrder {
                 command,
@@ -274,7 +324,7 @@ impl AsterDex {
     }
     fn start_trade(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId, job: Result<Job, String>) {
         match job {
-            Ok(job) => {
+            Ok(mut job) => {
                 // Authentication is shared by every step. Reject it once so
                 // synchronous signer failures cannot recurse through a split job.
                 if let Some(step) = job.steps.front() {
@@ -291,6 +341,29 @@ impl AsterDex {
                         cx.done(id, Err(error));
                         return;
                     }
+                }
+                self.trading.acknowledged.retain(|id, _| {
+                    cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
+                });
+                job.reserved_places = job
+                    .steps
+                    .iter()
+                    .filter(|step| matches!(step.call, Call::Place(_)))
+                    .count();
+                let reserved = self
+                    .trading
+                    .jobs
+                    .values()
+                    .map(|job| job.reserved_places)
+                    .sum::<usize>();
+                if job.reserved_places > 0
+                    && self.trading.acknowledged.len() + reserved + job.reserved_places
+                        > MAX_ACKNOWLEDGED_ORDERS
+                {
+                    let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
+                    cx.log(LogLevel::Error, error.clone());
+                    cx.done(id, Err(error));
+                    return;
                 }
                 if let Some(error) = &job.error {
                     cx.log(LogLevel::Error, error.clone());
@@ -347,14 +420,20 @@ impl AsterDex {
         response: Result<Response<'_>, &str>,
     ) {
         let command = request.command;
+        let was_place = matches!(&request.call, Call::Place(_));
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.to_owned())),
         };
         let outcome = match outcome {
             Err((-2011, ref message))
-                if matches!(&request.call, Call::Cancel { .. })
-                    && message.to_ascii_lowercase().contains("unknown order") =>
+                if matches!(
+                    &request.call,
+                    Call::Cancel {
+                        filled_at_amend: None,
+                        ..
+                    }
+                ) && message.to_ascii_lowercase().contains("unknown order") =>
             {
                 Ok("")
             }
@@ -363,7 +442,7 @@ impl AsterDex {
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
-            (Call::Place, Ok(body)) => {
+            (Call::Place(symbol), Ok(body)) => {
                 let ack = serde_json::from_str::<PlaceAck>(body).map_err(|e| (0, e.to_string()));
                 ack.and_then(|ack| {
                     ack.order_id
@@ -373,6 +452,12 @@ impl AsterDex {
                         .ok_or_else(|| (0, "Aster order response did not include orderId".into()))
                 })
                 .map(|id| {
+                    self.trading.acknowledged.retain(|id, _| {
+                        cx.store.order(id).is_none() && !self.account.terminal.contains_key(id)
+                    });
+                    if cx.store.order(&id).is_none() && !self.account.terminal.contains_key(&id) {
+                        self.trading.acknowledged.insert(id.clone(), symbol);
+                    }
                     placed = Some(id);
                     self.account.order_revision = self.account.order_revision.wrapping_add(1);
                     self.request_refresh_orders(cx);
@@ -426,6 +511,7 @@ impl AsterDex {
                         .chain(self.account.terminal.get(&id).map(|(_, order)| order))
                         .any(|order| order.status == OrderStatus::Closed || order.filled > before)
                 });
+                self.trading.acknowledged.remove(&id);
                 self.mark_order_canceled(cx, &id);
                 if filled_during_cancel {
                     Err((0,"Aster order filled while cancellation was in flight; replacement was not submitted".into()))
@@ -467,6 +553,9 @@ impl AsterDex {
             (_, Err(error)) => Err(error),
         };
         if let Some(job) = self.trading.jobs.get_mut(&command) {
+            if was_place {
+                job.reserved_places = job.reserved_places.saturating_sub(1);
+            }
             match outcome {
                 Ok(()) => job.successes += 1,
                 Err((_, message)) => {
@@ -484,6 +573,32 @@ impl AsterDex {
         self.advance_trade(cx, command);
     }
 
+    fn plan_cancel_refs(&self, orders: &[CancelOrderRef]) -> Result<Job, String> {
+        if orders
+            .iter()
+            .any(|order| order.id.is_empty() || order.symbol.is_empty())
+        {
+            return Err("Aster cancellation requires a nonempty order ID and symbol".into());
+        }
+        Ok(Job {
+            steps: orders
+                .iter()
+                .map(|order| Planned {
+                    method: Method::Delete,
+                    endpoint: "order",
+                    query: Query::new()
+                        .str("symbol", &order.symbol)
+                        .str("orderId", &order.id),
+                    call: Call::Cancel {
+                        id: order.id.clone(),
+                        filled_at_amend: None,
+                    },
+                })
+                .collect(),
+            continue_on_error: true,
+            ..Job::default()
+        })
+    }
     fn plan_cancel(&self, orders: &[Order], continue_on_error: bool) -> Job {
         Job {
             steps: orders
@@ -645,7 +760,7 @@ impl AsterDex {
                                 method: Method::Post,
                                 endpoint: "order",
                                 query,
-                                call: Call::Place,
+                                call: Call::Place(child.symbol.clone()),
                             });
                         }
                     }

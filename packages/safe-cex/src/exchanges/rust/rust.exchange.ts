@@ -563,7 +563,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
-    await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
+    if (this.name === 'asterdex') {
+      await this.command({ op: 'cancelOrdersWithSymbols', orders: orders.map(({ id, symbol }) => ({ id, symbol })) });
+    } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
@@ -680,7 +682,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);

@@ -158,7 +158,8 @@ const KNOWN_TS_FIXES = {
       'Nonce uniqueness is scoped to the agent address as documented; TS scopes it to owner plus agent and can collide across owners.',
       'Failed or malformed history reads propagate errors instead of silently returning an authoritative empty result.',
       'Historical candle timestamps use engine seconds consistently; TS returns raw milliseconds on this REST path.',
-      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response.',
+      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response; an unknown-order rejection cannot authorize replacement.',
+      'Configured leverage reads use the actual native setting rather than the inherited TS market-maximum fallback that overwrites it.',
     ],
   },
   hyperliquid() {

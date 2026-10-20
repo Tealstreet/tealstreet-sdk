@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, OHLCVOptions } from '../../types';
+import type { ExchangeOptions, OHLCVOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,7 +32,11 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
               ? 'EXPIRE_MAKER'
               : command.op === 'fetchAccount'
                 ? { userId: 'documented-fixture' }
-                : [],
+                : command.op === 'fetchLeverage'
+                  ? { buyLeverage: 10, sellLeverage: 10 }
+                  : command.op === 'placeOrders'
+                    ? ['newly-acked']
+                    : [],
           ),
         },
       ]);
@@ -203,6 +207,32 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     expect(await exchange.fetchSymbolMaxLeverage('BTCUSDT')).toBe(125);
     expect(await exchange.getAccount()).toEqual({ userId: 'documented-fixture' });
     expect(commands.at(-1)).toMatchObject({ op: 'fetchAccount' });
+  });
+
+  it('preserves cancellation symbols before Store sees a placement and for external orders', async () => {
+    const { exchange, store, commands } = fixture();
+    await exchange.start();
+    const [id] = await exchange.placeOrder({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 });
+    expect(id).toBe('newly-acked');
+    expect(store.orders).toEqual([]);
+    await exchange.cancelOrders([{ id, symbol: 'BTCUSDT' } as Order]);
+    await exchange.cancelOrders([{ id: 'external', symbol: 'ETHUSDT' } as Order]);
+    expect(commands.slice(-2)).toMatchObject([
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'newly-acked', symbol: 'BTCUSDT' }] },
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'external', symbol: 'ETHUSDT' }] },
+    ]);
+    expect(store.orders).toEqual([]);
+  });
+
+  it('loads account leverage 10 rather than the market maximum 125 into fetched leverage', async () => {
+    const { exchange, store, commands } = fixture();
+    store.update({ markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+      precision: { price: 0.01, amount: 0.001 }, limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } } }] });
+    await exchange.start();
+    expect(await exchange.fetchSymbolMaxLeverage('BTCUSDT')).toBe(125);
+    expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toEqual({ buyLeverage: 10, sellLeverage: 10 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 10, sellLeverage: 10 });
+    expect(commands.at(-1)).toMatchObject({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   });
 
   it('keeps duplicate registrations of the same book callback independently active', async () => {

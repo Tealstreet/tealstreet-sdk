@@ -698,17 +698,24 @@ contract. Native URLs carry socket roles; host transports apply account routing.
   writes/listen keys retain the primary agent. Other venues retain their prior
   explicit secondary-key rejection.
 - Private reconciliation commits each domain atomically and rejects stale
-  snapshots. Order fills retain native execution identities/prices; terminal
+  snapshots, including mode reads invalidated by later mode-write acknowledgements.
+  Unique native executions emit even when their order-state payload is older.
+  Order fills retain native execution identities/prices; terminal
   cancellation cannot overwrite a filled order. Typed currency balances cross
   the binary frame alongside aggregate balances.
 - Conditional, split and bracket placements remain sequential. Amendments
-  preflight before cancel and stop if the original fills during cancellation.
+  preflight before cancel and stop if the original fills during cancellation or
+  cancellation is unconfirmed. Unknown-order is idempotent only for ordinary
+  cancellation. Caller symbols and bounded ACK provenance keep newly placed
+  orders cancelable before reconciliation; no placeholder Store rows are made.
   Caller client IDs and trailing placement remain explicitly unsupported.
 - V3 STP uses typed account read/write commands and per-order overrides.
   Browser owner-wallet builder approval and agent onboarding stay outside the
   exchange engine; ordinary placement never synthesizes owner consent.
 - Rust fixes TS's hedge-zero event behavior by closing only the reported leg,
   and returns historical candle timestamps in the shared seconds contract.
-  These intentional differences are recorded in the harness known-fix notes.
+  Configured leverage reads use actual account settings instead of the inherited
+  market-maximum fallback. These differences and conservative amend cancellation
+  are recorded in the harness known-fix notes.
 
 Port plan, phase reviews and gate evidence: `docs/plans/RUST_ASTERDEX.md`.

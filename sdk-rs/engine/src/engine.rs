@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::Book;
 use crate::json::{ArrayAt, ArraySplitter};
-use crate::model::{Candle, OrderSide, PlaceOrderOpts};
+use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
@@ -168,6 +168,11 @@ pub enum Command {
     CancelOrders {
         command: CommandId,
         ids: Vec<String>,
+    },
+    /// Cancel using caller-supplied routing context before Store sees the order.
+    CancelOrdersWithSymbols {
+        command: CommandId,
+        orders: Vec<CancelOrderRef>,
     },
     /// Change an open order's price or amount.
     AmendOrder {

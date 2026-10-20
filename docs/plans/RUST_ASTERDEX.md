@@ -303,3 +303,12 @@ only ten historical copies of Aster's explicitly published demonstration key;
 exact commit/path/rule/line exclusions preserve all future scans. Independent
 review fetched the official docs and verified that exact demonstration literal;
 local new-commit scan reports zero findings. No global allowlist was widened.
+
+Trading/wrapper fixes are independently re-reviewed clear: typed caller symbol
+identity plus bounded pending-ACK provenance cover cancellation before REST/WS;
+unknown-order amendment cancellation fails closed. New reservation guards cap
+ACK context at10000 without evicting live cancellation routing; cancellations
+remain available at capacity. Native32trading/19unit/3WASMlib and wrapper13 tests,
+typecheck/lint/clippy/fmt pass. Configured leverage now uses its native command;
+this inherited TS maximum-leverage fallback bug and conservative unknown-cancel
+amendment behavior are documented in known-fix notes and this commit.

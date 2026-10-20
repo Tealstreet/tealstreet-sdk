@@ -734,3 +734,228 @@ fn settings_ack_invalidates_older_position_risk_settings_snapshot() {
         }
     }
 }
+
+#[test]
+fn cancel_with_caller_symbol_works_before_reconciliation_and_for_external_orders() {
+    let mut h = Harness::new();
+    h.place(limit());
+    let placed = h.take(Method::Post);
+    h.reply(placed, r#"{"orderId":22542179}"#);
+    assert!(h.result(1).is_ok());
+    // Deliberately leave the openOrders refresh and the private NEW undelivered.
+    assert!(h.engine.store().order("22542179").is_none());
+    for (command, id) in [(2, "22542179"), (3, "22542180")] {
+        h.command(Command::CancelOrdersWithSymbols {
+            command,
+            orders: vec![CancelOrderRef {
+                id: id.into(),
+                symbol: "BTCUSDT".into(),
+            }],
+        });
+        let cancel = h.take(Method::Delete);
+        assert!(
+            cancel
+                .url
+                .contains(&format!("symbol=BTCUSDT&orderId={id}&"))
+        );
+        h.reply(cancel, r#"{"status":"CANCELED","executedQty":"0"}"#);
+        assert!(h.result(command).is_ok());
+        assert!(h.engine.store().order(id).is_none());
+    }
+}
+
+#[test]
+fn id_only_cancellation_cannot_claim_success_without_routing_context() {
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["unseen".into()],
+    });
+    assert!(h.requests.is_empty());
+    assert!(
+        h.result(1)
+            .as_ref()
+            .unwrap_err()
+            .contains("requires its symbol")
+    );
+}
+
+#[test]
+fn symbol_cancel_includes_acknowledged_order_before_rest_or_private_new() {
+    let mut h = Harness::new();
+    h.place(limit());
+    let placed = h.take(Method::Post);
+    h.reply(placed, r#"{"orderId":22542179}"#);
+    assert!(h.engine.store().order("22542179").is_none());
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    let cancel = h.take(Method::Delete);
+    assert!(cancel.url.contains("symbol=BTCUSDT&orderId=22542179&"));
+    h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    assert!(h.result(2).is_ok());
+    h.command(Command::CancelSymbolOrders {
+        command: 3,
+        symbol: "BTCUSDT".into(),
+    });
+    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(h.result(3).is_ok());
+}
+
+#[test]
+fn symbol_cancel_retires_ack_provenance_when_store_has_seen_the_order() {
+    let mut h = Harness::new();
+    h.place(limit());
+    let placed = h.take(Method::Post);
+    h.reply(placed, r#"{"orderId":22542179}"#);
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("22542179", OrderType::Limit)]);
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(h.result(2).is_ok());
+}
+
+#[test]
+fn unknown_order_is_ambiguous_for_amend_and_never_authorizes_replacement() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("10", OrderType::Limit)]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "10".into(),
+        price: Some(9200.0),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    // Venue may already have filled the order while the private fill is delayed.
+    h.reply(cancel, r#"{"code":-2011,"msg":"Unknown order sent."}"#);
+    assert!(h.result(1).is_err());
+    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    // Do not manufacture a cancellation from the ambiguous rejection.
+    assert_eq!(
+        h.engine.store().order("10").unwrap().status,
+        OrderStatus::Open
+    );
+}
+
+#[test]
+fn leverage_query_returns_loaded_account_leverage_instead_of_market_maximum() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    assert_eq!(
+        h.engine
+            .store()
+            .market("BTCUSDT")
+            .unwrap()
+            .limits
+            .leverage
+            .max,
+        125.0
+    );
+    h.command(Command::FetchLeverage {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+    });
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(h.result(1).as_ref().unwrap()).unwrap(),
+        json!({"buyLeverage":10,"sellLeverage":10})
+    );
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn id_only_cancel_uses_ack_routing_before_store_sees_the_placement() {
+    let mut h = Harness::new();
+    h.place(limit());
+    let placed = h.take(Method::Post);
+    h.reply(placed, r#"{"orderId":22542179}"#);
+    assert!(h.engine.store().order("22542179").is_none());
+    h.command(Command::CancelOrders {
+        command: 2,
+        ids: vec!["22542179".into()],
+    });
+    let cancel = h.take(Method::Delete);
+    assert!(cancel.url.contains("symbol=BTCUSDT&orderId=22542179&"));
+    h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    assert!(h.result(2).is_ok());
+}
+
+#[test]
+fn ack_routing_capacity_rejects_oversized_and_concurrent_jobs_before_new_writes() {
+    let mut h = Harness::new();
+    let value: PlaceOrderOpts = serde_json::from_value(limit()).unwrap();
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![value.clone(); 10_001],
+    });
+    assert!(
+        h.result(1)
+            .as_ref()
+            .unwrap_err()
+            .contains("routing capacity")
+    );
+    assert!(h.requests.is_empty());
+    // Reserve room for every sequential split before the first write. Another
+    // command must not consume that capacity while its first request is pending.
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![value.clone(); 10_000],
+    });
+    let first = h.take(Method::Post);
+    h.command(Command::PlaceOrders {
+        command: 3,
+        orders: vec![value],
+    });
+    assert!(
+        h.result(3)
+            .as_ref()
+            .unwrap_err()
+            .contains("routing capacity")
+    );
+    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    h.reply(first, r#"{"orderId":22542179}"#);
+    // The existing job retains its reservation and can keep making progress.
+    let _second = h.take(Method::Post);
+    h.command(Command::CancelOrders {
+        command: 4,
+        ids: vec!["22542179".into()],
+    });
+    let cancel = h.take(Method::Delete);
+    assert!(cancel.url.contains("orderId=22542179&"));
+    h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    h.command(Command::PlaceOrders {
+        command: 5,
+        orders: vec![serde_json::from_value(limit()).unwrap()],
+    });
+    let _new = h.take(Method::Post);
+}
+
+#[test]
+fn unknown_id_does_not_prevent_other_cancellations_in_the_batch() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("known", OrderType::Limit)]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["unknown".into(), "known".into()],
+    });
+    let cancel = h.take(Method::Delete);
+    assert!(cancel.url.contains("orderId=known&"));
+    h.reply(cancel, r#"{"status":"CANCELED"}"#);
+    assert!(h.result(1).is_ok());
+    assert_eq!(
+        h.engine.store().order("known").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
