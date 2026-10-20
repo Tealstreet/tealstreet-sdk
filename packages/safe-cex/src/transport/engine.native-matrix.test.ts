@@ -35,6 +35,10 @@ interface Case {
 }
 
 const cases: Case[] = [
+  { name: 'breakout-direct-provider', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {}, direct: true },
+  { name: 'breakout-tealstreet-direct', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {} },
+  { name: 'breakout-proxy', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
+  { name: 'breakout-how', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetTunnel: true }, how: true },
   { name: 'direct-provider', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {}, direct: true },
   { name: 'tealstreet-direct', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {} },
   { name: 'asia-pool', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: { tealstreetProxy: true } },
@@ -257,6 +261,7 @@ const buildCase = async (input: Case) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(keyed ? { 'x-mbx-apikey': 'fixture-venue-key' } : {}),
+      ...(input.exchange === 'breakoutprop' ? { Authorization: 'DXAPI documented-session' } : {}),
     };
     const publicBinance = input.exchange.startsWith('binance') && !keyed;
     // Reproduce the TS public-client bypass; other requests go through the real

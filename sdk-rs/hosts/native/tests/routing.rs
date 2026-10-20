@@ -164,6 +164,48 @@ async fn proxy_public_selection_headers_and_fresh_tokens_reach_the_wire() {
 }
 
 #[tokio::test]
+async fn breakout_generated_proxy_plan_keeps_dxapi_and_proxy_credentials_separate() {
+    #[derive(Deserialize)]
+    struct Example {
+        name: String,
+        plan: RoutingPlan,
+    }
+    let examples: Vec<Example> =
+        serde_json::from_str(include_str!("fixtures/routing-plans.json")).unwrap();
+    let mut plan = examples
+        .into_iter()
+        .find(|example| example.name == "breakout-proxy")
+        .expect("TS-generated Breakout proxy route")
+        .plan;
+    assert_eq!(plan.http.authorization_header, "Tealstreet-Authorization");
+    let (listener, origin) = listener().await;
+    plan.http.prefix = origin;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request = request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+            .await
+            .unwrap();
+        request
+    });
+    let (send, mut events) = mpsc::unbounded_channel();
+    let mut request = http_request(
+        1,
+        "https://breakout.prosp.devexperts.com/dxsca-web/marketdata".into(),
+    );
+    request
+        .headers
+        .push(("Authorization", "DXAPI documented-session".into()));
+    NetworkTransport::with_routing(plan, tokens()).request(request, send);
+    assert_eq!(http_body(&mut events).await, b"{}");
+    let packet = server.await.unwrap();
+    assert!(packet.contains("authorization: DXAPI documented-session\r\n"));
+    assert!(packet.contains("tealstreet-authorization: Bearer account-token\r\n"));
+    assert!(!packet.contains("\r\nauthorization: Bearer account-token\r\n"));
+}
+
+#[tokio::test]
 async fn direct_without_a_plan_preserves_engine_websocket_headers() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {

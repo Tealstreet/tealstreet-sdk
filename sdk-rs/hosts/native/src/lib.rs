@@ -25,6 +25,7 @@ use tokio::task::AbortHandle;
 /// What transports and timers report back to the loop.
 #[derive(Debug)]
 pub enum HostEvent {
+    TickIntervalChanged(f64),
     WsOpened(SocketId),
     WsMessage(SocketId, String),
     WsClosed(SocketId, u16),
@@ -72,6 +73,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
         }
     }
 
+    /// Feed live configuration alongside transport completions.
+    pub fn event_sender(&self) -> Events {
+        self.events.clone()
+    }
+
     /// Run until `commands` closes, handing each flush frame to `on_frame`
     /// and every log line or command result to `on_notice`. Returns the
     /// engine for inspection.
@@ -114,6 +120,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
+            HostEvent::TickIntervalChanged(interval_ms) => {
+                engine.handle(now, Event::TickIntervalChanged { interval_ms })
+            }
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
             HostEvent::WsMessage(socket, text) => engine.handle(
                 now,
