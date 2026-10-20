@@ -592,3 +592,174 @@ fn priced_wallet_read_in_flight_during_private_event_applies_without_extra_refet
         assert!(!h.has_request(account_path), "inverse={inverse}");
     }
 }
+
+fn dust_wallet(spot: bool, status: &str) -> Harness {
+    let mut h = Harness::started(Options {
+        variant: if spot { Variant::Spot } else { Variant::UsdM },
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Default::default()
+    });
+    let dust = support::EXCHANGE_INFO
+        .replace("BTCUSDT", "DUSTUSDT")
+        .replace("\"baseAsset\":\"BTC\"", "\"baseAsset\":\"DUST\"")
+        .replace("TRADING", status);
+    let rows = |info: &str| {
+        info.strip_prefix(r#"{"symbols":["#)
+            .unwrap()
+            .strip_suffix("]}")
+            .unwrap()
+            .to_string()
+    };
+    h.respond(
+        "exchangeInfo",
+        200,
+        &format!(
+            r#"{{"symbols":[{},{}]}}"#,
+            rows(support::EXCHANGE_INFO),
+            rows(&dust)
+        ),
+    );
+    h
+}
+fn respond_dust_wallet(h: &mut Harness, spot: bool) {
+    if spot {
+        h.respond("/api/v3/account", 200, r#"{"balances":[{"asset":"USDT","free":"100","locked":"0"},{"asset":"DUST","free":"5","locked":"0"}]}"#);
+    } else {
+        h.respond("/fapi/v3/account", 200, r#"{"assets":[{"asset":"USDT","walletBalance":"100","availableBalance":"100","initialMargin":"0","unrealizedProfit":"0"},{"asset":"DUST","walletBalance":"5","availableBalance":"5","initialMargin":"0","unrealizedProfit":"0"}]}"#);
+    }
+}
+fn seed_dust(h: &mut Harness, spot: bool, dust_row: bool) {
+    let dust = if dust_row {
+        r#",{"symbol":"DUSTUSDT","lastPrice":"0","priceChangePercent":"0","volume":"0","quoteVolume":"0"}"#
+    } else {
+        ""
+    };
+    h.respond("ticker/24hr", 200, &format!(r#"[{{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"0","volume":"1","quoteVolume":"1"}}{dust}]"#));
+    if !spot {
+        h.respond("ticker/bookTicker", 200, support::BOOK_TICKERS);
+        h.respond("premiumIndex", 200, support::PREMIUM);
+    }
+}
+
+#[test]
+fn delisted_only_dust_commits_at_zero_once_the_ticker_seed_loads() {
+    for spot in [true, false] {
+        for dust_row in [false, true] {
+            for wallet_first in [true, false] {
+                let case = format!("spot={spot} dust_row={dust_row} wallet_first={wallet_first}");
+                let status = if spot { "BREAK" } else { "SETTLING" };
+                let mut h = dust_wallet(spot, status);
+                if wallet_first {
+                    respond_dust_wallet(&mut h, spot);
+                    if !spot {
+                        h.respond("positionRisk", 200, "[]");
+                    }
+                    assert!(!h.engine.store().loaded().balance, "{case}");
+                    seed_dust(&mut h, spot, dust_row);
+                } else {
+                    seed_dust(&mut h, spot, dust_row);
+                    respond_dust_wallet(&mut h, spot);
+                    if !spot {
+                        h.respond("positionRisk", 200, "[]");
+                    }
+                }
+                assert!(h.engine.store().loaded().balance, "{case}");
+                assert_eq!(h.engine.store().balance().total, 100., "{case}");
+                if spot {
+                    let dust = h
+                        .engine
+                        .store()
+                        .currency_balances()
+                        .unwrap()
+                        .iter()
+                        .find(|currency| currency.currency == "DUST")
+                        .unwrap()
+                        .balance
+                        .clone();
+                    assert_eq!(dust.total, 5., "{case}");
+                    let coin = h
+                        .engine
+                        .store()
+                        .coin_balances()
+                        .unwrap()
+                        .iter()
+                        .find(|coin| coin.base == "DUST")
+                        .unwrap()
+                        .clone();
+                    assert_eq!((coin.amount, coin.notional), (5., 0.), "{case}");
+                }
+                respond_dust_wallet_again(&mut h, spot);
+                assert_eq!(
+                    h.logs
+                        .iter()
+                        .filter(|log| log.contains("DUST has no supported valuation market"))
+                        .count(),
+                    1,
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+fn respond_dust_wallet_again(h: &mut Harness, spot: bool) {
+    h.advance(30_000.);
+    if h.has_request(if spot {
+        "/api/v3/account"
+    } else {
+        "/fapi/v3/account"
+    }) {
+        respond_dust_wallet(h, spot);
+    }
+}
+
+#[test]
+fn tradable_pair_with_a_late_quote_holds_previous_usd_then_values_on_the_quote() {
+    for previous in [false, true] {
+        let mut h = dust_wallet(true, "TRADING");
+        let old = Balance {
+            total: 1234.,
+            free: 1234.,
+            used: 0.,
+            upnl: 0.,
+        };
+        if previous {
+            h.engine.store_mut().set_balance(old.clone());
+        }
+        seed_dust(&mut h, true, false);
+        respond_dust_wallet(&mut h, true);
+        assert_eq!(h.engine.store().loaded().balance, previous);
+        assert_eq!(
+            *h.engine.store().balance(),
+            if previous {
+                old.clone()
+            } else {
+                Balance::default()
+            }
+        );
+        h.advance(10_000.);
+        assert_eq!(h.engine.store().loaded().balance, previous);
+        h.message(
+            "9443/ws",
+            r#"{"e":"24hrTicker","s":"DUSTUSDT","c":"2","P":"0","v":"1","q":"2"}"#,
+        );
+        assert!(h.engine.store().loaded().balance);
+        assert_eq!(h.engine.store().balance().total, 110.);
+    }
+}
+
+#[test]
+fn tradable_pair_that_never_quotes_commits_at_zero_after_a_bounded_wait() {
+    let mut h = dust_wallet(true, "TRADING");
+    seed_dust(&mut h, true, true);
+    respond_dust_wallet(&mut h, true);
+    assert!(!h.engine.store().loaded().balance);
+    h.advance(60_000.);
+    assert!(h.engine.store().loaded().balance);
+    assert_eq!(h.engine.store().balance().total, 100.);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("DUST has no supported valuation market"))
+    );
+}
