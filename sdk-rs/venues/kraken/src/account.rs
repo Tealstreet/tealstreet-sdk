@@ -4,6 +4,7 @@ use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
     json::{self, ArrayAt},
     model::*,
+    socket::{Config, Supervisor, Tick, Timeout},
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -95,19 +96,28 @@ pub struct Account {
     waiting_challenge: bool,
     acks: HashSet<String>,
     deadline: f64,
-    last_received: f64,
     opened_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     poll: Option<TimerId>,
     heal: Option<TimerId>,
-    attempts: u32,
     seen_fills: RecentIds<8192>,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
     snapshot_positions_seen: bool,
     read_failures: u32,
+}
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 15_000.0,
+                ping_interval_ms: Some(10_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
 }
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -547,10 +557,9 @@ impl Kraken {
         self.account.poll = Some(cx.set_timer(5000.0));
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.supervisor.connecting(cx);
         self.account.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Private));
         self.account.open = false;
-        self.account.deadline = cx.now + 15000.0;
-        self.account.watchdog = Some(cx.set_timer(10000.0));
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.signer.is_none() {
@@ -626,7 +635,6 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
-        self.account.last_received = cx.now;
         self.account.opened_at = cx.now;
         self.account.deadline = cx.now + 15000.0;
         cx.send(
@@ -636,10 +644,7 @@ impl Kraken {
             )
             .unwrap(),
         );
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.watchdog = Some(cx.set_timer(10000.0));
+        self.account.supervisor.opened(cx);
         true
     }
     pub(crate) fn account_ws_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -654,14 +659,7 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.waiting_challenge = false;
-        if let Some(t) = self.account.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        if self.account.reconnect.is_none() {
-            let delay = (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32)).min(30000.0);
-            self.account.attempts += 1;
-            self.account.reconnect = Some(cx.set_timer(delay));
-        }
+        self.account.supervisor.retry(cx);
         true
     }
     fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
@@ -672,11 +670,6 @@ impl Kraken {
         }
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.account_connect(cx);
-            return true;
-        }
         if self.account.poll == Some(timer) {
             self.account.poll = None;
             self.account_refresh(cx);
@@ -688,28 +681,28 @@ impl Kraken {
             self.account_refresh(cx);
             return true;
         }
-        if self.account.watchdog != Some(timer) {
-            return false;
-        }
-        self.account.watchdog = None;
-        if self.account.open {
-            if (self.account.acks.len() < FEEDS.len() && cx.now >= self.account.deadline)
-                || cx.now - self.account.last_received >= 60000.0
+        let tick = self.account.supervisor.on_timer(cx, timer);
+        match tick {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => self.account_connect(cx),
+            Tick::TimedOut(Timeout::Connect) => {
+                self.account_disconnect(cx, "Kraken private socket open timed out")
+            }
+            Tick::TimedOut(_) => self.account_disconnect(cx, "Kraken private socket timed out"),
+            Tick::Handled | Tick::Ping if !self.account.open => (),
+            Tick::Handled | Tick::Ping => {
+                if (self.account.acks.len() < FEEDS.len() && cx.now >= self.account.deadline)
                 // Fills and orders are event driven: a confirmed empty snapshot
                 // may legitimately be followed by hours with only ping replies.
                 // Missing initial snapshots are different from a quiet account.
                 || (cx.now-self.account.opened_at>=180000.0
                     &&FEEDS.iter().any(|feed|!self.account.payloads.contains_key(*feed)))
-            {
-                self.account_disconnect(cx, "Kraken private socket timed out");
-            } else if let Some(socket) = self.account.socket {
-                cx.send(socket, r#"{"event":"ping"}"#);
-                self.account.watchdog = Some(cx.set_timer(10000.0));
+                {
+                    self.account_disconnect(cx, "Kraken private socket timed out");
+                } else if let (Tick::Ping, Some(socket)) = (tick, self.account.socket) {
+                    cx.send(socket, r#"{"event":"ping"}"#);
+                }
             }
-        } else if cx.now >= self.account.deadline {
-            self.account_disconnect(cx, "Kraken private socket open timed out");
-        } else {
-            self.account.watchdog = Some(cx.set_timer(10000.0));
         }
         true
     }
@@ -728,7 +721,7 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return true;
         };
-        self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         if msg.event == "challenge" {
             if !self.account.waiting_challenge || msg.message.is_empty() {
                 return true;
@@ -761,9 +754,6 @@ impl Kraken {
             && self.account.signed_challenge.is_some()
         {
             self.account.acks.insert(msg.feed.to_string());
-            if self.account.acks.len() == FEEDS.len() {
-                self.account.attempts = 0;
-            }
             return true;
         }
         if self.account.signed_challenge.is_none() {
@@ -1403,7 +1393,7 @@ mod cache_tests {
     use super::*;
     #[test]
     fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
-        let mut account = Account::default();
+        let mut account = Account::new();
         for n in 0..20000 {
             assert!(account.seen_fills.insert(format!("fill-{n}")));
         }
@@ -1417,7 +1407,7 @@ mod cache_tests {
     }
     #[test]
     fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {
-        let mut account = Account::default();
+        let mut account = Account::new();
         for n in 0..20000 {
             assert!(account.terminal.insert(format!("order-{n}")));
         }

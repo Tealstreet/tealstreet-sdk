@@ -4,11 +4,13 @@ import { expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 it.each<ExchangeName>(['lighter', 'lighter-robinhood'])(
   '%s exposes the app tier switch and the cached tier through engine venue actions',
   async (name) => {
     const exchange = new RustEngineExchange(name, { key: 'fixture-key', secret: 'fixture-secret' }, new DefaultStore());
+    adoptEngineCapabilities(exchange);
     const boundary = exchange as unknown as { command: (input: unknown) => Promise<unknown> };
     const command = vi.spyOn(boundary, 'command').mockResolvedValueOnce(null).mockResolvedValueOnce('premium');
     try {
@@ -26,6 +28,7 @@ it.each<ExchangeName>(['lighter', 'lighter-robinhood'])(
 
 it('other Rust venues do not advertise a tier switch', () => {
   const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+  adoptEngineCapabilities(exchange);
   try {
     expect(exchange.changeAccountTier).toBeUndefined();
   } finally {
@@ -36,6 +39,7 @@ it('other Rust venues do not advertise a tier switch', () => {
 it('the tier reaches balance.info.lighterAccountLimits in the TS shape the settings page reads', async () => {
   const store = new DefaultStore();
   const exchange = new RustEngineExchange('lighter', { key: 'fixture-key', secret: 'fixture-secret' }, store);
+  adoptEngineCapabilities(exchange);
   const boundary = exchange as unknown as {
     command: (input: unknown) => Promise<unknown>;
     syncLighterTier: () => Promise<void>;

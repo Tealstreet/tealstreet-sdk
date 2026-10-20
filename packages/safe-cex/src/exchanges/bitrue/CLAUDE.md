@@ -712,9 +712,9 @@ exposure stays visible with unavailable UPnL represented as zero. A later valid
 quote and private account poll recover valuation. Native contracts, entry,
 liquidation and account equity/free/used remain authoritative.
 
-`sumOpenRealizedAmount` is realized money, not UPnL. Rust sums validated position
-UPnL within each collateral account instead. An unmappable position invalidates
-the whole private account snapshot, retaining prior state rather than publishing
-a partial aggregate. Per-row private snapshot tolerance is a separate phase.
+Per-currency UPnL is the account's `sumOpenRealizedAmount`, exactly as TS
+publishes it; no venue documentation establishes it as realized money. An
+unmappable position invalidates the whole private account snapshot, retaining
+prior state. Per-row private snapshot tolerance is a separate phase.
 `tests/startup_valuation.rs` pins zero/non-finite quote recovery, side changes,
-partial-snapshot refusal and a realized-PnL sentinel that must never become UPnL.
+partial-snapshot refusal and the private-tape startup currency UPnL.
