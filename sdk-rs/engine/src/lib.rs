@@ -7,6 +7,8 @@ pub mod error;
 pub mod json;
 pub mod model;
 pub mod num;
+#[cfg(feature = "order-locks")]
+mod order_locks;
 pub mod paging;
 pub mod public_feed;
 pub mod socket;

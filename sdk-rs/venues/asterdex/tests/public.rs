@@ -514,6 +514,39 @@ fn ticker_seed_retains_native_rows_without_active_market_metadata() {
 }
 
 #[test]
+fn disconnect_clears_visible_book_until_a_new_partial_snapshot() {
+    let mut h = Harness::ready();
+    h.subscribe();
+    h.message(DOCUMENTED_DEPTH);
+    assert!(h.engine.book("BTCUSDT").is_some());
+    h.engine.take_frame(h.now);
+    let old_socket = h.socket();
+    h.event(Event::WsClosed {
+        socket: old_socket,
+        code: 1006,
+    });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    let frame = h.engine.take_frame(h.now).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+            kind == safe_cex_engine::wire::section::BOOK && payload[4..12] == [0; 8]
+        })
+    );
+    h.event(Event::WsMessage {
+        socket: old_socket,
+        text: DOCUMENTED_DEPTH,
+    });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    h.advance(500.0);
+    let socket = h.socket();
+    assert_ne!(old_socket, socket);
+    h.event(Event::WsOpened { socket });
+    assert!(h.engine.book("BTCUSDT").is_none());
+    h.message(DOCUMENTED_DEPTH);
+    assert!(h.engine.book("BTCUSDT").is_some());
+}
+
+#[test]
 fn malformed_market_and_ticker_rows_are_skipped_without_halting_startup() {
     let mut h = Harness::start(Options {
         public_data_only: true,
