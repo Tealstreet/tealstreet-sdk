@@ -623,3 +623,87 @@ fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
         "inverse fills stay in native contract units"
     );
 }
+
+#[test]
+fn hyro_transient_periodic_read_failure_keeps_the_ready_stream_and_last_good_state() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    for failure in [
+        "upstream timeout",
+        r#"{"retCode":10016,"retMsg":"Server error"}"#,
+    ] {
+        h.advance(5000.0);
+        h.respond("/v5/order/realtime", 502, failure);
+        h.respond("/v5/position/list", 200, POSITIONS);
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+        assert!(
+            h.closed.is_empty(),
+            "a transient poll failure tore down the stream"
+        );
+        assert_eq!(h.socket("/v5/private"), Some(socket));
+        assert_eq!(h.engine.store().positions().len(), 1);
+        assert_eq!(h.engine.store().balance().total, 1000.0);
+    }
+    // The next tick repairs.
+    h.advance(5000.0);
+    hyro_snapshot(&mut h);
+    assert!(h.closed.is_empty());
+    assert!(h.engine.store().loaded().orders);
+}
+
+#[test]
+fn hyro_initial_snapshot_transport_failure_still_recovers_the_session() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 502, "upstream timeout");
+    assert!(!h.closed.is_empty());
+}
+
+#[test]
+fn hyro_reads_orphaned_by_a_transient_failure_cannot_fill_the_next_snapshot() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    h.advance(5000.0);
+    let old_orders = h.take("/v5/order/realtime");
+    let old_positions = h.take("/v5/position/list");
+    h.respond("/v5/account/wallet-balance", 502, "upstream timeout");
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"3","avgPrice":"50000","markPrice":"51000","positionValue":"153000","leverage":"10","unrealisedPnl":"300","curRealisedPnl":"0","positionIM":"30"}]}"#,
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 3.0);
+    h.advance(5000.0);
+    h.reply(old_orders.id, 200, EMPTY);
+    h.reply(old_positions.id, 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert_eq!(
+        h.engine.store().positions()[0].contracts,
+        3.0,
+        "a read issued before the stream event overwrote it"
+    );
+    assert!(h.closed.is_empty());
+}
+
+#[test]
+fn hyro_streamed_venue_refusal_is_transient_but_repeated_failures_reconnect() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let refusal =
+        r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
+    for _ in 0..3 {
+        h.advance(5000.0);
+        h.respond("/v5/order/realtime", 200, refusal);
+        assert!(h.closed.is_empty(), "a venue refusal tore down the stream");
+        h.requests.clear();
+    }
+    h.advance(5000.0);
+    h.respond("/v5/order/realtime", 200, refusal);
+    assert!(
+        !h.closed.is_empty(),
+        "persistent failures must recover the session"
+    );
+}
