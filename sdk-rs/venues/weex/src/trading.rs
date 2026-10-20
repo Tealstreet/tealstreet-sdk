@@ -29,6 +29,18 @@ struct Job {
     continue_on_error: bool,
     refresh: bool,
     hedged: Option<bool>,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
+}
+impl Job {
+    /// The first failure names the error; any unproven one makes it unknown.
+    fn record(&mut self, error: VenueError) {
+        let unknown = error.outcome == Some(Outcome::Unknown);
+        let recorded = self.error.get_or_insert(error);
+        if unknown {
+            recorded.outcome = Some(Outcome::Unknown);
+        }
+    }
 }
 pub(crate) struct Request {
     command: CommandId,
@@ -1107,6 +1119,7 @@ impl WeexFutures {
                 continue_on_error,
                 refresh,
                 hedged,
+                effective: false,
             },
         );
         self.trade_next(cx, id);
@@ -1179,7 +1192,10 @@ impl WeexFutures {
             if job.refresh {
                 self.refresh_account(cx);
             }
-            if let Some(error) = job.error {
+            if let Some(mut error) = job.error {
+                if job.effective && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
                 reject(cx, command, error);
             } else {
                 if let Some(hedged) = job.hedged {
@@ -1203,7 +1219,7 @@ impl WeexFutures {
         );
         self.account.invalidate_orders();
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            job.error.get_or_insert(error);
+            job.record(error);
         }
         // Reconcile ambiguous outcomes through reads; never resend the write.
         self.refresh_account(cx);
@@ -1254,10 +1270,11 @@ impl WeexFutures {
                 job.error.get_or_insert_with(||"WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
             }
             match result {
-                Ok(ids) => job.ids.extend(ids),
-                Err(error) => {
-                    job.error.get_or_insert(error);
+                Ok(ids) => {
+                    job.effective = true;
+                    job.ids.extend(ids);
                 }
+                Err(error) => job.record(error),
             }
         }
         self.trade_next(cx, request.command);

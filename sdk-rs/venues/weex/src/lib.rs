@@ -722,6 +722,7 @@ impl Venue for WeexFutures {
         if response.status >= 400 {
             if let Task::Trade(request) = p.task {
                 let error = trading::http_failure(response.status, response.body);
+                cx.log(LogLevel::Warning, format!("WEEX: {}", error.message));
                 self.trade_failed(cx, request, error);
                 return;
             }

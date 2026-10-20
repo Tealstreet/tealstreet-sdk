@@ -1683,3 +1683,28 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
     }
 }
+
+#[test]
+fn a_rejection_after_an_accepted_step_is_not_reported_as_rejected() {
+    let mut e = engine();
+    let orders: Vec<_> = (0..6).map(|i| opts(&format!("lot-{i}"))).collect();
+    let actions = command(&mut e, Command::PlaceOrders { command: 5, orders });
+    let first = writes(&actions).pop().unwrap();
+    let ack = batch_ack(&first, 100);
+    let actions = response(&mut e, &first, ack);
+    let second = writes(&actions).pop().expect("second lot");
+    e.handle(
+        1002.0,
+        Event::HttpResponse {
+            request: second.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"40015","msg":"Insufficient balance"}"#,
+            },
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let error = failure(&actions);
+    assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
+}
