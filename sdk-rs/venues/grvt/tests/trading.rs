@@ -201,13 +201,15 @@ fn reply(e: &mut Engine<Grvt>, r: &HttpRequest, status: u16, body: &str) -> Vec<
     );
     e.drain_actions().collect()
 }
-fn done(actions: &[Action], id: u32) -> Option<&Result<String, String>> {
-    actions.iter().find_map(|a| {
-        if let Action::Notice(Notice::CommandDone { command, result }) = a {
-            (*command == id).then_some(result)
-        } else {
-            None
+fn done(actions: &[Action], id: u32) -> Option<Result<String, String>> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandDone { command, result }) => {
+            (*command == id).then(|| result.clone())
         }
+        Action::Notice(Notice::CommandFailed { command, error }) => {
+            (*command == id).then(|| Err(error.legacy_text()))
+        }
+        _ => None,
     })
 }
 #[derive(Deserialize)]
@@ -684,7 +686,12 @@ fn bracket_failure_reports_partial_progress_and_never_sends_next_child() {
         "create_order",
     );
     let actions = reply(&mut e, &child, 400, r#"{"c":2001,"m":"rejected"}"#);
-    let error = done(&actions, 5).unwrap().as_ref().unwrap_err();
+    assert_eq!(
+        failure(&actions).outcome,
+        None,
+        "the entry was already created"
+    );
+    let error = done(&actions, 5).unwrap().unwrap_err();
     assert!(error.contains(&format!("already created GRVT order IDs: {entry_id}")));
     assert!(
         !actions
@@ -1128,7 +1135,7 @@ fn fetch_leverage_is_a_real_native_read_and_missing_or_malformed_rows_fail() {
         let result = done(&actions, 19).unwrap();
         assert_eq!(result.is_ok(), expected);
         if let Ok(value) = result {
-            let got: Fetched = serde_json::from_str(value).unwrap();
+            let got: Fetched = serde_json::from_str(&value).unwrap();
             assert_eq!((got.buy_leverage, got.sell_leverage), (25., 25.));
         }
     }
@@ -1530,7 +1537,7 @@ fn failed_builder_check_retries_within_budget_then_names_the_cause_and_rechecks(
         "order rejected while the check is in flight"
     );
     let actions = exhaust_builder_check(&mut e, held.unwrap());
-    let error = done(&actions, 40).unwrap().as_ref().unwrap_err();
+    let error = done(&actions, 40).unwrap().unwrap_err();
     assert!(error.contains("could not be checked"), "{error}");
     assert!(error.contains("code 1008"), "{error}");
     assert!(error.contains("Request IP is not whitelisted"), "{error}");
@@ -1616,7 +1623,7 @@ fn builder_fee_cap_below_required_still_rejects() {
             orders: vec![opts()],
         },
     );
-    let error = done(&actions, 45).unwrap().as_ref().unwrap_err();
+    let error = done(&actions, 45).unwrap().unwrap_err();
     assert!(error.contains("cap is below 300"), "{error}");
 }
 #[test]
@@ -1638,7 +1645,7 @@ fn definitive_rejection_surfaces_grvt_message_without_reconcile_advice() {
         400,
         r#"{"code":2001,"message":"Insufficient margin","status":400}"#,
     );
-    let error = done(&actions, 46).unwrap().as_ref().unwrap_err();
+    let error = done(&actions, 46).unwrap().unwrap_err();
     assert!(error.contains("code 2001"), "{error}");
     assert!(error.contains("Insufficient margin"), "{error}");
     assert!(!error.contains("reconcile"), "{error}");
@@ -1657,7 +1664,7 @@ fn gateway_failure_on_create_keeps_reconcile_advice() {
         "create_order",
     );
     let actions = reply(&mut e, &r, 502, "<html>bad gateway</html>");
-    let error = done(&actions, 47).unwrap().as_ref().unwrap_err();
+    let error = done(&actions, 47).unwrap().unwrap_err();
     assert!(
         error.contains("reconcile GRVT client order ID 9223372036854775807"),
         "{error}"
@@ -1704,8 +1711,41 @@ fn null_or_non_string_rejection_message_keeps_the_grvt_code() {
             400,
             &format!(r#"{{"code":2001,"message":{message},"status":400}}"#),
         );
-        let error = done(&actions, 51).unwrap().as_ref().unwrap_err();
+        let error = done(&actions, 51).unwrap().unwrap_err();
         assert!(error.contains("code 2001"), "{message}: {error}");
         assert!(!error.contains("reconcile"), "{message}: {error}");
+    }
+}
+
+fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command")
+}
+
+#[test]
+fn write_failures_carry_grvt_outcomes_without_changing_their_text() {
+    use safe_cex_engine::Outcome;
+    for (status, body, outcome) in [
+        (400, r#"{"c":2001,"m":"rejected"}"#, Some(Outcome::Rejected)),
+        (502, "Bad Gateway", Some(Outcome::Unknown)),
+    ] {
+        let mut e = boot();
+        let create = http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 5,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+        let actions = reply(&mut e, &create, status, body);
+        assert_eq!(failure(&actions).outcome, outcome, "{status} {body}");
     }
 }

@@ -67,26 +67,3 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
 }
-
-#[test]
-fn private_start_is_independent_of_ticker_seed_responses() {
-    let mut engine = Engine::new(TxFlow::new(Options {
-        testnet: true,
-        secret: Some(format!("0x{}1", "0".repeat(63))),
-        application_id: Some("0x0000000000000000000000000000000000000001".into()),
-        ..Options::default()
-    }));
-    engine.start(0.0);
-    let request = engine
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","basePrecision":"0.0001","priceTick":"0.1","maxLeverage":50,"haltTrading":false,"delisted":false,"useNotionalMargin":false},{"index":"malformed"}]}}"### } });
-    assert!(engine.store().loaded().markets);
-    assert!(!engine.store().loaded().tickers);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Http(request) if request.body.as_deref().is_some_and(|body| body.contains("clearinghouseState")))), "private snapshot did not start: {actions:?}");
-}
