@@ -51,7 +51,10 @@ Register it (the workspace picks up `venues/*` itself): `hosts/wasm`
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
 and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
 script beside `rust:private-tape`. Extend `replay.mjs` generically; never
-break Binance.
+break Binance. Declare what the venue answers beyond the common commands in
+`Venue::capabilities()` (account identity, client-order lookup, history axes,
+cancel-all, leverage reads, symbol-routed commands); the bridge routes from
+that record, never from the venue's name.
 
 ## Gates (all must pass before you report done)
 

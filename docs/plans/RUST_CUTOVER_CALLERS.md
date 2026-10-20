@@ -101,7 +101,7 @@ cannot proceed for the affected venues/hosts until one does.
 | B4 | **Main-thread trading.** Web places orders on the main-thread exchange built by `createExchangeFromAccount` (`apps/web/src/utils/exchange/createExchangeFromAccount.ts:57`; `order/sendOrder.ts:24-26`, `createScaledOrder.ts:452`, `updateOrder.ts:280`, `cancelOrders.ts:136`, `useNuke.ts:7`, `lostSendResolver.ts:82`). A main-thread `RustEngineExchange` has no engine (`rust.exchange.ts`; RUST_AUDITS "Cutover"). Commands must route to the worker engine. | listed | web, all Rust venues |
 | B5 | **Socket health and recovery.** `store.socketHealth` is never written by frames; `reconnect`/`recoverAfterOffline` are no-ops/`true`; `getAllSockets()` returns `[]`; `authFailureStreak` stays 0. #1388 `getHealth()` counters are a different shape and not wired into the store. | web `exchangeAccountController.ts:3391-3415`, `utils/exchange/getWebSocketStatus.ts:27-55`, `getExchangeAppearsConnected.tsx:34`, `components/connectionStatus/{ConnectionStatusIndicator.tsx:39,97,ReconnectingBanner.tsx:157-261}`, `nudges/hostedServerForInstability.ts:66`, `ConnectionStateWorker.tsx:364`, `utils/desktop/desktopRecovery.ts:82`; CLI `packages/cli-core/src/commands/BaseCommand.ts:173` (stale-stream gate fails open), `ConnectionCommand.ts:182-196`, `ConnectionMonitor.ts:128-132`, `legacyCommands.ts:28`, `apps/cli/src/repl.ts:2831,2903` (key rejection); exchange-server `public-exchange-manager.ts:95,459` | all Rust venues |
 | B6 | **In-process shared public data.** exchange-server passes `externalPublicData: { type: 'in-process', source }` (`server.ts:1015-1034`) and reads the live public exchange (`shared-public-data-source.ts:64-131`); Rust throws `Rust externalPublicData is unsupported; use publicFeed …` (`rust.exchange.ts:489-493`). The replacement `RustPublicFeedProvider` is MessagePort-based and not adopted by the server. | `services/exchange-server/src/server.ts:1015-1034`, `shared-public-data-source.ts:50-131`, `public-exchange-manager.ts:73-293` | hosted accounts on Rust venues with `supportsPublicOnly` |
-| B7 | **Per-account proxy token across async engine work.** exchange-server binds the proxy token with `AsyncLocalStorage` (`server.ts:59,77`, `virtual-worker-context.ts:681`) and safe-cex reads it on every continuation. Engine-initiated requests (timers, reconnects) leave JS through host callbacks; propagation is unproven, and a global token is forbidden (multi-tenant). | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
+| B7 | ~~**Per-account proxy token across async engine work.**~~ **Resolved in the SDK:** each engine HTTP transport captures the contextual token provider of the context that created the account (`captureProxyTokenProvider`) and reinstates it synchronously around proxy authorization (`withProxyTokenProvider`), so requests started from timers, sockets, shared public feeds or another account's context use the account's own live provider. Before this, a request outside the account's `AsyncLocalStorage` run went out with no proxy token, and one inside another account's run used that account's token (`transport/engine.proxy-token-context.test.ts`). The HOW adapter and relay sockets read the token after awaits or on open, so they bind the lookup at request/socket start (`HOWConfig.bindProxyToken`), and the engine creates relays inside the account scope. Shared HOW connections are still authenticated once per connection by whichever request opens them, as with TS. No exchange-server change. | `services/exchange-server/src/server.ts:2,59,77,796-819`, `virtual-worker-context.ts:681` | hosted mode, proxied venues |
 | B8 | **Missing per-venue methods** used by the app: `fetchClosedPnl` (bybit/okx/blofin handled by engine `fetchClosedPositions`), `fetchHistoricalPositions` (only kraken, binance, woo), Hyperliquid `enableSpotMarkets` (throws), Bybit raw `balance.info` (`accountType`, multi-collateral array; handled by `fetchBalanceInfo`). | web `components/openPositions/ClosedPositions.tsx:93-121`, `utils/historical/collectAccountAxes.ts:229` (non-null asserted), `ChartContainer.tsx:161`, `useChartSession.ts:303`, `Margin.tsx:85-110,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56`; MCP `packages/exchange-mcp/src/tools.ts:182` | per family when switched: bybit/okx/blofin (closed PnL); bitget/blofin/bybit/hyperliquid/okx/paradex (journal); hyperliquid spot; bybit margin UI |
 | B9 | **Typed errors.** No TS `ExchangeError` with `kind`/`outcome`/`venueCode` exists on the branch or any open PR; `host.mjs` ignores the wire `detail` from #1377/#1401/#1403. Text matching (below) cannot move to codes until it does. | see [Error strings](#error-strings-that-must-move-to-codes) | all |
 | B10 | **candle-server public exchanges never started.** Resolved on landing by #1375 (`fetchMarkets` starts the engine and waits ≤30 s), provided the engine loads in that image (B1); see [Mobile](#mobile). | `mobile-services/candle-server/src/exchange-pool.ts:169-312` | candles for the 9 default names |
@@ -168,7 +168,7 @@ reference). Venue lists outside the SDK that must be reconciled by hand:
 | `fetchPublicTrades` | web `components/chart/datafeed/DefaultDatafeed.ts:831-836` (binance only) | TS | engine command | RT (equivalent) |
 | Fill events lack `fee`/`realizedPnl` | web `exchangeAccountController.ts:2315-2355`, `fillOrderToast.tsx`, `FillsModule.tsx:141`, `HistoricalIngestionWorker.tsx:297`, `ChartTradingController.ts:239-245`; CLI `repl.ts:941-949` | fields present on some TS venues | `{ id, orderId, symbol, side?, price, amount }` | RT (no current reader of fee/realizedPnl found) |
 | `options.enableSpotMarkets` on hyperliquid | web `ChartContainer.tsx:161`, `useChartSession.ts:303` | spot markets | startup throws `Rust Hyperliquid currently supports perpetual markets only` | RT, B8 |
-| `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | Lighter tier bridged; Bybit (all five names) syncs the engine's last REST wallet account verbatim (`fetchBalanceInfo`, every 2 s), replacing `info` as TS does | none (handled) |
+| `store.balance.info` raw venue payload | web `Margin.tsx:85-110,136,358,413,566`, `isBybitInverseUnifiedMargin.ts:25`, `placeOrderStoreData.ts:107`, `bybit-skin/.../AccountInfo.tsx:32-45,97`, `MarginHeader.tsx:56` | Bybit `accountType`, multi-collateral array, Lighter limits | Lighter tier bridged; Bybit (all five names) syncs the engine's last REST wallet account verbatim (`balanceInfo` capability, `fetchBalanceInfo` every 2 s), replacing `info` as TS does | none (handled) |
 | `Market.info` raw payload | cli-core `order/prepareCliOrder.ts:44`, `commands/session/CheckCommand.ts:14` (`classifyMarket`); MCP strips `info` (`tools.ts:113`) | raw venue JSON | typed exceptions only (Bybit class/region/underlying, Polymarket, OKX) | RT |
 | `store` writes from the app | web `eagerExchangeWarmStart.ts:20-107`, `exchangeAccountController.ts:691-884,2573`, `feedSources.ts:98`; `packages/safe-cex-server/src/publicExchange/hydrateStore.ts:6-13`; candle-server `exchange-pool.ts` | TS store | frames overwrite markets/tickers/orders/positions/balance on the next engine frame; app writes are transient | RT |
 
@@ -443,6 +443,45 @@ Indirect construction paths are also deletion dependencies:
 source audit. The downstream tealstreet-next consumers are inventoried in
 [tealstreet-next callers at cutover](#tealstreet-next-callers-at-cutover).
 Existing in-repo consumers still need their factory and store contract.
+
+## tealstreet-next caller changes shipped at cutover
+
+These land in tealstreet-next together with the cutover, never before it. Each
+row is the exact edit the SDK contract change requires.
+
+### Capability record (RUST_QUALITY item 8)
+
+`isBaseCapabilityFallback`, `isInertCapability` and `isEmptyStubCapability` are
+no longer exported from `@tealstreet/safe-cex/src/exchanges/base`. The only
+reader is `exchange.capabilities` (`ExchangeCapabilities`, keys in
+`CAPABILITY_METHODS`); it also counts an unconditional `return []` as absent.
+Rust venues report theirs once the engine exists, so read after `start()`.
+
+| File | Old call | New call |
+| --- | --- | --- |
+| `apps/web/src/components/openPositions/ClosedPositions.tsx:114` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` (drop the line-11 import) |
+| `apps/web/src/utils/historical/collectAccountAxes.ts:162` | `!isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')` | `exchange.capabilities.orderHistory` |
+| `apps/web/src/utils/historical/collectAccountAxes.ts:164` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` (drop the line-5 import; `HistoryCapableExchange` gains `capabilities`; reword the line-143 comment) |
+| `packages/venue-data/src/journal/symbolScopedFills.ts:73` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` (parameter type `{ capabilities: ExchangeCapabilities }`) |
+| `packages/venue-data/src/journal/axis-grading.registry.test.ts:81` | `!isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `exchange.capabilities.fillHistory` |
+| `scripts/history-audit/lib/axis-inventory.ts:81-83` | `isBaseCapabilityFallback(fn, method)` → `'base-fallback'`; `isEmptyStubCapability(fn)` → `'empty-stub'` | `exchange.capabilities[axis] ? 'implemented' : 'unavailable'`; the report merges the two absent states |
+| `scripts/history-audit/lib/closedPnl.ts:234` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` |
+| `scripts/history-audit/lib/venue-survey.ts:86` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` |
+| `scripts/history-audit/lib/venue-survey.ts:107` | `!isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `exchange.capabilities.closedPnl` |
+| `scripts/history-audit/lib/venue-survey.ts:165` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` |
+
+Main-thread mirrors (`createExchangeFromAccount` objects that apply worker
+frames and never create an engine) do not know a Rust venue's record yet, so
+their history answers stay at the base defaults until frames carry the record
+(next capabilities PR). `apps/web/src/order/lostSendResolver.ts:82` needs no
+change: without an engine, `findOrderByClientOrderId` answers from open orders,
+never definitively, as before. Callers that need the record on an unstarted
+exchange await `exchange.loadCapabilities()` first, as `exchange-mcp` does.
+
+`RUST_VENUES` is now a `ReadonlySet<ExchangeName>` (use `isRustVenue`), and the
+engine host no longer has `accountId()` (`getAccount()` answers for every venue
+that reports an account lookup). No tealstreet-next file outside the mirrored
+packages uses either.
 
 ## Shared helpers that a venue-directory deletion would otherwise remove
 

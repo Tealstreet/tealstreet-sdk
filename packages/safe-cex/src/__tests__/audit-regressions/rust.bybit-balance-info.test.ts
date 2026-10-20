@@ -15,7 +15,7 @@ const ACCOUNT = {
 
 type Boundary = {
   command: (input: unknown, options?: unknown) => Promise<unknown>;
-  syncBybitBalanceInfo: () => Promise<void>;
+  syncBalanceInfo: () => Promise<void>;
 };
 
 it.each<ExchangeName>(['bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'])(
@@ -32,14 +32,14 @@ it.each<ExchangeName>(['bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybi
       .mockRejectedValueOnce(new Error('engine busy'));
     try {
       store.update({ balance: { used: 1, free: 2, total: 3, upnl: 0, info: { stale: true } } });
-      await boundary.syncBybitBalanceInfo();
+      await boundary.syncBalanceInfo();
       expect(store.balance.info).toEqual({ stale: true });
-      await boundary.syncBybitBalanceInfo();
+      await boundary.syncBalanceInfo();
       expect(store.balance.info).toEqual(ACCOUNT);
       expect(store.balance.total).toBe(3);
       const update = vi.spyOn(store, 'update');
-      await boundary.syncBybitBalanceInfo();
-      await boundary.syncBybitBalanceInfo();
+      await boundary.syncBalanceInfo();
+      await boundary.syncBalanceInfo();
       expect(update).not.toHaveBeenCalled();
       expect(store.balance.info).toEqual(ACCOUNT);
       expect(command).toHaveBeenCalledWith({ op: 'fetchBalanceInfo' }, { report: false });

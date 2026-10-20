@@ -1917,8 +1917,13 @@ impl BybitLinear {
 impl Venue for BybitLinear {
     type Pending = Pending;
 
-    fn supports_options(&self) -> bool {
-        self.category_enabled(Category::Option)
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            options: self.category_enabled(Category::Option),
+            closed_positions: !self.variant.is_spot(),
+            balance_info: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
