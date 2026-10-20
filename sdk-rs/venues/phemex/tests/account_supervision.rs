@@ -82,6 +82,18 @@ impl Harness {
         self.collect();
     }
     fn respond(&mut self, query: &str, body: &str) {
+        // A read queued behind the paced REST budget dispatches when its window resets.
+        while !self.http.iter().any(|r| r.url.contains(query)) {
+            let (&timer, &at) = self
+                .timers
+                .iter()
+                .min_by(|a, b| a.1.total_cmp(b.1))
+                .expect("request queued without timer");
+            assert!(at <= NOW + 1_000., "{query} waited past the budget window");
+            self.now = at;
+            self.timers.remove(&timer);
+            self.event(Event::TimerFired { timer });
+        }
         let id: RequestId = self
             .http
             .iter()

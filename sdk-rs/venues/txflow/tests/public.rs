@@ -911,7 +911,8 @@ fn api_tickers_follow_numeric_instrument_order_on_initial_and_replacement_socket
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(at, 6000.0);
+            // Supervised reconnects use the jittered 1s backoff; reopen lands after it.
+            assert!((5000.0 + 750.0..=6000.0).contains(&at), "backoff {at}");
             e.handle(at, Event::TimerFired { timer });
             api = e
                 .drain_actions()
@@ -1032,7 +1033,8 @@ fn assert_restored_intent_order(api: bool) {
                     _ => None,
                 })
                 .unwrap();
-            assert_eq!(at, 8000.0);
+            // Supervised reconnects use the jittered 1s backoff; reopen lands after it.
+            assert!((7000.0 + 750.0..=8000.0).contains(&at), "backoff {at}");
             e.handle(at, Event::TimerFired { timer });
             socket = e
                 .drain_actions()

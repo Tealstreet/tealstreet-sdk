@@ -930,8 +930,8 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     assert_eq!(
-        h.fired, 2,
-        "only the unanswered interest and clock refreshes fire"
+        h.fired, 3,
+        "only the bootstrap public request-budget window and the unanswered interest and clock refreshes fire"
     );
 }
 
