@@ -61,8 +61,9 @@ private snapshots retain their stricter all-or-nothing safety contract.
 - Broker phase: all 48 registered names inventoried in
   `RUST_BROKER_ATTRIBUTION.md`; missing public factory headers and BloFin gated
   placement attribution repaired. Independent review also caught configured
-  KuCoin partner signatures on authenticated public reads; repaired and covered
-  for futures, spot and public-data-only accounts.
+  KuCoin partner signatures on authenticated futures public reads; repaired and
+  covered separately from spot's unsigned public-endpoint exception and
+  public-data-only accounts.
 - Cancel phase: eight silent-drop planners now reject absent routing context
   before any write. KuCoin sends unknown native IDs, continues mixed batches,
   and preserves stops on symbol cancellation. Independent integration review

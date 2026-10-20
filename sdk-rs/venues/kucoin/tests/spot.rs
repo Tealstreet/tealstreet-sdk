@@ -1147,7 +1147,7 @@ fn assert_identity(request: &HttpRequest, secondary: bool, passphrase: &str, now
     );
 }
 #[test]
-fn secondary_reads_preserve_primary_mutations_and_primary_signed_public_gets() {
+fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
     for read in [
         None,
         Some(secondary_credentials(Some("read-only-pass"))),
@@ -1168,10 +1168,17 @@ fn secondary_reads_preserve_primary_mutations_and_primary_signed_public_gets() {
             } else if request.url.contains("/bullet-private") {
                 assert_identity(request, false, "replay-passphrase", h.now);
             } else {
-                // The authenticated TS public factory signs with the primary identity.
-                assert_identity(request, false, "replay-passphrase", h.now);
+                assert!(request.headers.iter().all(|(name, _)| {
+                    !name.starts_with("KC-API-") && *name != "KC-BROKER-NAME"
+                }));
+                assert!(
+                    request
+                        .headers
+                        .iter()
+                        .any(|(name, value)| { *name == "X-CHANNEL-API-CODE" && value == "3zexp" })
+                );
             }
-            // Public factory identity stays primary; private GETs use the read identity.
+            // Public requests stay unsigned; private GETs use the read identity.
             assert_eq!(request.route, None);
         }
         h.command(Command::FetchAccount { command: 1 });
@@ -1198,7 +1205,12 @@ fn secondary_reads_preserve_primary_mutations_and_primary_signed_public_gets() {
         let candles = h.http("/market/candles");
         assert_eq!(candles.method, Method::Get);
         assert_eq!(candles.route, None);
-        assert_identity(&candles, false, "replay-passphrase", h.now);
+        assert!(
+            candles
+                .headers
+                .iter()
+                .all(|(name, _)| { !name.starts_with("KC-API-") && *name != "KC-BROKER-NAME" })
+        );
         h.command(Command::PlaceOrders {
             command: 4,
             orders: vec![place(Some("primary-write"))],

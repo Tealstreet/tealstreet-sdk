@@ -98,7 +98,11 @@ fn assert_partner(request: &HttpRequest) {
             .any(|(_, value)| value.contains("broker-test-key"))
     );
 }
-fn verify_partner_catalogue_and_followup<V: Venue>(mut engine: Engine<V>, body: &str) {
+fn verify_partner_catalogue_and_followup<V: Venue>(
+    mut engine: Engine<V>,
+    body: &str,
+    assert_headers: impl Fn(&HttpRequest),
+) {
     engine.start(1700000000123.0);
     let initial: Vec<_> = engine
         .drain_actions()
@@ -109,7 +113,7 @@ fn verify_partner_catalogue_and_followup<V: Venue>(mut engine: Engine<V>, body: 
         .collect();
     assert!(!initial.is_empty());
     for request in initial {
-        assert_partner(&request);
+        assert_headers(&request);
         engine.handle(
             1700000000123.0,
             Event::HttpStart {
@@ -140,10 +144,12 @@ fn verify_partner_catalogue_and_followup<V: Venue>(mut engine: Engine<V>, body: 
         })
         .collect();
     let mut saw_public_bullet = false;
+    let mut saw_tickers = false;
     for request in requests {
-        assert_partner(&request);
+        assert_headers(&request);
         saw_public_bullet |= request.url.ends_with("/bullet-public");
         if request.url.ends_with("/allTickers") {
+            saw_tickers = true;
             let tickers = if request.url.contains("/market/") {
                 r#"{"code":"200000","data":{"ticker":[]}}"#
             } else {
@@ -174,26 +180,50 @@ fn verify_partner_catalogue_and_followup<V: Venue>(mut engine: Engine<V>, body: 
     }
     for action in engine.drain_actions() {
         if let Action::Http(request) = action {
-            assert_partner(&request);
+            assert_headers(&request);
             saw_public_bullet |= request.url.ends_with("/bullet-public");
         }
     }
     assert!(saw_public_bullet);
+    assert!(saw_tickers);
 }
 #[test]
 fn authenticated_futures_public_reads_keep_configured_partner_signatures() {
     verify_partner_catalogue_and_followup(
         Engine::new(Kucoin::new(partner_options())),
         r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}]}"#,
+        assert_partner,
     );
 }
 #[cfg(feature = "spot")]
 #[test]
-fn authenticated_spot_public_reads_keep_configured_partner_signatures() {
+fn authenticated_spot_public_reads_stay_channel_only_with_configured_partner() {
     verify_partner_catalogue_and_followup(
         Engine::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(
             partner_options(),
         )),
         r#"{"code":"200000","data":[{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.0001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"10"}]}"#,
+        |request| {
+            if ["/api/v2/symbols", "/market/allTickers", "/bullet-public"]
+                .iter()
+                .any(|path| request.url.ends_with(path))
+            {
+                assert!(
+                    request
+                        .headers
+                        .iter()
+                        .any(|(name, value)| { *name == "X-CHANNEL-API-CODE" && value == "3zexp" })
+                );
+                assert!(
+                    request.headers.iter().all(|(name, _)| {
+                        !name.starts_with("KC-API-") && *name != "KC-BROKER-NAME"
+                    }),
+                    "spot public request unexpectedly authenticated: {request:?}"
+                );
+            } else {
+                // The private bullet token retains the primary partner signature.
+                assert_partner(request);
+            }
+        },
     );
 }

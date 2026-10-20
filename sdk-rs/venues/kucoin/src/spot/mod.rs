@@ -154,7 +154,7 @@ impl KucoinSpot {
                     sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
                 })
         } else {
-            sign::public_request_headers(self.credentials.as_ref(), method, path, cx.now)
+            sign::public_headers()
         };
         cx.request(
             method,
@@ -168,7 +168,7 @@ impl KucoinSpot {
         cx.request_streamed(
             Method::Get,
             format!("{REST}{path}"),
-            sign::public_request_headers(self.credentials.as_ref(), Method::Get, path, cx.now),
+            sign::public_headers(),
             at,
             pending,
         );
