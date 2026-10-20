@@ -194,6 +194,7 @@ const KNOWN_TS_FIXES = {
     notes: [
       'Translate AssetPairs XBT and XDG/XXDG identities to accepted WS v2 BTC/DOGE wire symbols while preserving canonical store symbols.',
       'Value normalized BTC holdings through the market identity even when the SDK ticker uses XBT/USD.',
+      'Parse documented decimal tick and lot steps canonically instead of exposing Math.pow ULP artifacts as extra precision.',
       'Trim subscribed book depth after each update and clear reconnect book caches.',
       'Fan supported native OHLC updates out to every requested fallback timeframe.',
       'Read current native triggers.actual_price/static triggers.price and map BTC/USD execution identity back to XBT/USD.',

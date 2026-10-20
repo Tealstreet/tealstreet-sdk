@@ -22,6 +22,15 @@ const ticker = (row: Market): Ticker => ({
 });
 
 describe('documented spot public payloads and native placement acknowledgements', () => {
+  it.each([[4, 0.0001], [5, 0.00001], [8, 0.00000001]])('retains the exact Kraken decimal step for %i places', async (decimals, step) => {
+    const exchange = new KrakenSpotExchange('krakenspot', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    exchanges.push(exchange);
+    vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: { error: [], result: {
+      XXBTZUSD: { wsname: 'XBT/USD', pair_decimals: decimals, lot_decimals: decimals, ordermin: '0.001', status: 'online' },
+    } } });
+    const markets = await exchange.fetchMarkets();
+    expect(markets[0].precision).toEqual({ price: step, amount: step });
+  });
   it('normalizes Kraken XDG asset aliases to accepted WS v2 DOGE symbols', () => {
     expect(normalizeAsset('XDG')).toBe('DOGE');
     expect(normalizeAsset('XXDG')).toBe('DOGE');

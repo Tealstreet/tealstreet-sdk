@@ -808,6 +808,10 @@ Unsupported UI intervals use the nearest lower supported Kraken interval. In par
 - `pairName` (REST key) is stored in `market.info.pairName` for REST API calls
 - `altname` (for example `XBTUSD`) is stored from AssetPairs and indexed alongside `wsname`, `pairName`, and `prettySymbol` when reconciling open orders. OpenOrders descriptions use this identity, so matching only canonical `XBT/USD` would orphan BTC orders.
 
+`pair_decimals` and `lot_decimals` describe exact decimal steps. Construct them
+from decimal exponent strings, since `Math.pow(10, -5)` can expose
+`0.000009999999999999999` as the step and falsely imply extra precision.
+
 ## Asset Name Normalization
 
 Kraken uses non-standard asset codes. The `normalizeAsset()` function in `krakenspot.types.ts` handles:

@@ -123,8 +123,8 @@ export class KrakenSpotExchange extends BaseExchange {
         // Only include USD, USDT, USDC quoted pairs for now
         if (!['USD', 'USDT', 'USDC'].includes(quote)) continue;
 
-        const pricePrecision = p.pair_decimals != null ? Math.pow(10, -p.pair_decimals) : 0.01;
-        const amountPrecision = p.lot_decimals != null ? Math.pow(10, -p.lot_decimals) : 0.00000001;
+        const pricePrecision = p.pair_decimals != null ? Number(`1e${-p.pair_decimals}`) : 0.01;
+        const amountPrecision = p.lot_decimals != null ? Number(`1e${-p.lot_decimals}`) : 0.00000001;
         const minAmount = parseFloat(p.ordermin || '0');
 
         markets.push({
