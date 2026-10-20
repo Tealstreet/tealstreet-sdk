@@ -374,3 +374,37 @@ exposed a 0.3ms WOO steady-CPU sample reversal on its 77-frame tape; independent
 review verified identical code/base/artifact and the prior passing control. No
 threshold, tape or correctness check was changed. This integration still requires
 green CI for every venue before merge.
+
+### Standard benchmark correction and final proof
+
+The latest local follow-up commands accidentally included the optional
+`--no-egress` flag. Their performance figures above are diagnostic measurements,
+superseded by this table. The required standard gate includes the real TS worker
+packing, transfer and main-store application. All four gates were rerun with
+default options and no `--no-egress`; correctness and performance thresholds were
+unchanged. Exact argv, resolved options and artifact/tape hashes are posted on
+PR #1320. CI has always used the standard invocation.
+
+Standard gates pass on production source `d12352ccd0`, plus the test-only
+`409b6cc354` compatibility fix. That fix binds the new binary flag in two KuCoin
+socket tests and asserts its text protocol. Workspace/all-target and WASM Clippy,
+format and all 99 KuCoin tests pass; no production code changed.
+
+| Standard gate | Result |
+| --- | --- |
+| Paradex public, three runs | PASS: 12,261 frames, 66 markets/tickers, two full-depth books |
+| Public CPU, TS / Rust | 888.495ms / 797.589ms (1.11x) |
+| Public steady CPU, TS / Rust | 458.257ms / 414.250ms (1.11x) |
+| Public retained bytes, TS / Rust | 21,798,177 / 2,042,548 (10.67x) |
+| Paradex private | PASS: 15 commands, 33 records, independent signatures/writes/account/queries |
+| Paradex single web/Node WASM | 1,234,198 bytes / unchanged 1,258,291 budget |
+| Binance public / private | PASS / PASS with the CI-matching single-venue artifact |
+| Binance public CPU, TS / Rust | 194.2ms / 85.4ms; steady 103.6ms / 30.5ms |
+| Binance public retained memory, TS / Rust | 18.9MB / 2.6MB |
+| Native Paradex / harness / host tests | 105 / 269 / 48 PASS |
+
+Default combined WASM build and host tests also pass. Typecheck/lint pass after
+KuCoin integration; the complete 27-task repository test run passed before that
+merge and exact-head CI reruns the full suite. Earlier optional no-egress misses
+were not standard-gate failures; the invocation error is corrected explicitly
+rather than changing benchmark policy. Exact-head green CI remains required.
