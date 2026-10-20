@@ -617,3 +617,15 @@ settings, and host trap/dead/dispose boundaries. No raw native JSON readback or
 changes to existing position/order unit conversions. Core/host checks and an
 independent review precede this API checkpoint; actual SDK consumer proof follows
 after policy propagation releases the wrapper file.
+
+### Poll deadline review correction
+
+The unchanged Breakout control caught first-policy delivery postponing an
+existing poll when its resolved interval matched the startup fallback. New
+mixed-fallback regression proved RED (two replacements instead of one). Keep
+the existing physical deadline when the effective cadence, including a real
+minimum floor, is unchanged; still record policy for later completion/rearm.
+Two new controls cover first delivery and floor-equivalent updates. The
+cooldown control also verifies a genuinely different cadence still rearms.
+All ten scheduler controls now pass; strict all-feature core Clippy passes.
+Independent source review PASS. No ordinary timer behavior changed.

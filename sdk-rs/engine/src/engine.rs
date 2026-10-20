@@ -549,11 +549,22 @@ impl<P> Io<P> {
         if self.poll_interval_ms == Some(interval_ms) {
             return;
         }
-        self.poll_interval_ms = Some(interval_ms);
+        let previous = self.poll_interval_ms.replace(interval_ms);
         // Sort logical IDs so action ordering is independent of HashMap seeds.
         let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
         logicals.sort_unstable_by_key(|timer| timer.0);
         for logical in logicals {
+            let poll = &self.poll_timers[&logical];
+            let old_interval = previous.unwrap_or(poll.default_interval_ms);
+            if old_interval.is_finite()
+                && old_interval > 0.
+                && interval_ms.is_finite()
+                && old_interval.max(poll.bounds.minimum_interval_ms)
+                    == interval_ms.max(poll.bounds.minimum_interval_ms)
+            {
+                // An equivalent cadence must not postpone an already due poll.
+                continue;
+            }
             if let Some(physical) = self.poll_timers.get_mut(&logical).unwrap().physical.take() {
                 self.poll_physical.remove(&physical);
                 self.clear_physical_timer(physical);

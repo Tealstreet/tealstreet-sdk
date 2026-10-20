@@ -110,6 +110,50 @@ fn clear(engine: &mut Engine<Polls>, now: f64, index: &str) -> Vec<Action> {
 }
 
 #[test]
+fn first_matching_policy_keeps_existing_deadline_and_rearms_only_different_fallbacks() {
+    let mut engine = Engine::new(Polls::new(&[2_000., 5_000.]));
+    engine.start(5.);
+    let original = timers(&take(&mut engine));
+    let actions = policy(&mut engine, 105., 2_000.);
+    let replacement = timers(&actions);
+    assert_eq!(replacement.len(), 1);
+    assert_eq!(replacement[0].1, 2_105.);
+    assert!(!actions.iter().any(|action| matches!(action, Action::ClearTimer { timer } if *timer == original[0].0 || *timer == original[2].0)));
+    assert!(policy(&mut engine, 205., 2_000.).is_empty());
+    engine.handle(
+        2_005.,
+        Event::TimerFired {
+            timer: original[0].0,
+        },
+    );
+    engine.handle(
+        5_005.,
+        Event::TimerFired {
+            timer: original[1].0,
+        },
+    );
+    assert_eq!(engine.venue().fired, [engine.venue().logical[0]]);
+}
+
+#[test]
+fn an_unchanged_effective_minimum_never_postpones_a_poll() {
+    let mut venue = Polls::new(&[100.]);
+    venue.specs[0].1.minimum_interval_ms = 250.;
+    let mut engine = Engine::new(venue);
+    engine.start(10.);
+    let original = timers(&take(&mut engine));
+    assert_eq!(original[0].1, 260.);
+    assert!(policy(&mut engine, 20., 200.).is_empty());
+    engine.handle(
+        260.,
+        Event::TimerFired {
+            timer: original[0].0,
+        },
+    );
+    assert_eq!(engine.venue().fired, [engine.venue().logical[0]]);
+}
+
+#[test]
 fn fallback_cadences_are_independent_and_callbacks_use_logical_ids_once() {
     let mut engine = Engine::new(Polls::new(&[100., 250.]));
     engine.start(10.);
@@ -221,8 +265,10 @@ fn recurring_minimum_and_absolute_cooldown_survive_policy_changes() {
     assert_eq!(first.1, 500.);
     assert_eq!(timers(&policy(&mut engine, 10., 5.))[0].1, 300.);
     policy(&mut engine, 20., f64::INFINITY);
-    assert_eq!(timers(&policy(&mut engine, 100., 5.))[0].1, 300.);
-    assert_eq!(timers(&policy(&mut engine, 290., 6.))[0].1, 330.);
+    let resumed = timers(&policy(&mut engine, 100., 5.))[0];
+    assert_eq!(resumed.1, 300.);
+    assert!(policy(&mut engine, 290., 6.).is_empty());
+    assert_eq!(timers(&policy(&mut engine, 290., 50.))[0].1, 340.);
     assert_eq!(timers(&policy(&mut engine, 300., 80.))[0].1, 380.);
 }
 
