@@ -446,6 +446,8 @@ async function tsCommand(exchange, store, record) {
       return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage':
       return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchMaxLeverage':
+      return exchange.fetchSymbolMaxLeverage(args.symbol);
     case 'fetchAccount':
       return exchange.getAccount();
     case 'fetchOrderBook':

@@ -208,7 +208,7 @@ impl From<BooleanWire<'_>> for Boolean {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_attachments")]
     pub attach_algo_orders: Vec<Attachment<'a>>,
     #[serde(borrow)]
     pub inst_id: Str<'a>,
@@ -224,7 +224,7 @@ pub struct OrderRow<'a> {
     pub algo_id: Str<'a>,
     #[serde(borrow, default)]
     pub order_category: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub order_type: Str<'a>,
     #[serde(borrow, default)]
     pub state: Str<'a>,
@@ -234,13 +234,13 @@ pub struct OrderRow<'a> {
     pub position_side: Str<'a>,
     #[serde(borrow, default)]
     pub margin_mode: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub client_order_id: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub trigger_price_type: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub tp_trigger_price_type: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub sl_trigger_price_type: Str<'a>,
     #[serde(default)]
     pub price: Number,
@@ -250,17 +250,17 @@ pub struct OrderRow<'a> {
     pub filled_size: Number,
     #[serde(default)]
     pub average_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub trigger_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub order_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub tp_trigger_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub sl_trigger_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub tp_order_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub sl_order_price: Number,
     #[serde(default)]
     pub reduce_only: Boolean,
@@ -277,7 +277,7 @@ pub struct PositionRow<'a> {
     pub position_side: Str<'a>,
     #[serde(borrow, default)]
     pub margin_mode: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub liquidation_price: Str<'a>,
     #[serde(default)]
     pub positions: Number,
@@ -287,7 +287,7 @@ pub struct PositionRow<'a> {
     pub mark_price: Number,
     #[serde(default)]
     pub unrealized_pnl: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub leverage: Number,
     #[serde(default)]
     pub maintenance_margin: Number,
@@ -330,17 +330,17 @@ pub struct AccountRow {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment<'a> {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub tp_trigger_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub sl_trigger_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub tp_order_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     pub sl_order_price: Number,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub tp_trigger_price_type: Str<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "nullable_text")]
     pub sl_trigger_price_type: Str<'a>,
 }
 
@@ -350,4 +350,14 @@ pub fn nullable_text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Err
 
 pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>, D::Error> {
     Ok(safe_cex_engine::de::lenient_optional_number(d)?.map(Number))
+}
+
+// Optional prices use zero as the existing "no attached protection" sentinel.
+// Required financial fields deliberately continue to reject JSON null.
+fn nullable_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
+    Ok(Option::<Number>::deserialize(d)?.unwrap_or_default())
+}
+
+fn nullable_attachments<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Attachment<'de>>, D::Error> {
+    Ok(Option::<Vec<Attachment<'de>>>::deserialize(d)?.unwrap_or_default())
 }
