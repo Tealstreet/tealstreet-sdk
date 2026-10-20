@@ -1836,3 +1836,127 @@ Own git fetch nowpins02e9db0e8bbd1eaaab021cdfb7b63c7bc3d54722, which
 adds GRVT-products1337 docs/tests+fixture ONLY after reviewed86ed; no GRVT
 production change. Brief reread from origin Process unchanged. Merge this
 exact fetched SHA after checkpoint, keeping every documented local correction.
+
+02e9 integration native phase reviewed/released:2576 tests in208groups,
+zero failures/ignored, strict native and WASM Clippy, locked workspace check,
+bans/globalfmt PASS. Engine/crypto/Bitunix/native host production remain
+byte-identical to reviewed local HEAD; Lighter duplicate-price aggregation
+and all68Bitunix regressions preserved. Combined27-venue WASM build and
+89host tests PASS. Root44typecheck/28lint/27test tasks PASS; serveradapter
+real-local-WebSocket/native-session/SDK decoder integration PASS1/1.
+
+Harness audit caught invalid chronology in incoming documented synthetic
+TxFlow private generator: closeNODEsocket0 at7500, but replacement socket1
+frames8800–9200 precede actual TS reconnect9500 (BaseWebSocket delay2000).
+Native first reconnect8500 (delay1000) does not make the TS fixture valid.
+Old socket waiting silently advanced beyond recorded event time and weaker
+subscription checks hid it. Plan: verify actual per-subscription pacing on
+both paths, move only synthetic replacement events after required actual
+subscriptions, retain every payload/order/count, document evidence and add
+strict old-chronology rejection controls. Keep production reconnect timers,
+logical replay clock, thresholds and comparison rules unchanged. Independently
+review finalizer/typed authentication/socket proof/SDK boundaries, then freeze
+core source before compiled fixture tests and fresh feature-isolated gates.
+
+Public TxFlow audit exposes a separate real nondeterminism: native API ticker
+subscriptions iterate HashMap assets, TS reference uses metadata order, and
+live recorded ACK/data order reflects that particular native HashMap seed.
+Example BZ instrument65 ACK at12301 precedes current TS wire subscription
+around21000; another Rust process can choose yet another order. Do not bind
+adapters to captured random order or waive subscription-before-data proof.
+Plan bounded production correction: queue native and TS-reference ticker
+subscriptions by ascending explicit instrumentId, retain150ms pacing/bounds,
+prove scrambled-metadata and reconnect ordering with fail-before regression,
+independent audit, rebuild and record a NEW actual public20second/two-book
+fixture. Preserve original fixture provenance/hash and failure evidence in
+progress; no synthetic public timestamps/payloads, padding or hash waivers.
+
+Private recheck exposes active-clock queued-callback ownership defect too:
+advance fires reconnect9500 but jumps target10000 before queued open runs,
+so actual150ms subscription pacing starts10000. Startup already owns queued
+callbacks; extend exactly that synchronous callback lifetime to active clocks
+and drain owned callbacks before moving to another due timer/target. Never
+await callback-returned protocol promises or active HTTP work (which can need
+future timers); keep original real timeout/cancellation and no late advancement.
+Prove fail-before open callback sees9500 plus chained callbacks/pacer ordering,
+future-timer progress and bounded failure, then independently review and run
+all helpers. Synthetic private retiming alone cannot repair scheduler causality.
+Original public fixture retained externally:607records/525WS/last31307ms,
+gzipSHA58194322cafa0cc40943fe19c44f8fc7fdf300d3f0e26bd8d1106449bee90f19,
+rawSHAd21ad5a5ed06faae3adfb7539f6e4be117dc85d2ceb6cb8ea3ed72a61af411a4.
+
+New actual public capture exposes recorder readiness bug before replacing any
+fixture: record.mjs tests loaded mask3 (balance/orders), but public readiness
+is MARKETS4|TICKERS8=12 (engine wire.rs loaded_flag, store.rs status writer).
+Thus recordAfterReady never starts its20second window on a public-only engine
+and runs to the140second failure deadline despite all79HTTP seeds/78tickers/
+both books arriving. Preserve this failed capture, fix only decoded public
+loaded flags and prove actual wire-frame readiness (balance/orders alone must
+not qualify). Keep20seconds after genuine public readiness and120second
+startup deadline unchanged; independently review, then make a NEW capture.
+Observed original process exits0 at140seconds and claimsseconds20/3103WS;
+recordingReady's WS branch only checks frames/books, so it also misses the
+unstarted window. Require genuinely completed readiness window for successful
+recordAfterReady captures, including explicit pre-ready deadline failure test.
+
+Integration corrections frozen and independently reviewed PASS. Native/TS
+TxFlow ticker ordering: both scrambled initial/reconnect controls fail before;
+74native and53TS cases, strict Clippy/fmt/package types/scoped lint PASS.
+Native workspace total now2577 (prior2576 plus this regression). Active replay
+callback ownership:19focused PASS, both advance/wait controls fail before;
+callbacks keep actual9500 open time and150ms pacing without awaiting future
+protocol promises/HTTP. Private generator retains all35frames/15commands and
+payloads; replacement events11000..11500 honor actual jittered reconnect
+delay[2000,3000) plus150ms paced subscriptions. No production timer changes.
+
+Recorder public readiness uses named MARKET/TICKER wire flags; successful
+recordAfterReady requires full requested duration frozen before capture stops,
+not after asynchronous disk drain. Actual wire-frame and delayed-end-callback
+controls plus sticky rejection checks PASS4/4. All778helpers PASS; independent
+source review accepts finalizer, socket/auth guards, scheduler and recorder.
+
+NEW live public TxFlow fixture: actual20seconds after genuine public readiness,
+614records (1meta,79HTTP,2connect,2open,530WS), last30350ms; two books,
+417ticker updates,78ascending unique ticker ACKs,26book updates,7contexts,
+2pongs,zero gateway errors. Trim31seconds retains EVERY raw byte, including
+startup; no rewritten timestamps/payloads. gzipSHA
+e8ddf222be57620ea86d15fa4a2bbef1bb6c3bebd05f4d6cc32b6208c5ced642,
+rawSHA43e480fbbe5363d8032e97d9152a7fbddf3ed019880b0f64dd53aebf5fe44cb9.
+Capture/tmp/bitunix-02-txflow-ordered-public.jsonl and siblingrecord.log;
+miswindowed original and obsolete randomized-order fixture retained externally.
+Final combined27build PASS20.43s; compiled SDK suite running on this exact
+artifact/new fixture. Fresh isolated release gates and exact-head CI pending.
+
+Compiled combined SDK PASS415/12files. New fixture strict TS functional probe
+then catches the same native HashMap order defect in restored BOOK interests:
+NODEopen11235, first ETHbook11476, BTC11629. TS node queue sends allcontexts
+atopen, BTC+150, ETH+300; captured ETH+241 precedes its own TS subscription.
+Ticker ACK ordering now passes. Trace/tmp/bitunix-02-txflow-public-trace.log.
+Do not weaken temporal socket audit or keep retrying recordings for a lucky
+HashMap seed. Extend deterministic native-ID ordering to restored book queues
+and (nativeID,interval) to restored candle queues, align TS reference, retain
+all150ms pacing and active caller subscription order. Prove scrambled initial/
+replacement socket queues fail before, independently review, rebuild/re-record
+actual20second public fixture and rerun affected compiled checks. Current
+614record capture stays preserved as causal evidence, not final acceptance.
+
+Restored ordering correction independently reviewed/released: native76 and
+TS55/6suites PASS, including actual automatic reconnect, both socket roles,
+private-group ordering, exact150ms pacing and active caller FIFO controls.
+Native union now2579 (full2576 plus3 new regression cases). Both native and
+TS scrambled restoration controls fail before. Strict native Clippy, package
+typecheck/no-ignore scoped lint/fmt PASS. Final global bans/fmt and strict
+WASM Clippy PASS after these source changes. No remaining source findings.
+
+FINAL fresh TxFlow public capture PASS20seconds after genuine readiness:
+613records (1meta/79HTTP/2connect/2open/529WS), last31233ms,78orderedACKs,
+413ticker/30book/6context updates,2pongs,0gatewayerrors. BTC then ETH first
+book updates match ordered intents. Trim32 retains every raw byte/startup
+anchor. gzipSHAe1416a092d42c0ed3e3390c4f01321772781a82c51956a99dc9cdc6277047712;
+rawSHA0a083c906de37c7bac0865df89da4e3ef354be1f948103d2a3ba6a09ee05ba63.
+Raw/tmp/bitunix-02-txflow-final-public.jsonl and siblingrecord.log. Strict TS
+functional PASS531deliveredframes/78markets+tickers/2books/93bookEvents,
+unserved0/unusedWrites0/protocolErrors[]/socketErrors[] closes both original
+ordering failures. Final combinedbuild PASS21.97s; full compiled SDK rerun
+PASS415/12files on this exact artifact/fixture (56.15s). Performance gates
+next; all owned build/test/review jobs complete and CPU quiet.

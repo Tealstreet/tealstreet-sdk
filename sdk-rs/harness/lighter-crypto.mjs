@@ -58,7 +58,7 @@ export const decodeLighterTransactions = (body) => {
   }
   return [{ type: Number(form.get('tx_type')), info: parseRequestJson(form.get('tx_info')) }];
 };
-export function createLighterVerifier(options, oracle = crypto) {
+export function createLighterVerifier(options, oracle = crypto, exchangeName = 'lighter') {
   if (!oracle) throw new Error('Initialize the independent Lighter oracle first');
   const account = String(options.applicationId);
   const apiKey = Number(options.apiKeyIndex);
@@ -80,7 +80,7 @@ export function createLighterVerifier(options, oracle = crypto) {
       || Math.abs(info.ExpiredAt - now - 600_000) > 60_000) return false;
     integer(info.Nonce); integer(info.AccountIndex, (1n << 48n) - 2n);
     integer(info.ExpiredAt, (1n << 48n) - 1n); integer(type, 255n);
-    let preimage = words(options.testnet ? 300 : 304, type, info.Nonce, info.ExpiredAt, info.AccountIndex, info.ApiKeyIndex);
+    let preimage = words(options.testnet ? 300 : exchangeName === 'lighter-robinhood' ? 466324 : 304, type, info.Nonce, info.ExpiredAt, info.AccountIndex, info.ApiKeyIndex);
     let ids = [];
     if (type === 14) {
       preimage += orderWords(info, now);

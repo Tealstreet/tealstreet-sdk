@@ -3,7 +3,7 @@ import { isWriteRequest } from './requests.mjs';
 // Polling transports have HTTP activity and loaded state, without a socket.
 export const replayTransportReady = (venue, openSockets, loaded = true) =>
   loaded && (venue.polling === true || openSockets > 0);
-export const deterministicReplay = (venue, isPrivate) => venue.polling === true || !isPrivate;
+export const deterministicReplay = (venue, isPrivate) => venue.polling === true || venue.virtualPrivateClock === true || !isPrivate;
 export const recordingReady = (venue, { frames, httpResponses, loaded, books, requestedBooks }) =>
   (venue.polling === true ? httpResponses > 0 && loaded : frames > 0) && books >= requestedBooks;
 

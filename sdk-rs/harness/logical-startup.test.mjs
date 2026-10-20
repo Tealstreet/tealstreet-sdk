@@ -366,3 +366,107 @@ test('queued transport open is owned through invocation before subscription setu
     assert.equal(clock.holds.size, 0);
   } finally { clock.restore(); }
 });
+
+test('active queued reconnect opens and chained callbacks retain the protocol pacer epoch', async () => {
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.start();
+    const tape = new Tape([]);
+    tape.replayClock = clock;
+    const sent = [];
+    setTimeout(() => tape.connect('wss://example.test/reconnect', () => {
+      sent.push(['open', Date.now() - epoch]);
+      tape.deferCallback(() => tape.deferCallback(() => {
+        const send = () => {
+          sent.push(['subscribe', Date.now() - epoch]);
+          if (sent.filter(([kind]) => kind === 'subscribe').length < 3) setTimeout(send, 150);
+        };
+        setTimeout(send, 150);
+      }));
+    }, () => {}), 9500);
+    await clock.advance(10000);
+    assert.deepEqual(sent, [['open', 9500], ['subscribe', 9650], ['subscribe', 9800], ['subscribe', 9950]]);
+    assert.equal(clock.holds.size, 0);
+  } finally { clock.restore(); }
+});
+
+test('active wait pump drains queued opens before the next protocol timer', async () => {
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.start();
+    const tape = new Tape([]);
+    tape.replayClock = clock;
+    const seen = [];
+    let resolve;
+    const ready = new Promise((done) => { resolve = done; });
+    setTimeout(() => tape.connect('wss://example.test/wait', () => {
+      seen.push(Date.now() - epoch);
+      tape.deferCallback(() => setTimeout(() => { seen.push(Date.now() - epoch); resolve(); }, 150));
+    }, () => {}), 9500);
+    setTimeout(() => seen.push('too late'), 20000);
+    await clock.wait(ready, 'reconnect subscriptions', 1000);
+    assert.deepEqual(seen, [9500, 9650]);
+    assert.equal(clock.time - epoch, 9650);
+  } finally { clock.restore(); }
+});
+
+test('active callback ownership does not await returned protocol promises or general HTTP work', async () => {
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.start();
+    const tape = new Tape([]);
+    tape.replayClock = clock;
+    const finish = clock.beginWork();
+    let complete = false;
+    tape.deferCallback(() => new Promise((resolve) => setTimeout(() => {
+      complete = true;
+      finish();
+      resolve();
+    }, 50)));
+    await clock.advance(50);
+    assert.equal(complete, true);
+    assert.equal(clock.holds.size, 0);
+    assert.equal(clock.work.size, 0);
+  } finally { clock.restore(); }
+});
+
+test('queued callback releases ownership when synchronous invocation throws', () => {
+  const clock = new ReplayClock(epoch);
+  const originalImmediate = globalThis.setImmediate;
+  clock.install();
+  try {
+    clock.start();
+    const tape = new Tape([]);
+    tape.replayClock = clock;
+    let callback;
+    globalThis.setImmediate = (fn) => { callback = fn; };
+    tape.deferCallback(() => { throw new Error('callback failed'); });
+    assert.equal(clock.holds.size, 1);
+    assert.throws(callback, /callback failed/);
+    assert.equal(clock.holds.size, 0);
+  } finally { globalThis.setImmediate = originalImmediate; clock.restore(); }
+});
+
+test('a stuck active callback hold times out without a leaked advance or wait pump', async () => {
+  const { setTimeout: pause } = await import('node:timers/promises');
+  for (const mode of ['advance', 'wait']) {
+    const clock = new ReplayClock(epoch);
+    clock.install();
+    try {
+      clock.start();
+      clock.startupTimeoutMs = 15;
+      const release = clock.hold();
+      let future = false;
+      setTimeout(() => { future = true; }, 10);
+      const pending = mode === 'advance' ? clock.advance(20) : clock.wait(new Promise(() => {}), 'held callback', 15);
+      await assert.rejects(pending, /timeout/);
+      release();
+      await pause(15);
+      assert.equal(future, false);
+      assert.equal(clock.time, epoch);
+    } finally { clock.restore(); }
+  }
+});

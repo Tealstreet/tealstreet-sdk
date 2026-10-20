@@ -809,3 +809,34 @@ test('production Binance cancellation targets, duplicate queries and batch JSON 
   }
   assert.equal(post('x-s3vFFRQpGenerated').status,200);
 });
+
+test('production TxFlow typed writes retain economics, caller IDs and unknown fields after raw authentication', async () => {
+  const { createRequire } = await import('node:module');
+  const require=createRequire(new URL('../../packages/safe-cex/package.json',import.meta.url));
+  const ethers=require('ethers'),{encode}=require('@msgpack/msgpack');
+  const venue=venueOf('txflow');await venue.initializeReplay('ts',venue.replayCredentials);
+  const url='https://rpc.txflow-testnet.xyz/exchange',headers={'Content-Type':'application/json','x-api-version':'2026-08-16'};
+  const caller='ts_declaredcaller',order={a:1,b:true,p:'90',s:'0.25',r:false,t:{limit:{tif:'Gtc'}},c:caller};
+  const sign=(row,nonce=Date.now(),extra={})=>{
+    const body={grouping:'na',orders:[row]},suffix=Buffer.alloc(9);suffix.writeBigUInt64BE(BigInt(nonce));
+    const digest=ethers.TypedDataEncoder.hash({name:'TxFlow-Testnet',version:'1',chainId:2511,verifyingContract:ethers.ZeroAddress},
+      {Agent:[{name:'txflowNetwork',type:'string'},{name:'chainId',type:'uint32'},{name:'apiVersion',type:'uint32'},{name:'connectionId',type:'bytes32'}]},
+      {txflowNetwork:'TxFlow-Testnet',chainId:2511,apiVersion:1,connectionId:ethers.keccak256(Buffer.concat([encode(body),suffix]))});
+    const signature=new ethers.SigningKey(venue.replayCredentials.secret).sign(digest);
+    return {action:{type:'order',...body},nonce,signature:{r:signature.r,s:signature.s,v:signature.v},confirm:'executed',...extra};
+  };
+  const records=[{type:'command',op:'placeOrders',orders:[{clientOrderId:caller}]},{type:'http',method:'POST',url,requestBody:sign(order),status:200,body:'{}'}];
+  for(const changed of [{...order,c:'other-caller'},{...order,s:'0.3'}]){
+    const tape=productionTapeFor('txflow',records);const nonce=Date.now();
+    assert.equal(tape.respond('POST',url,sign(changed,nonce),headers).status,599);assert.equal(tape.missingWrites,1);
+    assert.equal(tape.respond('POST',url,sign(order,nonce+1),headers).status,200);assert.equal(tape.missingWrites,0);
+  }
+  for(const field of ['requestId','timestamp','recvWindow']){
+    const tape=productionTapeFor('txflow',records),nonce=Date.now();
+    assert.equal(tape.respond('POST',url,sign(order,nonce,{[field]:'unknown-business-field'}),headers).status,599);
+    assert.equal(tape.missingWrites,1);assert.equal(tape.respond('POST',url,sign(order,nonce+1),headers).status,200);
+  }
+  const tape=productionTapeFor('txflow',records),signed=sign(order);
+  assert.throws(()=>tape.respond('POST',url,signed,[...Object.entries(headers),['X-API-VERSION','wrong']]));
+  assert.equal(tape.missingWrites,1);assert.equal(tape.respond('POST',url,signed,headers).status,200);
+});

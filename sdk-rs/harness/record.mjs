@@ -11,7 +11,7 @@ import { loadEngine } from './engine.mjs';
 import { canonicalUrl } from './tape.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
 import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
-import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { Frame, LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -20,6 +20,7 @@ const { values } = parseArgs({
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
     'options-env': { type: 'string' },
+    'tealstreet-ws-route': { type: 'boolean', default: false },
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
@@ -49,7 +50,14 @@ const write = (record) => {
 write({ type: 'meta', epoch: started, private: false });
 if (policy.replayOptions || options.endpoints) write({ type: 'config', options: policy.replayOptions ?? options });
 
-const live = nativeTransport();
+let live = nativeTransport();
+if (values['tealstreet-ws-route']) {
+  const [{ createEngineTransport }, { tealstreetTransport }] = await Promise.all([
+    import('../../packages/safe-cex/src/transport/engine.ts'),
+    import('../../packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts'),
+  ]);
+  live = createEngineTransport(values.venue, { ...options, transport: tealstreetTransport, tealstreetWsRoute: true, tealstreetProxy: false, tealstreetTunnel: false }, live);
+}
 const connections = new Map();
 const tickerSymbols = new Set();
 const closedUrls = new Set();
@@ -68,10 +76,7 @@ const recording = {
       write({ type: 'close', url, connection, socket: connection, code, local });
     };
     const socket = live.connect(url, {
-      channel: handlers.channel,
-      context: handlers.context,
-      binary: handlers.binary,
-      headers: handlers.headers,
+      ...handlers,
       onOpen: () => {
         write({ type: 'open', url, connection, socket: connection });
         handlers.onOpen();
@@ -103,7 +108,8 @@ const recording = {
     };
   },
   async request(request) {
-    const response = await live.request(request);
+    const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect ? { ...request, route: 'direct' } : request;
+    const response = await live.request(outgoing);
     const recorded = (body) => { httpResponses++; write({
       type: 'http', method: request.method, url: request.url,
       ...(request.body === undefined ? {} : { requestBody: request.body }),
@@ -132,14 +138,15 @@ const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
     venue.rust,
-    JSON.stringify(options),
+    JSON.stringify({ ...options, ...recording.engineOptions }),
   ),
   recording,
   {
     onFrame: (buffer) => {
       updates++;
       const frame = new Frame(buffer);
-      loaded = Boolean(frame.status()?.loaded & 3) && ((frame.status()?.loaded & 3) === 3) || loaded;
+      const publicMask = LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS;
+      loaded = ((frame.status()?.loaded & publicMask) === publicMask) || loaded;
       if (loaded && windowStarted === undefined) windowStarted = Date.now();
       for (const book of frame.books()) seenBooks.add(book.market);
     },
@@ -154,11 +161,12 @@ const flush = setInterval(() => host.flush(), 250);
 const stop = () => {
   clearInterval(flush);
   host.flush();
+  const completedWindow = !venue.recordAfterReady || (windowStarted !== undefined && Date.now() - windowStarted >= Number(values.seconds) * 1000);
   capturing = false;
   host.dispose();
   tape.end(() => {
     console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
-    process.exit(!recordingFailed && (!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
+    process.exit(!recordingFailed && completedWindow && (!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
   });
 };
 const duration = Number(values.seconds) * 1000;

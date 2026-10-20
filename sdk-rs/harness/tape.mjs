@@ -138,15 +138,16 @@ export async function bodyBytes(body) {
 // Public tapes run faster than real time. Timers must follow the recorded
 // clock so a faster implementation does not skip a retry the slower one runs.
 export class ReplayClock {
-  constructor(epoch) {
+  constructor(epoch, freezeStartup = false) {
     this.epoch = epoch;
+    this.freezeStartup = freezeStartup;
     this.time = epoch;
     this.active = false;
     this.timers = new Map();
     this.original = { now: Date.now, setTimeout, clearTimeout, setInterval, clearInterval };
   }
   install() {
-    Date.now = () => (this.active ? this.time : this.original.now());
+    Date.now = () => (this.active || this.freezeStartup ? this.time : this.original.now());
     globalThis.setTimeout = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, false);
     globalThis.setInterval = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, true);
     globalThis.clearTimeout = globalThis.clearInterval = (timer) => {
@@ -193,7 +194,7 @@ export class ReplayClock {
     // Public records are anchored before construction. Readiness does not
     // establish a new epoch: genuine startup timers have already spent time.
     if (this.startup) { this.startup = false; return; }
-    const previous = this.active ? this.time : this.original.now();
+    const previous = this.active || this.freezeStartup ? this.time : this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
       timer.at = this.epoch + elapsed + Math.max(0, timer.at - previous);
@@ -231,6 +232,17 @@ export class ReplayClock {
       this.startupSettled = true;
       return;
     }
+  }
+  async drainCallbacks(cancelled = () => false, timeoutMs) {
+    if (!this.holds.size) return;
+    let stopped = false;
+    const drain = async () => {
+      while (this.active && this.holds.size && !stopped && !cancelled()) await new Promise(setImmediate);
+    };
+    try {
+      if (timeoutMs === undefined) await drain();
+      else await withTimeout(drain(), 'Queued replay callbacks', timeoutMs);
+    } finally { stopped = true; }
   }
   nextTimer(ceiling = Infinity) {
     let next;
@@ -275,6 +287,11 @@ export class ReplayClock {
       }, 'Logical startup timeline', this.startupTimeoutMs ?? 30000, t);
       return;
     }
+    // Queued host callbacks own synchronous invocation, including callbacks
+    // queued by another callback. Active HTTP work may need a future timer and
+    // must not block this guard.
+    await this.drainCallbacks(undefined, this.startupTimeoutMs ?? 30000);
+    if (!this.active) return;
     for (;;) {
       const next = this.nextTimer(target);
       if (!next) break;
@@ -282,6 +299,8 @@ export class ReplayClock {
       this.fire(next);
       if (this.startup) await this.drainStartup();
       else await new Promise(setImmediate);
+      await this.drainCallbacks(undefined, this.startupTimeoutMs ?? 30000);
+      if (!this.active) return;
     }
     this.time = target;
   }
@@ -295,6 +314,8 @@ export class ReplayClock {
       while (!done) {
         await new Promise(setImmediate);
         if (done) break;
+        await this.drainCallbacks(() => done);
+        if (done || !this.active) break;
         if (++steps > maxSteps) throw new Error(`replay timeout: ${label} virtual step budget exceeded`);
         const current = progress?.();
         if (current !== previous) { previous = current; idle = 0; }
@@ -449,7 +470,6 @@ export class Tape {
     this.books = books;
     this.options = options ?? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase',
       ...venue.options, ...venue.replayCredentials };
-    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.commandIndex = 0;
     this.time = 0;
     this.generations = new Map();
@@ -482,6 +502,7 @@ export class Tape {
       for (const nested of Object.values(value)) collectCallerIds(nested);
     };
     for (const record of records) if (record.type === 'command') collectCallerIds(record);
+    this.validateRequest = venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.hyperliquid = venue.rust === 'hyperliquid';
     this.contract = this.bitget ? bitgetContract(this.callerIds, venue) : undefined;
@@ -819,7 +840,7 @@ export class Tape {
   deferCallback(callback) {
     // A queued synchronous host callback is runnable work, not a reason to
     // advance a protocol timer. Its HTTP descendants own their own lifetimes.
-    const release = this.replayClock?.startup ? this.replayClock.hold() : undefined;
+    const release = this.replayClock?.active ? this.replayClock.hold() : undefined;
     setImmediate(() => { try { callback(); } finally { release?.(); } });
   }
 
@@ -1261,7 +1282,7 @@ export class Tape {
     for (const frame of this.frames) {
       startupCeiling = frame.t;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (this.isPrivate && !this.venue.polling) {
+      if (this.isPrivate && !this.venue.polling && !this.venue.virtualPrivateClock) {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => realTimeout(resolve, wait));
       }

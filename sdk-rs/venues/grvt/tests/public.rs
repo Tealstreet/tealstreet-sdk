@@ -2,6 +2,10 @@ use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketChannel, S
 use safe_cex_venue_grvt::{Grvt, Options};
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6},{"i":"ETH_USDT_Perp","ih":"0x030502","b":"ETH","q":"USDT","k":"PERPETUAL","ts":"0.01","ms":"0.01","bd":9,"qd":6}]}"#;
 fn boot() -> (Engine<Grvt>, SocketId) {
+    let (engine, socket, _) = boot_with_catalog(CATALOG);
+    (engine, socket)
+}
+fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId, Vec<String>) {
     let mut e = Engine::new(Grvt::new(Options {
         public_data_only: true,
         ..Options::default()
@@ -29,7 +33,7 @@ fn boot() -> (Engine<Grvt>, SocketId) {
             response: Response {
                 status: 200,
                 headers: "",
-                body: CATALOG,
+                body: catalog,
             },
         },
     );
@@ -49,8 +53,14 @@ fn boot() -> (Engine<Grvt>, SocketId) {
         })
         .unwrap();
     e.handle(1700000000002., Event::WsOpened { socket });
-    e.drain_actions();
-    (e, socket)
+    let subscriptions = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    (e, socket, subscriptions)
 }
 fn ws(e: &mut Engine<Grvt>, s: SocketId, text: &str) {
     e.handle(1700000000010., Event::WsMessage { socket: s, text });
@@ -62,6 +72,55 @@ fn catalog_and_case_are_native() {
     assert_eq!(m.id, "BTC_USDT_Perp");
     assert_eq!(m.precision.amount, 0.001);
     assert_eq!(e.store().markets().len(), 2);
+}
+#[test]
+fn mapper_only_products_do_not_become_markets_tickers_or_book_subscriptions() {
+    // GRVT_PRODUCTS_DECISION.md retires these latent TS mappings; their
+    // presence in an unexpected response must not enable a new product.
+    let catalog = r#"{"r":[
+        {"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001"},
+        {"i":"BTC_USDT_Fut_20Oct23","ih":"0x030502","b":"BTC","q":"USDT","k":"FUTURE","ts":"0.1","ms":"0.001"},
+        {"instrument":"BTC_USDT_Call_20Oct23_2800","instrument_hash":"0x030503","base":"BTC","quote":"USDT","kind":"CALL","tick_size":"0.1","min_size":"0.001"},
+        {"i":"BTC_USDT_Put_20Oct23_2800","ih":"0x030504","b":"BTC","q":"USDT","k":"PUT","ts":"0.1","ms":"0.001"}
+    ]}"#;
+    let (mut e, socket, subscriptions) = boot_with_catalog(catalog);
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(subscriptions.len(), 1);
+    assert!(subscriptions[0].contains("BTC_USDT_Perp@500"));
+    assert!(!subscriptions[0].contains("Fut_"));
+    assert!(!subscriptions[0].contains("Call_"));
+    assert!(!subscriptions[0].contains("Put_"));
+    for id in [
+        "BTC_USDT_Fut_20Oct23",
+        "BTC_USDT_Call_20Oct23_2800",
+        "BTC_USDT_Put_20Oct23_2800",
+    ] {
+        assert!(e.store().market_by_id(id).is_none());
+        let symbol = id.to_ascii_uppercase();
+        e.handle(
+            1700000000003.,
+            Event::Command(Command::SubscribeOrderBook { symbol }),
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::WsSend { .. }))
+        );
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"s":"v1.ticker.d","f":{{"i":"{id}","lp":"999"}}}}"#),
+        );
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"s":"v1.book.s","f":{{"i":"{id}","b":[{{"p":"999","s":"1"}}],"a":[]}}}}"#
+            ),
+        );
+    }
+    assert_eq!(e.store().ticker("BTC_USDT_PERP").unwrap().last, 0.);
+    assert!(e.venue().books().next().is_none());
 }
 #[test]
 fn delta_fields_retain_sides_and_derive_totals_from_current_price() {

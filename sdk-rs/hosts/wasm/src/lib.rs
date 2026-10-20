@@ -28,12 +28,13 @@
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
@@ -170,6 +171,7 @@ struct KucoinExtra {
     feature = "weex",
     feature = "hyperliquid",
     feature = "kraken",
+    feature = "txflow",
     feature = "orderly",
     feature = "lighter",
     feature = "okx"
@@ -193,6 +195,11 @@ struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    lighter_remote_signer: bool,
+    #[cfg(feature = "lighter")]
+    lighter_signer_provider: Option<String>,
     #[cfg(any(
         feature = "grvt",
         feature = "coinbase",
@@ -208,6 +215,7 @@ struct EngineOptions {
         feature = "cryptocom",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "phemex",
         feature = "orderly",
         feature = "lighter",
@@ -240,6 +248,7 @@ struct EngineOptions {
         feature = "phemex",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "txflow",
         feature = "kraken",
         feature = "lighter",
         feature = "woo",
@@ -272,6 +281,7 @@ struct EngineOptions {
     omni_key_seed: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
+        feature = "txflow",
         feature = "asterdex",
         feature = "orderly",
         feature = "lighter",
@@ -279,7 +289,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     application_id: Option<String>,
-    #[cfg(feature = "hyperliquid")]
+    #[cfg(any(feature = "hyperliquid", feature = "txflow"))]
     #[serde(default)]
     vault: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -551,6 +561,7 @@ impl WasmEngine {
         feature = "weex",
         feature = "hyperliquid",
         feature = "kraken",
+        feature = "txflow",
         feature = "orderly",
         feature = "lighter",
         feature = "okx"
@@ -650,6 +661,19 @@ impl WasmEngine {
                 omni_key_seed: options.omni_key_seed,
                 tick_interval_ms: None,
             }))),
+            #[cfg(feature = "txflow")]
+            "txflow" => {
+                let options = safe_cex_venue_txflow::Options {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                };
+                options.validate().map_err(|e| JsError::new(&e))?;
+                Box::new(Engine::new(safe_cex_venue_txflow::TxFlow::new(options)))
+            }
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
                 testnet: options.testnet,
@@ -694,16 +718,21 @@ impl WasmEngine {
                 })))
             }
             #[cfg(feature = "lighter")]
-            "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
-                api_key_index: options.api_key_index,
-                integrator_account_index: options.lighter_integrator_account_index,
-                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
-            }))),
+            "lighter" | "lighter-robinhood" => {
+                Box::new(Engine::new(Lighter::new(LighterOptions {
+                    robinhood: venue == "lighter-robinhood",
+                    remote_signer: options.lighter_remote_signer,
+                    signer_provider: options.lighter_signer_provider,
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    api_key_index: options.api_key_index,
+                    integrator_account_index: options.lighter_integrator_account_index,
+                    stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+                })))
+            }
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

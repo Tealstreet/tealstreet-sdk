@@ -763,3 +763,113 @@ fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_e
     );
     assert_session(&h.take("aggregated_account_summary"), "recovered");
 }
+
+#[test]
+fn undiscovered_product_events_cannot_mutate_perpetual_account_or_consume_its_fill() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let position = r#"{"i":"BTC_USDT_Perp","s":"1","ep":"100","n":"100","l":"20","el":"50","up":"0","mt":"CROSS","et":"1700000000100000000"}"#;
+    h.ws(&format!("{{\"s\":\"v1.position\",\"f\":{position}}}"));
+    h.ws(&format!("{{\"s\":\"v1.order\",\"f\":{OPEN}}}"));
+    let fill = r#"{"i":"BTC_USDT_Perp","ti":"77","co":"9223372036854775807","oi":"0xabcd","ib":true,"s":"0.2","p":"100"}"#;
+    h.engine.take_frame(h.now);
+
+    // Deliberately share the supported market's base, quote, client ID and
+    // trade ID: only exact discovered instrument identities may resolve.
+    for instrument in [
+        "BTC_USDT_20261225_Future",
+        "BTC_USDT_20261225_100000_Call",
+        "BTC_USDT_20261225_100000_Put",
+    ] {
+        let unknown_position = position
+            .replace("BTC_USDT_Perp", instrument)
+            .replace("\"s\":\"1\"", "\"s\":\"0\"")
+            .replace("\"l\":\"20\"", "\"l\":\"99\"")
+            .replace("CROSS", "ISOLATED");
+        h.ws(&format!(
+            "{{\"s\":\"v1.position\",\"f\":{unknown_position}}}"
+        ));
+        let unknown_order = OPEN
+            .replace("BTC_USDT_Perp", instrument)
+            .replace("\"OPEN\"", "\"FILLED\"")
+            .replace("\"ts\":[\"0\"]", "\"ts\":[\"2\"]");
+        h.ws(&format!("{{\"s\":\"v1.order\",\"f\":{unknown_order}}}"));
+        let unknown_fill = fill.replace("BTC_USDT_Perp", instrument);
+        h.ws(&format!("{{\"s\":\"v1.fill\",\"f\":{unknown_fill}}}"));
+        assert!(
+            h.engine
+                .store()
+                .setting(&instrument.to_uppercase())
+                .is_none()
+        );
+    }
+    assert_eq!(h.engine.store().positions().len(), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 1.);
+    assert_eq!(h.engine.store().orders().len(), 1);
+    assert_eq!(h.engine.store().orders()[0].filled, 0.);
+    let setting = h.engine.store().setting("BTC_USDT_PERP").unwrap();
+    assert_eq!(setting.leverage, 20.);
+    assert_eq!(
+        setting.margin_type,
+        Some(safe_cex_engine::model::MarginType::Cross)
+    );
+    if let Some(frame) = h.engine.take_frame(h.now) {
+        assert!(!sections(frame).any(|(kind, _)| kind == section::FILLS));
+    }
+    h.ws(&format!("{{\"s\":\"v1.fill\",\"f\":{fill}}}"));
+    let frame = h.engine.take_frame(h.now).unwrap();
+    let (_, fills) = sections(frame)
+        .find(|(kind, _)| *kind == section::FILLS)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 1);
+}
+
+#[test]
+fn undiscovered_products_in_rest_snapshots_do_not_alias_perpetuals() {
+    for instrument in [
+        "BTC_USDT_20261225_Future",
+        "BTC_USDT_20261225_100000_Call",
+        "BTC_USDT_20261225_100000_Put",
+    ] {
+        let mut h = Harness::new(true);
+        h.reply(
+            "login",
+            r#"{"status":"success"}"#,
+            "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+        );
+        h.reply("aggregated_account_summary", SUMMARY, "");
+        h.reply(
+            "get_all_initial_leverage",
+            &format!(
+                "{{\"r\":[{{\"i\":\"BTC_USDT_Perp\",\"l\":\"20\"}},{{\"i\":\"{instrument}\",\"l\":\"99\",\"mt\":\"ISOLATED\"}}]}}"
+            ),
+            "",
+        );
+        assert_eq!(
+            h.engine.store().setting("BTC_USDT_PERP").unwrap().leverage,
+            20.
+        );
+        assert!(
+            h.engine
+                .store()
+                .setting(&instrument.to_uppercase())
+                .is_none()
+        );
+        h.reply(
+            "positions",
+            &format!(
+                "{{\"r\":[{{\"i\":\"{instrument}\",\"s\":\"3\",\"ep\":\"100\",\"n\":\"300\",\"l\":\"99\",\"el\":\"50\",\"up\":\"0\"}}]}}"
+            ),
+            "",
+        );
+        let unknown_order = OPEN.replace("BTC_USDT_Perp", instrument);
+        h.reply("open_orders", &format!("{{\"r\":[{unknown_order}]}}"), "");
+        assert!(h.engine.store().positions().is_empty());
+        assert!(h.engine.store().orders().is_empty());
+        assert_eq!(
+            h.engine.store().setting("BTC_USDT_PERP").unwrap().leverage,
+            20.
+        );
+    }
+}

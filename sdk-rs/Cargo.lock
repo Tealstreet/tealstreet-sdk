@@ -3879,6 +3879,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-txflow"
+version = "0.1.0"
+dependencies = [
+ "alloy-dyn-abi",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "safe-cex-venue-hyperliquid",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
@@ -3928,6 +3940,7 @@ dependencies = [
  "safe-cex-venue-paradex",
  "safe-cex-venue-phemex",
  "safe-cex-venue-polymarket",
+ "safe-cex-venue-txflow",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",
  "serde",

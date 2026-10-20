@@ -19,6 +19,8 @@ test('only explicit polling transports may start without a socket and loaded sta
   assert.equal(replayTransportReady({}, 1, true), true);
   assert.equal(replayTransportReady({}, 1, false), false);
   assert.equal(deterministicReplay({ polling: true }, true), true);
+  assert.equal(deterministicReplay({ virtualPrivateClock: true }, true), true);
+  assert.equal(deterministicReplay({ virtualPrivateClock: false }, true), false);
   assert.equal(deterministicReplay({}, true), false);
   assert.equal(deterministicReplay({}, false), true);
 });

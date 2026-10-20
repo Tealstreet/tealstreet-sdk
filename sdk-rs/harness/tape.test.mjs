@@ -3510,3 +3510,19 @@ test('live-smoke bootstrap records preserve chronology, count and ticks while en
   assert(seen.indexOf('tick:0')<seen.indexOf('ack:10'));
   assert.deepEqual(seen.filter(x=>x.startsWith('tick:')),['tick:0','tick:10','tick:20']);
 });
+
+test('private replay can freeze startup timestamps while startup timers still run', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch, true);
+  clock.install();
+  try {
+    assert.equal(Date.now(), epoch);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(Date.now(), epoch);
+    clock.start();
+    let observed;
+    setTimeout(() => { observed = Date.now(); }, 100);
+    await clock.advance(100);
+    assert.equal(observed, epoch + 100);
+  } finally { clock.restore(); }
+});

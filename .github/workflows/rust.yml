@@ -11,11 +11,13 @@ on:
     paths:
       - 'sdk-rs/**'
       - 'packages/safe-cex/**'
+      - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
   pull_request:
     paths:
       - 'sdk-rs/**'
       - 'packages/safe-cex/**'
+      - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
 
 permissions:
@@ -174,6 +176,9 @@ jobs:
           - venue: lighter
             books: ETH,BTC
             private_script: rust:private-tape-lighter
+          - venue: lighter-robinhood
+            books: ETH,BTC
+            private_script: rust:private-tape-lighter-robinhood
           - venue: bitrue
             books: E-BTC-USDT,E-ETH-USDT
             private_script: rust:private-tape-bitrue
@@ -183,6 +188,9 @@ jobs:
           - venue: paradex
             books: BTC-USD-PERP,ETH-USD-PERP
             private_script: rust:private-tape-paradex
+          - venue: txflow
+            books: BTC-USDC,ETH-USDC
+            private_script: rust:private-tape-txflow
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # Budget per single-venue browser bundle.
@@ -215,6 +223,12 @@ jobs:
       - name: Rust book delta wire through the JS decoder and SDK
         if: matrix.venue == 'binance'
         run: yarn rust:test-frame-wire
+      - name: Build the offline native session fixture
+        if: matrix.venue == 'binance'
+        run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
+      - name: Native frame session adapter through real WebSockets
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-server-adapter
       - name: Build the combined wasm engine
         if: matrix.venue == 'binance'
         run: yarn rust:build-wasm
@@ -243,6 +257,11 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Lighter testnet deployment signing and replay
+        if: matrix.venue == 'lighter' || matrix.venue == 'lighter-robinhood'
+        run: |
+          yarn rust:private-tape-lighter --venue '${{ matrix.venue }}' --testnet --out sdk-rs/harness/tapes/lighter-testnet-private.jsonl
+          yarn rust:gate --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --runs 1 --books ''
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |

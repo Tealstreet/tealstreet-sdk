@@ -250,6 +250,7 @@ const fixBackpack = (ts) => {
 //   rejected/ambiguous cancels and filled orders never place a replacement.
 // TS reports resting executionReport.p instead of this trade's L.
 
+// TxFlow compares both implementations directly; no venue-specific output repair.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'blofin') {
     // TS can retain the zero-size placeholder's margin. Derive the repair
@@ -632,7 +633,7 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     KNOWN_TS_FIXES(ts.account, rust.account);
     fixHistoricalFills(ts.commands);
-    if (values.venue === 'lighter') {
+    if (['lighter', 'lighter-robinhood'].includes(values.venue)) {
       KNOWN_TS_FIXES.lighter.fills(ts.account, tape);
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tape);
     }

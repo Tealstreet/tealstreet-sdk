@@ -1,3 +1,9 @@
+import {venueOf} from './venues.mjs';
+import {fileURLToPath} from 'node:url';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
@@ -182,4 +188,41 @@ test('Lighter form matching retains duplicate and unexpected form fields', () =>
   assert.equal(tape.missingWrites,1);
  }
  assert.equal(tape.respond('POST',url,form()).status,200);
+});
+
+test('Robinhood production signatures fail the standard production verifier and vice versa',()=>{
+ const standard=createLighterVerifier(options,oracle,'lighter');
+ const robinhood=createLighterVerifier(options,oracle,'lighter-robinhood');
+ const broker=corpus.cases.find(c=>c.name==='lighter-robinhood/livenet/create-complete');
+ assert.equal(standard.request({method:'POST',url,body:broker.wire[0].body,now}),false);
+ assert.equal(robinhood.request({method:'POST',url,body:form(),now}),false);
+});
+
+test('private tape generator preserves all deployment origins and disables absent builder defaults',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'lighter-private-profiles-'));
+ try {
+  for (const [name,testnet,rest,socket] of [
+   ['lighter',false,'https://mainnet.zklighter.elliot.ai','wss://mainnet.zklighter.elliot.ai/stream'],
+   ['lighter',true,'https://testnet-api.lighter.xyz','wss://testnet.zklighter.elliot.ai/stream'],
+   ['lighter-robinhood',false,'https://api.rh.lighter.xyz','wss://api.rh.lighter.xyz/stream'],
+   ['lighter-robinhood',true,'https://api.rh-testnet.lighter.xyz','wss://api.rh-testnet.lighter.xyz/stream'],
+  ]) {
+   const out=join(directory,`${name}-${testnet}.jsonl`);
+   execFileSync('corepack',['yarn','-s','rust:private-tape-lighter','--venue',name,...(testnet?['--testnet']:[]),'--out',out],{cwd:fileURLToPath(new URL('../../',import.meta.url))});
+   const records=readFileSync(out,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+   assert.equal(records.find(r=>r.type==='meta').venue,name);
+   assert.equal(records.find(r=>r.type==='config').options.testnet,testnet);
+   assert.equal(records.filter(r=>r.type==='command').length,8);
+   for (const record of records) {
+    if(record.type==='ws')assert.equal(record.url,socket);
+    if(record.type!=='http')continue;
+    assert.equal(new URL(record.url).origin,rest);
+    if(!record.requestBody)continue;
+    for (const {type,info} of decodeLighterTransactions(record.requestBody)) {
+     if(type!==14)continue;
+     assert.deepEqual(info.L2TxAttributes,name==='lighter'&&!testnet?{'1':158385,'2':250,'3':0}:undefined);
+    }
+   }
+  }
+ } finally { rmSync(directory,{recursive:true,force:true}); }
 });

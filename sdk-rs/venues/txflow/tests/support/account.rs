@@ -1,0 +1,138 @@
+#![allow(dead_code)]
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
+use safe_cex_venue_txflow::{Options, TxFlow};
+pub const NOW: f64 = 1_700_000_000_000.0;
+pub const WALLET: &str = "0x0000000000000000000000000000000000000001";
+pub const META: &str = r#"{"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","delisted":false,"haltTrading":false,"basePrecision":"0.001","priceTick":"0.1","maxLeverage":"50"}]}}"#;
+pub const STATE: &str = r#"{"success":true,"code":0,"data":{"time":1700000000000,"assetPositions":[{"type":"oneWay","position":{"asset":"1","szi":"2","leverage":{"type":"Cross","value":10},"positionValue":"200","unrealizedPnl":"5","marginUsed":"20","entryPx":"97.5","liquidationPx":"10","updateTime":1700000000000}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20","totalRawUsd":"995"}}}"#;
+pub const EMPTY_STATE: &str = r#"{"success":true,"code":0,"data":{"time":1700000000000,"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0","totalRawUsd":"1000"}}}"#;
+pub const ORDER: &str = r#"{"asset":1,"oid":42,"side":"B","orderType":"Limit","limitPx":"100","origSz":"2","sz":"1.5","timestamp":1700000000000,"isTrigger":false,"reduceOnly":false,"cloid":"caller-id","state":"Open","tif":"GTC","triggerPx":"","children":[]}"#;
+pub fn kind(r: &HttpRequest) -> String {
+    serde_json::from_str::<serde_json::Value>(r.body.as_deref().unwrap()).unwrap()["type"]
+        .as_str()
+        .unwrap()
+        .into()
+}
+pub fn reply(e: &mut Engine<TxFlow>, r: &HttpRequest, body: &str) {
+    reply_at(e, r, NOW, 200, body)
+}
+pub fn reply_at(e: &mut Engine<TxFlow>, r: &HttpRequest, now: f64, status: u16, body: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+pub fn requests(e: &mut Engine<TxFlow>) -> Vec<HttpRequest> {
+    e.drain_actions()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+pub fn message(e: &mut Engine<TxFlow>, socket: SocketId, now: f64, text: &str) {
+    e.handle(now, Event::WsMessage { socket, text });
+}
+pub fn bootstrap() -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
+    bootstrap_with_wallet(WALLET)
+}
+pub fn bootstrap_with_wallet(
+    wallet: &str,
+) -> (Engine<TxFlow>, SocketId, Vec<HttpRequest>, TimerId) {
+    let mut e = Engine::new(TxFlow::new(Options {
+        testnet: true,
+        application_id: Some(wallet.into()),
+        secret: Some(format!("0x{:064x}", 1)),
+        ..Options::default()
+    }));
+    e.start(NOW);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, META);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(NOW + 25.0, Event::TimerFired { timer });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/ws") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let refresh = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5025.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let reads = actions
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect();
+    e.handle(NOW + 25.0, Event::WsOpened { socket });
+    let mut reads: Vec<_> = reads;
+    reads.extend(requests(&mut e));
+    (e, socket, reads, refresh)
+}
+pub fn answer(e: &mut Engine<TxFlow>, reads: Vec<HttpRequest>) {
+    for r in reads {
+        let body = match kind(&r).as_str() {
+            "clearinghouseState" => STATE.to_owned(),
+            "frontendOpenOrders" => format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#),
+            "activeAssetData" => format!(
+                r#"{{"success":true,"code":0,"data":{{"coin":"1","user":"{WALLET}","leverage":{{"mode":"oneWay","type":"Cross","value":10}}}}}}"#
+            ),
+            "userFills" => r#"{"success":true,"code":0,"data":{"data":[],"hasMore":false}}"#.into(),
+            k => panic!("unexpected {k}"),
+        };
+        reply(e, &r, &body);
+    }
+}
+pub fn fill_count(frame: &[u8]) -> u32 {
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            return u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap());
+        }
+        at += 8 + size;
+    }
+    0
+}
+pub fn fill(tid: u64, price: f64, time: f64) -> String {
+    format!(
+        r#"{{"tid":{tid},"oid":42,"instrumentId":1,"px":"{price}","sz":"0.5","side":"B","time":{time}}}"#
+    )
+}

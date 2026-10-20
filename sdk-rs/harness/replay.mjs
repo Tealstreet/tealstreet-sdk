@@ -1,3 +1,4 @@
+import { finalizeReplay } from './replay-finalize.mjs';
 // Replay a recorded tape through one implementation and report its final
 // Store, order books, CPU time and memory as JSON on stdout.
 //
@@ -135,7 +136,7 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni', 'paradex', 'phemex', 'coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance')
+const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni', 'paradex', 'phemex', 'coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance')
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -146,7 +147,7 @@ class Tape extends SharedTape {
   constructor(impl) {
     super(records, { ...venue, deferResponseAudit: true, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop'].includes(values.venue) || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws' || typeof r.text !== 'string') return r;
@@ -178,7 +179,7 @@ class Tape extends SharedTape {
 
   send(socket, text) {
     const { url, connection } = socket;
-    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop'].includes(values.venue) || values.venue.startsWith('bitget')) return super.send(socket, text);
+    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || values.venue.startsWith('bitget')) return super.send(socket, text);
     venue.validateSocketMessage?.(socket, text);
     for (const key of subscriptionKeys(socket.rawUrl, text)) {
       if (this.startupSubscriptions.get(key) === false) {
@@ -330,20 +331,17 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, peakBytes = 0) => {
+const captureUsage = (cpuStart, wallStart, warmMark) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
+  return { cpuMs: (thread.user + thread.system) / 1000, steadyCpuMs: (steady.user + steady.system) / 1000, processCpuMs: (cpu.user + cpu.system) / 1000, wallMs };
+};
+const measure = async (heapBefore, wasmBytes, peakBytes, usage) => {
   const memory = await baseline();
   return {
-    // The worker's own thread: what competes with its message handling.
-    cpuMs: (thread.user + thread.system) / 1000,
-    // Main thread after the first quarter of frames: startup and JIT excluded.
-    steadyCpuMs: (steady.user + steady.system) / 1000,
-    // All threads, including V8 background compilation and GC helpers.
-    processCpuMs: (cpu.user + cpu.system) / 1000,
-    wallMs,
+    ...usage,
     rssBytes: memory.rss,
     heapBeforeBytes: heapBefore.heapUsed,
     heapUsedBytes: memory.heapUsed,
@@ -386,13 +384,19 @@ const marketFields = (m) => ({
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },
 });
 
+const assertReplayIntegrity = (tape) => {
+  tape.assertWritesConsumed();
+  const failures = [...(tape.audit?.errors() ?? []), ...(tape.socketErrors ?? []), ...(tape.signatureErrors ?? [])];
+  if (tape.unserved || failures.length) throw new Error(`Replay integrity failed: ${tape.unserved} unserved; ${failures.join('; ')}`);
+};
+
 async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, { ...venue.options, ...metadataOptions, ...config.options });
   const tape = new Tape('rust');
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   tape.replayClock = clock;
   const encoder = new TextEncoder();
@@ -502,10 +506,9 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   realClearInterval(sampling);
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark, tape.peakBytes);
+  const usage = captureUsage(cpuStart, wallStart, tape.warmMark);
+  const result = await finalizeReplay(() => {
   const protocolErrors = tape.audit?.errors() ?? [];
-  host.dispose();
-  clock?.restore();
 
   // Rebuild comparable records outside the measured window.
   const marketRows = [];
@@ -540,7 +543,11 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  }, () => measure(heapBefore, wasmMemoryBytes(), tape.peakBytes, usage), { check: () => assertReplayIntegrity(tape) });
+  host.dispose();
+  clock?.restore();
+  return result;
 }
 
 const commandArgs = ({ t, type, expected, ...args }) => args;
@@ -584,7 +591,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 
 async function runTs() {
   const tape = new Tape('ts');
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   tape.replayClock = clock;
   class TapeWebSocket {
@@ -811,7 +818,8 @@ async function runTs() {
   postStore();
   if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   realClearInterval(sampling);
-  const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
+  const usage = captureUsage(cpuStart, wallStart, tape.warmMark);
+  const result = await finalizeReplay(() => {
   const snapshot = {
     markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
     tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
@@ -833,9 +841,11 @@ async function runTs() {
       }
     : undefined;
   const protocolErrors = tape.audit?.errors() ?? [];
+  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  }, () => measure(heapBefore, 0, tape.peakBytes, usage), { check: () => assertReplayIntegrity(tape) });
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return result;
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
