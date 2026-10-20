@@ -800,7 +800,10 @@ fn fills_during_a_quiet_but_pinging_stretch_are_backfilled_once() {
         for action in e.drain_actions() {
             match action {
                 Action::SetTimer { timer, at_ms } if at_ms == now + 10_000.0 => watchdog = timer,
-                Action::SetTimer { timer, at_ms } if at_ms == now + 1000.0 => {
+                // Reconnect jitter shortens the 1 s delay by up to a quarter.
+                Action::SetTimer { timer, at_ms }
+                    if (now + 750.0..=now + 1000.0).contains(&at_ms) =>
+                {
                     reconnect_at = Some((timer, at_ms))
                 }
                 _ => {}
