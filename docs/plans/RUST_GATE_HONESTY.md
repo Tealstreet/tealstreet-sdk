@@ -256,3 +256,31 @@ never retry an unchanged failed performance measurement to obtain a pass.
   failures, not venue exceptions. Tracing and correcting this before the next
   matrix. Two Coinbase ES256 private variants also expose additional raw
   terminal-order checkpoint paths, under independent evidence classification.
+- Coinbase public receipt defect corrected with the existing replay-readiness
+  hook: wait for the actual public socket and completed market/ticker seeds
+  before book registration. The production handler otherwise schedules a 100 ms
+  pre-open retry; auditing could advance startup through it and rebase polling
+  differently. Generic paced clock semantics and private readiness are unchanged.
+  Actual audit/no-audit receipt-only controls now each perform nine product GETs,
+  deliver 201 frames and match complete transport receipts and terminal state.
+  No quantitative performance claim comes from these diagnostic controls.
+- Coinbase private evidence independently classified: INTX ES256 adds 23 and
+  spot ES256 adds 45 literal paths. Earlier native REST reconciliation omits
+  closed order 40 while TS retains it, shifting stop 50's sorted row; eight
+  additional TIF leaf paths compare same-ID orders with native PostOnly/GTC
+  versus absent TS TIF. All commands/writes/signatures/protocol checks complete.
+  Exact manifest refresh adversarial review PASS, including failed attempts to
+  exempt the seven public own-audit errors. Updated full CI and final reviewer
+  findings are recorded on PR #1346; the single known-failure list retains FAIL.
+- Post-Coinbase-fix verification: 767/767 integrated harness tests PASS with no
+  skips; targeted startup controls 12/12 PASS. Old public receipt errors remain
+  rejected by the verifier even if explicitly declared, proving the fix did not
+  weaken the failure policy. Final-head CI performs new seven-pair measurements
+  after this workload correction; no unchanged measurement was retried to pass.
+- Final independent readiness review PASS: real Coinbase negative control
+  reproduces the old 900 ms/10-read phase versus corrected 1,000 ms/9 reads.
+  Manifest refresh review preserves every old key, rejects adjacent unknown
+  fields/hashes and all public own-audit errors. Results audit confirms all
+  107 cases, 49 aliases and both combined artifacts; PR wording distinguishes
+  measured standalone performance from combined size and lists the private
+  terminal-retention/TIF divergences. Full updated-head CI is the landing gate.

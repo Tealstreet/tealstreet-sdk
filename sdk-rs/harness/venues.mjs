@@ -766,6 +766,12 @@ const coinbase = (name) => ({
   options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
   replayCredentials: COINBASE_REPLAY,
   privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  // Public startup schedules ticker polling before replay begins. Registering
+  // books before socket open adds a 100 ms retry that otherwise shifts that
+  // poll's phase depending on audit cost. Use the same completed seed/open
+  // boundary in both modes; private startup keeps its existing readiness.
+  tsBooksReady: (exchange, store) => !exchange.isPublicDataOnly
+    || Boolean(store.loaded.markets && store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
   verifyRequest: verifyCoinbaseRequest,

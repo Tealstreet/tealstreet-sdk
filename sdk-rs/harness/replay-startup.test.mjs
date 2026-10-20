@@ -231,3 +231,63 @@ test('Kraken Spot replay registers books after open for either startup order and
   });
   assert.equal(result.status, 0, result.error?.stack ?? result.stderr ?? result.stdout);
 });
+
+test('Coinbase public book readiness fixes the seed/open boundary without shifting ticker polling or private readiness', () => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { CoinbasePublicWebsocket } from './packages/safe-cex/src/__tests__/reference/coinbase/coinbase.ws-public.ts';
+    import { VENUES } from './sdk-rs/harness/venues.mjs';
+    import { ReplayClock } from './sdk-rs/harness/tape.mjs';
+    globalThis.WebSocket = { OPEN: 1 };
+    const receipts = [];
+    for (const name of ['coinbase', 'coinbasespot']) for (const order of ['registration-first', 'open-first']) {
+      const sends = [];
+      const store = { loaded: { markets: false, tickers: false }, markets: [{ symbol: 'BTC-USD' }, { symbol: 'ETH-USD' }] };
+      const parent = { store, isDisposed: false, isPublicDataOnly: true };
+      const socket = new CoinbasePublicWebsocket(parent);
+      parent.publicWebsocket = socket;
+      socket.ws = { readyState: 0, send: text => sends.push(JSON.parse(text)) };
+      const ready = () => VENUES[name].tsBooksReady(parent, store);
+      const clock = new ReplayClock(1700000000000, true);
+      clock.install();
+      try {
+        let requests = 2; // Public markets and initial ticker seed.
+        const poll = () => { requests++; setTimeout(poll, 1000); };
+        setTimeout(poll, 1000);
+        assert.equal(ready(), false);
+        if (order === 'open-first') { socket.ws.readyState = 1; socket.onOpen(); }
+        assert.equal(ready(), false);
+        store.loaded.markets = true;
+        assert.equal(ready(), false);
+        store.loaded.tickers = true;
+        if (order === 'registration-first') {
+          assert.equal(ready(), false); // No 100 ms waitForConnected timer is created.
+          socket.ws.readyState = 1;
+          socket.onOpen();
+        }
+        assert.equal(ready(), true);
+        for (const market of store.markets) socket.listenOrderBook(market.symbol, () => {});
+        assert.deepEqual([...clock.timers.values()].map(timer => timer.delay), [1000]);
+        clock.start();
+        await clock.advance(7962); // Actual public fixture's terminal time.
+        assert.equal(requests, 9);
+        assert.deepEqual(sends, [
+          { type: 'subscribe', product_ids: ['BTC-USD', 'ETH-USD'], channel: 'heartbeats' },
+          { type: 'subscribe', product_ids: ['BTC-USD'], channel: 'level2' },
+          { type: 'subscribe', product_ids: ['ETH-USD'], channel: 'level2' },
+        ]);
+        receipts.push({ requests, sends });
+        parent.isPublicDataOnly = false;
+        store.loaded = { markets: false, tickers: false };
+        socket.ws.readyState = 0;
+        assert.equal(ready(), true); // Existing private bootstrap is unchanged.
+      } finally { clock.restore(); }
+    }
+    for (const receipt of receipts) assert.deepEqual(receipt, receipts[0]);
+    process.exit(0);
+  `;
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module'], {
+    cwd: fileURLToPath(new URL('../../', import.meta.url)), input: script, encoding: 'utf8', timeout: 30_000,
+  });
+  assert.equal(result.status, 0, result.error?.stack ?? result.stderr ?? result.stdout);
+});

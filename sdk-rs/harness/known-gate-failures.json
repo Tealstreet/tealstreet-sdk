@@ -15,7 +15,7 @@
       "ciRun": 39422195309,
       "ciHead": "2b10e43733a43f37c0ec4318b8144650ab2c1f3f",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39422195309",
-      "note": "Exact newly observed paths independently classified from raw artifacts; KuCoin refreshed tape preserves the same 60 divergences. Corrected TxFlow startup-window fixture has exactly the prior three settings divergences in both local correctness replays; full exact-head CI must certify the refreshed hash."
+      "note": "Exact newly observed paths independently classified from raw artifacts; KuCoin refreshed tape preserves the same 60 divergences. Corrected TxFlow startup-window fixture has exactly the prior three settings divergences in both local correctness replays; full exact-head CI must certify the refreshed hash. Coinbase ES256 private variants expose source-consistent terminal-retention/TIF paths, independently reviewed; no public own-audit failure is declared."
     }
   },
   "failures": [
@@ -15775,6 +15775,39 @@
           "keys": [
             "checkpoint 0 account.balance.upnl"
           ]
+        },
+        {
+          "divergence": "Native REST configuration reports PostOnly/GTC while TS live-order mapper omits time-in-force; native earlier reconciliation also shifts sorted rows at these boundaries.",
+          "keys": [
+            "checkpoint 7 account.orders[2].timeInForce",
+            "checkpoint 7 account.orders[3].timeInForce",
+            "checkpoint 8 account.orders[3].timeInForce"
+          ]
+        },
+        {
+          "divergence": "Earlier native open-order reconciliation removes closed market order 40; TS retains that FILLED row. Stop order 50 shifts from index 5 to 4, so these literal row paths reflect lifecycle retention and alignment, not same-order economic disagreement.",
+          "keys": [
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]"
+          ]
         }
       ]
     },
@@ -16710,6 +16743,61 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "Native REST configuration reports PostOnly/GTC while TS live-order mapper omits time-in-force; native earlier reconciliation also shifts sorted rows at these boundaries.",
+          "keys": [
+            "checkpoint 10 account.orders[0].timeInForce",
+            "checkpoint 7 account.orders[0].timeInForce",
+            "checkpoint 7 account.orders[3].timeInForce",
+            "checkpoint 8 account.orders[0].timeInForce",
+            "checkpoint 9 account.orders[0].timeInForce"
+          ]
+        },
+        {
+          "divergence": "Earlier native open-order reconciliation removes closed market order 40; TS retains that FILLED row. Stop order 50 shifts from index 5 to 4, so these literal row paths reflect lifecycle retention and alignment, not same-order economic disagreement.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[4].filled",
+            "checkpoint 10 account.orders[4].id",
+            "checkpoint 10 account.orders[4].parentId",
+            "checkpoint 10 account.orders[4].price",
+            "checkpoint 10 account.orders[4].remaining",
+            "checkpoint 10 account.orders[4].side",
+            "checkpoint 10 account.orders[4].status",
+            "checkpoint 10 account.orders[4].type",
+            "checkpoint 10 account.orders[5]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[4].filled",
+            "checkpoint 7 account.orders[4].id",
+            "checkpoint 7 account.orders[4].parentId",
+            "checkpoint 7 account.orders[4].price",
+            "checkpoint 7 account.orders[4].remaining",
+            "checkpoint 7 account.orders[4].side",
+            "checkpoint 7 account.orders[4].status",
+            "checkpoint 7 account.orders[4].type",
+            "checkpoint 7 account.orders[5]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[4].filled",
+            "checkpoint 8 account.orders[4].id",
+            "checkpoint 8 account.orders[4].parentId",
+            "checkpoint 8 account.orders[4].price",
+            "checkpoint 8 account.orders[4].remaining",
+            "checkpoint 8 account.orders[4].side",
+            "checkpoint 8 account.orders[4].status",
+            "checkpoint 8 account.orders[4].type",
+            "checkpoint 8 account.orders[5]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[4].filled",
+            "checkpoint 9 account.orders[4].id",
+            "checkpoint 9 account.orders[4].parentId",
+            "checkpoint 9 account.orders[4].price",
+            "checkpoint 9 account.orders[4].remaining",
+            "checkpoint 9 account.orders[4].side",
+            "checkpoint 9 account.orders[4].status",
+            "checkpoint 9 account.orders[4].type",
+            "checkpoint 9 account.orders[5]"
           ]
         }
       ]
