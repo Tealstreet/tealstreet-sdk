@@ -337,6 +337,29 @@ pub struct SpotMeta {
     pub universe: Vec<safe_cex_engine::startup::Row<SpotMarket>>,
     pub tokens: Vec<safe_cex_engine::startup::Row<SpotToken>>,
 }
+impl SpotMeta {
+    /// One pass when every row is well formed; a malformed row falls back to
+    /// the tolerant per-row parse (see `startup::rows`).
+    pub fn parse(text: &str) -> serde_json::Result<Self> {
+        #[derive(Deserialize)]
+        struct WellFormed {
+            universe: Vec<SpotMarket>,
+            tokens: Vec<SpotToken>,
+        }
+        use safe_cex_engine::startup::Row;
+        match serde_json::from_str::<WellFormed>(text) {
+            Ok(meta) => Ok(Self {
+                universe: meta
+                    .universe
+                    .into_iter()
+                    .map(|row| Row(Some(row)))
+                    .collect(),
+                tokens: meta.tokens.into_iter().map(|row| Row(Some(row))).collect(),
+            }),
+            Err(_) => serde_json::from_str(text),
+        }
+    }
+}
 #[derive(Deserialize)]
 pub struct SpotMarket {
     pub name: String,

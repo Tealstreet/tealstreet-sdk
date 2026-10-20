@@ -47,7 +47,9 @@ starts a real native Coinbase catalog, so workspace resolution cannot mask a
 missing artifact. `EXCHANGE_ENGINE=rust` selects the supported native path;
 unset keeps the registry default. Tests selected by `SAFE_CEX_WASM_TESTS=1`
 exercise real protocol tool calls and account state, using documented inputs.
-Failed native startup is retried with a fresh account on the next tool call;
+Tools are chosen from `exchange.loadCapabilities()`, which creates the native
+engine without starting it; a failed load lists tools from base answers and
+surfaces on the first call. Failed native startup is retried with a fresh account on the next tool call;
 concurrent calls share the replacement startup. Keep shutdown reading
 `instance.exchange` at call time, since destructuring would retain the failed
 account. Rust accounts reject `EXCHANGE_SIGNER_HEADER` before issuing requests;

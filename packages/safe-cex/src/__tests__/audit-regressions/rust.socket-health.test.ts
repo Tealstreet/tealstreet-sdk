@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { RUST_SOCKET_STALE_MS, RustSocketHandle } from '../../exchanges/rust/rustSockets';
 import { DefaultStore } from '../../store/store.base';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 type Handlers = Parameters<Transport['connect']>[1];
 interface FakeSocket {
@@ -36,6 +37,7 @@ const setup = async () => {
     return { op: 'wsConnect', socket, url: `wss://venue.test/${channel}/${socket}`, channel };
   };
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('bybit'),
     start: () => JSON.stringify([connect('public'), connect('private')]),
     command: (json) => {
       const command = JSON.parse(json);

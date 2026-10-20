@@ -11,6 +11,7 @@ import {
 } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import { RUST_SOCKET_STALE_MS } from '@tealstreet/safe-cex/src/exchanges/rust/rustSockets';
 import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
+import { engineCapabilities } from '@tealstreet/safe-cex/src/__tests__/fixtures/engineCapabilities';
 
 import { ConnectionMonitor } from '../../utils/ConnectionMonitor';
 import { BaseCommand } from '../BaseCommand';
@@ -33,6 +34,7 @@ const connected = async () => {
   const sockets: Array<{ url: string; handlers: Handlers; closed: boolean }> = [];
   const engineCloses: number[] = [];
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('bybit'),
     start: () =>
       JSON.stringify([
         { op: 'wsConnect', socket: 1, url: 'wss://venue.test/public', channel: 'public' },

@@ -108,6 +108,18 @@ credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
 
+## Rust engine capabilities
+
+Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
+read through `EngineHost.capabilities()`): account identity, client-order
+lookup, history axes, fills by order id, native cancel-all, leverage reads and
+maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
+order-book queries and options. `RustEngineExchange` routes from that record,
+never from venue names, and adopts it once the engine exists (`ensureHost` or
+`start`); `engineCapabilities` is undefined before then. Missing history axes
+take the branded base fallbacks, so `exchange.capabilities` reports them absent
+once the engine exists.
+
 ## Rust engine failure
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
@@ -536,8 +548,11 @@ See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
 and `fetchHistoricalFills`. These functions carry a private
-runtime brand exposed through `isBaseCapabilityFallback`; derived class fields
-replace the branded function during construction. The deterministic capability
+runtime brand; derived class fields replace the branded function during
+construction. `exchange.capabilities` is the only reader: a capability is
+present when its method (`CAPABILITY_METHODS`) is neither the branded fallback
+nor an unconditional `return []`. Subclasses opt out of an axis with
+`markBaseCapabilityFallback`. The deterministic capability
 suite in `src/__tests__/audit-regressions/exchange-metadata-capabilities.test.ts`
 loads the real registry and enforces the following minimum contracts:
 
@@ -548,7 +563,7 @@ loads the real registry and enforces the following minimum contracts:
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
-the capability brand on `fetchHistoricalFills` and then applies
+`exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
 must be walked by symbols discovered from the income ledger. A branded fallback,
 an unenumerable symbol-scoped venue, and an empty result are three different
@@ -869,8 +884,8 @@ existing connection only where the venue keeps them in the same account as its
 derivatives, so balance, margin and positions stay one view. A venue with a separate
 options account gets its own exchange name instead. Option markets carry
 `Market.option`; chains, expiries and account greeks come from `fetchOptionChain`,
-`fetchOptionExpiries` and `fetchAccountGreeks`, which are branded, so check them with
-`isInertCapability`. Chains are fetched on demand and never enter the store, so the
+`fetchOptionExpiries` and `fetchAccountGreeks`; check them with
+`exchange.capabilities` (`optionChain`, `optionExpiries`, `accountGreeks`). Chains are fetched on demand and never enter the store, so the
 perp ticker path is unchanged when options are on.
 
 ### Decision Flow
@@ -917,7 +932,13 @@ Is requiresCors true?
   before the browser shared-worker or CLI/global refresh path, but invalid,
   expired, empty, or throwing contextual providers must fall back to the normal
   module token path. Do not replace this with module-global `setProxyToken` in
-  multi-user hosts.
+  multi-user hosts. Rust engine transports capture the provider of the context
+  that created the account and reinstate it around each proxy authorization
+  (`withProxyTokenProvider`), because engine requests start from timers, sockets
+  and shared feeds whose async context is not the account's. HOW requests and
+  relay sockets read the token after awaits or on open, so they bind the lookup
+  at request/socket start through `HOWConfig.bindProxyToken`
+  (`bindProxyTokenLookup`); the engine creates relays inside the scope.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;

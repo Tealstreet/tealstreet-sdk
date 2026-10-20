@@ -2,6 +2,7 @@
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::de::number;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -58,18 +59,34 @@ pub struct Execution {
     timestamp: f64,
     fill: Fill,
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
     connected_at: f64,
     last_payload: Option<f64>,
     last_recovery: Option<f64>,
     recovery_started: Option<f64>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            connected_at: 0.0,
+            last_payload: None,
+            last_recovery: None,
+            recovery_started: None,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 180_000.0,
+                idle_timeout_ms: 180_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 struct OrderBatch {
     revision: u64,
@@ -779,13 +796,9 @@ impl Lighter {
     }
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.open = false;
-        self.account.connection.last_received = cx.now;
+        self.account.connection.supervisor.connecting(cx);
         self.account.connection.socket =
             Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Private));
-        if let Some(timer) = self.account.connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
     }
     fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let account = self.account.account_index.unwrap();
@@ -800,11 +813,7 @@ impl Lighter {
             return false;
         }
         self.account.connection.open = true;
-        if let Some(timer) = self.account.connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.connection.last_received = cx.now;
-        self.account.connection.attempts = 0;
+        self.account.connection.supervisor.opened(cx);
         self.account.connection.connected_at = cx.now;
         self.account.connection.last_payload = None;
         self.account.connection.last_recovery = None;
@@ -816,7 +825,6 @@ impl Lighter {
             socket,
             format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
         );
-        self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
         self.refresh_account(cx);
         self.refresh_orders(cx);
         if let Some(since) = self.account.live_after {
@@ -847,72 +855,71 @@ impl Lighter {
         self.account.connection.socket = None;
         let connection = &self.account.connection;
         self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
-        if let Some(t) = self.account.connection.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.account.connection.attempts = self.account.connection.attempts.saturating_add(1);
-        let delay = if code == 1013 {
-            30_000.0
-        } else {
-            (1000.0 * 2f64.powi(self.account.connection.attempts.min(5) as i32 - 1)).min(30_000.0)
-        };
-        self.account.connection.reconnect = Some(cx.set_timer(delay));
+        let minimum = if code == 1013 { 30_000.0 } else { 0.0 };
+        self.account.connection.supervisor.retry_after(cx, minimum);
         true
     }
-    pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.connection.reconnect == Some(timer) {
-            self.account.connection.reconnect = None;
-            self.connect_private(cx);
-            return true;
+    // Payload staleness is checked on the same 10s cadence as the heartbeat.
+    fn private_heartbeat(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        let connection = &self.account.connection;
+        if connection
+            .recovery_started
+            .is_some_and(|at| cx.now - at >= 20_000.0)
+        {
+            cx.close(socket);
+            self.account_close(cx, socket, 1006);
+            return;
         }
-        if self.account.connection.watchdog == Some(timer) {
-            self.account.connection.watchdog = None;
-            if let Some(socket) = self.account.connection.socket {
-                if cx.now - self.account.connection.last_received >= 180_000.0 {
+        let payload_age = cx.now - connection.last_payload.unwrap_or(connection.connected_at);
+        let stale_after = if connection.last_payload.is_some() {
+            120_000.0
+        } else {
+            180_000.0
+        };
+        if payload_age >= stale_after
+            && connection.recovery_started.is_none()
+            && connection
+                .last_recovery
+                .is_none_or(|at| cx.now - at >= 180_000.0)
+        {
+            let quiet_since = connection.last_payload.unwrap_or(connection.connected_at);
+            self.account.connection.last_recovery = Some(cx.now);
+            self.account.connection.recovery_started = Some(cx.now);
+            self.arm_outage(quiet_since);
+            self.account.live_after = self.account.outage.map(|outage| self.cutoff(outage));
+            self.subscribe_private(cx, socket);
+        }
+        cx.send(
+            socket,
+            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
+        );
+    }
+    pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        match self.account.connection.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => {}
+            Tick::Reconnect => {
+                self.connect_private(cx);
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.account.connection.socket {
                     cx.close(socket);
                     self.account_close(cx, socket, 1006);
-                } else {
-                    if self.account.connection.open {
-                        let connection = &self.account.connection;
-                        if connection
-                            .recovery_started
-                            .is_some_and(|at| cx.now - at >= 20_000.0)
-                        {
-                            cx.close(socket);
-                            self.account_close(cx, socket, 1006);
-                            return true;
-                        }
-                        let payload_age =
-                            cx.now - connection.last_payload.unwrap_or(connection.connected_at);
-                        let stale_after = if connection.last_payload.is_some() {
-                            120_000.0
-                        } else {
-                            180_000.0
-                        };
-                        if payload_age >= stale_after
-                            && connection.recovery_started.is_none()
-                            && connection
-                                .last_recovery
-                                .is_none_or(|at| cx.now - at >= 180_000.0)
-                        {
-                            let quiet_since =
-                                connection.last_payload.unwrap_or(connection.connected_at);
-                            self.account.connection.last_recovery = Some(cx.now);
-                            self.account.connection.recovery_started = Some(cx.now);
-                            self.arm_outage(quiet_since);
-                            self.account.live_after =
-                                self.account.outage.map(|outage| self.cutoff(outage));
-                            self.subscribe_private(cx, socket);
-                        }
-                        cx.send(
-                            socket,
-                            format!(r#"{{"type":"ping","timestamp":{}}}"#, cx.now),
-                        );
-                    }
-                    self.account.connection.watchdog = Some(cx.set_timer(10_000.0));
                 }
+                return true;
             }
-            return true;
+            Tick::Ping => {
+                if let Some(socket) = self
+                    .account
+                    .connection
+                    .socket
+                    .filter(|_| self.account.connection.open)
+                {
+                    self.private_heartbeat(cx, socket);
+                }
+                return true;
+            }
+            Tick::Handled => return true,
         }
         if self.account.sync == Some(timer) {
             self.account.sync = Some(cx.set_timer(2_000.0));
@@ -1845,7 +1852,7 @@ impl Lighter {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
-        self.account.connection.last_received = cx.now;
+        self.account.connection.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Frame<'_>>(text) else {
             cx.log(LogLevel::Warning, "Invalid Lighter private frame");
             return true;
