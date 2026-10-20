@@ -43,6 +43,7 @@ unsupported), venue code and message preserved, every failure visible to the
 user with its cause. Design pass first (Opus), then lanes apply it per layer.
 The client contract outside safe-cex (error shape, logger, exchange interface)
 may change when there is a good argument; update tealstreet-next callers with it.
+Audit results and the standards: `docs/plans/RUST_QUALITY.md`.
 
 ## Cutover
 
