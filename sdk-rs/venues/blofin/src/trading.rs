@@ -852,10 +852,12 @@ impl Blofin {
             trigger_type: order.trigger_type,
             tp_trigger_type: None,
             sl_trigger_type: None,
-            max_slippage_pct: None,
             client_order_id: None,
             close: None,
             stp_mode: None,
+            max_slippage_pct: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
         };
         self.placement(cx, &raw, source)
     }
@@ -894,6 +896,13 @@ impl Blofin {
             let mut job = Job::new(command_id);
             match command {
                 Command::PlaceOrders { orders, .. } => {
+                    if orders.iter().any(|order| {
+                        order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+                    }) {
+                        return Err(
+                            "Bybit BBO and TickSize controls are not supported by BloFin".into(),
+                        );
+                    }
                     let mut seen = HashSet::new();
                     let mut rows = Vec::new();
                     for opts in &orders {

@@ -66,7 +66,6 @@ fn opts(id: &str) -> PlaceOrderOpts {
         amount: 0.01,
         price: Some(69000.0),
         trigger_price: None,
-        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: None,
@@ -77,6 +76,9 @@ fn opts(id: &str) -> PlaceOrderOpts {
         client_order_id: (!id.is_empty()).then(|| id.to_owned()),
         close: None,
         stp_mode: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
 fn order(id: &str, kind: OrderType) -> Order {
@@ -154,6 +156,33 @@ fn single_ack(r: &HttpRequest, id: u64) -> Value {
     let payload = body(r);
     json!({"orderId":id.to_string(),"clientOrderId":payload.get("newClientOrderId").unwrap_or(&payload["clientAlgoId"]),"success":true})
 }
+
+#[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for bbo in [true, false] {
+        let mut e = engine();
+        let mut second = opts("second");
+        if bbo {
+            second.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        } else {
+            second.bybit_slippage_tolerance_ticks = Some(2.0);
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts("first"), second],
+            },
+        );
+        assert!(writes(&actions).is_empty());
+        assert!(e.store().orders().is_empty());
+        assert!(done(&actions).unwrap_err().contains("Bybit"));
+    }
+}
+
 #[test]
 fn regular_batches_are_five_sequential_and_correlated_by_echoed_id() {
     let mut e = engine();

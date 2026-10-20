@@ -210,10 +210,12 @@ impl Hyperliquid {
                     trigger_type: None,
                     tp_trigger_type: None,
                     sl_trigger_type: None,
-                    max_slippage_pct: None,
                     client_order_id: None,
                     close: None,
                     stp_mode: None,
+                    max_slippage_pct: None,
+                    bybit_bbo: None,
+                    bybit_slippage_tolerance_ticks: None,
                 };
                 if opts.kind == OrderType::TakeProfit
                     && let Some(t) = cx.store.ticker(&opts.symbol)
@@ -312,6 +314,11 @@ impl Hyperliquid {
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut seen = HashSet::new();
         for o in orders {
+            if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                return Err(
+                    "Bybit BBO and TickSize controls are not supported by Hyperliquid".into(),
+                );
+            }
             let m = cx
                 .store
                 .market(&o.symbol)

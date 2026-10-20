@@ -435,6 +435,11 @@ impl MexcFutures {
         orders: Vec<PlaceOrderOpts>,
         allow_batch: bool,
     ) -> Result<VecDeque<Step>, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit BBO and TickSize controls are not supported by MEXC".into());
+        }
         if orders.iter().any(|o| o.client_order_id.is_some()) {
             return Err("mexc cannot honor a caller clientOrderId".into());
         }
@@ -652,7 +657,6 @@ impl MexcFutures {
                         }),
                         price: price.or(Some(o.price)),
                         trigger_price: None,
-                        max_slippage_pct: None,
                         reduce_only: Some(o.reduce_only),
                         time_in_force: o.time_in_force,
                         trigger_type: o.trigger_type,
@@ -663,6 +667,9 @@ impl MexcFutures {
                         client_order_id: None,
                         close: o.close,
                         stp_mode: None,
+                        max_slippage_pct: None,
+                        bybit_bbo: None,
+                        bybit_slippage_tolerance_ticks: None,
                     };
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {

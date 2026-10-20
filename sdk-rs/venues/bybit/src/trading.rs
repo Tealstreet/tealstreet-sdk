@@ -9,7 +9,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
     StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, num};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -27,10 +27,20 @@ const TAKE_PROFIT_SUFFIX: &str = "__take_profit";
 pub struct Request {
     command: CommandId,
     call: Call,
+    local: Option<LocalWrite>,
+}
+
+struct LocalWrite {
+    path: &'static str,
+    body: String,
+    before: Vec<Order>,
+    socket: Option<SocketId>,
+    snapshot: u32,
 }
 
 /// What a response means for its job.
 enum Call {
+    Hyro(crate::hyro::Request),
     ResolveMode {
         symbol: String,
         command: Box<Command>,
@@ -89,6 +99,7 @@ struct Job {
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
     mode_version: u64,
+    pub(crate) hyro: crate::hyro::State,
 }
 
 fn side_text(side: OrderSide) -> &'static str {
@@ -109,6 +120,33 @@ fn tif_text(tif: TimeInForce) -> &'static str {
 
 fn number(value: f64) -> String {
     num::format(value)
+}
+
+fn stop_trigger_price(opts: &PlaceOrderOpts, precision: f64) -> Result<f64, String> {
+    opts.trigger_price
+        .filter(|price| *price != 0.0)
+        .or(opts.price.filter(|price| *price != 0.0))
+        .map(|price| num::adjust(price, precision))
+        .filter(|price| price.is_finite() && *price > 0.0)
+        .ok_or_else(|| {
+            format!(
+                "A stop needs a finite positive trigger price ({})",
+                opts.symbol
+            )
+        })
+}
+
+fn validate_stop_triggers(cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
+    for opts in orders {
+        if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+            let market = cx
+                .store
+                .market(&opts.symbol)
+                .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+            stop_trigger_price(opts, market.precision.price)?;
+        }
+    }
+    Ok(())
 }
 
 /// `^[A-Za-z0-9_-]{1,36}$`, Bybit's `orderLinkId` rule.
@@ -184,26 +222,143 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
 }
 
 /// One order's fields, for a batch item and, with `category`, a single create.
-struct Lot {
+pub(crate) struct Lot {
     item: Body,
-    single: Body,
+    pub(crate) single: Body,
 }
 
 impl BybitLinear {
+    fn local_order_lifecycle(&self) -> bool {
+        self.variant == crate::Variant::Demo || self.variant.is_hyro()
+    }
+
+    fn variant_control(&self, command: &Command) -> Option<(CommandId, Result<(), String>)> {
+        if self.variant.is_spot() {
+            let id = match command {
+                Command::SetLeverage { command, .. }
+                | Command::SetMarginType { command, .. }
+                | Command::SetPositionMode { command, .. } => *command,
+                _ => return None,
+            };
+            return Some((
+                id,
+                Err("Bybit spot has no derivative position settings".into()),
+            ));
+        }
+        if self.variant.is_hyro() {
+            match command {
+                Command::SetPositionMode { command, hedged } => {
+                    return Some((
+                        *command,
+                        if *hedged {
+                            Err("HyroTrader supports one-way mode only".into())
+                        } else {
+                            Ok(())
+                        },
+                    ));
+                }
+                Command::SetMarginType {
+                    command, isolated, ..
+                } => {
+                    return Some((
+                        *command,
+                        if *isolated {
+                            Err("HyroTrader supports cross margin only".into())
+                        } else {
+                            Ok(())
+                        },
+                    ));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(crate) fn check_ids(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[PlaceOrderOpts],
+    ) -> Result<(), String> {
+        if self.variant.is_hyro() && orders.iter().any(|o| o.client_order_id.is_some()) {
+            return Err("HyroTrader does not support caller client order IDs".into());
+        }
+        check_client_order_ids(cx, orders)
+    }
+
+    pub(crate) fn send_hyro(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rest: Rest,
+        request: crate::hyro::Request,
+    ) {
+        self.send(
+            cx,
+            rest,
+            Then::Trade(Request {
+                command: 0,
+                call: Call::Hyro(request),
+                local: None,
+            }),
+        );
+    }
+
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // Validate the whole batch before mode reads or writes: an unpriced
+        // protective order must never become an ordinary market order.
+        if let Command::PlaceOrders { command, orders } = &command
+            && let Err(error) = validate_stop_triggers(cx, orders)
+        {
+            cx.done(*command, Err(error));
+            return;
+        }
+        if self.variant.is_hyro() {
+            if !self.private_ready() {
+                let id = match &command {
+                    Command::PlaceOrders { command, .. }
+                    | Command::CancelOrders { command, .. }
+                    | Command::AmendOrder { command, .. }
+                    | Command::CancelSymbolOrders { command, .. }
+                    | Command::SetLeverage { command, .. }
+                    | Command::SetMarginType { command, .. }
+                    | Command::SetPositionMode { command, .. } => *command,
+                    _ => return,
+                };
+                cx.done(
+                    id,
+                    Err(
+                        "HyroTrader account is reconnecting; wait for private state reconciliation"
+                            .into(),
+                    ),
+                );
+                return;
+            }
+            if let Command::PlaceOrders { command, orders } = command {
+                self.start_hyro_place(cx, command, &orders);
+                return;
+            }
+        }
+        if let Some((id, result)) = self.variant_control(&command) {
+            cx.done(id, result.map(|_| "[]".to_owned()));
+            return;
+        }
         // A settle-coin snapshot omits flat symbols. Resolve their mode before
         // planning any writes, since Bybit modes can differ by symbol.
-        let unresolved = match &command {
-            Command::PlaceOrders { command, orders } => orders
-                .iter()
-                .find(|o| !self.account.position_modes.contains_key(&o.symbol))
-                .map(|o| (*command, o.symbol.clone())),
-            Command::AmendOrder { command, id, .. } => cx
-                .store
-                .order(id)
-                .filter(|o| !self.account.position_modes.contains_key(&o.symbol))
-                .map(|o| (*command, o.symbol.clone())),
-            _ => None,
+        let unresolved = if self.variant.is_spot() || self.variant.is_hyro() {
+            None
+        } else {
+            match &command {
+                Command::PlaceOrders { command, orders } => orders
+                    .iter()
+                    .find(|o| !self.account.position_modes.contains_key(&o.symbol))
+                    .map(|o| (*command, o.symbol.clone())),
+                Command::AmendOrder { command, id, .. } => cx
+                    .store
+                    .order(id)
+                    .filter(|o| !self.account.position_modes.contains_key(&o.symbol))
+                    .map(|o| (*command, o.symbol.clone())),
+                _ => None,
+            }
         };
         if let Some((id, symbol)) = unresolved {
             if self.credentials.is_none() {
@@ -221,12 +376,13 @@ impl BybitLinear {
                 Rest::get(
                     "/v5/position/list",
                     crate::sign::Query::new()
-                        .str("category", "linear")
+                        .str("category", self.paths.category)
                         .str("symbol", &symbol),
                 )
                 .signed(),
                 Then::Trade(Request {
                     command: id,
+                    local: None,
                     call: Call::ResolveMode {
                         symbol,
                         command: Box::new(command),
@@ -243,7 +399,7 @@ impl BybitLinear {
                     .iter()
                     .filter_map(|id| cx.store.order(id).cloned())
                     .collect();
-                (command, Ok(plan_cancel(&orders)))
+                (command, Ok(self.plan_cancel(&orders)))
             }
             Command::AmendOrder {
                 command,
@@ -252,25 +408,76 @@ impl BybitLinear {
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
             Command::CancelSymbolOrders { command, symbol } => {
-                let ids = cx
-                    .store
-                    .orders()
-                    .iter()
-                    .filter(|o| o.symbol == symbol)
-                    .map(|o| o.id.clone())
-                    .collect();
-                let body = Body::new()
-                    .str("category", "linear")
-                    .str("symbol", &symbol)
-                    .finish();
-                let call = Call::CancelAll { ids };
-                (command, Ok(single("/v5/order/cancel-all", body, call)))
+                if self.variant.is_hyro() {
+                    let orders: Vec<Order> = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|o| o.symbol == symbol)
+                        .cloned()
+                        .collect();
+                    let job = self.plan_cancel(&orders);
+                    self.trading.jobs.insert(command, job);
+                    self.advance(cx, command);
+                    return;
+                }
+                if self.variant.is_spot() {
+                    let mut job = Job {
+                        continue_on_error: true,
+                        ..Job::default()
+                    };
+                    // Spot defaults to ordinary orders; every trigger family
+                    // needs its own cancel, even when absent from our snapshot.
+                    for filter in ["Order", "StopOrder", "tpslOrder"] {
+                        let ids = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|o| {
+                                o.symbol == symbol
+                                    && !is_virtual(&o.id)
+                                    && spot_order_filter(o.kind) == filter
+                            })
+                            .map(|o| o.id.clone())
+                            .collect();
+                        job.steps.push_back(Step {
+                            delay_ms: 0.0,
+                            requests: vec![Planned {
+                                path: "/v5/order/cancel-all",
+                                body: Body::new()
+                                    .str("category", self.paths.category)
+                                    .str("symbol", &symbol)
+                                    .str("orderFilter", filter)
+                                    .finish(),
+                                call: Call::CancelAll { ids },
+                            }],
+                        });
+                    }
+                    (command, Ok(job))
+                } else {
+                    let ids = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|o| o.symbol == symbol)
+                        .map(|o| o.id.clone())
+                        .collect();
+                    let body = Body::new()
+                        .str("category", self.paths.category)
+                        .str("symbol", &symbol)
+                        .finish();
+                    let call = Call::CancelAll { ids };
+                    (command, Ok(single("/v5/order/cancel-all", body, call)))
+                }
             }
             Command::SetLeverage {
                 command,
                 symbol,
                 leverage,
-            } => (command, plan_leverage(cx, symbol, leverage)),
+            } => (
+                command,
+                plan_leverage(cx, self.paths.category, symbol, leverage),
+            ),
             Command::SetMarginType {
                 command, isolated, ..
             } => {
@@ -287,9 +494,41 @@ impl BybitLinear {
                 )
             }
             Command::SetPositionMode { command, hedged } => {
+                if self.variant.is_inverse() {
+                    let mut coins = std::collections::BTreeSet::new();
+                    for market in cx.store.markets() {
+                        coins.insert(market.base.clone());
+                    }
+                    let mut job = Job::default();
+                    for coin in coins {
+                        let body = Body::new()
+                            .str("category", self.paths.category)
+                            .str("coin", &coin)
+                            .int("mode", if hedged { 3 } else { 0 })
+                            .finish();
+                        job.steps.push_back(Step {
+                            delay_ms: 0.0,
+                            requests: vec![Planned {
+                                path: "/v5/position/switch-mode",
+                                body,
+                                call: Call::PositionMode { hedged },
+                            }],
+                        });
+                    }
+                    if job.steps.is_empty() {
+                        cx.done(
+                            command,
+                            Err("No inverse markets loaded for position-mode switch".into()),
+                        );
+                    } else {
+                        self.trading.jobs.insert(command, job);
+                        self.advance(cx, command);
+                    }
+                    return;
+                }
                 // Linear modes switch per settle coin; USDT carries every perp but USDC's.
                 let body = Body::new()
-                    .str("category", "linear")
+                    .str("category", self.paths.category)
                     .str("coin", "USDT")
                     .int("mode", if hedged { 3 } else { 0 })
                     .finish();
@@ -331,15 +570,41 @@ impl BybitLinear {
                 let step = job.steps.pop_front().expect("checked above");
                 job.outstanding = step.requests.len();
                 for planned in step.requests {
+                    let local = self.local_order_lifecycle().then(|| LocalWrite {
+                        path: planned.path,
+                        body: planned.body.clone(),
+                        before: cx.store.orders().to_vec(),
+                        socket: self.private.socket,
+                        snapshot: self.account.orders_snapshot_version,
+                    });
                     let request = Request {
                         command,
                         call: planned.call,
+                        local,
                     };
+                    if self.variant.is_hyro() {
+                        if !self.private_ready() {
+                            if let Some(job) = self.trading.jobs.get_mut(&command) {
+                                job.error = Some("HyroTrader private state is recovering".into());
+                                job.outstanding = job.outstanding.saturating_sub(1);
+                            }
+                            continue;
+                        }
+                        self.note_hyro_write();
+                    }
                     self.send(
                         cx,
                         Rest::post(planned.path, planned.body),
                         Then::Trade(request),
                     );
+                }
+                if self
+                    .trading
+                    .jobs
+                    .get(&command)
+                    .is_some_and(|job| job.outstanding == 0)
+                {
+                    self.advance(cx, command);
                 }
             }
             None => {
@@ -375,7 +640,23 @@ impl BybitLinear {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        let Request { command, call } = request;
+        let Request {
+            command,
+            call,
+            local,
+        } = request;
+        if let (Some(local), Ok(response)) = (&local, &response)
+            && venue_error(response).is_none()
+        {
+            self.apply_local_write(cx, local, response.body);
+        }
+        let call = match call {
+            Call::Hyro(request) => {
+                self.on_hyro_response(cx, request, response);
+                return;
+            }
+            call => call,
+        };
         let call = match call {
             Call::ResolveMode {
                 symbol,
@@ -442,7 +723,13 @@ impl BybitLinear {
         let mut errors = Vec::new();
         let mut fallback_steps = Vec::new();
         match (call, outcome) {
-            (Call::PlaceOne | Call::Amend, Ok(body)) => {
+            (Call::PlaceOne, Ok(body)) => {
+                match serde_json::from_str::<Placed>(body).ok().and_then(|p| p.result).and_then(|r| r.order_id).filter(|id| !id.is_empty()) {
+                    Some(id) => ids.push(id.into_owned()),
+                    None => errors.push("Bybit order outcome is unknown: create acknowledgement has no order ID; reconcile before replacing".into()),
+                }
+            }
+            (Call::Amend, Ok(body)) => {
                 if let Ok(placed) = serde_json::from_str::<Placed>(body) {
                     ids.extend(
                         placed
@@ -514,14 +801,33 @@ impl BybitLinear {
                         _ => canceled.push(id.clone()),
                     }
                 }
-                mark_canceled(cx, &canceled);
+                mark_canceled(cx, &canceled, self.local_order_lifecycle());
             }
             (Call::Cancel { ids } | Call::CancelAll { ids }, Err((_, message)))
                 if already_gone(&message) =>
             {
-                mark_canceled(cx, &ids);
+                mark_canceled(cx, &ids, self.local_order_lifecycle());
             }
-            (Call::CancelAll { ids }, Ok(_)) => mark_canceled(cx, &ids),
+            (Call::CancelAll { ids }, Ok(body)) => {
+                #[derive(serde::Deserialize)]
+                struct Reply {
+                    result: Option<Success>,
+                }
+                #[derive(serde::Deserialize)]
+                struct Success {
+                    success: Option<String>,
+                }
+                let rejected = serde_json::from_str::<Reply>(body)
+                    .ok()
+                    .and_then(|r| r.result)
+                    .and_then(|r| r.success)
+                    .is_some_and(|s| s != "1");
+                if rejected {
+                    errors.push("Bybit cancel-all was not successful".into());
+                } else {
+                    mark_canceled(cx, &ids, self.local_order_lifecycle());
+                }
+            }
             (Call::Leverage { symbol, leverage }, outcome)
                 if outcome
                     .as_ref()
@@ -617,6 +923,9 @@ impl BybitLinear {
         side: OrderSide,
         reduce: bool,
     ) -> i64 {
+        if self.variant.is_spot() || self.variant.is_hyro() {
+            return 0;
+        }
         if !self
             .account
             .position_modes
@@ -637,7 +946,7 @@ impl BybitLinear {
         self.position_idx(cx, symbol, side, true)
     }
 
-    fn full_position_opposite(cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> bool {
+    fn full_position_opposite(&self, cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> bool {
         let side = match opts.side {
             OrderSide::Buy => PositionSide::Short,
             OrderSide::Sell => PositionSide::Long,
@@ -646,33 +955,71 @@ impl BybitLinear {
             p.symbol == opts.symbol
                 && p.side == side
                 && p.contracts != 0.0
-                && p.contracts >= opts.amount
+                && if self.variant.is_inverse() {
+                    p.notional
+                } else {
+                    p.contracts
+                } >= opts.amount
         })
     }
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
-        check_client_order_ids(cx, orders)?;
+        self.check_ids(cx, orders)?;
         let mut job = Job {
             continue_on_error: true,
             ..Job::default()
         };
         let mut lots = Vec::new();
         for opts in orders {
+            execution_params(opts, self.variant.is_spot(), self.variant.is_hyro())?;
+            if !opts.amount.is_finite() || opts.amount < 0.0 {
+                return Err("Order quantity must be finite and nonnegative".into());
+            }
             let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
-            if stop && Self::full_position_opposite(cx, opts) {
+            if self.variant.is_spot() && opts.kind == OrderType::TrailingStopLoss {
+                return Err("Bybit spot has no trailing-position stops".into());
+            }
+            if !self.variant.is_spot() && stop && self.full_position_opposite(cx, opts) {
                 let body = self.position_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
             } else if opts.kind == OrderType::TrailingStopLoss {
                 let body = self.trailing_stop(cx, opts)?;
                 job.steps.push_back(trading_stop_step(body));
+            } else if opts.max_slippage_pct.is_some()
+                || opts.bybit_bbo.is_some()
+                || opts.bybit_slippage_tolerance_ticks.is_some()
+            {
+                for lot in self.format_lots(cx, opts)? {
+                    job.steps.push_back(Step {
+                        delay_ms: 0.0,
+                        requests: vec![Planned {
+                            path: "/v5/order/create",
+                            body: lot.single.finish(),
+                            call: Call::PlaceOne,
+                        }],
+                    });
+                }
             } else {
                 lots.extend(self.format_lots(cx, opts)?);
             }
         }
+        if !self.paths.batch_orders {
+            for lot in lots {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![Planned {
+                        path: "/v5/order/create",
+                        body: lot.single.finish(),
+                        call: Call::PlaceOne,
+                    }],
+                });
+            }
+            return Ok(job);
+        }
         for (index, chunk) in lots.chunks(BATCH_LIMIT).enumerate() {
             let items: Vec<String> = chunk.iter().map(|lot| lot.item.clone().finish()).collect();
             let body = Body::new()
-                .str("category", "linear")
+                .str("category", self.paths.category)
                 .raw("request", &format!("[{}]", items.join(",")))
                 .finish();
             let fallback = chunk
@@ -693,7 +1040,32 @@ impl BybitLinear {
 
     /// One order as create bodies, split into lots above the market's
     /// maximum size; only the first lot carries the attached TP/SL.
-    fn format_lots(&self, cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> Result<Vec<Lot>, String> {
+    pub(crate) fn hyro_stop(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Option<String>, String> {
+        execution_params(opts, false, true)?;
+        if !opts.amount.is_finite() || opts.amount < 0.0 {
+            return Err("Order quantity must be finite and nonnegative".into());
+        }
+        if opts.kind == OrderType::TrailingStopLoss {
+            return self.trailing_stop(cx, opts).map(Some);
+        }
+        if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && self.full_position_opposite(cx, opts)
+        {
+            return self.position_stop(cx, opts).map(Some);
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn format_lots(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Lot>, String> {
+        let execution = execution_params(opts, self.variant.is_spot(), self.variant.is_hyro())?;
         let market = cx
             .store
             .market(&opts.symbol)
@@ -701,7 +1073,11 @@ impl BybitLinear {
         let p_price = market.precision.price;
         let p_amount = market.precision.amount;
         let adjust_price = |p: f64| num::adjust(p, p_price);
-        let amount = num::adjust(opts.amount, p_amount);
+        let amount = if self.variant.is_inverse() {
+            opts.amount.round()
+        } else {
+            num::adjust(opts.amount, p_amount)
+        };
         if !amount.is_finite() || amount <= 0.0 {
             return Err("Order quantity must be finite and positive".into());
         }
@@ -714,11 +1090,11 @@ impl BybitLinear {
         let price = opts.price.filter(|p| *p != 0.0).map(adjust_price);
         // A stop with no position to attach to is a reduce-only conditional
         // market order triggering at its price.
-        let trigger_price = opts
-            .trigger_price
-            .filter(|p| *p != 0.0)
-            .or(if stop { price } else { None })
-            .map(adjust_price);
+        let trigger_price = if stop {
+            Some(stop_trigger_price(opts, p_price)?)
+        } else {
+            opts.trigger_price.filter(|p| *p != 0.0).map(adjust_price)
+        };
         let conditional = opts.kind == OrderType::Conditional;
         if conditional && trigger_price.is_none() {
             return Err(format!(
@@ -731,10 +1107,11 @@ impl BybitLinear {
             OrderType::Conditional if price.is_some() => "Limit",
             _ => "Market",
         };
-        let limit_price = (opts.kind == OrderType::Limit || (conditional && price.is_some()))
-            .then_some(price)
-            .flatten();
-        let direction = match trigger_price {
+        let limit_price = (execution.bbo_side.is_none()
+            && (opts.kind == OrderType::Limit || (conditional && price.is_some())))
+        .then_some(price)
+        .flatten();
+        let direction = match trigger_price.filter(|_| !self.variant.is_spot()) {
             Some(trigger) => {
                 let ticker = cx
                     .store
@@ -749,14 +1126,36 @@ impl BybitLinear {
             }
             None => None,
         };
+        if self.variant.is_spot() && opts.reduce_only == Some(true) {
+            return Err("Bybit spot does not support reduceOnly".into());
+        }
+        if self.variant.is_spot()
+            && (opts.stop_loss.is_some() || opts.take_profit.is_some())
+            && opts.kind != OrderType::Limit
+        {
+            return Err("Bybit spot attached TP/SL requires a limit order".into());
+        }
         let reduce_only = !conditional && opts.reduce_only == Some(true);
         let position_idx = self.position_idx(cx, &opts.symbol, opts.side, reduce_only);
         let stop_loss = opts.stop_loss.filter(|p| *p != 0.0).map(adjust_price);
         let take_profit = opts.take_profit.filter(|p| *p != 0.0).map(adjust_price);
-        let tif = (limit_price.is_some())
+        let tif = (limit_price.is_some() || execution.bbo_side.is_some())
             .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)));
 
         let max = market.limits.amount.max;
+        if !max.is_finite() || max <= 0.0 {
+            return Err("Market has no valid maximum order quantity".into());
+        }
+        if self.variant.is_inverse() && amount < market.limits.amount.min {
+            return Err("Inverse order quantity is below the market minimum".into());
+        }
+        if [price, trigger_price, stop_loss, take_profit]
+            .into_iter()
+            .flatten()
+            .any(|p| !p.is_finite() || p <= 0.0)
+        {
+            return Err("Order prices must be finite and positive".into());
+        }
         let mut sizes = Vec::new();
         let mut remaining = amount;
         while max > 0.0 && remaining > max {
@@ -767,27 +1166,60 @@ impl BybitLinear {
         let lot = |qty: f64, brackets: bool, category: bool| {
             let mut body = Body::new();
             if category {
-                body = body.str("category", "linear");
+                body = body.str("category", self.paths.category);
             }
             let sl = stop_loss.filter(|_| brackets);
             let tp = take_profit.filter(|_| brackets);
-            body.str("symbol", &opts.symbol)
+            let body = body
+                .str("symbol", &opts.symbol)
                 .str("side", side_text(opts.side))
                 .str("orderType", order_type)
                 .str("qty", &number(qty))
                 .opt_str("price", limit_price.map(number).as_deref())
                 .opt_str("stopLoss", sl.map(number).as_deref())
-                .opt_str("takeProfit", tp.map(number).as_deref())
-                .bool("reduceOnly", reduce_only)
+                .opt_str("takeProfit", tp.map(number).as_deref());
+            let body = if self.variant.is_spot() {
+                body
+            } else {
+                body.bool("reduceOnly", reduce_only)
+            };
+            let body = body
                 .opt_str("triggerPrice", trigger_price.map(number).as_deref())
                 .opt_str("triggerDirection", direction)
-                .opt_str("triggerBy", trigger_by(opts))
-                .opt_str("slTriggerBy", sl.map(|_| sl_trigger_by(opts)))
-                .opt_str("tpTriggerBy", tp.map(|_| tp_trigger_by(opts)))
+                .opt_str(
+                    "triggerBy",
+                    (!self.variant.is_spot())
+                        .then(|| trigger_by(opts))
+                        .flatten(),
+                )
+                .opt_str(
+                    "slTriggerBy",
+                    sl.filter(|_| !self.variant.is_spot())
+                        .map(|_| sl_trigger_by(opts)),
+                )
+                .opt_str(
+                    "tpTriggerBy",
+                    tp.filter(|_| !self.variant.is_spot())
+                        .map(|_| tp_trigger_by(opts)),
+                )
                 .opt_str("timeInForce", tif)
-                .bool("closeOnTrigger", stop)
-                .int("positionIdx", position_idx)
-                .opt_str("orderLinkId", opts.client_order_id.as_deref())
+                .opt_str("bboSideType", execution.bbo_side)
+                .opt_str("bboLevel", execution.bbo_level.as_deref())
+                .opt_str("slippageToleranceType", execution.slippage_kind)
+                .opt_str("slippageTolerance", execution.slippage.as_deref());
+            let body = if self.variant.is_spot() {
+                body.opt_str("marketUnit", (order_type == "Market").then_some("baseCoin"))
+                    .opt_str(
+                        "orderFilter",
+                        trigger_price.map(|_| if stop { "tpslOrder" } else { "StopOrder" }),
+                    )
+                    .opt_str("slOrderType", sl.map(|_| "Market"))
+                    .opt_str("tpOrderType", tp.map(|_| "Market"))
+            } else {
+                body.bool("closeOnTrigger", stop)
+                    .int("positionIdx", position_idx)
+            };
+            body.opt_str("orderLinkId", opts.client_order_id.as_deref())
         };
         Ok(sizes
             .iter()
@@ -805,15 +1237,11 @@ impl BybitLinear {
             .store
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
-        let price = opts
-            .trigger_price
-            .or(opts.price)
-            .map(|p| num::adjust(p, market.precision.price))
-            .ok_or_else(|| format!("A stop needs a price ({})", opts.symbol))?;
+        let price = stop_trigger_price(opts, market.precision.price)?;
         let amount = num::adjust(opts.amount, market.precision.amount);
         let partial = amount != 0.0;
         let mut body = Body::new()
-            .str("category", "linear")
+            .str("category", self.paths.category)
             .str("symbol", &opts.symbol)
             .int(
                 "positionIdx",
@@ -847,7 +1275,7 @@ impl BybitLinear {
             market.precision.price,
         );
         Ok(Body::new()
-            .str("category", "linear")
+            .str("category", self.paths.category)
             .str("symbol", &opts.symbol)
             .int(
                 "positionIdx",
@@ -874,10 +1302,21 @@ impl BybitLinear {
             .market(&order.symbol)
             .ok_or_else(|| format!("Market {} not found", order.symbol))?;
         let price = price.map(|p| num::adjust(p, market.precision.price));
-        let amount = amount.map(|a| num::adjust(a, market.precision.amount));
+        let amount = amount.map(|a| {
+            if self.variant.is_inverse() {
+                a.round()
+            } else {
+                num::adjust(a, market.precision.amount)
+            }
+        });
+        if amount.is_some_and(|a| !a.is_finite() || a <= 0.0)
+            || price.is_some_and(|p| !p.is_finite() || p <= 0.0)
+        {
+            return Err("Amended price and quantity must be finite and positive".into());
+        }
         let base = || {
             Body::new()
-                .str("category", "linear")
+                .str("category", self.paths.category)
                 .str("symbol", &order.symbol)
         };
         let amend = |body: Body| Ok(single("/v5/order/amend", body.finish(), Call::Amend));
@@ -902,7 +1341,6 @@ impl BybitLinear {
                 amount: order.amount,
                 price: Some(target),
                 trigger_price: None,
-                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: None,
@@ -913,6 +1351,9 @@ impl BybitLinear {
                 client_order_id: None,
                 close: None,
                 stp_mode: None,
+                max_slippage_pct: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
             };
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }
@@ -934,7 +1375,7 @@ impl BybitLinear {
                 None => None,
             };
             let body = Body::new()
-                .str("category", "linear")
+                .str("category", self.paths.category)
                 .str("symbol", &order.symbol)
                 .int(
                     "positionIdx",
@@ -974,44 +1415,84 @@ fn trading_stop_job(body: String) -> Job {
     single("/v5/position/trading-stop", body, Call::TradingStop)
 }
 
-/// Cancel by id, ten per batch; attached TP/SL rows are not venue orders
-/// and go with their parent.
-fn plan_cancel(orders: &[Order]) -> Job {
-    let mut job = Job::default();
-    let real: Vec<&Order> = orders.iter().filter(|o| !is_virtual(&o.id)).collect();
-    for (index, chunk) in real.chunks(CANCEL_BATCH_LIMIT).enumerate() {
-        let items: Vec<String> = chunk
-            .iter()
-            .map(|o| {
-                Body::new()
-                    .str("symbol", &o.symbol)
-                    .str("orderId", &o.id)
-                    .finish()
-            })
-            .collect();
-        let body = Body::new()
-            .str("category", "linear")
-            .raw("request", &format!("[{}]", items.join(",")))
-            .finish();
-        job.steps.push_back(Step {
-            delay_ms: if index > 0 {
-                CANCEL_BATCH_DELAY_MS
-            } else {
-                0.0
-            },
-            requests: vec![Planned {
-                path: "/v5/order/cancel-batch",
-                body,
-                call: Call::Cancel {
-                    ids: chunk.iter().map(|o| o.id.clone()).collect(),
-                },
-            }],
-        });
+fn spot_order_filter(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::StopLoss | OrderType::TakeProfit => "tpslOrder",
+        OrderType::Conditional => "StopOrder",
+        _ => "Order",
     }
-    job
 }
 
-fn plan_leverage(cx: &Cx<'_, Pending>, symbol: String, input: f64) -> Result<Job, String> {
+/// Cancel by id, ten per batch; attached TP/SL rows are not venue orders
+/// and go with their parent.
+impl BybitLinear {
+    fn plan_cancel(&self, orders: &[Order]) -> Job {
+        let mut job = Job::default();
+        let real: Vec<&Order> = orders.iter().filter(|o| !is_virtual(&o.id)).collect();
+        if !self.paths.batch_orders {
+            for order in real {
+                let filter = self
+                    .variant
+                    .is_spot()
+                    .then_some(spot_order_filter(order.kind));
+                let body = Body::new()
+                    .str("category", self.paths.category)
+                    .str("symbol", &order.symbol)
+                    .str("orderId", &order.id)
+                    .opt_str("orderFilter", filter)
+                    .finish();
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![Planned {
+                        path: "/v5/order/cancel",
+                        body,
+                        call: Call::Cancel {
+                            ids: vec![order.id.clone()],
+                        },
+                    }],
+                });
+            }
+            return job;
+        }
+        for (index, chunk) in real.chunks(CANCEL_BATCH_LIMIT).enumerate() {
+            let items: Vec<String> = chunk
+                .iter()
+                .map(|o| {
+                    Body::new()
+                        .str("symbol", &o.symbol)
+                        .str("orderId", &o.id)
+                        .finish()
+                })
+                .collect();
+            let body = Body::new()
+                .str("category", self.paths.category)
+                .raw("request", &format!("[{}]", items.join(",")))
+                .finish();
+            job.steps.push_back(Step {
+                delay_ms: if index > 0 {
+                    CANCEL_BATCH_DELAY_MS
+                } else {
+                    0.0
+                },
+                requests: vec![Planned {
+                    path: "/v5/order/cancel-batch",
+                    body,
+                    call: Call::Cancel {
+                        ids: chunk.iter().map(|o| o.id.clone()).collect(),
+                    },
+                }],
+            });
+        }
+        job
+    }
+}
+
+fn plan_leverage(
+    cx: &Cx<'_, Pending>,
+    category: &str,
+    symbol: String,
+    input: f64,
+) -> Result<Job, String> {
     let market = cx
         .store
         .market(&symbol)
@@ -1024,7 +1505,7 @@ fn plan_leverage(cx: &Cx<'_, Pending>, symbol: String, input: f64) -> Result<Job
     }
     let value = number(leverage);
     let body = Body::new()
-        .str("category", "linear")
+        .str("category", category)
         .str("symbol", &symbol)
         .str("buyLeverage", &value)
         .str("sellLeverage", &value)
@@ -1037,7 +1518,17 @@ fn plan_leverage(cx: &Cx<'_, Pending>, symbol: String, input: f64) -> Result<Job
 }
 
 /// Mark accepted cancels; an order that already finished keeps its status.
-fn mark_canceled(cx: &mut Cx<'_, Pending>, ids: &[String]) {
+fn mark_canceled(cx: &mut Cx<'_, Pending>, ids: &[String], retire: bool) {
+    if retire {
+        for id in ids {
+            cx.store.remove_orders(&[
+                id,
+                &format!("{id}{STOP_LOSS_SUFFIX}"),
+                &format!("{id}{TAKE_PROFIT_SUFFIX}"),
+            ]);
+        }
+        return;
+    }
     let now = cx.now;
     for id in ids {
         for id in [
@@ -1095,4 +1586,234 @@ fn check_client_order_ids(cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Re
         seen.push(id);
     }
     Ok(())
+}
+
+#[derive(Default)]
+struct ExecutionParams {
+    bbo_side: Option<&'static str>,
+    bbo_level: Option<String>,
+    slippage_kind: Option<&'static str>,
+    slippage: Option<String>,
+}
+
+fn execution_params(
+    opts: &PlaceOrderOpts,
+    spot: bool,
+    hyro: bool,
+) -> Result<ExecutionParams, String> {
+    let bbo = opts.bybit_bbo.as_ref();
+    let ticks = opts.bybit_slippage_tolerance_ticks;
+    let percent = opts.max_slippage_pct;
+    if hyro && (bbo.is_some() || ticks.is_some() || percent.is_some()) {
+        return Err("HyroTrader does not support client-defined slippage or BBO controls".into());
+    }
+    let attached =
+        opts.trigger_price.is_some() || opts.stop_loss.is_some() || opts.take_profit.is_some();
+    if let Some(bbo) = bbo {
+        if spot
+            || opts.kind != OrderType::Limit
+            || opts.price.is_some()
+            || attached
+            || ticks.is_some()
+            || percent.is_some()
+            || opts
+                .time_in_force
+                .is_some_and(|t| t != TimeInForce::GoodTillCancel)
+        {
+            return Err(
+                "Bybit BBO requires a plain derivative GTC limit order without price or protection"
+                    .into(),
+            );
+        }
+        let side = match bbo.side_type.as_str() {
+            "Queue" => "Queue",
+            "Counterparty" => "Counterparty",
+            _ => return Err("Bybit BBO sideType must be Queue or Counterparty".into()),
+        };
+        if !bbo.level.is_finite() || bbo.level.fract() != 0.0 || !(1.0..=5.0).contains(&bbo.level) {
+            return Err("Bybit BBO level must be an integer from 1 to 5".into());
+        }
+        return Ok(ExecutionParams {
+            bbo_side: Some(side),
+            bbo_level: Some(number(bbo.level)),
+            ..ExecutionParams::default()
+        });
+    }
+    if let Some(ticks) = ticks {
+        if opts.kind != OrderType::Market || opts.price.is_some() || attached || percent.is_some() {
+            return Err("Bybit TickSize slippage requires a plain market order".into());
+        }
+        if !ticks.is_finite() || ticks.fract() != 0.0 || !(1.0..=10_000.0).contains(&ticks) {
+            return Err("Bybit TickSize slippage must be an integer from 1 to 10000".into());
+        }
+        return Ok(ExecutionParams {
+            slippage_kind: Some("TickSize"),
+            slippage: Some(number(ticks)),
+            ..ExecutionParams::default()
+        });
+    }
+    if let Some(percent) = percent {
+        if opts.kind != OrderType::Market
+            || attached
+            || !percent.is_finite()
+            || !(0.01..=10.0).contains(&percent)
+            || (percent * 100.0 - (percent * 100.0).round()).abs() >= 1e-9
+        {
+            return Err("Bybit maxSlippagePct requires a plain market order and 0.01 to 10 with at most two decimals".into());
+        }
+        return Ok(ExecutionParams {
+            slippage_kind: Some("Percent"),
+            slippage: Some(number(percent)),
+            ..ExecutionParams::default()
+        });
+    }
+    Ok(ExecutionParams::default())
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalOrder {
+    symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    side: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    qty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_loss: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    take_profit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sl_trigger_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tp_trigger_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    time_in_force: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_link_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reduce_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    close_on_trigger: Option<bool>,
+}
+
+impl BybitLinear {
+    fn apply_local_write(&self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
+        // A later authoritative snapshot or private session supersedes an ack.
+        if local.socket != self.private.socket
+            || local.snapshot != self.account.orders_snapshot_version
+        {
+            return;
+        }
+        match local.path {
+            "/v5/order/create" => {
+                if let (Ok(input), Ok(reply)) = (
+                    serde_json::from_str::<LocalOrder>(&local.body),
+                    serde_json::from_str::<Placed>(response),
+                ) && let Some(id) = reply.result.and_then(|r| r.order_id)
+                {
+                    self.publish_local_create(cx, &input, &id);
+                }
+            }
+            "/v5/order/create-batch" => {
+                #[derive(serde::Deserialize)]
+                struct Inputs {
+                    request: Vec<LocalOrder>,
+                }
+                if let (Ok(inputs), Ok(reply)) = (
+                    serde_json::from_str::<Inputs>(&local.body),
+                    serde_json::from_str::<Batch>(response),
+                ) && let Some(results) = reply.result
+                {
+                    for (input, result) in inputs.request.iter().zip(results.list) {
+                        if let Some(id) = result.order_id {
+                            self.publish_local_create(cx, input, &id);
+                        }
+                    }
+                }
+            }
+            "/v5/order/amend" => {
+                let Ok(input) = serde_json::from_str::<LocalOrder>(&local.body) else {
+                    return;
+                };
+                let Some(id) = input.order_id.as_deref() else {
+                    return;
+                };
+                let Some(before) = local.before.iter().find(|o| o.id == id) else {
+                    return;
+                };
+                // A private event wins over a late acknowledgement.
+                if cx.store.order(id) != Some(before) {
+                    return;
+                }
+                let price = input
+                    .price
+                    .or(input.trigger_price)
+                    .and_then(|p| p.parse().ok());
+                let amount = input.qty.and_then(|a| a.parse().ok());
+                cx.store.update_order(id, |o| {
+                    if let Some(price) = price {
+                        o.price = price;
+                    }
+                    if let Some(amount) = amount {
+                        o.amount = amount;
+                        o.remaining = (amount - o.filled).max(0.0);
+                    }
+                    o.last_update = cx.now;
+                });
+                for (suffix, level) in [
+                    (STOP_LOSS_SUFFIX, input.stop_loss),
+                    (TAKE_PROFIT_SUFFIX, input.take_profit),
+                ] {
+                    if let Some(level) = level.and_then(|p| p.parse().ok()) {
+                        cx.store.update_order(&format!("{id}{suffix}"), |o| {
+                            o.price = level;
+                            o.last_update = cx.now;
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn publish_local_create(&self, cx: &mut Cx<'_, Pending>, input: &LocalOrder, id: &str) {
+        if id.is_empty()
+            || cx.store.order(id).is_some()
+            || (input.order_type.as_deref() == Some("Market") && input.trigger_price.is_none())
+        {
+            return;
+        }
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PlacedRow<'a> {
+            #[serde(flatten)]
+            input: &'a LocalOrder,
+            order_id: &'a str,
+            order_status: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            stop_order_type: Option<&'static str>,
+        }
+        let wire = PlacedRow {
+            input,
+            order_id: id,
+            order_status: "New",
+            stop_order_type: input.trigger_price.as_ref().map(|_| "Stop"),
+        };
+        if let Ok(body) = serde_json::to_string(&wire)
+            && let Ok(row) = serde_json::from_str::<OrderRow>(&body)
+            && let Some(mapped) = crate::account::map_order(&row, cx.store, cx.now)
+        {
+            for order in mapped.orders {
+                cx.store.upsert_order(order);
+            }
+        }
+    }
 }

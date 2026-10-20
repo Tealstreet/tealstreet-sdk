@@ -554,6 +554,12 @@ impl AsterDex {
         if orders.iter().any(|o| o.client_order_id.is_some()) {
             return Err("AsterDEX does not support caller client order IDs".into());
         }
+        if orders
+            .iter()
+            .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+        {
+            return Err("Bybit BBO and TickSize controls are not supported by AsterDEX".into());
+        }
         let builder = if self.version == Version::V3 {
             builder(&self.options)?
         } else {
@@ -793,6 +799,8 @@ fn empty_order() -> PlaceOrderOpts {
         close: None,
         stp_mode: None,
         max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
 fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> Job {

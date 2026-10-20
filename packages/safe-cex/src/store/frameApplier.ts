@@ -95,10 +95,30 @@ export class FrameApplier {
       for (let i = 0; i < orders.count; i++) {
         const enums = orderEnums(orders.enums[i]);
         const trigger = enums.triggerType as Order['tpTriggerType'];
+        const symbol = this.symbol(orders.market[i]);
+        const market = update.markets?.[orders.market[i]] ?? this.store.marketsBySymbol[symbol];
+        const native = orders.remainingNative?.[i];
+        const nativeExtra = market?.isInverse && native !== undefined && Number.isFinite(native)
+          ? { remainingNative: native, remainingNotional: native }
+          : this.inverseNativeAmounts
+            ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
+            : undefined;
+        const extra = nativeExtra || enums.rejectReason || this.nativePlacementAmounts
+          ? {
+              ...nativeExtra,
+              ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }),
+              ...(this.nativePlacementAmounts && {
+                remainingNative: native !== undefined && Number.isFinite(native)
+                  ? native
+                  : orders.remaining[i] / this.contractSizes[orders.market[i]],
+                filledInPlacementUnits: orders.filled[i] / this.contractSizes[orders.market[i]],
+              }),
+            }
+          : undefined;
         rows.push({
           id: orders.id(i),
           status: enums.status as Order['status'],
-          symbol: this.symbol(orders.market[i]),
+          symbol,
           type: enums.type as Order['type'],
           side: enums.side as Order['side'],
           price: orders.price[i],
@@ -115,14 +135,7 @@ export class FrameApplier {
           ...((enums.type === 'stop_market' || enums.type === 'trailing_stop_market') && trigger && { slTriggerType: trigger }),
           ...(finite(orders.takeProfit[i]) !== undefined && { takeProfit: orders.takeProfit[i] }),
           ...(finite(orders.stopLoss[i]) !== undefined && { stopLoss: orders.stopLoss[i] }),
-          ...((enums.rejectReason || this.nativePlacementAmounts || this.inverseNativeAmounts) && { extra: {
-            ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }),
-            ...(this.inverseNativeAmounts && { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }),
-            ...(this.nativePlacementAmounts && {
-              remainingNative: orders.remaining[i] / this.contractSizes[orders.market[i]],
-              filledInPlacementUnits: orders.filled[i] / this.contractSizes[orders.market[i]],
-            }),
-          } }),
+          ...(extra && { extra }),
         } as Order);
       }
       update.orders = rows;
@@ -134,6 +147,7 @@ export class FrameApplier {
       for (let i = 0; i < positions.count; i++) {
         const enums = positionEnums(positions.enums[i]);
         const symbol = this.symbol(positions.market[i]);
+        const market = update.markets?.[positions.market[i]] ?? this.store.marketsBySymbol[symbol];
         const mode = enums.positionMode as PositionMode | undefined;
         rows.push({
           id: positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol),
@@ -144,7 +158,9 @@ export class FrameApplier {
           leverage: positions.leverage[i],
           unrealizedPnl: positions.unrealizedPnl[i],
           contracts: positions.contracts[i],
-          ...(this.inverseNativeAmounts && { extra: { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] } }),
+          ...((market?.isInverse || this.inverseNativeAmounts) && {
+            extra: { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] },
+          }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),
           ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),

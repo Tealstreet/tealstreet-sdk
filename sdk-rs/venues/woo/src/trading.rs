@@ -250,6 +250,9 @@ impl Woo {
     ) -> Result<(), String> {
         let mut ids = HashSet::new();
         for o in orders {
+            if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                return Err("Bybit BBO and TickSize controls are not supported by WOO".into());
+            }
             let m = cx
                 .store
                 .market(&o.symbol)
@@ -662,6 +665,8 @@ impl Woo {
                 close: None,
                 max_slippage_pct: None,
                 stp_mode: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
             };
             self.validate_places(cx, std::slice::from_ref(&opts))?;
             let mut steps = VecDeque::from([write(

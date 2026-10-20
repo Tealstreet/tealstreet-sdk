@@ -219,6 +219,44 @@ fn caller_id_anywhere_rejects_entire_batch_before_write() {
     assert!(h.result(1).is_err());
 }
 #[test]
+fn bybit_execution_controls_reject_entire_batch_before_clock_or_order_write() {
+    for version in [
+        safe_cex_venue_asterdex::sign::Version::V1,
+        safe_cex_venue_asterdex::sign::Version::V3,
+    ] {
+        for (field, value) in [
+            ("bybitBbo", json!({"sideType":"Queue","level":1})),
+            ("bybitSlippageToleranceTicks", json!(1)),
+            ("bybitSlippageToleranceTicks", json!(0)),
+        ] {
+            let mut h = Harness::options(Options {
+                api_version: Some(version),
+                key: Some("synthetic-key".into()),
+                secret: Some("synthetic-secret".into()),
+                ..Options::default()
+            });
+            let mut second = limit();
+            second[field] = value;
+            h.command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![
+                    serde_json::from_value(limit()).unwrap(),
+                    serde_json::from_value(second).unwrap(),
+                ],
+            });
+            assert!(h.requests.is_empty(), "{version:?} {field}");
+            assert!(
+                h.result(1)
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("not supported by AsterDEX"),
+                "{version:?} {field}"
+            );
+        }
+    }
+}
+
+#[test]
 fn trailing_and_v1_stp_fail_before_write() {
     for value in [
         json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":1,"price":9000}),

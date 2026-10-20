@@ -312,7 +312,14 @@ pub struct Candle {
     pub volume: f64,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BybitBbo {
+    pub side_type: String,
+    pub level: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceOrderOpts {
     pub symbol: String,
@@ -341,16 +348,46 @@ pub struct PlaceOrderOpts {
     pub tp_trigger_type: Option<StopTriggerType>,
     #[serde(default)]
     pub sl_trigger_type: Option<StopTriggerType>,
-    #[serde(default, deserialize_with = "caller_client_order_id")]
+    #[serde(
+        default,
+        deserialize_with = "caller_client_order_id",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
     #[serde(default)]
     pub stp_mode: Option<StpMode>,
+    #[serde(default)]
+    pub bybit_bbo: Option<BybitBbo>,
+    #[serde(default)]
+    pub bybit_slippage_tolerance_ticks: Option<f64>,
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<String>, D::Error> {
     String::deserialize(d).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn order_options_round_trip_without_turning_absent_identity_into_caller_null() {
+        for id in ["", r#","clientOrderId":"caller-1""#] {
+            let json =
+                format!(r#"{{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1{id}}}"#);
+            let opts: PlaceOrderOpts = serde_json::from_str(&json).unwrap();
+            let encoded = serde_json::to_string(&opts).unwrap();
+            assert_eq!(
+                serde_json::from_str::<PlaceOrderOpts>(&encoded).unwrap(),
+                opts
+            );
+        }
+        assert!(serde_json::from_str::<PlaceOrderOpts>(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"clientOrderId":null}"#,
+        ).is_err());
+    }
 }

@@ -132,6 +132,7 @@ struct Walk {
     pages: u32,
     cap: usize,
     rows: Rows,
+    inverse: bool,
 }
 
 #[derive(Default)]
@@ -253,6 +254,14 @@ impl BybitLinear {
             cx.done(command, Ok("[]".into()));
             return;
         }
+        if matches!(read, Read::Income { .. }) && (self.variant.is_spot() || self.variant.is_hyro())
+        {
+            cx.done(
+                command,
+                Err("This Bybit variant does not support income history".into()),
+            );
+            return;
+        }
         let walk = match read {
             Read::OrderByClientId { .. } => {
                 cx.done(
@@ -269,10 +278,11 @@ impl BybitLinear {
                 limit,
             } => {
                 let cap = limit.unwrap_or(50) as usize;
-                let mut params = vec![("category", "linear".to_owned())];
+                let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 params.extend(order_id.map(|id| ("orderId", id)));
                 Walk {
+                    inverse: self.variant.is_inverse(),
                     path: "/v5/execution/list",
                     signed: true,
                     params,
@@ -292,9 +302,10 @@ impl BybitLinear {
                 limit,
             } => {
                 let cap = limit.unwrap_or(50) as usize;
-                let mut params = vec![("category", "linear".to_owned())];
+                let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
+                    inverse: self.variant.is_inverse(),
                     path: "/v5/order/history",
                     signed: true,
                     params,
@@ -318,7 +329,7 @@ impl BybitLinear {
                 // The transaction log serves unified accounts only.
                 let mut params = vec![
                     ("accountType", "UNIFIED".to_owned()),
-                    ("category", "linear".to_owned()),
+                    ("category", self.paths.category.to_owned()),
                 ];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 params.extend(kind.map(|kind| {
@@ -330,6 +341,7 @@ impl BybitLinear {
                     ("type", venue)
                 }));
                 Walk {
+                    inverse: self.variant.is_inverse(),
                     path: "/v5/account/transaction-log",
                     signed: true,
                     params,
@@ -343,10 +355,21 @@ impl BybitLinear {
                 }
             }
             Read::PublicTrades { symbol, limit } => Walk {
+                inverse: self.variant.is_inverse(),
                 path: "/v5/market/recent-trade",
                 signed: false,
-                params: vec![("category", "linear".to_owned()), ("symbol", symbol)],
-                limit: limit.unwrap_or(500).clamp(1, TRADES_LIMIT),
+                params: vec![
+                    ("category", self.paths.category.to_owned()),
+                    ("symbol", symbol),
+                ],
+                limit: limit.unwrap_or(500).clamp(
+                    1,
+                    if self.variant.is_spot() {
+                        60
+                    } else {
+                        TRADES_LIMIT
+                    },
+                ),
                 windows: VecDeque::from([(None, None)]),
                 window: (None, None),
                 cursor: None,
@@ -541,7 +564,7 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
                     symbol: symbol.clone(),
                     price,
                     qty,
-                    quote_qty: price * qty,
+                    quote_qty: if walk.inverse { qty } else { price * qty },
                     timestamp: or_zero(&t.time),
                     side: side_name(order_side(t.side.as_deref())),
                 });

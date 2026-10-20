@@ -537,6 +537,11 @@ impl Trading {
     }
 
     fn place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit BBO and TickSize controls are not supported by BingX".into());
+        }
         let mut seen = HashSet::new();
         for o in orders {
             if let Some(id) = &o.client_order_id {
@@ -887,7 +892,6 @@ impl Trading {
                 amount: o.amount,
                 price: Some(next),
                 trigger_price: None,
-                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: Some(o.reduce_only),
@@ -898,6 +902,9 @@ impl Trading {
                 tp_trigger_type: o.trigger_type,
                 sl_trigger_type: o.trigger_type,
                 stp_mode: None,
+                max_slippage_pct: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {

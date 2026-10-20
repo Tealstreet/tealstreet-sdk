@@ -222,3 +222,19 @@ for green CI, merge, and cut a fresh follow-up branch.
 - Rebuilding selected and combined artifacts after this narrow credential fix;
   final private/native checks run again before PR. Previous public performance
   and Binance proofs are preserved above.
+
+### Bybit landing integration
+
+- Integrated landing922b5fdc89 (Bybit inverse/spot/demo/Hyro and shared protection
+  controls). Resolved conflicts additively: incoming layout/variants remain,
+  Aster registrations/auth/STP/currencies/orphan identities remain. Three separate
+  conflict-scope reviews checked native models, WASM/wrapper and harness.
+- Incoming per-order BBO/tick fields default absent in Aster replacements and
+  reject whole-batch input before any HTTP. Six V1/V3 cases include zero ticks;
+  independent review clear. All16 venue/host targets compile, scoped typecheck
+  and lint pass, WASM native2/2 and merged harness233/233 pass.
+- Incoming stricter pre-import memory accounting is preserved. Earlier gate
+  numbers above remain pre-integration evidence; rebuilt Aster and Binance
+  public/private gates and combined adapter/host checks are running again.
+- Pre-integration broad safe-cex run finished green:475files/6982tests. Root
+  integrated typecheck/lint and the new combined broad suite are running.

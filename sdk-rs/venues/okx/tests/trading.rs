@@ -624,3 +624,26 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
         assert_eq!(e.store().order(id), Some(&original));
     }
 }
+
+#[test]
+fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
+    for control in [
+        r#""bybitBbo":{"sideType":"Queue","level":1}"#,
+        r#""bybitSlippageToleranceTicks":5"#,
+    ] {
+        let mut engine = trading_engine();
+        let bad =
+            format!(r#"{{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1,{control}}}"#);
+        let out = place(
+            &mut engine,
+            vec![
+                order(r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}"#),
+                order(&bad),
+            ],
+        );
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { result: Err(message), .. })
+                if message.contains("only on Bybit"))));
+    }
+}

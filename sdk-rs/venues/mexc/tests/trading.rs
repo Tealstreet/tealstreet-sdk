@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
+use safe_cex_engine::model::{BybitBbo, OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice, Response};
 use support::*;
 fn order() -> PlaceOrderOpts {
@@ -39,6 +39,37 @@ fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
             }
         })
         .collect()
+}
+
+#[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for bbo in [true, false] {
+        let mut e = ready();
+        let mut second = order();
+        if bbo {
+            second.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        } else {
+            second.bybit_slippage_tolerance_ticks = Some(2.0);
+        }
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![order(), second],
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                result: Err(error), ..
+            }) if error.contains("Bybit")
+        )));
+    }
 }
 
 #[test]
@@ -879,7 +910,6 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         amount: 60.0,
         price: Some(55000.0),
         trigger_price: None,
-        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: Some(true),
@@ -890,6 +920,9 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         client_order_id: None,
         close: None,
         stp_mode: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     };
     e.handle(
         200.0,
