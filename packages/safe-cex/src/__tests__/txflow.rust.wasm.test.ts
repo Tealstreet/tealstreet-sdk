@@ -175,10 +175,14 @@ describe('TxFlow production registry through real Wasm', () => {
       { url: 'wss://rpc.txflow-testnet.xyz/ws', channel: 'private' },
       { url: 'wss://rpc.txflow-testnet.xyz/api-ws', channel: 'public' },
     ]);
-    const nodeSubscriptions = tape.sockets[0].sent as Array<{ type?: string; subscription?: { user?: string } }>;
-    const privateSubscriptions = nodeSubscriptions.filter(({ subscription }) => subscription?.user);
-    expect(privateSubscriptions.length).toBeGreaterThan(0);
-    expect(privateSubscriptions.every(({ subscription }) => subscription!.user === WALLET)).toBe(true);
+    await vi.waitFor(() => {
+      const nodeSubscriptions = tape.sockets[0].sent as Array<{ type?: string; subscription?: { user?: string } }>;
+      const privateSubscriptions = nodeSubscriptions.filter(({ subscription }) => subscription?.user);
+      expect(privateSubscriptions.map(({ type }) => type)).toEqual([
+        'orderUpdates', 'clearinghouseState', 'userAssetData',
+      ]);
+      expect(privateSubscriptions.every(({ subscription }) => subscription!.user === WALLET)).toBe(true);
+    }, { timeout: 3000 });
   });
 
   it('rejects mainnet startup before HTTP or socket I/O', async () => {

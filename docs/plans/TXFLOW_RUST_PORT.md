@@ -633,3 +633,19 @@ the full 68-test host suite passes. Engine 75, TxFlow 73, native server/transpor
 cross-language frame-wire, harness 455, bans, workspace formatting and combined
 Wasm Clippy pass. Full root and consumer suites, release replay/size gates and
 exact-head CI are being repeated on this integration before merge.
+
+### Live-smoke integration and paced consumer assertion
+
+Merge landing 0063068241's credentialed lifecycle runner. TxFlow has no
+reviewed authenticated live-smoke profile; it continues to refuse all modes
+before credential access. Add it to both explicit unreviewed-profile test
+inventories, preserving that production guard. This resolves the shared CI
+inventory failure without authorizing or performing authenticated live writes.
+Independent review accepts the harness union and finds no protocol change.
+
+The full consumer matrix exposed a test race: any initial socket send did not
+prove that all paced private subscriptions had been sent. Await all three
+actual node wallet subscriptions and verify their exact types and wallet.
+The two targeted real-Wasm tests and explicit lint pass; independent review
+accepts this stronger assertion. Root typecheck/lint/test gates also pass on
+the frame integration (7,408 safe-cex tests in each root test run).
