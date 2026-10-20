@@ -325,8 +325,8 @@ Fresh combined gates and exact-head CI are required before merging PR #1345.
 ## Architecture
 
 - Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.
-- Socket supervision copied per venue, no jitter, two without backoff →
-  `engine::socket::Supervisor`.
+- ~~Socket supervision copied per venue, no jitter, two without backoff →
+  `engine::socket::Supervisor`.~~ Fixed: every venue socket runs under the shared supervisor (#1385, #1406, #1423 and the final socket PR).
 - Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
   `safe-cex-venues` crate shared by both hosts.
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
