@@ -7,6 +7,8 @@ import { MarginType, OrderSide, PositionMode } from '../types';
 import { divide, subtract } from '../utils/safe-math';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
+type BookLevels = Map<number, number> | Float64Array;
+type BookState = { id: string; bids: BookLevels; asks: BookLevels };
 export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
 const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
@@ -19,16 +21,26 @@ const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
  */
 export class FrameApplier {
   private marketSymbols: string[] = [];
+  private marketIds: string[] = [];
+  private bookStates = new Map<string, BookState>();
+  private readonly frameBooks = new WeakMap<Frame, FrameBook[]>();
+  private readonly frameMarkets = new WeakMap<Frame, { symbols: string[]; ids: string[] }>();
   private contractSizes: number[] = [];
 
   constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false) {}
 
-  /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
-  apply(frame: Frame): void {
+  /** Forwarding workers skip book reconstruction before transferring the frame. */
+  apply(frame: Frame, applyBooks = true): void {
     const update: Writable<StoreUpdate> = {};
 
     const markets = frame.markets();
+    const symbols = markets ? Array.from({ length: markets.count }, (_, i) => markets.symbol(i)) : this.marketSymbols;
+    const ids = markets ? Array.from({ length: markets.count }, (_, i) => markets.id(i)) : this.marketIds;
+    this.frameMarkets.set(frame, { symbols, ids });
+    if (applyBooks) this.ingestBooks(frame, symbols, ids);
+    else this.bookStates.clear();
     if (markets) {
+      this.marketIds = ids;
       const rows: Market[] = [];
       this.marketSymbols = new Array(markets.count);
       this.contractSizes = Array.from(markets.contractSize, (size) => size > 0 ? size : 1);
@@ -224,17 +236,104 @@ export class FrameApplier {
   }
 
   books(frame: Frame): FrameBook[] {
-    const books: FrameBook[] = [];
-    for (const book of frame.books()) {
-      const side = (rows: Float64Array) => {
-        const levels = new Array(rows.length / 3);
-        for (let i = 0, j = 0; i < rows.length; i += 3, j++) {
-          levels[j] = { price: rows[i], amount: rows[i + 1], total: rows[i + 2] };
-        }
-        return levels;
-      };
-      books.push({ symbol: this.symbol(book.market), orderbook: { bids: side(book.bids), asks: side(book.asks) } });
+    const captured = this.frameMarkets.get(frame);
+    const markets = captured ? undefined : frame.markets();
+    return this.ingestBooks(
+      frame,
+      captured?.symbols ?? (markets ? Array.from({ length: markets.count }, (_, i) => markets.symbol(i)) : this.marketSymbols),
+      captured?.ids ?? (markets ? Array.from({ length: markets.count }, (_, i) => markets.id(i)) : this.marketIds),
+    );
+  }
+
+  private ingestBooks(frame: Frame, symbols: string[], ids: string[]): FrameBook[] {
+    const cached = this.frameBooks.get(frame);
+    if (cached) return cached;
+    const fullBooks = [...(frame.books?.() ?? [])];
+    const deltaBooks = [...(frame.bookDeltas?.() ?? [])];
+    if (!fullBooks.length && !deltaBooks.length && symbols === this.marketSymbols) {
+      const empty: FrameBook[] = [];
+      this.frameBooks.set(frame, empty);
+      return empty;
     }
+    // Stage every change: one invalid delta must not partially advance a baseline.
+    const states = new Map(this.bookStates);
+    if (symbols !== this.marketSymbols) {
+      const identities = new Map(symbols.map((symbol, i) => [symbol, ids[i]]));
+      for (const [symbol, state] of states) if (identities.get(symbol) !== state.id) states.delete(symbol);
+    }
+    const changed = new Set<string>();
+    const identity = (market: number) => {
+      const symbol = symbols[market];
+      const id = ids[market];
+      if (!symbol || id === undefined) throw new Error('Order book snapshot required: unknown market');
+      return { symbol, id };
+    };
+    const applyLevels = (levels: Map<number, number>, rows: Float64Array, width: number) => {
+      for (let i = 0; i < rows.length; i += width) {
+        const price = rows[i];
+        const amount = rows[i + 1];
+        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) {
+          throw new Error('Order book snapshot required: invalid level');
+        }
+        if (amount === 0) levels.delete(price);
+        else levels.set(price, amount);
+      }
+    };
+    for (const book of fullBooks) {
+      const { symbol, id } = identity(book.market);
+      // A worker can transfer the source frame after reading it. Keep compact
+      // numeric baselines, without allocating price maps or sorting full books.
+      states.set(symbol, { id, bids: book.bids.slice(), asks: book.asks.slice() });
+      changed.add(symbol);
+    }
+    const levelMap = (levels: BookLevels) => {
+      if (levels instanceof Map) return new Map(levels);
+      const result = new Map<number, number>();
+      applyLevels(result, levels, 3);
+      return result;
+    };
+    for (const book of deltaBooks) {
+      const { symbol, id } = identity(book.market);
+      const previous = states.get(symbol);
+      if (!previous || previous.id !== id) throw new Error(`Order book snapshot required for ${symbol}`);
+      const state = { id, bids: levelMap(previous.bids), asks: levelMap(previous.asks) };
+      applyLevels(state.bids, book.bids, 2);
+      applyLevels(state.asks, book.asks, 2);
+      states.set(symbol, state);
+      changed.add(symbol);
+    }
+    const side = (levels: BookLevels, descending: boolean): OrderBook['bids'] => {
+      let total = 0;
+      if (levels instanceof Float64Array) {
+        const rows: OrderBook['bids'] = [];
+        let previous = descending ? Infinity : -Infinity;
+        for (let i = 0; i < levels.length; i += 3) {
+          const price = levels[i];
+          const amount = levels[i + 1];
+          if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount < 0) {
+            throw new Error('Order book snapshot required: invalid level');
+          }
+          if (descending ? price >= previous : price <= previous) return side(levelMap(levels), descending);
+          previous = price;
+          if (amount === 0) continue;
+          total += amount;
+          if (!Number.isFinite(total)) throw new Error('Order book snapshot required: invalid total');
+          rows.push({ price, amount, total });
+        }
+        return rows;
+      }
+      return [...levels].sort(([a], [b]) => descending ? b - a : a - b).map(([price, amount]) => {
+        total += amount;
+        if (!Number.isFinite(total)) throw new Error('Order book snapshot required: invalid total');
+        return { price, amount, total };
+      });
+    };
+    const books = [...changed].map((symbol) => {
+      const state = states.get(symbol)!;
+      return { symbol, orderbook: { bids: side(state.bids, true), asks: side(state.asks, false) } };
+    });
+    this.bookStates = states;
+    this.frameBooks.set(frame, books);
     return books;
   }
 

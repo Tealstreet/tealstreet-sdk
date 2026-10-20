@@ -16,6 +16,7 @@ export const SECTION = {
   STATUS: 10,
   FILLS: 11,
   SETTINGS: 12,
+  BOOK_DELTA: 13,
 };
 
 export const NONE = 0xffffffff;
@@ -76,16 +77,26 @@ const utf8 = new TextDecoder();
 const align8 = (n) => (n + 7) & ~7;
 
 class Strings {
-  constructor(buffer, offset) {
+  constructor(buffer, offset, length) {
+    if (length < 8) throw new Error('invalid STRINGS section');
     const count = new Uint32Array(buffer, offset, 1)[0];
+    const headerLength = 4 + 4 * (count + 1);
+    if (headerLength > length) throw new Error('invalid STRINGS count');
     this.offsets = new Uint32Array(buffer, offset + 4, count + 1);
-    this.bytes = new Uint8Array(buffer, offset + 4 + 4 * (count + 1));
+    this.bytes = new Uint8Array(buffer, offset + headerLength, length - headerLength);
+    let previous = 0;
+    for (const end of this.offsets) {
+      if (end < previous || end > this.bytes.length) throw new Error('invalid STRINGS offset');
+      previous = end;
+    }
+    if (this.offsets[0] !== 0) throw new Error('invalid STRINGS first offset');
     // Numeric-only readers never need slots for the frame's string table.
     this.cache = [];
   }
 
   get(index) {
     if (index === NONE) return undefined;
+    if (!Number.isInteger(index) || index < 0 || index + 1 >= this.offsets.length) throw new Error('invalid string reference');
     let value = this.cache[index];
     if (value === undefined) {
       value = utf8.decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
@@ -106,6 +117,7 @@ const columns = (buffer, offset, rows, names) => {
 
 export class Frame {
   constructor(buffer) {
+    if (buffer.byteLength < 16) throw new Error('truncated safe-cex frame');
     const header = new DataView(buffer);
     if (header.getUint32(0, true) !== 0x46584353) throw new Error('not a safe-cex frame');
     if (header.getUint16(4, true) !== 1) throw new Error(`unsupported frame format ${header.getUint16(4, true)}`);
@@ -115,13 +127,19 @@ export class Frame {
     this.sections = [];
     let offset = 16;
     for (let i = header.getUint16(6, true); i > 0; i--) {
+      if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
       const length = header.getUint32(offset + 4, true);
       const payload = offset + 8;
-      if (kind === SECTION.STRINGS) this.strings = new Strings(buffer, payload);
+      if (payload + length > buffer.byteLength) throw new Error('truncated frame section payload');
+      if (kind === SECTION.STRINGS) {
+        if (this.strings) throw new Error('duplicate STRINGS section');
+        this.strings = new Strings(buffer, payload, length);
+      }
       else this.sections.push({ kind, offset: payload, length });
       offset = payload + length;
     }
+    if (offset !== buffer.byteLength) throw new Error('unexpected trailing frame bytes');
   }
 
   *of(kind) {
@@ -182,16 +200,27 @@ export class Frame {
 
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
   *books() {
-    for (const section of this.sections) {
-      if (section.kind !== SECTION.BOOK) continue;
+    yield* this.bookSections(SECTION.BOOK, 3);
+  }
+
+  /** Changed `[price, amount]` levels; zero amount deletes a price. */
+  *bookDeltas() {
+    yield* this.bookSections(SECTION.BOOK_DELTA, 2);
+  }
+
+  *bookSections(kind, width) {
+    for (const section of this.of(kind)) {
+      if (section.offset % 8 || section.length < 16) throw new Error('invalid book section header');
       const market = this.view.getUint32(section.offset, true);
       const bids = this.view.getUint32(section.offset + 4, true);
       const asks = this.view.getUint32(section.offset + 8, true);
+      if (this.view.getUint32(section.offset + 12, true) !== 0
+        || section.length !== 16 + (bids + asks) * width * 8) throw new Error('invalid book section length');
       const rows = section.offset + 16;
       yield {
         market,
-        bids: new Float64Array(this.buffer, rows, bids * 3),
-        asks: new Float64Array(this.buffer, rows + bids * 24, asks * 3),
+        bids: new Float64Array(this.buffer, rows, bids * width),
+        asks: new Float64Array(this.buffer, rows + bids * width * 8, asks * width),
       };
     }
   }

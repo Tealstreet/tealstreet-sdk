@@ -247,6 +247,19 @@ triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` 
 `canceled`, and BloFin's `filled` / `canceled` / `effective` / `order_failed`. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.
 
+## Rust frame books
+
+`FrameApplier` retains book baselines by symbol and market ID, independent of
+market-row ordering. `BOOK` replaces both sides, including an empty reset;
+`BOOK_DELTA` upserts price/amount pairs and deletes zero amounts. Consumers
+receive best-first sorted levels with recomputed cumulative totals. A delta
+without a matching full baseline throws a snapshot-required error; reconnect
+must create a new stream from its snapshot before applying deltas. Frame book
+sections are ingested once, even when `apply` and `books` both read the frame,
+and subsequent updates do not mutate books already handed to listeners. Actual book readers retain copied numeric baselines so transferring a source
+frame cannot detach future delta state. Forwarding workers call
+`apply(frame, false)` and leave book ingestion to the receiving main thread.
+
 ## Rust frame native units
 
 `FrameApplier` preserves inverse sizing metadata across the worker bridge.

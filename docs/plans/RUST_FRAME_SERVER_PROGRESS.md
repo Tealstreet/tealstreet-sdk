@@ -70,3 +70,30 @@ branch from origin/feat/rust-rewrite. Record actual gate numbers and limitations
   plan accepted. Clarified that disconnected in-flight IDs remain reserved until
   completion, and stalled socket writes require a deadline as well as bounded
   queues. Both are included in the implementation acceptance criteria.
+
+### Phase 1 acceptance
+
+- Added opt-in BOOK_DELTA and full baseline resets on subscriptions, gaps,
+  whole-Book replacement, and market identity changes. Unique internal reset
+  revisions prevent replacement books from colliding with an old baseline.
+- Added typed decoder views and SDK reconstruction, including zero deletions,
+  sorted totals, identity reorder, empty resets, repeated reads, malformed-frame
+  atomicity, and detached source buffers. Forwarding workers explicitly skip
+  book ingestion; re-enabling requires a full baseline.
+- Independent reciprocal correctness reviews (frame_engine/frame_consumers)
+  found and fixed reset-revision collisions and unread-snapshot ingestion.
+  Both final reviews pass. Root also reviewed engine and consumer changes.
+- Verification: engine 63 tests; engine native all-target and wasm32 clippy;
+  engine fmt; host JS 54 tests; focused SDK frame tests 21 across five files;
+  safe-cex typecheck/lint; actual Rust writer -> JS Frame -> SDK FrameApplier
+  integration 1 test. All pass. No TS venue behavior changed.
+- Deterministic measurement: two books, 1,000 bids and 1,000 asks each; ten
+  amount changes per side per book (40 changes total). At four flushes/second,
+  SCXF payload drops from 96,064 to 704 bytes/frame (384,256 to 2,816 B/s),
+  a 99.267% reduction. One unmasked, uncompressed WebSocket binary message per
+  flush adds ten bytes to the full message and four to the delta: 384,296
+  versus 2,832 B/s. Book-only initial/resync snapshot costs 96,064 payload
+  bytes, plus current store/market sections. Real deployments also incur
+  TCP/TLS/IP overhead and workload-dependent change counts; not measured here.
+  Reproduce with `corepack yarn -s rust:test-frame-wire` or
+  `cargo run -p safe-cex-engine --example book_bandwidth` from sdk-rs.

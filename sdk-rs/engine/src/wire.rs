@@ -28,6 +28,9 @@ pub mod section {
     pub const FILLS: u16 = 11;
     /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
     pub const SETTINGS: u16 = 12;
+    /// Absolute changed book levels: market, bid count, ask count, reserved,
+    /// then f64 [price, amount] rows. Zero amount deletes that level.
+    pub const BOOK_DELTA: u16 = 13;
 }
 
 pub mod status_flag {

@@ -12,6 +12,7 @@ export const SECTION: {
   STATUS: 10;
   FILLS: 11;
   SETTINGS: 12;
+  BOOK_DELTA: 13;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -67,6 +68,12 @@ export type TickerTable = { count: number; market: Uint32Array; identity?(i: num
 export interface BookRows {
   market: number;
   /** `[price, amount, total]` per level, best first. */
+  bids: Float64Array;
+  asks: Float64Array;
+}
+export interface BookDeltaRows {
+  market: number;
+  /** Changed `[price, amount]` pairs; zero amount deletes a price. */
   bids: Float64Array;
   asks: Float64Array;
 }
@@ -128,6 +135,7 @@ export class Frame {
   tickers(): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   books(): Generator<BookRows>;
+  bookDeltas(): Generator<BookDeltaRows>;
   candles(): CandleRows | undefined;
   orders(): OrderTable | undefined;
   positions(): PositionTable | undefined;

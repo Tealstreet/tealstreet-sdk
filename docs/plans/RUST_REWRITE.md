@@ -105,6 +105,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
+| 13 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
 
 `TICKERS` appends identity string references only when a ticker has no current
 market row. Those rows retain market index `0xFFFFFFFF`; consumers use the tail
