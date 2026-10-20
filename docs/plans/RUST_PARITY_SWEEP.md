@@ -396,3 +396,26 @@ than treating the original port boundary as a waiver.
   exact. Negative controls fail without the fix; harness537/537 and independent
   review PASS. Both original private failures remain recorded; final replay
   follows this bounded harness correction.
+
+### Final selected-artifact gate checkpoint
+
+- Mixed GRVT private tape PASS on the rebuilt combined engine:130records,
+  17commands,8markets,72frames; exact financial/command/signature/protocol
+  comparisons retained. Four OKX private profiles PASS again on that artifact.
+- Selected OKX node/web814,314bytes each (ceiling1,258,291), identical SHA256
+  `4eaad3f31104d8e87601016e51236a32c1415b67771dbfd0a5678e2a4a0d6550`.
+  Three-run public gates all PASS with two books per capture:
+
+  | Capture | Frames | Markets | Main CPU TS/Rust | Steady CPU TS/Rust | Retained memory TS/Rust |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | OKX linear | 8,904 | 509 | 1.16x | 1.23x | 4.19x |
+  | OKX inverse | 41,499 | 509 | 1.07x | 1.05x | 3.73x |
+  | EEA X-Perp | 29,268 | 750 | 1.07x | 1.07x | 3.43x |
+
+- Measurements follow completed root/native/WASM quality checks, with no own
+  compilation/tests overlapping scoring. Prior pre-optimization EEA failure
+  and unchanged-binary control remain historical; these are the final rebuilt
+  artifact's first full selected gate sequence, without raised thresholds.
+- Primary verification is complete. Transfer bindings ownership to the serial
+  runner for remaining50replays,24feature builds,11venue controls and10incoming
+  integration controls. Source stays frozen until its results are reviewed.
