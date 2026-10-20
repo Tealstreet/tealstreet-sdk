@@ -472,6 +472,16 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
 }
 
 #[test]
+fn cancel_all_preserves_completed_fills_before_and_during_the_command() {
+    support::assert_cancel_all_preserves_filled_orders(ready(), false, false);
+}
+
+#[test]
+fn cancel_all_preserves_completed_fills_when_the_order_is_unknown() {
+    support::assert_cancel_all_preserves_filled_orders(ready(), false, true);
+}
+
+#[test]
 fn amend_cancels_then_places_the_replacement() {
     let mut h = ready();
     h.event(Event::Command(Command::AmendOrder {

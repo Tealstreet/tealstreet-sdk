@@ -523,7 +523,7 @@ impl BinanceFutures {
             ) => match proof {
                 Some(proof) => self.confirm_cancel(cx, &canceled, proof, body),
                 None => {
-                    mark_canceled(cx, &canceled);
+                    mark_canceled_preserving_closed(cx, &canceled);
                     None
                 }
             },
@@ -546,11 +546,7 @@ impl BinanceFutures {
                         format!("Cancellation was not confirmed: {message}"),
                     ))
                 } else {
-                    if proof.is_some() {
-                        mark_canceled_preserving_closed(cx, &canceled);
-                    } else {
-                        mark_canceled(cx, &canceled);
-                    }
+                    mark_canceled_preserving_closed(cx, &canceled);
                     None
                 }
             }
@@ -1457,12 +1453,6 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
             Some(StopTriggerType::LastPrice) => "CONTRACT_PRICE",
             _ => "MARK_PRICE",
         },
-    }
-}
-
-fn mark_canceled(cx: &mut Cx<'_, Pending>, ids: &[String]) {
-    for id in ids {
-        cx.store.set_order_status(id, OrderStatus::Canceled);
     }
 }
 

@@ -238,3 +238,13 @@ fn margin_type_is_refused_on_a_cross_only_account() {
     assert!(h.requests.is_empty());
     assert!(matches!(h.result(5), Some(Err(message)) if message.contains("cross margin only")));
 }
+
+#[test]
+fn cancel_all_preserves_completed_fills_before_and_during_the_command() {
+    support::assert_cancel_all_preserves_filled_orders(ready(), true, false);
+}
+
+#[test]
+fn cancel_all_preserves_completed_fills_when_the_order_is_unknown() {
+    support::assert_cancel_all_preserves_filled_orders(ready(), true, true);
+}

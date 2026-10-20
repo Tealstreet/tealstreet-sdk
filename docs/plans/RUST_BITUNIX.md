@@ -2268,3 +2268,17 @@ USD-M preclosed and racing full fills, success and unknown-order responses,
 while still canceling open targets. Run scoped native tests/strict checks and
 independent final review. Rebuild and rerun all four Binance public/private
 modes before resuming the remaining batch; no fixture or gate changes.
+
+
+Native cancellation guard correction is frozen and independently reviewed PASS.
+All 115 Binance tests pass (111 existing plus four raw PM/USD-M success and
+UNKNOWN_ORDER controls); strict all-target Clippy, scoped formatting and diff
+checks pass. Four new controls fail before the correction and pass after,
+covering a preclosed order and a full fill racing the actual cancel-all ACK,
+while open siblings still cancel. Reuse the existing helper; delete the unused
+unconditional helper. No proof-based ACK validation or amendment failure logic
+changes. Verified native union is now 2,830 tests. Source root typecheck 44/44
+and lint 28/28 pass again after the paired TS fix; full root tests are running.
+Rebuild all four Binance profiles and rerun public/private gates next, then
+resume unexecuted integration checks. No output, fixture or gate changes in
+this native correction.

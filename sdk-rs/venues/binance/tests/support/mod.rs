@@ -189,3 +189,95 @@ impl Harness {
             .map(|(_, r)| r)
     }
 }
+
+/// Exercise the shared USD-M/PM cancel-all paths through raw user-stream fills.
+pub fn assert_cancel_all_preserves_filled_orders(
+    mut h: Harness,
+    portfolio_margin: bool,
+    unknown: bool,
+) {
+    use safe_cex_engine::model::OrderStatus;
+
+    let socket = if portfolio_margin {
+        "/pm/ws"
+    } else {
+        "/private/ws"
+    };
+    let id = |native: u64| {
+        if portfolio_margin {
+            format!("filled-{native}")
+        } else {
+            native.to_string()
+        }
+    };
+    let update = |native: u64, filled: bool| {
+        let status = if filled { "FILLED" } else { "NEW" };
+        let execution = if filled { "TRADE" } else { "NEW" };
+        let quantity = if filled { "0.002" } else { "0" };
+        format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","fs":"UM","E":2000,"T":2000,"o":{{"s":"BTCUSDT","c":"filled-{native}","S":"BUY","o":"LIMIT","ot":"LIMIT","f":"GTC","q":"0.002","p":"97000","ap":"97000","sp":"0","x":"{execution}","X":"{status}","i":{native},"l":"{quantity}","z":"{quantity}","L":"97000","T":2000,"t":{native},"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ps":"BOTH","cp":false,"rp":"0"}}}}"#
+        )
+    };
+    let preclosed = 9_100_001;
+    let racing = 9_100_002;
+    h.message(socket, &update(preclosed, false));
+    h.message(socket, &update(preclosed, true));
+    h.message(socket, &update(racing, false));
+    assert_eq!(
+        h.engine.store().order(&id(preclosed)).unwrap().status,
+        OrderStatus::Closed
+    );
+
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: 901,
+        symbol: "BTCUSDT".into(),
+    }));
+    let (regular_path, conditional_path, regular_id, conditional_id) = if portfolio_margin {
+        (
+            "/papi/v1/um/allOpenOrders",
+            "/papi/v1/um/conditional/allOpenOrders",
+            "x-s3vFFRQpresting",
+            "abc",
+        )
+    } else {
+        (
+            "/fapi/v1/allOpenOrders",
+            "/fapi/v1/algoOpenOrders",
+            "8389765519993909000",
+            "2146760",
+        )
+    };
+    let regular = h.take(regular_path);
+    let conditional = h.take(conditional_path);
+    assert_eq!(regular.method, safe_cex_engine::Method::Delete);
+    assert_eq!(conditional.method, safe_cex_engine::Method::Delete);
+    h.message(socket, &update(racing, true));
+    let (status, body) = if unknown {
+        (400, r#"{"code":-2011,"msg":"Unknown order sent."}"#)
+    } else {
+        (200, r#"{"code":200,"msg":"success"}"#)
+    };
+    h.reply(regular.id, status, "", body);
+    h.reply(conditional.id, status, "", body);
+
+    for native in [preclosed, racing] {
+        let order = h.engine.store().order(&id(native)).unwrap();
+        assert_eq!(
+            order.status,
+            OrderStatus::Closed,
+            "native ID {native}, unknown={unknown}"
+        );
+        assert_eq!((order.filled, order.remaining), (0.002, 0.0));
+    }
+    for id in [regular_id, conditional_id] {
+        assert_eq!(
+            h.engine.store().order(id).unwrap().status,
+            OrderStatus::Canceled
+        );
+    }
+    assert!(h.result(901).unwrap().is_ok());
+    assert!(
+        h.requests.is_empty(),
+        "cancellation must not place or retry writes"
+    );
+}
