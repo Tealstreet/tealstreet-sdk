@@ -1827,3 +1827,117 @@ fn a_rejection_after_an_accepted_step_is_not_reported_as_rejected() {
     let error = failure(&actions);
     assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
 }
+
+fn leverage_read(e: &mut Engine<WeexFutures>, command_id: u32) -> HttpRequest {
+    let actions = command(
+        e,
+        Command::FetchLeverage {
+            command: command_id,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    let mut reads: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/account/symbolConfig") => Some(r.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reads.len(), 1, "one fresh symbol configuration read");
+    reads.pop().unwrap()
+}
+fn command_errors(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandError { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+const ISOLATED_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#;
+
+#[test]
+fn leverage_read_is_a_fresh_symbol_scoped_configuration_read() {
+    let mut e = engine();
+    let r = leverage_read(&mut e, 40);
+    assert_eq!(r.method, Method::Get);
+    assert!(r.url.contains("symbol=BTCUSDT"), "{}", r.url);
+    assert!(r.headers.iter().any(|(k, _)| *k == "ACCESS-SIGN"));
+    let actions = raw_response(&mut e, &r, ISOLATED_CONFIG);
+    assert_eq!(
+        done(&actions),
+        Ok(r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#.into())
+    );
+    assert!(command_errors(&actions).is_empty());
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(7.0));
+    assert_eq!(setting.sell_leverage, Some(9.0));
+    assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+}
+
+#[test]
+fn leverage_read_failures_report_once_and_keep_settings() {
+    let mut e = engine();
+    let before = e.store().setting("BTCUSDT");
+    for (id, body) in [
+        (41, "{\"code\":\"40001\"}"),
+        (42, "[]"),
+        (
+            43,
+            r#"[{"symbol":"ETHUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"5","isolatedLongLeverage":"5","isolatedShortLeverage":"5"}]"#,
+        ),
+        (
+            44,
+            r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"0","isolatedLongLeverage":"5","isolatedShortLeverage":"5"}]"#,
+        ),
+    ] {
+        let r = leverage_read(&mut e, id);
+        let actions = raw_response(&mut e, &r, body);
+        let error = done(&actions).expect_err(body);
+        assert_eq!(command_errors(&actions), [error]);
+    }
+    assert_eq!(e.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn a_leverage_write_during_the_read_wins_over_its_snapshot() {
+    let mut e = engine();
+    let read = leverage_read(&mut e, 45);
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 46,
+            symbol: "BTCUSDT".into(),
+            leverage: 50.0,
+            side: None,
+        },
+    );
+    let write = writes(&actions).pop().unwrap();
+    response(
+        &mut e,
+        &write,
+        json!({"symbol":"BTCUSDT","marginType":"CROSSED","crossLeverage":"50","isolatedLongLeverage":"20","isolatedShortLeverage":"20"}),
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
+    assert_eq!(
+        done(&actions),
+        Ok(r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#.into())
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+}
+
+#[test]
+fn leverage_read_needs_a_known_market() {
+    let mut e = engine();
+    let actions = command(
+        &mut e,
+        Command::FetchLeverage {
+            command: 47,
+            symbol: "ETHUSDT".into(),
+        },
+    );
+    assert_eq!(done(&actions), Err("unknown market ETHUSDT".into()));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}

@@ -51,6 +51,11 @@ enum Task {
         command: CommandId,
         rows: Vec<Candle>,
     },
+    Leverage {
+        command: CommandId,
+        symbol: String,
+        revision: u64,
+    },
 }
 struct DeferredGet {
     timer: TimerId,
@@ -237,6 +242,99 @@ impl WeexFutures {
         }
     }
     #[allow(clippy::too_many_arguments)]
+    /// A fresh symbol configuration read, as the TS adapter's leverage query does.
+    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
+        let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
+            cx.done(command, Err(format!("unknown market {symbol}")));
+            return;
+        };
+        if cx.now < self.paused_until {
+            cx.done(command, Err("WEEX account reads are rate limited".into()));
+            return;
+        }
+        let task = Task::Leverage {
+            command,
+            symbol,
+            revision: self.account.settings_revision(),
+        };
+        let query = format!("symbol={market_id}");
+        if !self.signed_request(
+            cx,
+            Method::Get,
+            "/capi/v3/account/symbolConfig",
+            &query,
+            None,
+            task,
+            None,
+        ) {
+            cx.done(command, Err("WEEX leverage requires credentials".into()));
+        }
+    }
+    fn leverage_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: &str,
+        revision: u64,
+        response: Response<'_>,
+    ) {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fetched {
+            buy_leverage: f64,
+            sell_leverage: f64,
+            margin_type: safe_cex_engine::model::MarginType,
+        }
+        let market_id = cx.store.market(symbol).map(|m| m.id.clone());
+        let config = serde_json::from_str::<Vec<account_wire::ConfigRow<'_>>>(response.body)
+            .map_err(|e| format!("invalid WEEX symbol configuration: {e}"))
+            .and_then(|rows| {
+                rows.into_iter()
+                    .find(|row| Some(&*row.symbol) == market_id.as_deref())
+                    .ok_or_else(|| format!("WEEX symbol configuration omitted {symbol}"))
+            })
+            .and_then(|row| {
+                let setting = row.setting();
+                match (
+                    setting.buy_leverage,
+                    setting.sell_leverage,
+                    setting.margin_type,
+                ) {
+                    (Some(buy), Some(sell), Some(margin_type)) if buy > 0.0 && sell > 0.0 => Ok((
+                        account::Config {
+                            setting,
+                            hedged: row.separated_type == "SEPARATED",
+                            isolated_long_leverage: row.isolated_long_leverage,
+                            isolated_short_leverage: row.isolated_short_leverage,
+                        },
+                        Fetched {
+                            buy_leverage: buy,
+                            sell_leverage: sell,
+                            margin_type,
+                        },
+                    )),
+                    _ => Err("invalid WEEX symbol configuration: non-positive leverage".into()),
+                }
+            });
+        let (config, fetched) = match config {
+            Ok(config) => config,
+            Err(error) => {
+                cx.command_error(command, &error);
+                cx.done(command, Err(error));
+                return;
+            }
+        };
+        // A write or a newer settings read since issue supersedes this snapshot.
+        if revision == self.account.settings_revision() {
+            cx.store
+                .update_setting(symbol, |setting| *setting = config.setting);
+            self.account.configs.insert(symbol.to_owned(), config);
+        }
+        cx.done(
+            command,
+            serde_json::to_string(&fetched).map_err(|e| e.to_string()),
+        );
+    }
     fn signed_request(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -494,6 +592,10 @@ impl WeexFutures {
                 }
             }
             Task::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Task::Leverage { command, .. } => {
+                cx.command_error(command, error);
+                cx.done(command, Err(error.into()));
+            }
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -545,6 +647,12 @@ impl Venue for WeexFutures {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.read_credentials
             && let Err(error) = read.validate().and_then(|_| {
@@ -794,6 +902,11 @@ impl Venue for WeexFutures {
             );
         }
         match p.task {
+            Task::Leverage {
+                command,
+                symbol,
+                revision,
+            } => self.leverage_response(cx, command, &symbol, revision, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
@@ -1057,6 +1170,7 @@ impl Venue for WeexFutures {
                     Some(ArrayAt::Root),
                 );
             }
+            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             _ => cx.log(LogLevel::Warning, "WEEX command not implemented yet"),
         }
     }

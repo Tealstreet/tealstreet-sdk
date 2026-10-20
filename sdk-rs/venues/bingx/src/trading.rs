@@ -1156,7 +1156,7 @@ impl Trading {
         };
         Ok(one(
             Method::Post,
-            "/openApi/swap/v2/trade/leverage",
+            crate::paths::LEVERAGE,
             Params::new()
                 .str("symbol", &market.id)
                 .str(

@@ -252,6 +252,10 @@ impl Account {
     pub fn bump_orders(&mut self) {
         self.orders_revision = self.orders_revision.wrapping_add(1);
     }
+    /// Fences a settings read against stream and acknowledgement updates.
+    pub fn positions_revision(&self) -> u64 {
+        self.positions_revision
+    }
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }

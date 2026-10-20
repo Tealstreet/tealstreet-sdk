@@ -1482,6 +1482,8 @@ mod tests {
                         "coinbase",
                         "coinbasespot",
                         "polymarket",
+                        "bingx",
+                        "weex",
                     ],
                     venue,
                 ) || any(&OKX, venue)
