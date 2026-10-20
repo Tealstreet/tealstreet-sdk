@@ -346,3 +346,14 @@ All 21 Rust CI checks passed on `a7330dc0b1` before this observation-horizon fix
 The new commit requires fresh green CI. The default combined WASM build, full
 host suite and Binance public/private regression gates are the remaining local
 follow-ups; their earlier checkpoint results do not replace those reruns.
+
+### Completed local landing gates
+
+The remaining local gates also pass on `2ae66217b6`: the combined default WASM
+build completes, all48 host tests pass, and Binance public/private replay passes
+with that combined artifact. Public Binance compares873 frames and three books:
+CPU TS193.5ms / Rust85.4ms, steady105.5ms /29.2ms, retained18.9MB /3.2MB.
+Its14-frame private replay passes without changing correctness requirements.
+No additional source change or single-Binance artifact was needed. All mandatory
+local port gates are now complete. Final exact-head CI remains the merge gate;
+posted independent adversarial reports have no unresolved blocking finding.
