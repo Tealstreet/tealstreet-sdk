@@ -124,7 +124,8 @@ impl BitunixFutures {
     }
     fn connect_recovering(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed, recover: bool) {
         let (url, channel, identity) = match &feed {
-            Feed::Futures => (FUTURES, SocketChannel::Public, "futures".into()),
+            // Depth and klines use the futures endpoint, which the host routes as Business.
+            Feed::Futures => (FUTURES, SocketChannel::Business, "futures".into()),
             Feed::Private => (PRIVATE, SocketChannel::Private, "private".into()),
             Feed::Public { channel, range } => (
                 PUBLIC,

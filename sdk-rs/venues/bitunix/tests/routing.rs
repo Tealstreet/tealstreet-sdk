@@ -101,7 +101,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             "private" => ("wss://fapi.bitunix.com/private/", SocketChannel::Private),
             "futures" => (
                 "wss://api.bitunix.com/ws-futures/?from=contract&compress=2",
-                SocketChannel::Public,
+                SocketChannel::Business,
             ),
             _ => ("wss://fapi.bitunix.com/public/", SocketChannel::Public),
         };

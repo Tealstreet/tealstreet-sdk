@@ -768,3 +768,44 @@ fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
 }
+
+#[test]
+fn app_stop_payload_with_trigger_equal_to_price_places_protection() {
+    for (kind, field) in [
+        (safe_cex_engine::model::OrderType::StopLoss, "slPrice"),
+        (safe_cex_engine::model::OrderType::TakeProfit, "tpPrice"),
+    ] {
+        let (mut e, _) = startup();
+        let mut o = order(r#","triggerPrice":100500"#);
+        o.kind = kind;
+        o.price = Some(100500.0);
+        o.amount = 0.01;
+        e.handle(
+            1.0,
+            Event::Command(Command::PlaceOrders {
+                command: 940,
+                orders: vec![o],
+            }),
+        );
+        let write = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/api/v1/futures/tpsl/place_order"))
+            .expect("protective trigger equal to price is placed from price");
+        let body: serde_json::Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body[field], "100500");
+    }
+    let (mut e, _) = startup();
+    let mut o = order(r#","triggerPrice":90000"#);
+    o.kind = safe_cex_engine::model::OrderType::StopLoss;
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 941,
+            orders: vec![o],
+        }),
+    );
+    assert!(
+        done(&mut e, 941).is_err(),
+        "a distinct trigger stays rejected"
+    );
+}

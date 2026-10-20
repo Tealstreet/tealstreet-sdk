@@ -262,8 +262,11 @@ impl BitunixFutures {
                     );
                 }
             }
+            // The app sends SL/TP with triggerPrice equal to price; TS places them from price.
+            let protective_trigger = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && o.trigger_price == o.price;
             if matches!(o.kind, OrderType::TrailingStopLoss | OrderType::Conditional)
-                || o.trigger_price.is_some()
+                || (o.trigger_price.is_some() && !protective_trigger)
             {
                 return Err("Bitunix conditional and trailing orders are not supported".into());
             }
