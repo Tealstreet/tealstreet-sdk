@@ -16,7 +16,6 @@ const CHUNK_BYTES = 16 * 1024;
 const BATCH_BYTES = 64 * 1024;
 const BATCH_MESSAGES = 256;
 const RETAINED_SCRATCH_BYTES = 16 * 1024;
-const encoder = new TextEncoder();
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}, { batchMessages = true } = {}) {
@@ -404,7 +403,7 @@ export class EngineHost {
         const binary = data instanceof Uint8Array;
         let written;
         if (binary) { buffer.set(data, at + header); written = data.byteLength; }
-        else ({ written } = encoder.encodeInto(data, buffer.subarray(at + header)));
+        else ({ written } = (this.wsEncoder ??= new TextEncoder()).encodeInto(data, buffer.subarray(at + header)));
         view.setUint32(at, messages[i], true);
         view.setUint32(at + 4, written, true);
         view.setFloat64(at + 8, messages[i + 1], true);

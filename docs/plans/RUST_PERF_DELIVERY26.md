@@ -787,3 +787,38 @@ No original-control or candidate performance samples were collected. Next:
 archive the previous243 family files plus9 historical aggregate files, rebuild
 all27 families, run actual SDK/host/consumer/offline integration checks and
 size review, then freeze the40/64 comparison with the declared no-retry policy.
+
+## Actual family/consumer checkpoint and lazy codec repair
+
+The `aa96322d86` release passes all27 isolated builds/Clippy checks. Independent
+physical audit verifies1002 source inputs,252 archived files and243 fresh family
+files with matching Node/web binaries. Preserve the failed size gate:26 families
+exceed the earlier caps after incoming shared-feed functionality; Paradex fits.
+No budgets changed. For final-source size review, independently conditionally
+reviewed policy is to raise only verified breaches to actual+3%, rounded up to
+KiB; retain fitting caps, publish old/actual/new, and require CI to pass. This is
+separate from the unused earlier four-family CI-exact condition and changes no
+CPU/memory gate or compiler profile. Final-source physical evidence is required.
+
+One actual15-command integration run passes14 commands: SDK448/17files,
+host185, offline parity44, server11, MCP5, CLI2, MCP build and isolated packaged
+smoke. React Native fails its codec-free native-registry import: the host's
+module-level TextEncoder construction runs before the probe restores codecs.
+Preserve this failure. Repair the host to reuse its existing lazy per-host
+encoder only for text delivery. Binary-only batches instantiate no encoder.
+The unchanged React Native actual tests then pass2/2; full host tests pass186,
+including a new isolated import-without-codecs regression. Independent review
+finds no remaining issue. No full-suite or performance pass is inferred from
+this targeted repair. `RUST_PERF_DELIVERY28_RELEASE_CHECKPOINT.json.gz` retains
+all evidence, SHA `c52952d4cd3e5d157b060957fb4002256425744de5d29736414ef286b9e6fc85`.
+
+The target advanced to startup/broker landing `9c34020741`. Merge it before
+scoring: canonical BloFin option gating, KuCoin cancellation scope, broker
+contracts, Bitrue time-in-force correction and startup signing-clock reset after
+module setup. Preserve existing CPU/memory cutoffs and readiness continuity;
+apply the clock correction identically to both arms. Only KuCoin futures needs
+one new private tape;63 can be hash-reused,40/64 roster/order unchanged.
+An exact new original control is already built and independently audited:
+446Rust/config,35 protected inputs,29 fresh internal compiles,9 bindings,
+Node/web WASM12174466bytes identical. Old controls and failed samples remain
+untouched. New final cohort remains unstarted; PR1344 remains draft.

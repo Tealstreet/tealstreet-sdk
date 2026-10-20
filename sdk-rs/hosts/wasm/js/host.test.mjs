@@ -2,8 +2,19 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
+
+test('host imports before a native runtime provides codecs or WebAssembly', () => {
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    for (const name of ['TextEncoder', 'TextDecoder', 'WebAssembly']) Reflect.deleteProperty(globalThis, name);
+    const { EngineHost } = await import(process.argv[1]);
+    if (typeof EngineHost !== 'function') throw new Error('host export unavailable');
+  `, new URL('./host.mjs', import.meta.url).href], { encoding: 'utf8', timeout: 10_000 });
+  assert.ifError(child.error);
+  assert.equal(child.status, 0, child.stderr);
+});
 
 const decode = (bytes) => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
