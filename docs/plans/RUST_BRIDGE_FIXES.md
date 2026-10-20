@@ -684,3 +684,41 @@ additional consumer cases, types and strict scoped lint pass. Independent
 source and fixture-preservation review PASS. Actual native credential outcome
 feedback remains phase 6b; manually invoking Base auth methods proves only
 resolved-policy propagation. No combined-WASM acceptance claimed yet.
+
+### Account reads and observation freshness
+
+Review found that full non-consuming account reads would otherwise manufacture
+order update IDs, and then the ordinary flush would count the same native
+observation again. That can falsely confirm a chaser's missing order. Add an
+optional empty ACCOUNT_READ section to these frames, decoded at every consumer.
+FrameApplier passes explicit read-source metadata to Store.update: apply rows
+and notify readers without advancing orders/positions observation counters.
+Ordinary bulk replacements keep their required counter bumps. Guard recursive
+read notification; never restore counters after notifying observers. Tests
+cover repeated reads followed by the normal flush and missing-order handling.
+
+Direct consumers synchronize through the Base no-op/Rust native seam before
+CLI preprocessing, connected command execution and chaser initial position
+capture. The structural CLI interface keeps the seam optional for non-SDK
+consumers. Failure follows existing visible command error paths; disconnected
+session management must remain available.
+
+## Phase 5 audited plan
+
+Generic order triggerType is already encoded and decoded but dropped by the
+FrameApplier; preserve it beside existing TP/SL aliases. Fills carry native
+order identity but omit the event orderId required by chaser attribution; add
+that field while retaining existing id. Append optional realizedPnl and fee
+columns after the legacy fill prefix, preserving old frame readers and missing
+versus zero. Use native typed producer fields on Hyperliquid, MEXC and WEEX;
+retain each live event's established fee/PnL convention, including Hyperliquid
+close-event net PnL. No new network reads, synthetic financial guesses or fill
+count/dedup changes. Verify legacy/new wire decoding, zeros/rebates, exact
+native events, worker forwarding and chaser tracking.
+
+Aster already canonicalizes unsupported intervals consistently in fetch,
+subscription and provider paths, with an actual-WASM regression. Invalid
+numeric steps are already guarded natively. Verify and retain those fixes.
+Candle lastSide has no demonstrated repository consumer and native Bybit kline
+messages do not supply aggressor side; skip under the production-impact bar
+instead of inventing it from candle direction.
