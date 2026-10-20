@@ -24,6 +24,7 @@ import type {
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
 
@@ -602,12 +603,18 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
-  snapshotFrame = () => this.host?.snapshot();
+  snapshotFrame = () => {
+    this.host?.flush();
+    return this.host?.snapshot();
+  };
 
-  fetchEngineSnapshot = async (): Promise<ArrayBuffer> => {
-    const frame = this.host?.snapshot();
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
+    const frame = this.snapshotFrame();
     if (!frame) throw new Error('Engine has not started');
-    return frame;
+    const fetchedLeverage: Record<string, FetchedLeverage> = {};
+    for (const symbol of Object.keys(this.store.fetchedLeverage))
+      fetchedLeverage[symbol] = { ...this.store.fetchedLeverage[symbol] };
+    return { frame, fetchedLeverage };
   };
 
   updateSymbolMetadata = async (symbol: string) => {
@@ -625,6 +632,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       frame = new Frame(buffer);
     } catch (error) {
+      this.applier.invalidateMarketIdentity();
       console.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
       return;
@@ -1006,8 +1014,14 @@ export class RustEngineExchange extends BaseExchange {
       if (['asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
-        const value = await this.fetchSymbolMaxLeverage(symbol);
-        leverage = { buyLeverage: value, sellLeverage: value };
+        this.host?.flush();
+        const cached = this.store.fetchedLeverage[symbol];
+        if (
+          !cached ||
+          !Number.isFinite(cached.buyLeverage) || cached.buyLeverage <= 0 ||
+          !Number.isFinite(cached.sellLeverage) || cached.sellLeverage <= 0
+        ) return null;
+        return cached;
       }
       this.host?.flush();
       this.applier.applyLeverage(symbol, leverage);

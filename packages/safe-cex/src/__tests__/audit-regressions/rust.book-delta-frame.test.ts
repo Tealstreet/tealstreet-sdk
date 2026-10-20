@@ -96,14 +96,51 @@ describe('Rust BOOK_DELTA reconstruction', () => {
     applier.apply(first);
     applier.books(first);
     for (const invalid of [NaN, Infinity, -1]) {
+      applier.apply(initial());
       expect(() => applier.apply(frame({ deltas: [
         { market: 0, bids: [99, 10], asks: [] }, { market: 1, bids: [49, invalid], asks: [] },
       ] }))).toThrow(/snapshot required/);
     }
     expect(() => applier.apply(frame({ deltas: [{ market: 200, bids: [], asks: [] }] }))).toThrow(/snapshot required/);
     const good = frame({ deltas: [{ market: 0, bids: [98, 4], asks: [] }] });
-    applier.apply(good);
-    expect(applier.books(good)[0].orderbook.bids).toEqual(levels([[99, 2, 2], [98, 4, 6]]));
+    expect(() => applier.apply(good)).toThrow(/snapshot required/);
+    applier.apply(initial());
+    const resumed = frame({ deltas: [{ market: 0, bids: [98, 4], asks: [] }] });
+    applier.apply(resumed);
+    expect(applier.books(good)).toEqual([]);
+    expect(applier.books(resumed)[0].orderbook.bids).toEqual(levels([[99, 2, 2], [98, 4, 6]]));
+  });
+
+  it('keeps rejected book batches invalid until a recovery snapshot arrives while preserving account sections and fills', () => {
+    const store = new DefaultStore();
+    const applier = new FrameApplier(store);
+    const first = initial();
+    applier.apply(first);
+    const retained = applier.books(first);
+    const broken = frame({ deltas: [
+      { market: 0, bids: [99, 10], asks: [] },
+      { market: 1, bids: [49, NaN], asks: [] },
+    ] });
+    broken.balance = () => ({ used: 1, free: 6, total: 7, upnl: 0 });
+    broken.fills = () => ({ count: 1, market: Uint32Array.of(0), side: Uint32Array.of(0),
+      rows: Float64Array.of(99, 0.25), orderId: () => 'tracked-order' });
+    expect(() => applier.apply(broken)).toThrow(/snapshot required/);
+    expect(applier.books(broken)).toEqual([]);
+    expect(store.balance.total).toBe(7);
+    expect(applier.fills(broken)[0]).toMatchObject({ orderId: 'tracked-order', symbol: 'BTCUSDT', amount: 0.25 });
+    expect(retained[0].orderbook.bids[0].amount).toBe(2);
+
+    // A failed recovery request leaves no full snapshot to restore the dropped deltas.
+    const next = frame({ deltas: [{ market: 0, bids: [98, 4], asks: [] }] });
+    next.balance = () => ({ used: 1, free: 7, total: 8, upnl: 0 });
+    expect(() => applier.apply(next)).toThrow(/snapshot required/);
+    expect(applier.books(next)).toEqual([]);
+    expect(store.balance.total).toBe(8);
+
+    applier.apply(frame({ books: [{ market: 0, bids: [99, 10, 10, 98, 3, 13], asks: [] }] }));
+    const resumed = frame({ deltas: [{ market: 0, bids: [98, 4], asks: [] }] });
+    applier.apply(resumed);
+    expect(applier.books(resumed)[0].orderbook.bids).toEqual(levels([[99, 10, 10], [98, 4, 14]]));
   });
 
   it('supports reading a self-contained snapshot directly before apply', () => {

@@ -99,7 +99,8 @@ identities already work and must remain intact. Full-auto phases:
    state. Keep Rust, JS declarations, decoder and FrameApplier synchronized.
 2. Preserve market identity: symbol-keyed settings and no market-only flush
    while MARKETS is pending; regression tests cover reorder/removal and queued
-   books/candles/fills. Route leverage writes through SETTINGS alone.
+   books/candles/fills. Route SETTINGS and rare-query leverage writes through
+   the sole FrameApplier owner.
 3. Recover apply failures: retain independent account sections, stage identity
    changes, request local/worker snapshots, and test actual frame-to-chaser fills.
 4. Run scoped native/JS/SDK checks, combined WASM and Binance plus affected-field
@@ -138,8 +139,27 @@ retaining both test additions and adapting renamed helpers/revised Greek tails;
 the landed KuCoin Spot leverage path also uses the sole applier owner.
 Integrated checks pass: 95 all-feature/89 default engine tests, 25 decoder tests,
 187 scoped SDK/worker tests, typecheck/lint, native/WASM Clippy and 586 harness
-tests. The earlier Binance replay was superseded after the landing merge;
-combined-WASM rebuild and acceptance replay results follow on this exact source.
+tests. Combined release WASM built successfully. All 12 public/private gates pass
+for Binance, Hyperliquid, OKX, GRVT, KuCoin futures and KuCoin spot.
+Public main/steady CPU in ms (TS → Rust): Binance 296.1/166.6 → 158.1/82.4;
+Hyperliquid 387.2/44.9 → 81.5/33.8; OKX 1589.2/1188.4 → 1290.8/936.8;
+GRVT 171.3/97.4 → 153.7/84.1; KuCoin 408.9/247.4 → 202.6/108.5;
+KuCoin spot 525.5/333.2 → 464.3/301.3. All retained-memory comparisons pass.
+The first OKX attempt matched output but missed steady CPU by 0.4%; a
+same-machine decoder control profile matched output/main CPU, followed by one
+full three-run retry with unchanged fixture and thresholds (passing above).
+The PR records both attempts and distinguishes profiling from gate evidence.
+
+Phase-4 review additionally found query-only leverage filtered from main, stale
+late snapshots, market maxima masquerading as account leverage, and
+identity/book baselines surviving rejected frames. Repairs preserve query rails
+in coherent snapshot bundles, return only confirmed account rails or null, and
+require fresh baselines after errors; each has reproducing SDK regressions.
+These are production data-loss/staleness/attribution fixes, not lifecycle parity.
+Final phase review passes. Follow-up checks: 54 recovery/worker/contract tests,
+12 book tests (two fail with the baseline invalidation removed), 83 JS host/reader
+tests, 7 actual-writer cross-language tests, typecheck, production lint and bans.
+All requested repairs are ready for the PR adversarial-review and green-CI gates.
 
 ## Security
 
@@ -324,8 +344,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
   `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
-- Medium: `fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`; command
+- Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
   rejections don't emit the error toast (one-error rule); `privateOnly`/
   `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base

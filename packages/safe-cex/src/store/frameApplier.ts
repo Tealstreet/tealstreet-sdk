@@ -192,6 +192,7 @@ export class FrameApplier {
     const marketsFailed = errors.length > 0 || (this.marketsNeedSnapshot && !update.markets);
     this.marketsNeedSnapshot = marketsFailed;
     if (marketsFailed) {
+      this.invalidateMarketIdentity();
       this.invalidMarketFrames.add(frame);
       if (!errors.length) errors.push(new Error('Market identity requires a snapshot'));
     }
@@ -499,6 +500,8 @@ export class FrameApplier {
       try {
         this.ingestBooks(frame, symbols, ids);
       } catch (error) {
+        // A rejected batch may discard valid deltas too; require fresh baselines.
+        this.bookStates.clear();
         this.frameBooks.set(frame, []);
         errors.push(error);
       }
@@ -525,9 +528,18 @@ export class FrameApplier {
     if (errors.length) throw new FrameApplyError(errors.map(String).join('; '));
   }
 
+  invalidateMarketIdentity(): void {
+    this.marketsNeedSnapshot = true;
+    this.bookStates.clear();
+  }
+
   applyLeverage(symbol: string, leverage: FetchedLeverage): void {
+    this.applyLeverageSnapshot({ ...this.store.fetchedLeverage, [symbol]: leverage });
+  }
+
+  applyLeverageSnapshot(leverage: Record<string, FetchedLeverage>): void {
     const update: Writable<StoreUpdate> = {};
-    this.writeFetchedLeverage(update, { ...this.store.fetchedLeverage, [symbol]: leverage });
+    this.writeFetchedLeverage(update, leverage);
     this.store.update(update);
   }
 

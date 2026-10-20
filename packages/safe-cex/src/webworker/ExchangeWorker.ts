@@ -661,7 +661,7 @@ export class ExchangeWorker {
     }
 
     if (this._forwardsFrames) {
-      this._ctx.postMessage({ op: 'store', data: this._derivedStorePayload(processedData) });
+      this._ctx.postMessage({ op: 'store', data: this._derivedStorePayload(processedData, options?.forceFullStore) });
       return;
     }
 
@@ -673,24 +673,28 @@ export class ExchangeWorker {
 
   /**
    * Frame mode: venue state (markets, tickers, orders, positions, balance,
-   * leverage, loaded flags) reaches main in frames, so a store payload carries
-   * only what the worker derives from it, sanitized as usual.
+   * loaded flags) reaches main in frames. Rare query-derived leverage also
+   * travels in store payloads when changed, including late-client snapshots.
    */
-  private _derivedStorePayload = (data: StoreData): StoreWorkerStorePayload => {
+  private _lastFrameLeverage?: StoreData['fetchedLeverage'];
+
+  private _derivedStorePayload = (data: StoreData, force = false): StoreWorkerStorePayload => {
+    const includeLeverage = force || data.fetchedLeverage !== this._lastFrameLeverage;
+    this._lastFrameLeverage = data.fetchedLeverage;
     const {
       markets: _markets,
       tickers: _tickers,
       orders: _orders,
       positions: _positions,
       balance: _balance,
-      fetchedLeverage: _fetchedLeverage,
+      fetchedLeverage,
       loaded: _loaded,
       latency: _latency,
       options: _options,
       updateIds: _updateIds,
       ...derived
     } = this._sanitizeForPostMessage(data);
-    return derived;
+    return includeLeverage ? { ...derived, fetchedLeverage } : derived;
   };
 
   get store() {

@@ -223,6 +223,11 @@ export const isEmptyStubCapability = (value: unknown): boolean => {
 export const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
   isBaseCapabilityFallback(value, method) || isEmptyStubCapability(value);
 
+export type EngineSnapshot = {
+  frame: ArrayBuffer;
+  fetchedLeverage: Record<string, FetchedLeverage>;
+};
+
 export type CallableMethodsInWorker =
   | 'setLeverage'
   | 'scheduleCancel'
@@ -319,7 +324,7 @@ export interface Exchange {
   fetchTickers?: () => Promise<Ticker[]>;
   fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;
   fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
-  fetchEngineSnapshot: () => Promise<ArrayBuffer>;
+  fetchEngineSnapshot: () => Promise<EngineSnapshot>;
   updateSymbolMetadata: (symbol: string) => Promise<void>;
   fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
@@ -1435,7 +1440,7 @@ export class BaseExchange implements Exchange {
   private workerFrameApplier?: FrameApplier;
   private workerFrameRecoveryPending = false;
 
-  fetchEngineSnapshot = async (): Promise<ArrayBuffer> => {
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
     throw new Error('Engine snapshots are unavailable for this exchange');
   };
 
@@ -1469,6 +1474,7 @@ export class BaseExchange implements Exchange {
     try {
       frame = new Frame(buffer);
     } catch (error) {
+      this.workerFrameApplier.invalidateMarketIdentity();
       needsSnapshot = true;
       console.error('Invalid engine frame', error);
     }
@@ -1499,7 +1505,10 @@ export class BaseExchange implements Exchange {
     void Promise.resolve()
       .then(async () => {
         const snapshot = await (this as Exchange).callMethodInWorker('fetchEngineSnapshot');
-        if (!this.isDisposed) this.applyWorkerFrameBuffer(snapshot, false);
+        if (!this.isDisposed) {
+          this.applyWorkerFrameBuffer(snapshot.frame, false);
+          this.dispatchFrameEvent(() => this.workerFrameApplier!.applyLeverageSnapshot(snapshot.fetchedLeverage));
+        }
       })
       .catch((error) => console.error('Engine frame recovery failed', error))
       .finally(() => {

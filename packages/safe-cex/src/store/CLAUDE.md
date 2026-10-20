@@ -26,9 +26,15 @@ Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 and ticker `midPrice`, including clearing midpoint on packed and object worker
 updates. Orders, positions, fills and settings retain explicit symbols for rows
 missing from MARKETS. `FrameApplier` owns fetched-leverage writes, including rare
-query results; a SETTINGS replacement remains authoritative.
+query results; a SETTINGS replacement remains authoritative. Frame forwarding
+also sends changed query-derived leverage and includes it in late snapshots,
+since such reads need not cause an engine SETTINGS frame. Recovery snapshots
+carry a copied leverage map after flushing pending SETTINGS. Cached rails with
+missing, nonfinite or nonpositive sides are unknown, not market maxima.
 
 A failed book or account section must not suppress independent valid sections.
+Rejecting a book batch invalidates its baselines until fresh full books arrive;
+rejecting an envelope invalidates indexed identities until fresh MARKETS arrive.
 Stage identities before adopting a new table, retain the old table when market
 metadata fails, and use explicit fill identities until a snapshot repairs it.
 Apply failures request a bounded local engine snapshot or worker snapshot RPC;

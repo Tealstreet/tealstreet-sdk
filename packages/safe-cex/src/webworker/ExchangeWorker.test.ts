@@ -11,6 +11,7 @@ import type {
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameApplier } from '../store/frameApplier';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
 import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
@@ -493,4 +494,30 @@ it('forwards midpoint changes and clearing through the object worker delta bridg
   expect(messages.at(-1).data.tickerDeltas).toEqual([[0, 1 << 11, NaN]]);
   main.update(messages.at(-1).data, true);
   expect('midPrice' in main.tickers[0]).toBe(false);
+});
+
+
+it('forwards query-only leverage in frame mode, including late-client snapshots and authoritative clearing', () => {
+  const { worker, messages } = createWorker();
+  (worker as any)._forwardsFrames = true;
+  const applier = new FrameApplier(worker.store);
+  const main = new DefaultStore();
+  const send = () => (worker as any)._storeUpdate({
+    ...worker.store.serialize(), fetchedLeverage: worker.store.fetchedLeverage,
+  });
+  const rails = { buyLeverage: 7, sellLeverage: 9 };
+  applier.applyLeverage('BTCUSDT', rails);
+  send();
+  main.update(messages.at(-1).data, true);
+  expect(main.fetchedLeverage.BTCUSDT).toEqual(rails);
+  expect(messages.at(-1).data).not.toHaveProperty('orders');
+  expect(messages.at(-1).data).not.toHaveProperty('tickers');
+  send();
+  expect(messages.at(-1).data).not.toHaveProperty('fetchedLeverage');
+  worker.sendSnapshot();
+  expect(messages.at(-1).data.fetchedLeverage.BTCUSDT).toEqual(rails);
+  worker.store.update({ fetchedLeverage: {} });
+  send();
+  main.update(messages.at(-1).data, true);
+  expect(main.fetchedLeverage).toEqual({});
 });
