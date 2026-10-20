@@ -190,3 +190,30 @@ Leave every `Confirm`/owner-decision item untouched. Repeat phased independent
 reviews, regression tests, all touched-family gates, PR reviews posted to the
 PR, green CI and merge for the second PR; no TS venue deletion. Read-only
 reverification has begun while this first patch completes its gates.
+
+### Production-impact guidance and follow-up preparation
+
+- Fetched and merged the new audit/guidance updates through landing `77291cd6cf`;
+  these additional merges changed audit documentation only. Apply the owner's
+  production-impact rule: no lifecycle matching for its own sake. Current fixes
+  prevent extra exposure, lost/repeated fills, stale financial state or broken
+  caller attribution. M10 is reverified and dropped, with its regression kept.
+- Addendum read-only verification confirms the eight remaining requested issues.
+  Partial COIN-M rejection should follow the established observable contract:
+  emit/log the rejected rows and return accepted IDs, while stopping remaining
+  bracket steps; malformed/count-mismatched replies still fail closed. There is
+  no need to invent a new cross-host result envelope solely to mirror TS.
+- Unsupported histories need native errors **and** existing SDK branded fallback
+  methods, because downstream ingestion tests those brands. `recvWindow` needs
+  SDK options → WASM options → native signing plus the primary-account lookup;
+  the separate Spot WS default remains unchanged. Transport timeout lifecycle
+  need not mimic Axios without demonstrated caller impact.
+- The order-races lane (checkpoint `c2eb6aa8ca`, Aimux thread
+  `thread-dmaqc0s1cvom`) owns engine order locks, pending-placement fences and
+  snapshot empty-BOOK recovery. This lane additionally owns Binance/Bybit
+  subscribed-book enumeration during resync, with missed-clear/fresh-recovery
+  regressions. Include that public-data fix in the authorized follow-up PR and
+  verify against their landed engine contract. Do not duplicate engine locks.
+- Replied through the explicitly requested Aimux thread; requested the peer's
+  PR/landing commit for integration. Native venues currently clear their local
+  books on gaps, but filter those subscribed identities out of `books()`.

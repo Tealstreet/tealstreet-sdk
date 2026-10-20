@@ -200,8 +200,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
 
 ### Binance family
-- The known USD-M amend double exposure also hits PM, where TS throws on -2011
-  and Rust re-places (`binance/src/trading.rs:530`): a regression.
+- ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
+  and Rust re-places (`binance/src/trading.rs:530`): a regression.~~
+  Fixed with the USD-M/PM cancellation-proof and racing-fill regression matrix.
 - Medium: PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`);
   REST candles with `from`+`limit` return the oldest N instead of newest, no
   1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
