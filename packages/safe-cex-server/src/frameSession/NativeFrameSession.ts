@@ -17,7 +17,7 @@ export type NativeFrameSocketFactory = (url: string, protocols: string[]) => Nat
 export interface NativeFrameSessionSink {
   /** Delivery is serial, and commands remain gated until the snapshot delivery completes. */
   onFrame(buffer: ArrayBuffer, metadata: { snapshot: boolean }): void | Promise<void>;
-  /** Native done/error/log/deactivate JSON, retaining caller command IDs and result strings. */
+  /** Native progress/done/error/log/deactivate JSON, retaining caller command IDs and identity strings. */
   onNotice(rawJson: string): void | Promise<void>;
   /** Called once, including explicit close. The error never contains connection credentials. */
   onClose(error: Error): void;
@@ -55,6 +55,15 @@ function validateNotice(text: string): void {
   const value: unknown = JSON.parse(text);
   if (!record(value)) throw error();
   switch (value.type) {
+    case 'commandError':
+      if (keys(value, ['type', 'command', 'message']) && uint32(value.command) && typeof value.message === 'string') return;
+      break;
+    case 'commandProgress':
+      if (keys(value, ['type', 'command', 'receipts']) && uint32(value.command) && Array.isArray(value.receipts) && value.receipts.every((receipt) =>
+        record(receipt) && keys(receipt, ['symbol', 'kind', 'identity']) && typeof receipt.symbol === 'string' && typeof receipt.identity === 'string' &&
+        typeof receipt.kind === 'string' && ['clientOrderId', 'clientOrderIndex', 'orderCode'].includes(receipt.kind),
+      )) return;
+      break;
     case 'done':
       if (keys(value, ['type', 'command', 'result', 'error', 'detail']) && uint32(value.command) && ((typeof value.result === 'string' && !('error' in value) && !('detail' in value)) || (typeof value.error === 'string' && !('result' in value) && (!('detail' in value) || record(value.detail))))) return;
       break;

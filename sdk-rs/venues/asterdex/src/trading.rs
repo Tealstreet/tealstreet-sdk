@@ -8,7 +8,7 @@ use safe_cex_engine::model::{
     PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
@@ -355,7 +355,7 @@ impl AsterDex {
                         .ok_or_else(|| "Missing required Aster credentials".to_owned())
                         .and_then(|credentials| credentials.validate());
                     if let Err(error) = valid {
-                        cx.log(LogLevel::Error, error.clone());
+                        cx.command_error(id, error.clone());
                         cx.fail(id, not_sent(error).kind(ErrorKind::AuthInvalid));
                         return;
                     }
@@ -379,18 +379,18 @@ impl AsterDex {
                         > MAX_ACKNOWLEDGED_ORDERS
                 {
                     let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
-                    cx.log(LogLevel::Error, error.clone());
+                    cx.command_error(id, error.clone());
                     cx.fail(id, not_sent(error));
                     return;
                 }
                 if let Some(error) = &job.error {
-                    cx.log(LogLevel::Error, error.message.clone());
+                    cx.command_error(id, error.message.clone());
                 }
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
             Err(error) => {
-                cx.log(LogLevel::Error, error.clone());
+                cx.command_error(id, error.clone());
                 cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
@@ -600,7 +600,7 @@ impl AsterDex {
             match outcome {
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
-                    cx.log(LogLevel::Error, message.clone());
+                    cx.command_error(command, message.clone());
                     let mut error = failure(code, message);
                     // An earlier leg that may have executed keeps the command unknown.
                     if unproven
