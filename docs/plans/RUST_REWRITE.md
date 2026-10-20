@@ -319,7 +319,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 
 | Venue | State |
 | --- | --- |
-| Binance USD-M, Binance PM | done |
+| Binance USD-M, Binance PM | done; regression gates retained by variants lane |
+| Binance Spot, COIN-M inverse | port complete in existing Binance crate ([#1326](https://github.com/Tealstreet/tealstreet-sdk/pull/1326)); all four Binance profiles and fresh Hyro regression gates pass |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |
@@ -338,7 +339,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | KuCoin spot | parity follow-up in `RUST_PARITY_GAPS.md` |
-| Engine performance: batched message delivery, per-venue wasm builds | lane running |
+| Engine performance: batched message delivery, per-venue wasm builds | lane running; [GRVT fixture profiling](GRVT_RUST_PERF.md) hands off measured replay audit overhead |
 | GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing |
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; delegated signing follow-up in `RUST_PARITY_GAPS.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
@@ -347,7 +348,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | BreakoutProp legacy DXtrade | implemented; [PR #1328](https://github.com/Tealstreet/tealstreet-sdk/pull/1328), documented public/private gates PASS (scripted public fixture accepted by Sam); live capture needs Sam's legacy DXtrade credentials (`RUST_BREAKOUTPROP.md`) |
-| TxFlow, Binance spot and inverse | next, as lanes free up |
+| TxFlow | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

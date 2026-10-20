@@ -51,7 +51,9 @@ use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "binance")]
-use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_binance::{
+    BinanceFutures, Options as BinanceOptions, Variant as BinanceVariant,
+};
 #[cfg(feature = "bingx")]
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "bitget")]
@@ -1096,13 +1098,21 @@ impl WasmEngine {
                 secret: options.secret,
             }))),
             #[cfg(feature = "binance")]
-            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                portfolio_margin: venue == "binancepm",
-            }))),
+            "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+                Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    portfolio_margin: venue == "binancepm",
+                    variant: match venue {
+                        "binancepm" => BinanceVariant::PortfolioMargin,
+                        "binancespot" => BinanceVariant::Spot,
+                        "binanceinverse" => BinanceVariant::CoinM,
+                        _ => BinanceVariant::UsdM,
+                    },
+                })))
+            }
             #[cfg(feature = "kucoinspot")]
             "kucoinspot" => Box::new(Engine::new(KucoinSpot::new(KucoinOptions {
                 broker: options.extra.and_then(|e| e.kucoin_broker),
