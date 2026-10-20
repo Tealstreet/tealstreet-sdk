@@ -191,6 +191,18 @@ fn number(value: f64) -> String {
 
 impl BinanceFutures {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchStpMode { command }
+        | Command::SetStpMode { command, .. }
+        | Command::CancelOrdersWithSymbols { command, .. }
+        | Command::FetchAccount { command }
+        | Command::FetchOrderBook { command, .. } = &command
+        {
+            cx.done(
+                *command,
+                Err("This Binance command is not supported".into()),
+            );
+            return;
+        }
         if self.is_spot() {
             let id = match &command {
                 Command::SetLeverage { command, .. }
@@ -591,6 +603,9 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
     ) -> Result<Job, String> {
+        if orders.iter().any(|order| order.stp_mode.is_some()) {
+            return Err("Binance self-trade prevention controls are not supported".into());
+        }
         check_client_order_ids(orders)?;
         for opts in orders {
             if let Some(id) = &opts.client_order_id {
@@ -1139,6 +1154,7 @@ impl BinanceFutures {
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
             close: Some(order.close.unwrap_or(false)),
+            stp_mode: None,
         };
         let place = self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));

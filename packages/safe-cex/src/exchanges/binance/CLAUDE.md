@@ -29,6 +29,11 @@ terminal fences against stale replicas and reused client IDs. Whole-batch valida
 trailing/conditional parameters, derivative execution flags, invalid triggers
 and client IDs before cancellation or placement.
 
+The shared engine STP option is currently AsterDEX-only: every Binance profile
+rejects it for the whole batch before any action. Newly shared STP, native
+account/book and symbol-aware cancel commands complete with an explicit
+unsupported error instead of leaving their command pending.
+
 Spot public ticker streams use individual `@ticker` topics, with bid/ask from
 the same event, split into sockets of at most 1024 topics with stable feed
 identities. Each control frame is capped at 128 topics and 4096 UTF-8 bytes,

@@ -166,3 +166,21 @@ precludes claiming strict isolation; live Hyro origins remain unconfigured.
 Final combined WASM boundary suite79/79 passes across six files. Root test
 scripts both pass6972 safe-cex cases; all27 root test tasks pass. PR review
 publication and green CI remain the final landing checks.
+
+
+### AsterDEX landing compatibility
+
+Landing advanced again to `d9aa597fd3` while the combined tests finished.
+The merge preserves optional currency and orphan-ticker wire tails, typed HTTP
+routes/deadlines, both venues' registrations, and lazy Aster crypto loading.
+Phase reviewers found two semantic integration gaps: new STP intent could be
+silently ignored by Binance, and the explicit replay balance view could omit
+Binance coins. Both are fixed before rerunning final gates.
+
+All four Binance profiles reject a batch containing STP intent before any
+read/write/store mutation; newly shared unsupported commands return errors
+instead of hanging. The wrapper rejects non-Aster STP intent before commands.
+Six wrapper cases demonstrably fail without the guard; all20 focused wrapper
+tests pass with it. Native suite98 and strict crate Clippy pass; peer reviews
+of the wrapper/native guards pass. Merged harness272/272 passes, including
+lazy-oracle isolation. Fresh artifact and full gates follow this checkpoint.
