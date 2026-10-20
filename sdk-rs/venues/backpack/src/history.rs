@@ -33,6 +33,7 @@ pub struct Request {
     page_fresh: usize,
     page_hash: u64,
     pages: HashSet<u64>,
+    skipped_fills: Vec<String>,
     invalid: bool,
 }
 #[derive(Serialize)]
@@ -241,6 +242,7 @@ impl Backpack {
                 page_fresh: 0,
                 page_hash: 14695981039346656037,
                 pages: HashSet::new(),
+                skipped_fills: vec![],
                 invalid: false,
             },
         );
@@ -418,9 +420,24 @@ impl Backpack {
             }
             Ok::<(), String>(())
         })();
-        if let Err(e) = result {
-            r.invalid = true;
-            cx.log(safe_cex_engine::LogLevel::Error, e);
+        match result {
+            // One undecodable execution must not hide the rest of the history.
+            Err(_) if r.kind == Kind::Fills => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Id {
+                    trade_id: u64,
+                }
+                r.skipped_fills.push(
+                    serde_json::from_str::<Id>(item)
+                        .map_or_else(|_| "unknown".into(), |d| d.trade_id.to_string()),
+                );
+            }
+            Err(e) => {
+                r.invalid = true;
+                cx.log(safe_cex_engine::LogLevel::Error, e);
+            }
+            Ok(()) => {}
         }
     }
     pub(crate) fn history_response(
@@ -459,6 +476,16 @@ impl Backpack {
             r.oldest = f64::INFINITY;
             self.history_request(cx, r);
         } else {
+            if !r.skipped_fills.is_empty() {
+                cx.log(
+                    safe_cex_engine::LogLevel::Warning,
+                    format!(
+                        "Skipped {} malformed Backpack fill rows: {}",
+                        r.skipped_fills.len(),
+                        r.skipped_fills.join(", ")
+                    ),
+                );
+            }
             cx.done(r.command, Ok(serde_json::to_string(&r.rows).unwrap()));
         }
     }

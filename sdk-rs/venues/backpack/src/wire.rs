@@ -20,6 +20,16 @@ pub fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error>
 use safe_cex_engine::de::number_or_zero;
 pub use safe_cex_engine::de::{Number, number};
 
+/// Names a row that failed to decode, for the skip log; never echoes the raw row.
+pub fn row_symbol(item: &str) -> String {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: Str<'a>,
+    }
+    serde_json::from_str::<Row<'_>>(item).map_or_else(|_| "unknown".into(), |r| r.symbol.into())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketRow<'a> {
@@ -263,14 +273,7 @@ pub fn timestamp(text: &str) -> Result<f64, String> {
     };
     let (year, month, day) = (part(0, 4)?, part(5, 7)?, part(8, 10)?);
     let (hour, minute, second) = (part(11, 13)?, part(14, 16)?, part(17, 19)?);
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_month = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => 0,
-    };
+    let days_in_month = safe_cex_engine::time::days_in_month(year, month).unwrap_or(0);
     if !(1..=days_in_month).contains(&day)
         || !(0..=23).contains(&hour)
         || !(0..=59).contains(&minute)
@@ -278,12 +281,7 @@ pub fn timestamp(text: &str) -> Result<f64, String> {
     {
         return Err("invalid timestamp".into());
     }
-    let y = year - i64::from(month <= 2);
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let m = month + if month > 2 { -3 } else { 9 };
-    let days =
-        era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + (153 * m + 2) / 5 + day - 1 - 719468;
+    let days = safe_cex_engine::time::days_from_civil(year, month, day);
     let fraction = text
         .get(19..)
         .filter(|s| s.starts_with('.'))

@@ -37,6 +37,16 @@ pub struct Contract<'a> {
     #[serde(default, deserialize_with = "number")]
     pub max_market_price_range: f64,
 }
+/// Names a contract row that failed to parse.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractKey<'a> {
+    #[serde(borrow)]
+    pub symbol: Cow<'a, str>,
+    #[serde(borrow)]
+    pub cross_symbol_name: Cow<'a, str>,
+}
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(default, deserialize_with = "optional_number_or_blank")]
