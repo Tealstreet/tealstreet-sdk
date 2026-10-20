@@ -2,8 +2,8 @@
 use crate::Pending;
 use crate::sign::{Credentials, Params};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
-    StopTriggerType, TimeInForce,
+    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::Deserialize;
@@ -67,6 +67,7 @@ enum Call {
     },
 }
 struct Step {
+    receipts: Vec<OrderIdentityReceipt>,
     method: Method,
     path: &'static str,
     params: Params,
@@ -357,6 +358,7 @@ impl Trading {
             job.steps.clear();
         }
         if let Some(step) = job.steps.pop_front() {
+            cx.command_progress(command, step.receipts);
             let (url, headers, body) =
                 step.params
                     .into_request(step.method, step.path, credentials, cx.now);
@@ -719,14 +721,22 @@ impl Trading {
         let mut out = Vec::new();
         for &lot in &lots {
             let mut p = params.clone().num("quantity", lot);
+            let mut receipts = Vec::new();
             if matches!(o.kind, OrderType::Limit | OrderType::Market) {
                 let id = match &o.client_order_id {
                     Some(id) => id.clone(),
                     None => generated_id()?,
                 };
                 p = p.str("clientOrderId", &id);
+                receipts.push(OrderIdentityReceipt {
+                    symbol: o.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: id,
+                });
             }
-            out.push(place_step(p));
+            let mut step = place_step(p);
+            step.receipts = receipts;
+            out.push(step);
         }
         for (kind, trigger) in [
             (OrderType::StopLoss, o.stop_loss),
@@ -783,6 +793,7 @@ impl Trading {
                 .ok_or_else(|| format!("Order {id} not found"))?;
             let market = cx.store.market(&o.symbol).ok_or("Order market not found")?;
             job.steps.push_back(Step {
+                receipts: Vec::new(),
                 method: Method::Delete,
                 path: ORDER,
                 params: Params::new().str("symbol", &market.id).str("orderId", id),
@@ -990,18 +1001,25 @@ impl Trading {
                 id.parse().map_err(|_| "Order id is not a numeric int64")?,
             );
         }
-        params = params.str("clientOrderId", &generated_id()?);
+        let identity = generated_id()?;
+        params = params.str("clientOrderId", &identity);
         if !cx.store.hedged() && o.reduce_only {
             params = params.boolean("reduceOnly", true);
         }
-        Ok(one(
+        let mut job = one(
             Method::Post,
             REPLACE,
             params,
             Call::Replace {
                 old_id: o.id.clone(),
             },
-        ))
+        );
+        job.steps.front_mut().unwrap().receipts = vec![OrderIdentityReceipt {
+            symbol: o.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
+        }];
+        Ok(job)
     }
     fn leverage(&self, cx: &Cx<'_, Pending>, symbol: &str, input: f64) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;
@@ -1021,6 +1039,7 @@ impl Trading {
         let mut job = Job::default();
         for (index, side) in sides.iter().enumerate() {
             job.steps.push_back(Step {
+                receipts: Vec::new(),
                 method: Method::Post,
                 path: "/openApi/swap/v2/trade/leverage",
                 params: Params::new()
@@ -1054,6 +1073,7 @@ impl Trading {
 fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Step {
+            receipts: Vec::new(),
             method,
             path,
             params,
@@ -1064,6 +1084,7 @@ fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
 }
 fn place_step(params: Params) -> Step {
     Step {
+        receipts: Vec::new(),
         method: Method::Post,
         path: ORDER,
         params,

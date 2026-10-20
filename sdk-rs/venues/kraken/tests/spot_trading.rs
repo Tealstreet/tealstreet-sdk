@@ -21,6 +21,64 @@ fn done(
         .unwrap()
 }
 #[test]
+fn every_spot_bracket_leg_receipts_its_exact_native_cl_ord_id_before_dispatch() {
+    let (mut e, _, _) = ready(false);
+    let mut order = opts("limit", 99.);
+    order.stop_loss = Some(95.);
+    order.take_profit = Some(105.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order],
+        }),
+    );
+    let mut identities = std::collections::HashSet::new();
+    for index in 0..3 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 91,
+                    receipts,
+                }) => Some((i, receipts)),
+                _ => None,
+            })
+            .unwrap();
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Http(request) if request.url.ends_with("AddOrder") => Some((i, request)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "XBT/USD");
+        assert_eq!(
+            receipts[0].kind,
+            safe_cex_engine::OrderIdentityKind::ClientOrderId
+        );
+        let actual = request
+            .body
+            .as_deref()
+            .unwrap()
+            .split('&')
+            .find_map(|part| part.strip_prefix("cl_ord_id="))
+            .unwrap();
+        assert_eq!(receipts[0].identity, actual);
+        assert!(identities.insert(receipts[0].identity.clone()));
+        reply(
+            &mut e,
+            request,
+            &format!(r#"{{"error":[],"result":{{"txid":["accepted-{index}"]}}}}"#),
+        );
+    }
+}
+#[test]
 fn native_place_types_exact_client_id_and_trailing_distance() {
     for (kind, raw, expected) in [
         ("limit", "limit", "price=98"),

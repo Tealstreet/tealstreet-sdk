@@ -101,9 +101,35 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
+        let mut receipts = Vec::new();
         for action in self.engine.drain_actions() {
             match action {
-                Action::Http(r) => self.requests.push(r),
+                Action::Notice(Notice::CommandProgress {
+                    receipts: actual, ..
+                }) => receipts.extend(actual),
+                Action::Http(r) => {
+                    let body = r
+                        .body
+                        .as_deref()
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok());
+                    let expected: Vec<_> = body
+                        .as_ref()
+                        .and_then(|body| body["clientOrderId"].as_str())
+                        .map(|id| OrderIdentityReceipt {
+                            symbol: "BTCUSDT".into(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: id.into(),
+                        })
+                        .into_iter()
+                        .collect();
+                    assert_eq!(
+                        std::mem::take(&mut receipts),
+                        expected,
+                        "receipt must precede the exact outgoing native identity: {}",
+                        r.url
+                    );
+                    self.requests.push(r);
+                }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
                 _ => {}
             }
@@ -582,6 +608,32 @@ fn split_quantities_conserve_the_original_amount() {
         h.reply(&format!(r#"{{"code":0,"data":{{"orderId":{id}}}}}"#));
     }
     assert!((total - 25.001).abs() < 1e-10);
+    assert!(h.done[0].is_ok());
+}
+#[test]
+fn every_split_entry_is_receipted_but_trigger_children_still_omit_identity() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        amount: 25.,
+        stop_loss: Some(90.),
+        ..opts()
+    }]);
+    let mut actual = std::collections::HashSet::new();
+    for index in 0..6 {
+        let payload: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+        if index < 3 {
+            assert!(actual.insert(payload["clientOrderId"].as_str().unwrap().to_owned()));
+        } else {
+            assert!(payload.get("clientOrderId").is_none());
+            assert_eq!(payload["type"], "TRIGGER_MARKET");
+        }
+        // collect() checks the progress-before-HTTP ordering and exact native
+        // IDs for every step, including the absence of IDs on trigger wires.
+        h.reply(&format!(
+            r#"{{"code":0,"data":{{"orderId":"accepted-{index}"}}}}"#
+        ));
+    }
+    assert!(h.requests.is_empty());
     assert!(h.done[0].is_ok());
 }
 

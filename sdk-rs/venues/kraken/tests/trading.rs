@@ -95,6 +95,44 @@ fn cancel_ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str) {
     );
 }
 #[test]
+fn each_futures_bracket_step_receipts_its_actual_cli_ord_id_before_write() {
+    let (mut e, _) = ready();
+    let mut order = limit();
+    order.stop_loss = Some(90.);
+    order.take_profit = Some(110.);
+    place(&mut e, vec![order]);
+    let mut identities = std::collections::HashSet::new();
+    for index in 0..3 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 7,
+                    receipts,
+                }) => Some((i, receipts)),
+                _ => None,
+            })
+            .unwrap();
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Http(request) if request.url.ends_with("sendorder") => Some((i, request)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "PF_XBTUSD");
+        assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+        assert_eq!(receipts[0].identity, param(request, "cliOrdId").unwrap());
+        assert!(identities.insert(receipts[0].identity.clone()));
+        ack(&mut e, request, &format!("accepted-{index}"), "placed");
+    }
+}
+#[test]
 fn batch_prevalidates_every_caller_id_before_writes() {
     for kind in [
         OrderType::Limit,

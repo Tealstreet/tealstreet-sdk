@@ -40,6 +40,99 @@ fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
         })
         .collect()
 }
+#[test]
+fn only_final_refreshed_batch_and_fallback_external_ids_are_receipted() {
+    fn write(e: &mut TestEngine) -> safe_cex_engine::HttpRequest {
+        let mut receipts = Vec::new();
+        for action in e.drain_actions() {
+            match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 91,
+                    receipts: actual,
+                }) => receipts.extend(actual),
+                Action::Http(request) => {
+                    let payload: serde_json::Value =
+                        serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                    let rows = payload
+                        .as_array()
+                        .map_or_else(|| vec![&payload], |rows| rows.iter().collect());
+                    let expected: Vec<_> = rows
+                        .into_iter()
+                        .map(|row| safe_cex_engine::OrderIdentityReceipt {
+                            symbol: "BTCUSDT".into(),
+                            kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                            identity: row["externalOid"].as_str().unwrap().into(),
+                        })
+                        .collect();
+                    assert_eq!(
+                        receipts, expected,
+                        "discarded preflight identities cannot stand in for the actual outgoing payload"
+                    );
+                    return request;
+                }
+                _ => {}
+            }
+        }
+        panic!("placement write")
+    }
+    let mut e = ready();
+    e.handle(
+        200.,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order(), order()],
+        }),
+    );
+    let batch = write(&mut e);
+    assert!(batch.url.ends_with("submit_batch"));
+    reply(
+        &mut e,
+        &batch,
+        250.,
+        r#"{"success":false,"code":511,"message":"You do not have access to the interface"}"#,
+    );
+    for id in ["first", "second"] {
+        let (timer, now) = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(now, Event::TimerFired { timer });
+        let request = write(&mut e);
+        assert!(request.url.ends_with("/submit"));
+        reply(
+            &mut e,
+            &request,
+            now + 1.,
+            &format!(r#"{{"success":true,"code":0,"data":"{id}"}}"#),
+        );
+    }
+}
+
+#[test]
+fn plan_payload_without_external_id_does_not_receive_a_fabricated_identity() {
+    let mut e = ready();
+    let mut stop = order();
+    stop.kind = safe_cex_engine::model::OrderType::StopLoss;
+    e.handle(
+        200.,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![stop],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("planorder/place"))
+    ));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandProgress { .. })))
+    );
+}
 
 #[test]
 fn bybit_execution_controls_reject_entire_batch_before_writes() {

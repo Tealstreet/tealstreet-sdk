@@ -47,10 +47,51 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
-        for a in self.e.drain_actions() {
+        let mut receipts = Vec::new();
+        for a in self.e.drain_actions().collect::<Vec<_>>() {
             if let Action::Http(r) = a {
+                let payload = r
+                    .body
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok());
+                let rows: Vec<_> = payload
+                    .as_ref()
+                    .map(|value| {
+                        value
+                            .as_array()
+                            .map_or_else(|| vec![value], |rows| rows.iter().collect())
+                    })
+                    .unwrap_or_default();
+                let expected: Vec<_> = rows
+                    .into_iter()
+                    .filter_map(|row| {
+                        Some(safe_cex_engine::OrderIdentityReceipt {
+                            symbol: self
+                                .e
+                                .store()
+                                .market_by_id(row["instId"].as_str()?)?
+                                .symbol
+                                .clone(),
+                            kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                            identity: row["clientOrderId"].as_str()?.into(),
+                        })
+                    })
+                    .collect();
+                assert_eq!(
+                    std::mem::take(&mut receipts),
+                    expected,
+                    "receipt must precede the exact outgoing native identities: {}",
+                    r.url
+                );
                 self.pending.push(r);
             } else {
+                if let Action::Notice(safe_cex_engine::Notice::CommandProgress {
+                    receipts: actual,
+                    ..
+                }) = &a
+                {
+                    receipts.extend(actual.clone());
+                }
                 self.actions.push(a);
             }
         }

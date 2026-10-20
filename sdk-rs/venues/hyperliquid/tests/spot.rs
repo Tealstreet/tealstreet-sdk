@@ -167,6 +167,49 @@ fn order(symbol: &str) -> PlaceOrderOpts {
     serde_json::from_str(&format!(r#"{{"symbol":"{symbol}","type":"limit","side":"buy","price":0.00093722,"amount":6208,"clientOrderId":"0x00000000000000000000000000000001"}}"#)).unwrap()
 }
 #[test]
+fn spot_receipt_keeps_canonical_symbol_and_actual_shifted_asset_cloid() {
+    let (mut e, _) = ready(true);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order("HFUN/USDC")],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let (at, receipts) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 91,
+                receipts,
+            }) => Some((i, receipts)),
+            _ => None,
+        })
+        .unwrap();
+    let (write_at, request) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Http(request) if request.url.ends_with("/exchange") => Some((i, request)),
+            _ => None,
+        })
+        .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert!(at < write_at);
+    assert_eq!(payload["action"]["orders"][0]["a"], 10001);
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].symbol, "HFUN/USDC");
+    assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+    assert_eq!(
+        receipts[0].identity,
+        payload["action"]["orders"][0]["c"].as_str().unwrap()
+    );
+}
+#[test]
 fn signed_spot_order_uses_shifted_asset_and_eight_decimal_cap() {
     let (mut e, _) = ready(true);
     e.drain_actions().for_each(drop);

@@ -31,6 +31,7 @@ struct Job {
     commit: Commit,
 }
 struct Step {
+    receipts: Vec<OrderIdentityReceipt>,
     path: &'static str,
     body: String,
     effect: Effect,
@@ -613,6 +614,7 @@ impl Blofin {
                 .collect();
             for target in job.replacement_targets.iter().filter(|t| t.family == 0) {
                 job.steps.push_back(Step {
+                    receipts: Vec::new(),
                     path: "/api/v1/trade/order-detail",
                     body: String::new(),
                     effect: Effect::Verify(target.clone()),
@@ -621,13 +623,20 @@ impl Blofin {
             }
         }
         let mut normal = Vec::new();
+        let mut normal_receipts = Vec::new();
         let mut special = Vec::new();
         for (family, p, order) in rows {
+            let receipt = OrderIdentityReceipt {
+                symbol: order.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: p.client_order_id.clone(),
+            };
             job.creating.push(order);
             if family == 0 {
                 normal.push(p);
+                normal_receipts.push(receipt);
             } else {
-                special.push((family, p));
+                special.push((family, p, receipt));
             }
         }
         // Keep caller order while respecting BloFin's homogeneous-batch rule.
@@ -640,8 +649,10 @@ impl Blofin {
                 .take_while(|p| p.inst_id == first.inst_id && p.margin_mode == first.margin_mode)
                 .count();
             let batch = &normal[start..start + count];
+            let receipts = normal_receipts[start..start + count].to_vec();
             start += count;
             job.steps.push_back(Step {
+                receipts,
                 path: "/api/v1/trade/batch-orders",
                 body: serde_json::to_string(batch).unwrap(),
                 effect: Effect::Place {
@@ -651,8 +662,9 @@ impl Blofin {
                 delay: 350.0,
             });
         }
-        for (family, payload) in special {
+        for (family, payload, receipt) in special {
             job.steps.push_back(Step {
+                receipts: vec![receipt],
                 path: if family == 1 {
                     "/api/v1/trade/order-tpsl"
                 } else {
@@ -750,6 +762,7 @@ impl Blofin {
                 job.affected
                     .extend(batch.iter().flat_map(|t| t.store_ids.clone()));
                 job.steps.push_back(Step {
+                    receipts: Vec::new(),
                     path: match family {
                         0 => "/api/v1/trade/cancel-batch-orders",
                         1 => "/api/v1/trade/cancel-tpsl",
@@ -1039,6 +1052,7 @@ impl Blofin {
                     };
                     for side in sides {
                         job.steps.push_back(Step {
+                            receipts: Vec::new(),
                             path: "/api/v1/account/set-leverage",
                             body: serde_json::to_string(&Leverage {
                                 inst_id: &market.id,
@@ -1060,6 +1074,7 @@ impl Blofin {
                         MarginType::Cross
                     };
                     job.steps.push_back(Step {
+                        receipts: Vec::new(),
                         path: "/api/v1/account/set-margin-mode",
                         body: format!("{{\"marginMode\":\"{}\"}}", margin(mode)),
                         effect: Effect::Setting,
@@ -1069,6 +1084,7 @@ impl Blofin {
                 }
                 Command::SetPositionMode { hedged, .. } => {
                     job.steps.push_back(Step {
+                        receipts: Vec::new(),
                         path: "/api/v1/account/set-position-mode",
                         body: format!(
                             "{{\"positionMode\":\"{}\"}}",
@@ -1252,6 +1268,7 @@ impl Blofin {
                 return;
             }
         };
+        cx.command_progress(job.command, step.receipts.clone());
         cx.request(
             method,
             format!("{}{}", self.host(), path),

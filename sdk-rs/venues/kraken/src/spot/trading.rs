@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 pub enum Step {
     Place {
         params: Vec<(&'static str, String)>,
+        receipt: OrderIdentityReceipt,
     },
     Amend {
         id: String,
@@ -86,7 +87,7 @@ impl KrakenSpot {
             ),
             ("ordertype", kind.into()),
             ("volume", num::format(amount)),
-            ("cl_ord_id", client_id),
+            ("cl_ord_id", client_id.clone()),
         ];
         if o.kind != OrderType::Market {
             let input_price = o.price.ok_or("Kraken Spot order requires price")?;
@@ -122,7 +123,14 @@ impl KrakenSpot {
         if o.time_in_force == Some(TimeInForce::ImmediateOrCancel) {
             params.push(("timeinforce", "IOC".into()));
         }
-        Ok(Step::Place { params })
+        Ok(Step::Place {
+            params,
+            receipt: OrderIdentityReceipt {
+                symbol: o.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: client_id,
+            },
+        })
     }
     fn prepare_batch(
         &self,
@@ -272,11 +280,14 @@ impl KrakenSpot {
             return;
         }
         let (path, params) = match &step {
-            Step::Place { params } => ("/0/private/AddOrder", params.clone()),
+            Step::Place { params, .. } => ("/0/private/AddOrder", params.clone()),
             Step::Amend { params, .. } => ("/0/private/AmendOrder", params.clone()),
             Step::Cancel { id } => ("/0/private/CancelOrder", vec![("txid", id.clone())]),
         };
         self.trading.waiting = true;
+        if let Step::Place { receipt, .. } = &step {
+            cx.command_progress(job.command, vec![receipt.clone()]);
+        }
         self.request_private(cx, path, params, Kind::Trade(step));
     }
     pub(super) fn trade_response(&mut self, cx: &mut Cx<'_, Pending>, step: Step, text: &str) {

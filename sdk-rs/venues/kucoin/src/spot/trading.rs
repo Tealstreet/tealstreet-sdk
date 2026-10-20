@@ -17,6 +17,7 @@ struct Placement<'a> {
     post_only: Option<bool>,
 }
 struct Write {
+    receipt: Option<OrderIdentityReceipt>,
     method: Method,
     path: String,
     body: Option<String>,
@@ -130,6 +131,11 @@ impl KucoinSpot {
             post_only: (o.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
         };
         Ok(Write {
+            receipt: Some(OrderIdentityReceipt {
+                symbol: o.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: payload.client_oid.clone(),
+            }),
             method: Method::Post,
             path: "/api/v1/hf/orders".into(),
             body: Some(serde_json::to_string(&payload).unwrap()),
@@ -138,6 +144,9 @@ impl KucoinSpot {
     }
     fn next_write(&self, cx: &mut Cx<'_, Pending>, mut job: Job) {
         if let Some(w) = job.requests.pop_front() {
+            if let Some(receipt) = w.receipt {
+                cx.command_progress(job.command, vec![receipt]);
+            }
             job.current = w.kind;
             self.request(cx, w.method, &w.path, w.body, true, Pending::Write(job));
         } else {
@@ -232,6 +241,7 @@ impl KucoinSpot {
                             format!("KuCoin Spot cancel needs order symbol for {id}")
                         })?;
                         Ok(Write {
+                            receipt: None,
                             method: Method::Delete,
                             path: format!(
                                 "/api/v1/hf/orders/{}?symbol={}",
@@ -249,6 +259,7 @@ impl KucoinSpot {
                 let out = orders
                     .into_iter()
                     .map(|o| Write {
+                        receipt: None,
                         method: Method::Delete,
                         path: format!(
                             "/api/v1/hf/orders/{}?symbol={}",
@@ -274,6 +285,7 @@ impl KucoinSpot {
                     command,
                     Ok((
                         VecDeque::from([Write {
+                            receipt: None,
                             method: Method::Delete,
                             path,
                             body: None,
@@ -322,6 +334,7 @@ impl KucoinSpot {
                     .unwrap();
                     Ok((
                         VecDeque::from([Write {
+                            receipt: None,
                             method: Method::Post,
                             path: "/api/v1/hf/orders/alter".into(),
                             body: Some(body),
@@ -425,6 +438,7 @@ mod tests {
                 }
             })?;
             Ok(Write {
+                receipt: None,
                 method: Method::Post,
                 path: "/api/v1/hf/orders".into(),
                 body: Some(id),

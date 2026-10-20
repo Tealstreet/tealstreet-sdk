@@ -267,6 +267,67 @@ fn split_sizing_preserves_native_quantity_and_stays_below_maximum() {
     );
     assert!(sizes.iter().all(|s| *s <= 500.0));
 }
+#[test]
+fn grouped_normal_batches_keep_their_own_native_receipt_slices() {
+    let mut h = Harness::new();
+    h.seed();
+    let orders: Vec<_> = (0..21).map(|index| serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":format!("Caller{index}")})).collect();
+    place(&mut h, &serde_json::to_string(&orders).unwrap());
+    let first = h.take("batch-orders");
+    let payload: serde_json::Value = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.as_array().unwrap().len(), 20);
+    let first_receipts = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 7,
+                receipts,
+            }) => Some(receipts),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(first_receipts.len(), 20);
+    assert_eq!(first_receipts[0].identity, "Caller0");
+    assert_eq!(first_receipts[19].identity, "Caller19");
+    let ack: Vec<_> = (0..20)
+        .map(|index| serde_json::json!({"orderId":format!("Accepted{index}"),"code":"0"}))
+        .collect();
+    h.respond(
+        first,
+        &serde_json::json!({"code":"0","data":ack}).to_string(),
+    );
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 350. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(350., Event::TimerFired { timer });
+    h.collect();
+    let second = h.take("batch-orders");
+    let payload: serde_json::Value = serde_json::from_str(second.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.as_array().unwrap().len(), 1);
+    assert_eq!(payload[0]["clientOrderId"], "Caller20");
+    let second_receipts = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 7,
+                receipts,
+            }) => Some(receipts),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(second_receipts.len(), 1);
+    assert_eq!(second_receipts[0].symbol, "BTCUSDT");
+    assert_eq!(second_receipts[0].identity, "Caller20");
+}
 
 #[test]
 fn tiny_partial_protection_and_negative_amend_do_not_become_full_position() {

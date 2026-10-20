@@ -417,6 +417,17 @@ rejected-link replacement and omitted trading-stop IDs, option generation,
 Binance PM/batches, OKX canonical symbols, Bitget rollback and ApeX reminting.
 No payload, signing, entropy or retry changes; broad artifact gates remain due.
 
+Group B implemented and independently reviewed PASS across eight production
+and ten existing test/support files. Six-crate all-feature native run passes
+616 cases in 40 nonempty suites; all-target/all-feature strict Clippy, check,
+format and diff checks pass. Ten new cases and strengthened existing request
+boundaries cover final regenerated MEXC batch/fallback IDs, BloFin partitions,
+Hyperliquid spot/brackets and Kraken/Kucoin futures/spot, plus absent BingX
+trigger IDs. The initial new MEXC fixture fired a pacing timer early; it now
+uses the emitted at_ms, with a focused pass and final 616-case pass. Production
+code was unchanged by that fixture correction. All generated-ID source slices
+are implemented; final combined WASM/harness/size acceptance remains outstanding.
+
 ### Phase 3c plan for command errors
 
 Plan audit passes with explicit error-only `Notice::CommandError { command,

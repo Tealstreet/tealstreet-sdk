@@ -101,8 +101,35 @@ impl H {
         h
     }
     fn collect(&mut self) {
+        let mut receipts = Vec::new();
         for action in self.e.drain_actions() {
+            if let Action::Notice(Notice::CommandProgress {
+                receipts: actual, ..
+            }) = &action
+            {
+                receipts.extend(actual.clone());
+            }
             if let Action::Http(request) = &action {
+                let payload = request
+                    .body
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str::<Value>(body).ok());
+                let expected: Vec<_> = payload
+                    .as_ref()
+                    .and_then(|body| {
+                        Some(safe_cex_engine::OrderIdentityReceipt {
+                            symbol: body["symbol"].as_str()?.into(),
+                            kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                            identity: body["clientOid"].as_str()?.into(),
+                        })
+                    })
+                    .into_iter()
+                    .collect();
+                assert_eq!(
+                    std::mem::take(&mut receipts),
+                    expected,
+                    "spot clientOid must be available before the exact HF write"
+                );
                 self.requests.push(request.clone());
             }
             if let Action::ClearTimer { timer } = &action {
@@ -203,6 +230,50 @@ impl H {
 }
 fn place(id: Option<&str>) -> safe_cex_engine::model::PlaceOrderOpts {
     serde_json::from_value(json!({"symbol":"BTC-USDT","type":"limit","side":"buy","amount":1.2345,"price":95.26, "clientOrderId":id.unwrap_or("caller-123")})).unwrap()
+}
+#[test]
+fn hf_caller_and_generated_identities_are_receipted_before_the_exact_request() {
+    for generated in [false, true] {
+        let mut h = H::new(true);
+        let mut order = place(Some("requested"));
+        if generated {
+            order.client_order_id = None;
+        }
+        h.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order],
+        });
+        let receipt_at = h
+            .actions
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandProgress { command: 91, .. })
+                )
+            })
+            .unwrap();
+        let write_at = h.actions.iter().position(|action| matches!(action, Action::Http(request) if request.url.ends_with("/hf/orders"))).unwrap();
+        assert!(receipt_at < write_at);
+        let Action::Notice(Notice::CommandProgress { receipts, .. }) = &h.actions[receipt_at]
+        else {
+            unreachable!()
+        };
+        let Action::Http(request) = &h.actions[write_at] else {
+            unreachable!()
+        };
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "BTC-USDT");
+        assert_eq!(
+            receipts[0].kind,
+            safe_cex_engine::OrderIdentityKind::ClientOrderId
+        );
+        assert_eq!(receipts[0].identity, payload["clientOid"].as_str().unwrap());
+        if !generated {
+            assert_eq!(receipts[0].identity, "requested");
+        }
+    }
 }
 #[test]
 fn streamed_markets_keep_spot_identity_and_fixed_settings() {

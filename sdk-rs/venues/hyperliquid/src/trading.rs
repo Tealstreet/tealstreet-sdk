@@ -649,6 +649,21 @@ impl Hyperliquid {
         }
         self.trading.inflight = true;
         self.trading.write_at = Some(cx.now);
+        if let Effect::Place(records) = &effect {
+            cx.command_progress(
+                command,
+                records
+                    .iter()
+                    .filter_map(|record| {
+                        Some(OrderIdentityReceipt {
+                            symbol: record.order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: record.order.client_order_id.clone()?,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         cx.request(
             Method::Post,
             format!("{}/exchange", self.rest()),
