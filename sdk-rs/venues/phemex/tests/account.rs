@@ -1127,7 +1127,7 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
 }
 
 #[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+fn owned_position_outside_partial_catalogue_is_skipped_and_reported() {
     let (mut e, actions, _) = started();
     response(
         &mut e,
@@ -1136,9 +1136,9 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
         200,
         &envelope("USDT", 1000., 69., &BTC.replace("BTCUSDT", "MISSINGUSDT")),
     );
-    assert!(!e.store().loaded().positions);
+    assert!(e.store().positions().is_empty());
     assert!(e.drain_actions().any(|action| matches!(action,
-        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+        Action::Notice(Notice::Log { message, .. }) if message == "Phemex skipped MISSINGUSDT position on an unavailable market")));
 }
 
 #[test]
@@ -1310,4 +1310,87 @@ fn bad_stream_position_row_still_applies_the_frame_balance() {
     assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
     assert_ne!(e.store().balance().used, before);
     assert_eq!(e.store().balance().used, 80. + 19.);
+}
+#[test]
+fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
+    let short = ETH
+        .replace("\"Long\"", "\"Short\"")
+        .replace("\"Buy\"", "\"Sell\"")
+        .replace("\"size\":\"1\"", "\"size\":\"2\"");
+    let cycle = |e: &mut Engine<PhemexPerpetuals>, prior: &[Action], at: f64, usdc: &str| {
+        e.handle(
+            at,
+            Event::TimerFired {
+                timer: timer(prior, at),
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        response(
+            e,
+            at,
+            request(&actions, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., BTC),
+        );
+        response(
+            e,
+            at,
+            request(&actions, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 25., usdc),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let logs = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Log { message, .. }) => Some(message.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (actions, logs)
+    };
+    let (mut e, a, _) = started();
+    response(
+        &mut e,
+        NOW,
+        request(&a, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., BTC),
+    );
+    response(
+        &mut e,
+        NOW,
+        request(&a, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 19., &format!("{ETH},{short}")),
+    );
+    assert_eq!(e.store().position("ETHUSDC:short").unwrap().contracts, 2.);
+    let upnl = e.store().balance().upnl;
+    let seeded: Vec<_> = e.drain_actions().collect();
+
+    // A zero entry is unmappable; an owned row off the market list has no stored copy.
+    let long = ETH.replace("\"size\":\"1\"", "\"size\":\"3\"");
+    let bad_short = short.replace("1900", "0");
+    let missing = ETH.replace("ETHUSDC", "MISSINGUSDC");
+    let (actions, logs) = cycle(
+        &mut e,
+        &seeded,
+        NOW + 2_000.,
+        &format!("{long},{bad_short},{missing}"),
+    );
+    assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 3.);
+    assert_eq!(e.store().position("ETHUSDC:short").unwrap().contracts, 2.);
+    assert_eq!(e.store().balance().used, 69. + 25.);
+    assert_eq!(e.store().balance().upnl, upnl);
+    for message in [
+        "Phemex skipped unmappable ETHUSDC position row",
+        "Phemex skipped MISSINGUSDC position on an unavailable market",
+    ] {
+        assert!(logs.iter().any(|l| l == message), "{message}");
+    }
+    assert!(!logs.iter().any(|l| l.contains('{') || l.contains("1900")));
+
+    cycle(&mut e, &actions, NOW + 4_000., &long);
+    assert!(e.store().position("ETHUSDC:short").is_none());
+    assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 3.);
 }

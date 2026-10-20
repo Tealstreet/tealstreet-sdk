@@ -3,6 +3,7 @@ pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -34,14 +35,24 @@ pub struct Request {
     currency: usize,
     write_revision: u64,
     slice_revision: u64,
-    positions: Vec<Position>,
+    positions: SnapshotBuilder<String, Position>,
     contexts: HashMap<String, Context>,
     versions: HashMap<String, u64>,
-    /// Symbols whose rows failed to map; the store keeps their positions.
-    skipped: HashSet<String>,
-    /// A row without a usable symbol: keep every stored position of this slice.
-    unattributed: bool,
-    invalid: bool,
+    /// A rejected open row has no counted stored copy, so the slice UPnL is unknown.
+    pnl_unknown: bool,
+}
+impl Request {
+    /// Rejects every position id a row on `symbol` may carry; its legs keep their stored copies.
+    fn reject(&mut self, store: &safe_cex_engine::Store, symbol: &str, size: f64) {
+        for id in [
+            symbol.to_owned(),
+            format!("{symbol}:long"),
+            format!("{symbol}:short"),
+        ] {
+            self.positions.reject(Some(id));
+        }
+        self.pnl_unknown |= size != 0. && !store.positions().iter().any(|p| p.symbol == symbol);
+    }
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
 /// Only an HTTP read started after the failure can prove which of its orders exist.
@@ -311,12 +322,10 @@ impl PhemexPerpetuals {
                 currency,
                 write_revision: self.account.write_revision,
                 slice_revision: self.account.slices[currency].revision,
-                positions: vec![],
+                positions: SnapshotBuilder::default(),
                 contexts: HashMap::new(),
                 versions: HashMap::new(),
-                skipped: HashSet::new(),
-                unattributed: false,
-                invalid: false,
+                pnl_unknown: false,
             };
             self.request(
                 cx,
@@ -375,17 +384,20 @@ impl PhemexPerpetuals {
                 LogLevel::Warning,
                 "Phemex skipped an unreadable position row",
             );
-            request.unattributed = true;
+            request.positions.reject(None);
+            request.pnl_unknown = true;
             return;
         };
         let symbol = row.symbol.to_ascii_uppercase();
         let Some(market) = cx.store.market(&symbol) else {
             if row.size != 0.0 {
-                request.invalid = true;
                 cx.log(
                     LogLevel::Warning,
-                    "Phemex owned position market unavailable; preserving previous snapshot",
+                    format!("Phemex skipped {symbol} position on an unavailable market"),
                 );
+                request.reject(cx.store, &symbol, row.size);
+                // A stored copy off the market list is outside every slice's UPnL.
+                request.pnl_unknown = true;
             }
             return;
         };
@@ -396,7 +408,7 @@ impl PhemexPerpetuals {
                 LogLevel::Warning,
                 format!("Phemex skipped {symbol} position with mismatched settlement"),
             );
-            request.skipped.insert(symbol);
+            request.reject(cx.store, &symbol, row.size);
             return;
         }
         let prior = request
@@ -409,7 +421,7 @@ impl PhemexPerpetuals {
                 LogLevel::Warning,
                 format!("Phemex skipped unmappable {symbol} position row"),
             );
-            request.skipped.insert(symbol);
+            request.reject(cx.store, &symbol, row.size);
             return;
         };
         request
@@ -438,7 +450,6 @@ impl PhemexPerpetuals {
         if !(200..300).contains(&response.status)
             || envelope.code != 0
             || envelope.data.account.currency != CURRENCIES[request.currency]
-            || request.invalid
             || envelope.data.account.used < 0.
         {
             self.account_failed(cx, request, "invalid account-position snapshot");
@@ -453,22 +464,20 @@ impl PhemexPerpetuals {
         if request.write_revision == self.account.write_revision
             && request.slice_revision == self.account.slices[currency].revision
         {
-            let kept = |p: &Position| request.unattributed || request.skipped.contains(&p.symbol);
-            let mut positions: Vec<_> = cx
-                .store
-                .positions()
-                .iter()
-                .filter(|p| {
+            let (mut positions, slice): (Vec<_>, Vec<_>) =
+                cx.store.positions().iter().cloned().partition(|p| {
                     cx.store
                         .market(&p.symbol)
                         .is_none_or(|m| m.quote != CURRENCIES[currency])
-                        || kept(p) && !request.positions.iter().any(|r| r.id == p.id)
-                })
-                .cloned()
-                .collect();
+                });
             // A successful full slice also versions omissions. Keep exact native versions
             // for present rows: fresh authoritative REST may contain a long-lived position.
-            let present: HashSet<_> = request.positions.iter().map(|p| p.id.clone()).collect();
+            let present: HashSet<_> = request
+                .positions
+                .rows()
+                .iter()
+                .map(|p| p.id.clone())
+                .collect();
             let mut known: HashSet<_> = self.account.position_versions.keys().cloned().collect();
             known.extend(cx.store.positions().iter().map(|p| p.id.clone()));
             known.extend(request.versions.keys().cloned());
@@ -478,8 +487,7 @@ impl PhemexPerpetuals {
                     .store
                     .market(symbol)
                     .is_some_and(|m| m.quote == CURRENCIES[currency])
-                    || request.unattributed
-                    || request.skipped.contains(symbol)
+                    || !request.positions.allows_absence(&key)
                 {
                     continue;
                 }
@@ -501,12 +509,17 @@ impl PhemexPerpetuals {
                     self.account.position_absent.insert(key);
                 }
             }
-            positions.extend(request.positions);
+            positions.extend(request.positions.commit(slice, |p| p.id.clone()));
             cx.store.set_positions(positions);
             for (symbol, context) in request.contexts {
                 self.account.install_context(cx, &symbol, context, true);
             }
-            let upnl = currency_upnl(cx, currency);
+            // Native fields always refresh; the derived UPnL holds while a row's is unknown.
+            let upnl = if request.pnl_unknown {
+                self.account.slices[currency].balance.upnl
+            } else {
+                currency_upnl(cx, currency)
+            };
             self.account.slices[currency].balance = Balance {
                 // Account pushes use the same raw field and subtract this currency's UPnL.
                 total: envelope.data.account.total - upnl,

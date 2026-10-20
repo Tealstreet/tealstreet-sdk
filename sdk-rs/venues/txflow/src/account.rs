@@ -1,6 +1,7 @@
 //! Unsigned main-wallet reads. Reads commit only after complete, successful,
 //! generation/revision-matched responses. Order events never invent executions.
 use crate::{Pending, TxFlow};
+use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -46,13 +47,12 @@ pub enum Request {
         fence: Fence,
         // A newer asset setting owns account mode even if exposure can reconcile.
         mode_revision: u64,
-        positions: Vec<Position>,
-        valid: bool,
+        positions: SnapshotBuilder<String, Position>,
     },
     Orders {
         fence: Fence,
         offset: usize,
-        orders: Vec<Order>,
+        orders: SnapshotBuilder<String, Order>,
         ids: HashSet<String>,
         page_rows: usize,
         valid: bool,
@@ -345,8 +345,7 @@ impl TxFlow {
                     revision: self.account.state_revision,
                 },
                 mode_revision: self.account.settings_revision,
-                positions: Vec::new(),
-                valid: true,
+                positions: SnapshotBuilder::default(),
             };
             self.info(
                 cx,
@@ -390,7 +389,7 @@ impl TxFlow {
                 revision: self.account.orders_revision,
             },
             offset: 0,
-            orders: Vec::new(),
+            orders: SnapshotBuilder::default(),
             ids: HashSet::new(),
             page_rows: 0,
             valid: true,
@@ -597,16 +596,45 @@ impl TxFlow {
             }),
         })
     }
+    /// The store ids a malformed position row may cover: its leg when the size is
+    /// readable, else both legs; an unlisted asset matches no stored row.
+    fn skipped_position_keys(&self, item: &str) -> Option<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow)]
+            position: Leg<'a>,
+        }
+        #[derive(Deserialize)]
+        struct Leg<'a> {
+            asset: std::borrow::Cow<'a, str>,
+            #[serde(default, borrow)]
+            szi: Option<&'a RawValue>,
+        }
+        let row = serde_json::from_str::<Identity<'_>>(item).ok()?;
+        let asset = row.position.asset.parse::<u32>().ok()?;
+        let Some(symbol) = self.symbol(asset) else {
+            return Some(vec![format!("asset {asset}")]);
+        };
+        let size = row
+            .position
+            .szi
+            .and_then(|raw| serde_json::from_str::<N>(raw.get()).ok())
+            .map(|n| n.0)
+            .filter(|n| n.is_finite() && *n != 0.0);
+        Some(match size {
+            Some(size) if size > 0.0 => vec![format!("{symbol}:long")],
+            Some(_) => vec![format!("{symbol}:short")],
+            None => vec![format!("{symbol}:long"), format!("{symbol}:short")],
+        })
+    }
     pub(crate) fn account_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
         match request {
-            Request::State {
-                positions, valid, ..
-            } => match serde_json::from_str::<AssetPosition>(item)
+            Request::State { positions, .. } => match serde_json::from_str::<AssetPosition>(item)
                 .map_err(|_| "Malformed TxFlow position")
                 .and_then(|p| self.position_row(p))
             {
@@ -615,7 +643,24 @@ impl TxFlow {
                         positions.push(p);
                     }
                 }
-                Err(_) => *valid = false,
+                Err(_) => match self.skipped_position_keys(item) {
+                    Some(keys) => {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("TxFlow skipped malformed position {}", keys.join(", ")),
+                        );
+                        for key in keys {
+                            positions.reject(Some(key));
+                        }
+                    }
+                    None => {
+                        cx.log(
+                            LogLevel::Warning,
+                            "TxFlow skipped malformed position without an asset",
+                        );
+                        positions.reject(None);
+                    }
+                },
             },
             Request::Orders {
                 orders,
@@ -638,7 +683,31 @@ impl TxFlow {
                         }
                         orders.push(o);
                     }
-                    Err(_) => *valid = false,
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct Identity {
+                            oid: u64,
+                        }
+                        match serde_json::from_str::<Identity>(item) {
+                            Ok(Identity { oid }) => {
+                                if !ids.insert(oid.to_string()) {
+                                    *valid = false;
+                                }
+                                cx.log(
+                                    LogLevel::Warning,
+                                    format!("TxFlow skipped malformed order {oid}"),
+                                );
+                                orders.reject(Some(oid.to_string()));
+                            }
+                            Err(_) => {
+                                cx.log(
+                                    LogLevel::Warning,
+                                    "TxFlow skipped malformed order without an id",
+                                );
+                                orders.reject(None);
+                            }
+                        }
+                    }
                 }
             }
             Request::Fills {
@@ -674,7 +743,6 @@ impl TxFlow {
                 fence,
                 mode_revision,
                 positions,
-                valid,
             } => {
                 if fence.generation != self.account.generation {
                     return;
@@ -690,8 +758,7 @@ impl TxFlow {
                     );
                     return;
                 };
-                if !valid
-                    || fence.revision != self.account.state_revision
+                if fence.revision != self.account.state_revision
                     || state.time.is_some_and(|t| t.0 < self.account.state_time)
                     || state
                         .user
@@ -755,9 +822,10 @@ impl TxFlow {
                     return;
                 }
                 self.account.inflight.remove("orders");
-                for order in &orders {
+                for order in orders.rows() {
                     self.remember_order(order);
                 }
+                let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                 cx.store.set_orders(
                     orders
                         .into_iter()
@@ -882,7 +950,7 @@ impl TxFlow {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         state: State,
-        positions: Vec<Position>,
+        positions: SnapshotBuilder<String, Position>,
         apply_mode: bool,
     ) {
         if let Some(time) = state.time {
@@ -897,10 +965,12 @@ impl TxFlow {
             total: equity,
             upnl,
         });
-        if apply_mode && let Some(p) = positions.first() {
+        // Only an accepted row proves the account mode; retained copies may predate it.
+        if apply_mode && let Some(p) = positions.rows().first() {
             cx.store
                 .set_hedged(p.position_mode == Some(PositionMode::Hedged));
         }
+        let positions = positions.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
         cx.store.set_positions(positions);
     }
     fn asset_setting(
@@ -973,7 +1043,7 @@ impl TxFlow {
                 {
                     return;
                 }
-                let mut positions = Vec::new();
+                let mut positions = SnapshotBuilder::default();
                 let mut valid = true;
                 let decoded =
                     json::each_in_field::<AssetPosition>(frame.data.get(), "assetPositions", |p| {

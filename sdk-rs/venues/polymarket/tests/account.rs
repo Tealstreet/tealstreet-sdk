@@ -317,7 +317,8 @@ fn malformed_money_and_missing_holding_identity_fail_closed() {
     h.initial();
     h.poll();
     h.response("/balance-allowance", 200, r#"{"balance":"NaN"}"#);
-    h.response("/data/orders", 200, r#"{"data":[{"id":"bad","asset_id":"1","side":"BUY","price":"bogus","original_size":"10"}],"next_cursor":"LTE="}"#);
+    // A malformed known order keeps its stored copy; the identity-less holding keeps all.
+    h.response("/data/orders", 200, r#"{"data":[{"id":"o1","asset_id":"1","side":"BUY","price":"bogus","original_size":"10"}],"next_cursor":"LTE="}"#);
     h.response(
         "/positions",
         200,
@@ -366,6 +367,84 @@ fn malformed_position_row_keeps_its_known_holding_while_other_rows_commit() {
         h.response("/positions", 200, "[]");
         assert!(h.e.store().positions().is_empty());
     }
+}
+#[test]
+fn one_malformed_order_and_holding_keep_their_stored_copies_while_peers_commit() {
+    let o2 = ORDER.replace("o1", "o2").replace("\"BUY\"", "\"SELL\"");
+    let read = |h: &mut H, orders: &[&str], positions: &str| {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"12345678","allowances":{}}"#,
+        );
+        h.response(
+            "/data/orders",
+            200,
+            &format!(r#"{{"data":[{}],"next_cursor":"LTE="}}"#, orders.join(",")),
+        );
+        h.response("/positions", 200, positions);
+    };
+    let mut h = H::new();
+    h.initial();
+    let no = r#"{"asset":"2","size":3,"avgPrice":0.4,"curPrice":0.5,"mergeable":true}"#;
+    read(
+        &mut h,
+        &[ORDER, &o2],
+        &format!(r#"[{},{no}]"#, &POSITIONS[1..POSITIONS.len() - 1]),
+    );
+    assert_eq!(h.e.store().positions().len(), 2);
+    assert_eq!(h.e.store().orders().len(), 2);
+    h.logs.clear();
+
+    let o1 = ORDER.replace("\"price\":\"0.5\"", "\"price\":\"0.6\"");
+    let bad_o2 = o2.replace("\"price\":\"0.5\"", "\"price\":\"bogus\"");
+    read(
+        &mut h,
+        &[&o1, &bad_o2],
+        r#"[{"asset":"1","size":12,"avgPrice":0.5,"curPrice":0.5},{"asset":"2","size":"NaN","avgPrice":0.4}]"#,
+    );
+    let store = h.e.store();
+    let contracts = |symbol: &str| {
+        store
+            .positions()
+            .iter()
+            .find(|p| p.symbol == symbol)
+            .map(|p| p.contracts)
+    };
+    assert_eq!(contracts("election-Yes"), Some(12.0));
+    assert_eq!(contracts("election-No"), Some(3.0));
+    let holdings = store.prediction_holdings().unwrap();
+    assert!(holdings.iter().any(|h| h.market == 1 && h.mergeable));
+    assert!(holdings.iter().any(|h| h.market == 0 && !h.redeemable));
+    assert_eq!(store.order("o1").unwrap().price, 0.6);
+    assert_eq!(store.order("o2").unwrap().price, 0.5);
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l == "Polymarket skipped unmappable order o2")
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|l| l == "Polymarket skipped malformed holding 2")
+    );
+    assert!(
+        !h.logs
+            .iter()
+            .any(|l| l.contains("bogus") || l.contains("NaN"))
+    );
+
+    read(
+        &mut h,
+        &[&o1],
+        r#"[{"asset":"1","size":12,"avgPrice":0.5,"curPrice":0.5}]"#,
+    );
+    let store = h.e.store();
+    assert_eq!(store.positions().len(), 1);
+    assert_eq!(store.prediction_holdings().unwrap().len(), 1);
+    assert!(store.order("o2").is_none());
+    assert_eq!(store.orders().len(), 1);
 }
 #[test]
 fn unusable_current_price_still_commits_the_fresh_holding_size() {
@@ -679,9 +758,11 @@ fn unknown_owned_token_is_visible_failure_and_retains_previous_holdings() {
         h.poll();
         h.response("/positions", 200, &owned);
         assert_eq!(h.e.store().positions(), before, "{unknown}");
+        // With nothing stored, the snapshot commits its (empty) valid rows.
         let mut h = skipped_catalogue();
         h.response("/positions", 200, &owned);
-        assert!(!h.e.store().loaded().positions, "{unknown}");
+        assert!(h.e.store().loaded().positions, "{unknown}");
+        assert!(h.e.store().positions().is_empty(), "{unknown}");
         assert!(
             h.logs
                 .iter()
@@ -756,7 +837,7 @@ fn bbo_only_peer_never_uses_placeholder_zero_to_value_funded_holdings() {
             200,
             r#"[{"asset":"2","size":10,"avgPrice":0.5}]"#,
         );
-        assert!(!h.e.store().loaded().positions);
+        assert!(h.e.store().positions().is_empty());
         assert!(
             h.logs
                 .iter()

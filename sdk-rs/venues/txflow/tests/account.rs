@@ -642,3 +642,91 @@ fn a_failing_ticker_seed_read_does_not_block_account_start() {
         "a market still retrying its seed must not block private reads"
     );
 }
+#[test]
+fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
+    use safe_cex_engine::{Action, Notice};
+    let orders =
+        |rows: &[String]| format!(r#"{{"success":true,"code":0,"data":[{}]}}"#, rows.join(","));
+    let order = |oid: u64, side: &str, sz: &str| {
+        ORDER
+            .replace("\"oid\":42", &format!("\"oid\":{oid}"))
+            .replace("\"side\":\"B\"", &format!("\"side\":\"{side}\""))
+            .replace("\"sz\":\"1.5\"", &format!("\"sz\":\"{sz}\""))
+    };
+    let cycle = |e: &mut safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>,
+                 timer,
+                 now: f64,
+                 legs: &[(f64, f64)],
+                 rows: &[String]| {
+        e.handle(now, Event::TimerFired { timer });
+        let mut next = None;
+        let mut reads = vec![];
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(r) => reads.push(r),
+                Action::SetTimer { timer, at_ms } if at_ms == now + 5000.0 => next = Some(timer),
+                _ => {}
+            }
+        }
+        for r in reads {
+            match kind(&r).as_str() {
+                "clearinghouseState" => reply_at(e, &r, now, 200, &hedge_state(legs, now)),
+                "frontendOpenOrders" => reply_at(e, &r, now, 200, &orders(rows)),
+                _ => {}
+            }
+        }
+        let logs = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Log { message, .. }) => Some(message),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        (next.unwrap(), logs)
+    };
+    let (mut e, _, reads, timer) = bootstrap();
+    answer(&mut e, reads);
+    let (timer, _) = cycle(
+        &mut e,
+        timer,
+        NOW + 5025.0,
+        &[(2.0, 5.0), (-3.0, 8.0)],
+        &[order(42, "B", "1.5"), order(43, "A", "2")],
+    );
+    let contracts = |e: &safe_cex_engine::Engine<safe_cex_venue_txflow::TxFlow>, id: &str| {
+        e.store().position(id).map(|p| p.contracts)
+    };
+    assert_eq!(contracts(&e, "BTC-USDC:short"), Some(3.0));
+    assert!(e.store().order("43").is_some());
+
+    // Zero leverage and an unknown side are unmappable rows with known identities.
+    let (timer, logs) = cycle(
+        &mut e,
+        timer,
+        NOW + 10_025.0,
+        &[(4.0, 5.0), (-5.0, 0.0)],
+        &[order(42, "B", "1"), order(43, "X", "1")],
+    );
+    assert_eq!(contracts(&e, "BTC-USDC:long"), Some(4.0));
+    assert_eq!(contracts(&e, "BTC-USDC:short"), Some(3.0));
+    assert_eq!(e.store().order("42").unwrap().remaining, 1.0);
+    assert_eq!(e.store().order("43").unwrap().remaining, 2.0);
+    assert!(logs.contains(&"TxFlow skipped malformed position BTC-USDC:short".to_owned()));
+    assert!(logs.contains(&"TxFlow skipped malformed order 43".to_owned()));
+    assert!(
+        !logs
+            .iter()
+            .any(|l| l.contains('{') || l.contains("leverage"))
+    );
+
+    cycle(
+        &mut e,
+        timer,
+        NOW + 15_025.0,
+        &[(4.0, 5.0)],
+        &[order(42, "B", "1")],
+    );
+    assert_eq!(contracts(&e, "BTC-USDC:short"), None);
+    assert!(e.store().order("43").is_none());
+    assert_eq!(e.store().orders().len(), 1);
+}
