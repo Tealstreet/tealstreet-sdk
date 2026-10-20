@@ -2075,3 +2075,25 @@ may advance earliest live protocol timers with bounded action retention, not
 drop requests or suppress assertions. Independent TS contract audit before
 implementation and independent final native review required; then rebuild/
 record/gates on corrected production. No fixture retiming or deadline changes.
+
+Independent TS contract review PASS; native implementation authorized. Stage
+the complete initial catalog until bootstrap settles, matching TS aggregate
+publication; retain any already valid catalog on refresh/retry. New initial
+partial-catalog readiness must not precede public connection by the newly
+paced bootstrap. Queued writes hold unsigned intent/command ownership and
+re-prepare against current state only at dispatch, before optimistic effects
+and fresh nonce/signature. Preserve actual active request/filled/terminal/
+protection checks through the added queue delay. TS manual order nonce can
+be preselected; native dispatch-fresh signing is an explicit improvement,
+not a claim that TS chooses its nonce at the same time.
+
+Before any new performance result, choose existing after-ready recording
+policy for parentHyperliquid too (already used by TxFlow and both new spots):
+NEW actual recording gets20seconds of live public traffic after genuine full
+catalog readiness, retaining every startup HTTP/lifecycle record as well.
+Correct bootstrap is naturally about13seconds; recording20total would capture
+only about7seconds of public traffic. This is a declared acquisition policy,
+not fixture padding or a measured-window/warmup change: entire constructor+
+startup still enters every replay cost. Original failed fixture untouched
+until replacement; no future bytes or timestamp synthesis, unchanged120second
+startup cap/20second duration and original gate rules.

@@ -1304,6 +1304,8 @@ export const VENUES = {
   krakenspot,
   hyperliquid: {
     rust: 'hyperliquid',
+    // Retain the weighted catalog bootstrap plus a full public-data window.
+    recordAfterReady: true,
     matchRequestBody: true,
     fullSocketIdentity: true,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds),
