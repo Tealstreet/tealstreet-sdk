@@ -223,6 +223,8 @@ impl TxFlow {
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
             self.open_sockets(cx);
+            // TS records the account execution window only after the paced ticker seed.
+            self.account_start(cx);
         }
     }
     fn open_sockets(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -242,7 +244,6 @@ impl TxFlow {
                 SocketChannel::Public,
             ));
         }
-        self.account_start(cx);
     }
     fn subscribe(
         &mut self,

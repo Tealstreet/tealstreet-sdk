@@ -91,7 +91,7 @@ pub fn bootstrap_with_wallet(
     let refresh = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5025.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
