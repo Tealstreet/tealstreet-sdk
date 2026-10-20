@@ -36,5 +36,5 @@ test('Phemex full-depth audit rejects a default shallow subscription', () => {
   assert.match(audit.errors().join(), /full depth0/);
 });
 test('Phemex history reads require authenticated headers', () => {
-  for (const path of ['trades', 'orders']) assert.throws(() => venue.validateRequest({ url:'https://api.phemex.com/api-data/g-futures/' + path, headers:{} }), /invalid Phemex request/);
+  for (const path of ['/api-data/g-futures/trades', '/api-data/g-futures/orders', '/api-data/g-futures/orders/by-order-id', '/api-data/futures/v2/tradeAccountDetail']) assert.throws(() => venue.validateRequest({ url:'https://api.phemex.com' + path, headers:{} }), /invalid Phemex request/);
 });

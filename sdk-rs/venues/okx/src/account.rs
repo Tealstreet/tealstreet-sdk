@@ -72,6 +72,7 @@ pub struct AccountState {
     risk: HashMap<String, RiskValues>,
     order_leverage: HashMap<String, (f64, String)>,
     equity: Vec<(String, f64)>,
+    total_equity: Option<f64>,
     equity_loaded: bool,
     fills: HashMap<String, f64>,
     tick: Option<TimerId>,
@@ -588,6 +589,7 @@ impl Okx {
         cx.store.set_positions(positions);
         if self.account.balance_version <= join.balance_version {
             self.account.equity = join.equity.expect("equity ready");
+            self.account.total_equity = None;
         }
         self.account.equity_loaded = true;
         self.recalculate(cx);
@@ -656,26 +658,27 @@ impl Okx {
         if !self.account.equity_loaded {
             return;
         }
-        let collateral = usd(self
-            .account
-            .equity
-            .iter()
-            .map(|(ccy, eq)| {
-                let candidates = [
-                    format!("{ccy}-USDT-SWAP"),
-                    format!("{ccy}-USD-SWAP"),
-                    format!("{ccy}USDT"),
-                    format!("{ccy}USD"),
-                ];
-                let mark = cx
-                    .store
-                    .tickers()
-                    .iter()
-                    .find(|t| candidates.contains(&t.id) || candidates.contains(&t.symbol))
-                    .map_or(1.0, |t| t.mark);
-                eq * mark
-            })
-            .sum());
+        let collateral = usd(self.account.total_equity.unwrap_or_else(|| {
+            self.account
+                .equity
+                .iter()
+                .map(|(ccy, eq)| {
+                    let candidates = [
+                        format!("{ccy}-USDT-SWAP"),
+                        format!("{ccy}-USD-SWAP"),
+                        format!("{ccy}USDT"),
+                        format!("{ccy}USD"),
+                    ];
+                    let mark = cx
+                        .store
+                        .tickers()
+                        .iter()
+                        .find(|t| candidates.contains(&t.id) || candidates.contains(&t.symbol))
+                        .map_or(1.0, |t| t.mark);
+                    eq * mark
+                })
+                .sum()
+        }));
         let used = usd(self.account.risk.values().map(|p| p.imr).sum());
         let upnl = usd(self.account.risk.values().map(|p| p.upl).sum());
         let orders = usd(cx
@@ -706,7 +709,6 @@ impl Okx {
             self.account
                 .equity
                 .iter()
-                .filter(|(ccy, _)| ccy != "USD")
                 .map(|(currency, equity)| {
                     let risks = || {
                         self.account
@@ -938,25 +940,55 @@ impl Okx {
             }
             "account" => {
                 let mut equity = 0.0;
-                let mut valid = false;
-                let _ = json::each::<AccountPush<'_>>(data.get(), |row| {
-                    if let Ok(total) = row.total_eq.parse::<f64>()
-                        && total.is_finite()
-                    {
-                        equity += total;
-                        valid = true;
+                let mut count = 0;
+                let mut details: Vec<(String, f64)> = Vec::new();
+                let mut invalid = false;
+                let decoded = json::each::<AccountPush<'_>>(data.get(), |row| {
+                    let Ok(total) = row.total_eq.parse::<f64>() else {
+                        invalid = true;
+                        return;
+                    };
+                    if !total.is_finite() {
+                        invalid = true;
+                        return;
+                    }
+                    equity += total;
+                    count += 1;
+                    for detail in row.details {
+                        let Ok(value) = detail.eq.parse::<f64>() else {
+                            invalid = true;
+                            continue;
+                        };
+                        if !value.is_finite()
+                            || detail.ccy.is_empty()
+                            || details.iter().any(|(ccy, _)| ccy == detail.ccy)
+                        {
+                            invalid = true;
+                            continue;
+                        }
+                        details.push((detail.ccy.into(), value));
                     }
                 });
-                if valid {
-                    self.account.revision += 1;
-                    self.account.balance_version = self.account.revision;
-                    self.account.equity = vec![("USD".into(), equity)];
-                    self.account.equity_loaded = true;
-                    let mut b = cx.store.balance().clone();
-                    b.free = usd(equity - b.used);
-                    b.total = usd(equity - b.upnl);
-                    cx.store.set_balance(b);
+                if decoded.is_err() || invalid || count == 0 || !equity.is_finite() {
+                    return;
                 }
+                for (ccy, equity) in details {
+                    if let Some((_, current)) = self
+                        .account
+                        .equity
+                        .iter_mut()
+                        .find(|(currency, _)| currency == &ccy)
+                    {
+                        *current = equity;
+                    } else {
+                        self.account.equity.push((ccy, equity));
+                    }
+                }
+                self.account.revision += 1;
+                self.account.balance_version = self.account.revision;
+                self.account.total_equity = Some(equity);
+                self.account.equity_loaded = true;
+                self.recalculate(cx);
             }
             _ => {}
         }

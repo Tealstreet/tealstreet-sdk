@@ -1121,10 +1121,13 @@ The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
 
 ## Rust engine scope and verified corrections
 
-`engine: 'rust'` supports USDT/USDC linear SWAPs under all four OKX names.
-Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
-while the existing book contract uses lotSz. EEA X-Perps and inverse products
-remain outside this engine lane.
+`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names,
+plus EEA FUTURES with `ruleType=xperp` under `okxeu`/`okxeudemo`. Catalogs,
+tickers, positions, and regular/algo orders stage complete product unions before
+committing. EEA X-Perp dated IDs stay distinct from the matching SWAP.
+Sizes sent to OKX remain contracts; inverse fills and remaining quantities use
+quote contract value divided by the reference price. Coin margin and PnL convert
+to USD for aggregate balances and remain coin values in the currency table.
 
 The replay oracle also implements public trades (previously inherited an
 unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
@@ -1134,7 +1137,13 @@ refuses negative protective sizes and unsafe market/terminal amends, and
 continues standalone cancel batches after item failures. These corrections are
 listed in the harness KNOWN_TS_FIXES; they are independently tested instead
 of normalizing away output differences. Newer account equity survives REST
-snapshots and subsequent local balance ticks.
+snapshots and subsequent local balance ticks in both Rust and TS. Account WS
+`totalEq` is a separate aggregate anchor, never a synthetic USD currency row:
+USD is real settlement collateral for X-Perps. Details are currency deltas;
+validate the whole push before merging, retain currencies absent from it, and
+include live-order initial margin in free balance. Revision fences stop an
+older REST join, startup callback, or asynchronous local tick from restoring
+stale equity. A newer successful REST read can replace the WS anchor.
 
 Public-only business sockets subscribe candles directly without sending an
 empty-credential login or private order topics. Private accounts authenticate

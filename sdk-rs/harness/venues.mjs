@@ -450,12 +450,7 @@ const okx = (name) => ({
     name,
   },
   options: { testnet: name.endsWith('demo') },
-  configureTs: (exchange) => {
-    // The Rust lane covers linear stablecoin swaps, including on the EEA class.
-    exchange.getInstrumentTypes = () => ['SWAP'];
-    exchange.isSupportedMarketInstrument = (m) =>
-      m.instType === 'SWAP' && m.ctType === 'linear' && ['USDT', 'USDC'].includes(m.settleCcy);
-  },
+  compareBalanceCurrencies: true,
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
   isPrivateRecord: (record) => {
@@ -532,7 +527,7 @@ export const VENUES = {
       const parsed = new URL(url);
       const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
       const expiry = get('x-phemex-request-expiry');
-      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
+      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/')) return;
       const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
       const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + (body || '')).digest('hex');
       if (get('x-phemex-access-token') !== 'replay-key' || get('x-phemex-request-signature') !== expected || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);

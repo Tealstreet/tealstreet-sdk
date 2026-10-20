@@ -221,4 +221,6 @@ pub struct Risk<'a> {
 pub struct AccountPush<'a> {
     #[serde(default)]
     pub total_eq: &'a str,
+    #[serde(borrow, default)]
+    pub details: Vec<Equity<'a>>,
 }

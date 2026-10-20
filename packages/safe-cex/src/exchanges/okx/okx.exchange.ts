@@ -58,6 +58,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../base';
 import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../clientOrderId';
+import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
 import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
@@ -166,6 +167,10 @@ export class OKXExchange extends BaseExchange {
   // 3: Multi-currency margin
   // 4: Portfolio margin
   _accountLevel: number | null = null;
+
+  private accountEquityUsd?: number;
+  private accountEquityRows?: Array<Record<string, any>>;
+  private accountEquityRevision = 0;
 
   private readonly markPriceMarketIds = new Set<string>();
 
@@ -309,6 +314,11 @@ export class OKXExchange extends BaseExchange {
 
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
+        if (this.isDisposed) return;
+        // Account pushes can arrive after the read's last await and before this commit.
+        if (this.accountEquityUsd !== undefined) {
+          balance = this.calculateBalanceUsedAvail(balance.info, positions, this.store.orders, this._accountLevel || 2);
+        }
         this.store.update({
           balance,
           positions,
@@ -329,12 +339,14 @@ export class OKXExchange extends BaseExchange {
 
   tick = async () => {
     if (!this.isDisposed) {
+      const equityRevision = this.accountEquityRevision;
       const balance = await this.formatBalanceUsedAvail(
         this.store.balance.info,
         this.store.positions || [],
         this.store.orders || [],
       );
-      this.store.update({ balance });
+      if (this.isDisposed) return;
+      if (equityRevision === this.accountEquityRevision) this.store.update({ balance });
       loop(() => this.tick(), this.getTickInterval());
     }
   };
@@ -525,9 +537,14 @@ export class OKXExchange extends BaseExchange {
   };
 
   fetchBalanceAndPositions = async (symbols?: string[]) => {
+    const equityRevision = this.accountEquityRevision;
     await this.getOrFetchPositionMode(true);
     const { balance, positions: openPositions } = await this.fetchBalanceAndOpenPositions();
-    if (!symbols) return { balance, positions: openPositions };
+    if (!symbols)
+      return {
+        balance: equityRevision === this.accountEquityRevision ? balance : this.store.balance,
+        positions: openPositions,
+      };
     const openPositionsForSymbols = openPositions.filter((p) => symbols.includes(p.symbol));
     const missingSymbols = symbols.filter((s) => !openPositionsForSymbols.some((p) => p.symbol === s));
     const positionMetadatas = await this.fetchPositionMetadata(missingSymbols);
@@ -543,10 +560,11 @@ export class OKXExchange extends BaseExchange {
       };
     });
     const positions = [...openPositionsForSymbols, ...fakePositions];
-    return { balance, positions };
+    return { balance: equityRevision === this.accountEquityRevision ? balance : this.store.balance, positions };
   };
 
   fetchBalanceAndOpenPositions = async () => {
+    const equityRevision = this.accountEquityRevision;
     if (!this._accountPositionMode) {
       throw new Error('Position mode not loaded');
     }
@@ -569,6 +587,10 @@ export class OKXExchange extends BaseExchange {
       const pData = positionResponses.flatMap(({ data }) => data.data);
 
       const positions: Position[] = this.mapPositions(pData);
+      if (equityRevision === this.accountEquityRevision) {
+        this.accountEquityUsd = undefined;
+        this.accountEquityRows = undefined;
+      }
       const balance = await this.formatBalanceUsedAvail(bal, positions, this.store.orders || []);
 
       return {
@@ -584,9 +606,41 @@ export class OKXExchange extends BaseExchange {
     }
   };
 
+  applyAccountEquity = (data: unknown) => {
+    const update = parseAccountEquity(data);
+    if (!update || this.isDisposed) return;
+    const rows = new Map<string, Record<string, any>>();
+    const previous = this.accountEquityRows ?? this.store.balance.info;
+    if (Array.isArray(previous))
+      for (const row of previous) {
+        if (typeof row?.ccy === 'string') rows.set(row.ccy, row);
+      }
+    for (const row of update.details) rows.set(row.ccy, { ...rows.get(row.ccy), ...row });
+    this.accountEquityRows = [...rows.values()];
+    this.accountEquityUsd = update.total;
+    this.accountEquityRevision++;
+    const balance = this.calculateBalanceUsedAvail(
+      this.accountEquityRows,
+      this.store.positions,
+      this.store.orders,
+      this._accountLevel || 2,
+    );
+    this.store.update({ balance });
+  };
+
   formatBalanceUsedAvail = async (bal: any, positions: Position[], orders: Order[]) => {
     try {
       const accLevel = (await this.getOrFetchAccountLevel()) || 2;
+      return this.calculateBalanceUsedAvail(bal, positions, orders, accLevel);
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return this.store.balance;
+    }
+  };
+
+  private calculateBalanceUsedAvail = (bal: any, positions: Position[], orders: Order[], accLevel: number) => {
+    try {
+      bal = this.accountEquityRows ?? bal;
 
       const pData = positions.map((p) => p.info).filter((p) => !!p);
       const oData = orders.filter(
@@ -599,7 +653,7 @@ export class OKXExchange extends BaseExchange {
         eqNotional[b.ccy] = this.toFiniteNumber(b.eq) * mark;
       }
 
-      const totalCollateral = roundUSD(sumBy(Object.values(eqNotional)));
+      const totalCollateral = this.accountEquityUsd ?? roundUSD(sumBy(Object.values(eqNotional)));
       const usedP = roundUSD(
         sumBy(pData, (p) => {
           const market = this.store.marketsById[p.instId];

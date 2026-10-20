@@ -537,3 +537,94 @@ fn malformed_xperp_seed_remains_atomic_despite_permitted_blank_values() {
         );
     }
 }
+
+#[test]
+fn account_push_retains_real_usd_and_coin_details_and_live_order_margin() {
+    let (mut e, private, out) = private_catalog();
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2005.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    complete(out, &mut e);
+    e.handle(7.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45400","details":[{"ccy":"BTC","eq":"1"},{"ccy":"USD","eq":"100"},{"ccy":"USDT","eq":"5300"}]}]}"#,
+    );
+    assert_eq!(e.store().balance().used, 800.0);
+    assert_eq!(e.store().balance().upnl, 80.0);
+    assert_eq!(
+        e.store().balance().free,
+        44534.0,
+        "live order IMR must remain deducted"
+    );
+    assert_eq!(e.store().balance().total, 45320.0);
+    let currencies = e.store().currency_balances().unwrap();
+    let usd = currencies
+        .iter()
+        .find(|c| c.currency == "USD")
+        .expect("real USD must not be treated as scalar sentinel");
+    assert_eq!(usd.balance.total, 100.0);
+    assert_eq!(usd.balance.free, 100.0);
+    let btc = currencies.iter().find(|c| c.currency == "BTC").unwrap();
+    assert!((btc.balance.used - 0.02165).abs() < 1e-12);
+    assert_eq!(btc.balance.total, 0.998);
+    // Account details are changed-currency deltas; the new USD row must not wipe BTC/USDT.
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45410","details":[{"ccy":"USD","eq":"110"}]}]}"#,
+    );
+    assert_eq!(e.store().currency_balances().unwrap().len(), 3);
+    assert_eq!(e.store().balance().free, 44544.0);
+    e.handle(2005.0, Event::TimerFired { timer });
+    assert_eq!(
+        e.store().balance().free,
+        44544.0,
+        "tick must retain scalar equity and order IMR"
+    );
+    assert_eq!(e.store().balance().total, 45330.0);
+}
+
+#[test]
+fn malformed_account_details_are_atomic_and_scalar_only_push_keeps_currency_details() {
+    let (mut e, private, out) = private_catalog();
+    complete(out, &mut e);
+    e.handle(7.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    let before = e.store().balance().clone();
+    let coins = e.store().currency_balances().unwrap().to_vec();
+    for details in [
+        r#"[{"ccy":"BTC","eq":"2"},{"ccy":"USD","eq":"NaN"}]"#,
+        r#"[{"ccy":"BTC","eq":"2"},{"ccy":"BTC","eq":"3"}]"#,
+        r#"[{"ccy":"USD"}]"#,
+        r#"null"#,
+    ] {
+        ws(
+            &mut e,
+            private,
+            &format!(
+                r#"{{"arg":{{"channel":"account"}},"data":[{{"totalEq":"99999","details":{details}}}]}}"#
+            ),
+        );
+        assert_eq!(e.store().balance(), &before);
+        assert_eq!(e.store().currency_balances().unwrap(), coins);
+    }
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45300"}]}"#,
+    );
+    assert_eq!(e.store().balance().free, 44434.0);
+    assert_eq!(e.store().balance().total, 45220.0);
+    assert_eq!(e.store().currency_balances().unwrap(), coins);
+}

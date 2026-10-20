@@ -95,3 +95,29 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
   collateral and X-Perp positions/orders. Harness review then corrected fake
   position financial arithmetic and added inverse/X-Perp trading lifecycles;
   final fixture/source replays and CI remain phase5 work.
+
+### Harness/account equity review checkpoint
+
+- Real global inverse public replay PASS: 41,499 WS frames, 509 markets,
+  two books; steady CPU 1.08x TS/Rust and retained memory 4.31x TS/Rust.
+- Successful EEA recapture: 29,709 frames/two X-Perp books. The public socket
+  reconnects during startup; preserve the full 20 seconds so both real book
+  snapshots are present instead of counting an empty eight-second book trim.
+- Expanded private tapes now exercise inverse and X-Perp place/amend/partial
+  execution/cancel lifecycles with native contract units and truthful margin.
+  Their stronger oracle exposed account equity bugs in both implementations:
+  native account pushes omitted live-order margin and represented aggregate
+  equity as fake USD currency; TS local ticks restored stale REST equity.
+- Paired fix retains a distinct aggregate anchor and real currency detail
+  deltas, validates pushes atomically, preserves live-order margin, and fences
+  delayed REST/tick/startup commits. Native OKX87/87 + strict clippy PASS;
+  deterministic TS account7/7 PASS without network. Independent actual
+  microtask red/green audit proves removing either tick/startup guard fails.
+- OKX replay now compares per-currency balances through the existing generic
+  comparison option. No normalization, frame ABI, or size ceiling is changed.
+- Fetched newer Coinbase/Polymarket landing commits; merge before final gates.
+
+- Expanded global private replay PASS with strict per-currency balances:
+  35WSframes, three markets, 15commands, three executions. CI source/fixture
+  phase independently reviewed PASS; two new public gates raise the pre-merge
+  workflow to70replays plus7controls, without raising the wasm budget.
