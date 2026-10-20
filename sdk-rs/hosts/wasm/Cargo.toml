@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 paradex = ["dep:safe-cex-venue-paradex"]
+apexomni = ["dep:safe-cex-venue-apexomni"]
 kraken = ["dep:safe-cex-venue-kraken"]
 asterdex = ["dep:safe-cex-venue-asterdex"]
 lighter = ["dep:safe-cex-venue-lighter"]
@@ -22,6 +23,7 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 default = [
     "paradex",
+    "apexomni",
     "kraken",
     "asterdex",
     "lighter",
@@ -51,6 +53,7 @@ orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
+safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
 safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }
 safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }

@@ -8,6 +8,7 @@
     feature = "paradex",
     feature = "bitrue",
     feature = "binance",
+    feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
@@ -26,7 +27,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -35,6 +36,8 @@ use safe_cex_engine::model::{CancelOrderRef, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "apexomni")]
+use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
 #[cfg(feature = "asterdex")]
 use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "backpack")]
@@ -123,6 +126,7 @@ struct KucoinExtra {
 #[cfg(any(
     feature = "paradex",
     feature = "binance",
+    feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
     feature = "blofin",
@@ -157,6 +161,7 @@ struct EngineOptions {
     #[cfg(any(
         feature = "paradex",
         feature = "binance",
+        feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
@@ -178,6 +183,7 @@ struct EngineOptions {
     key: Option<String>,
     #[cfg(any(
         feature = "binance",
+        feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
@@ -212,10 +218,14 @@ struct EngineOptions {
         feature = "okx",
         feature = "weex",
         feature = "blofin",
-        feature = "bitget"
+        feature = "bitget",
+        feature = "apexomni"
     ))]
     #[serde(default)]
     passphrase: Option<String>,
+    #[cfg(feature = "apexomni")]
+    #[serde(default)]
+    omni_key_seed: Option<String>,
     #[cfg(any(
         feature = "hyperliquid",
         feature = "asterdex",
@@ -442,6 +452,10 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    #[cfg(feature = "apexomni")]
+    GetAccount {
+        command: u32,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -591,6 +605,8 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            #[cfg(feature = "apexomni")]
+            CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
                 symbol,
@@ -768,6 +784,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "paradex",
         feature = "binance",
+        feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
         feature = "blofin",
@@ -813,6 +830,16 @@ impl WasmEngine {
                 key: options.key,
                 paradex_address: options.paradex_address,
                 subkey_address: options.subkey_address,
+            }))),
+            #[cfg(feature = "apexomni")]
+            "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                omni_key_seed: options.omni_key_seed,
+                tick_interval_ms: None,
             }))),
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
@@ -1151,6 +1178,28 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn account_command_aliases_share_the_engine_read() {
+        for (op, enabled) in [
+            ("getAccount", cfg!(feature = "apexomni")),
+            ("fetchAccount", cfg!(feature = "asterdex")),
+        ] {
+            let parsed =
+                serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
+            if enabled {
+                assert!(matches!(
+                    Command::from(parsed.unwrap()),
+                    Command::FetchAccount { command: 77 }
+                ));
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "{op} must reject without its venue feature"
+                );
+            }
+        }
+    }
+
     #[test]
     fn http_route_metadata_is_optional_and_has_stable_host_names() {
         let actions = [

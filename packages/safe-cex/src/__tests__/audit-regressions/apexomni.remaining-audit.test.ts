@@ -154,6 +154,9 @@ describe('ApeX Omni remaining audit regressions', () => {
       side: OrderSide.Buy,
       price: 100,
       amount: 2,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 2,
       reduceOnly: false,
       info: { id: 'parent' },
     } as any;
@@ -206,6 +209,9 @@ describe('ApeX Omni remaining audit regressions', () => {
       side: OrderSide.Buy,
       price: 100,
       amount: 2,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 2,
       reduceOnly: false,
       info: { id: 'parent' },
     } as any;

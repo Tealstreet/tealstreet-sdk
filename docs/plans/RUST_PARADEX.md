@@ -450,3 +450,22 @@ single-Kraken WASM Clippy pass; merged harness/host suites pass 291/54 tests.
 Kraken's standalone secret option is included in its feature guard. Fresh standard
 gates and exact-head CI remain the landing conditions; final proof is posted on
 PR #1320.
+
+### ApeX Omni landing integration
+
+All 24 Rust checks (19 venue replays) passed on `90520d5bb2`; the two full
+repository test jobs were still running when ApeX Omni #1324 landed. The final
+standard local gates on that head all passed: public CPU TS/Rust
+1,044.070/833.963ms, steady 586.048/435.708ms, retained bytes
+21,958,657/2,044,996; private 15 commands/33 records; Binance public/private
+PASS; default combined WASM restored and host54 PASS. The exact invocation and
+artifact proof is posted on PR #1320.
+
+The new merge preserves both registry entries, ApeX's host-initialization/account
+read flow and Paradex's private startup guards. The new ApeX-only `getAccount`
+wire alias follows its feature, while Aster's five wire operations retain their
+feature selection and shared native commands remain intact. Feature-specific
+tests validate the aliases and explicit unsupported decoding. The ApeX standalone
+secret guard is included. No engine, native, JS/Workers transport or crypto
+primitive changes arrive with this landing. Independent review and fresh final
+gates/CI remain required; their proof is posted on PR #1320.

@@ -1,6 +1,7 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
@@ -522,6 +523,35 @@ export const VENUES = {
       symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
     })),
     tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
+  apexomni: {
+    rust: 'apexomni',
+    ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
+    privateSocket: '/realtime_private',
+    replayCredentials: { omniKeySeed: APEX_SEED },
+    publicOptions: { passphrase: '' },
+    recordOptions: { publicDataOnly: true, key: '', secret: '' },
+    prepareReplay: prepareApexReplay,
+    prepareTs: prepareApexTs,
+    wireBody: apexWireBody,
+    matchRequestBody: true,
+    generatedId: () => false,
+    generatedBodyId: (key) => ['clientId', 'clientOrderId', 'tpClientOrderId', 'slClientOrderId', 'expiration', 'tpExpiration', 'slExpiration', 'tpSignature', 'slSignature'].includes(key),
+    compareWriteOrder: true,
+    compareFillPrices: true,
+    compareClientIds: true,
+    subscriptionGenerations: true,
+    createSocketAudit: createApexSocketAudit,
+    validateRequest: validateApexRequest,
+    independentLeverage: true,
+    tsSettings: (_exchange, store) => store.markets.map((market) => ({
+      symbol: market.symbol,
+      marginType: 'cross',
+      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
+      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
+    })),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    isWrite: (method) => method !== 'GET',
   },
   kraken: {
     rust: 'kraken',
