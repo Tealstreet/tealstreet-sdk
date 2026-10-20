@@ -21,28 +21,69 @@ pub enum Request {
         generation: Option<u64>,
         revision: u64,
         rows: Vec<Position>,
-        bad: bool,
+        skipped: Skipped,
     },
     Orders {
         generation: Option<u64>,
         revision: u64,
         rows: Vec<Order>,
-        bad: bool,
+        skipped: Skipped,
     },
     Balance,
+}
+
+/// Rows a snapshot could not map; their last known state is retained.
+#[derive(Default)]
+pub struct Skipped {
+    keys: Vec<String>,
+    unidentified: bool,
+}
+
+impl Skipped {
+    fn note(&mut self, key: &str) {
+        match key.trim() {
+            "" => self.unidentified = true,
+            key => self.keys.push(key.to_owned()),
+        }
+    }
+
+    fn keeps(&self, key: &str) -> bool {
+        self.unidentified || self.keys.iter().any(|kept| kept == key)
+    }
+
+    fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
+        if self.keys.is_empty() && !self.unidentified {
+            return;
+        }
+        let mut labels = self.keys.join(", ");
+        if self.unidentified {
+            labels.push_str(if labels.is_empty() {
+                "unidentified"
+            } else {
+                ", unidentified"
+            });
+        }
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "ApeX skipped malformed {kind} rows ({labels}); keeping their last known state"
+            ),
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Account;
+    use safe_cex_engine::model::OrderStatus;
 
     #[test]
     fn retiring_order_guards_bounds_memory_and_invalidates_preexisting_reads() {
         let mut account = Account::default();
-        account.note_cancel("first-terminal");
+        account.record_order("first-terminal", Some(OrderStatus::Canceled));
         let read_revision = account.revision;
         for index in 0..8192 {
-            account.note_cancel(&format!("terminal-{index}"));
+            account.record_order(&format!("terminal-{index}"), Some(OrderStatus::Canceled));
         }
         assert_eq!(account.order_queue.len(), 8192);
         assert_eq!(account.order_versions.len(), 8192);
@@ -55,13 +96,13 @@ mod tests {
 impl Request {
     pub(crate) fn reset(&mut self) {
         match self {
-            Self::Positions { rows, bad, .. } => {
+            Self::Positions { rows, skipped, .. } => {
                 rows.clear();
-                *bad = false;
+                *skipped = Skipped::default();
             }
-            Self::Orders { rows, bad, .. } => {
+            Self::Orders { rows, skipped, .. } => {
                 rows.clear();
-                *bad = false;
+                *skipped = Skipped::default();
             }
             Self::Balance | Self::Identity { .. } => {}
         }
@@ -135,6 +176,7 @@ pub struct Account {
     order_queue: VecDeque<(String, u64)>,
     snapshot_floor: u64,
     terminal: HashMap<String, (u64, OrderStatus)>,
+    cancelling: HashMap<String, f64>,
     seen: HashSet<String>,
     seen_queue: VecDeque<String>,
     progress: HashMap<String, Progress>,
@@ -158,8 +200,18 @@ impl Account {
         self.leverage_versions
             .insert(symbol.to_owned(), (self.revision, now, leverage));
     }
-    pub(crate) fn note_cancel(&mut self, id: &str) {
-        self.record_order(id, Some(OrderStatus::Canceled));
+    /// An accepted cancel fences older reads and hides the order briefly; only
+    /// a venue terminal event tombstones it, so an order the venue kept reappears.
+    pub(crate) fn note_cancel(&mut self, id: &str, now: f64) {
+        self.record_order(id, None);
+        self.cancelling.retain(|_, at| now - *at < CANCEL_GRACE_MS);
+        self.cancelling.insert(id.to_owned(), now);
+    }
+
+    fn cancelling(&self, id: &str, now: f64) -> bool {
+        self.cancelling
+            .get(id)
+            .is_some_and(|at| now - at < CANCEL_GRACE_MS)
     }
 
     fn record_order(&mut self, id: &str, terminal: Option<OrderStatus>) {
@@ -212,6 +264,8 @@ impl Account {
         self.recent_executions.truncate(500);
     }
 }
+
+const CANCEL_GRACE_MS: f64 = 5000.0;
 
 pub(crate) fn execution_milliseconds(time: f64) -> f64 {
     if time > 1e12 { time } else { time * 1000.0 }
@@ -512,10 +566,15 @@ impl ApexOmni {
             cx.store.set_balance(Balance::default());
             return;
         }
+        // A bad seed only blocks order signing; monitoring and cancels still work.
         if let Err(error) = sign::validate_seed(self.options.omni_key_seed.as_deref().unwrap_or(""))
         {
-            cx.log(LogLevel::Error, error);
-            return;
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "{error}; ApeX order placement is disabled until the OmniKey seed is fixed"
+                ),
+            );
         }
         if self
             .options
@@ -677,7 +736,7 @@ impl ApexOmni {
             generation,
             revision: self.account.revision,
             rows: vec![],
-            bad: false,
+            skipped: Skipped::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -697,7 +756,7 @@ impl ApexOmni {
             generation,
             revision: self.account.revision,
             rows: vec![],
-            bad: false,
+            skipped: Skipped::default(),
         };
         if let Err(error) = self.signed(
             cx,
@@ -733,24 +792,39 @@ impl ApexOmni {
         request: &mut Request,
         item: &str,
     ) {
+        if self.public.has_unlisted() {
+            let kind = match request {
+                Request::Positions { .. } => "position",
+                _ => "order",
+            };
+            self.note_unlisted(cx, &wire::row_key(item).symbol, kind);
+        }
         match request {
-            Request::Positions { rows, bad, .. } => {
+            Request::Positions { rows, skipped, .. } => {
                 match serde_json::from_str::<wire::PositionRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| self.map_position(cx.store, &raw, cx.now))
                 {
                     Ok(Some(row)) => rows.push(row),
                     Ok(None) => {}
-                    Err(_) => *bad = true,
+                    Err(_) => {
+                        let key = wire::row_key(item);
+                        let symbol = cx
+                            .store
+                            .market_by_id(&key.symbol)
+                            .or_else(|| cx.store.market(&key.symbol))
+                            .map_or(key.symbol.as_str(), |market| market.symbol.as_str());
+                        skipped.note(symbol);
+                    }
                 }
             }
-            Request::Orders { rows, bad, .. } => {
+            Request::Orders { rows, skipped, .. } => {
                 match serde_json::from_str::<wire::OrderRow<'_>>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|raw| map_order(cx.store, &raw, cx.now))
                 {
                     Ok(mapped) => rows.extend(mapped),
-                    Err(_) => *bad = true,
+                    Err(_) => skipped.note(&wire::row_key(item).id),
                 }
             }
             Request::Balance | Request::Identity { .. } => {}
@@ -798,18 +872,26 @@ impl ApexOmni {
             Request::Positions {
                 generation,
                 revision,
-                rows,
-                bad,
+                mut rows,
+                skipped,
             } => {
                 self.account.positions_pending = false;
                 let metadata = data
                     .and_then(|data| serde_json::from_str::<wire::Metadata<'_>>(data.get()).ok());
-                let Some(metadata) = metadata
-                    .filter(|m| !bad && m.positions.get().starts_with('[') && !m.id.is_empty())
+                let Some(metadata) =
+                    metadata.filter(|m| m.positions.get().starts_with('[') && !m.id.is_empty())
                 else {
                     self.snapshot_failed(cx, generation, "invalid account snapshot");
                     return;
                 };
+                skipped.report(cx, "position");
+                for current in cx.store.positions() {
+                    if skipped.keeps(&current.symbol)
+                        && !rows.iter().any(|row| row.id == current.id)
+                    {
+                        rows.push(current.clone());
+                    }
+                }
                 let fees = metadata
                     .contract_account
                     .map(|f| (f.maker_fee_rate, f.taker_fee_rate))
@@ -840,8 +922,8 @@ impl ApexOmni {
             Request::Orders {
                 generation,
                 revision,
-                rows,
-                bad,
+                mut rows,
+                skipped,
             } => {
                 self.account.orders_pending = false;
                 if revision < self.account.snapshot_floor {
@@ -852,9 +934,17 @@ impl ApexOmni {
                     );
                     return;
                 }
-                if bad || !data.is_some_and(|data| data.get().starts_with('[')) {
+                if !data.is_some_and(|data| data.get().starts_with('[')) {
                     self.snapshot_failed(cx, generation, "invalid orders snapshot");
                     return;
+                }
+                skipped.report(cx, "order");
+                for current in cx.store.orders() {
+                    if skipped.keeps(base_id(&current.id))
+                        && !rows.iter().any(|row| row.id == current.id)
+                    {
+                        rows.push(current.clone());
+                    }
                 }
                 if let Some(generation) = generation {
                     if let Some(snapshot) = self
@@ -1039,20 +1129,35 @@ impl ApexOmni {
     }
 
     fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut rows: Vec<Order>, revision: u64) {
-        rows.retain(|row| !self.account.terminal.contains_key(base_id(&row.id)));
+        let versions = &self.account.order_versions;
+        let newer = |id: &str| versions.get(base_id(id)).is_some_and(|v| *v > revision);
+        // Rows read before a later local change never win, even if the store dropped the id.
+        rows.retain(|row| !newer(&row.id));
         for current in cx.store.orders() {
-            if self
-                .account
-                .order_versions
-                .get(base_id(&current.id))
-                .is_some_and(|version| *version > revision)
-            {
-                rows.retain(|o| o.id != current.id);
-                if current.status != OrderStatus::Canceled {
-                    rows.push(current.clone());
-                }
+            if newer(&current.id) && current.status != OrderStatus::Canceled {
+                rows.push(current.clone());
             }
         }
+        let now = cx.now;
+        let lapsed = self
+            .account
+            .cancelling
+            .extract_if(|id, at| now - *at >= CANCEL_GRACE_MS && !newer(id))
+            .map(|(id, _)| id)
+            .collect::<HashSet<_>>();
+        for id in lapsed
+            .iter()
+            .filter(|id| rows.iter().any(|row| row.id == **id))
+        {
+            cx.log(
+                LogLevel::Warning,
+                format!("ApeX order {id} is still open after its cancel was accepted"),
+            );
+        }
+        rows.retain(|row| {
+            let id = base_id(&row.id);
+            !self.account.terminal.contains_key(id) && !self.account.cancelling.contains_key(id)
+        });
         cx.store.set_orders(rows);
     }
 
@@ -1060,7 +1165,7 @@ impl ApexOmni {
         let mut remove = vec![];
         for id in ids {
             let id = base_id(id);
-            self.account.note_cancel(id);
+            self.account.note_cancel(id, cx.now);
             remove.extend([
                 id.to_owned(),
                 format!("{id}__stop_loss"),
@@ -1155,14 +1260,34 @@ impl ApexOmni {
             self.account.supervisor.authenticated(cx);
         }
         let snapshot = message.kind == "snapshot";
+        for (kind, skipped) in [
+            ("fill", contents.fills.as_ref().map(|rows| &rows.skipped)),
+            ("order", contents.orders.as_ref().map(|rows| &rows.skipped)),
+            (
+                "position",
+                contents.positions.as_ref().map(|rows| &rows.skipped),
+            ),
+        ] {
+            if let Some(skipped) = skipped.filter(|skipped| !skipped.is_empty()) {
+                cx.log(
+                    LogLevel::Warning,
+                    format!(
+                        "ApeX private stream skipped malformed {kind} rows ({})",
+                        skipped.join(", ")
+                    ),
+                );
+            }
+        }
         if let Some(fills) = contents.fills {
-            for fill in fills {
+            for fill in fills.rows {
+                self.note_unlisted(cx, &fill.symbol, "fill");
                 self.account_fill(cx, &fill, snapshot);
             }
         }
         if let Some(orders) = contents.orders {
             let canceled = orders.iter().any(|o| o.status == "CANCELED");
-            for raw in orders {
+            for raw in orders.rows {
+                self.note_unlisted(cx, &raw.symbol, "order");
                 self.account_order(cx, &raw, snapshot);
             }
             if !canceled {
@@ -1174,7 +1299,8 @@ impl ApexOmni {
         }
         if let Some(positions) = contents.positions {
             let mut rows = cx.store.positions().to_vec();
-            for raw in positions {
+            for raw in positions.rows {
+                self.note_unlisted(cx, &raw.symbol, "position");
                 if let Ok(Some(mut position)) = self.map_position(cx.store, &raw, cx.now) {
                     if let Some((_, at, leverage)) =
                         self.account.leverage_versions.get(&position.symbol)
@@ -1204,12 +1330,49 @@ impl ApexOmni {
         true
     }
 
+    fn fill_order_progress(&mut self, order_id: &str, qty: f64, now: f64) {
+        let progress = self
+            .account
+            .progress
+            .entry(order_id.to_owned())
+            .or_default();
+        let covered = progress.synthetic.min(qty);
+        progress.synthetic -= covered;
+        progress.topic += qty;
+        progress.at = now;
+        let mut remaining = covered;
+        for execution in &mut self.account.recent_executions {
+            if execution.synthetic
+                && execution.order_id.as_deref() == Some(order_id)
+                && remaining > 0.0
+            {
+                let reduction = execution.qty.min(remaining);
+                execution.commission *= (execution.qty - reduction) / execution.qty;
+                execution.qty -= reduction;
+                remaining -= reduction;
+            }
+        }
+        self.account
+            .recent_executions
+            .retain(|execution| execution.qty > 0.0);
+    }
+
     fn private_auth_payload(&self, store: &Store, contents: &wire::Contents<'_>, now: f64) -> bool {
         let has_rows = contents.fills.is_some()
             || contents.orders.is_some()
             || contents.positions.is_some()
             || contents.wallets.is_some();
+        let skipped = [
+            contents.fills.as_ref().map(|rows| rows.skipped.len()),
+            contents.orders.as_ref().map(|rows| rows.skipped.len()),
+            contents.positions.as_ref().map(|rows| rows.skipped.len()),
+            contents.wallets.as_ref().map(|rows| rows.skipped.len()),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|count| count > 0);
         has_rows
+            && !skipped
             && contents
                 .wallets
                 .as_ref()
@@ -1304,32 +1467,12 @@ impl ApexOmni {
         } else {
             market.quote.clone()
         };
-        let progress = self
-            .account
-            .progress
-            .entry(raw.order_id.clone())
-            .or_default();
-        let covered = progress.synthetic.min(qty);
-        progress.synthetic -= covered;
-        progress.topic += qty;
-        progress.at = cx.now;
-        let mut remaining = covered;
-        for execution in &mut self.account.recent_executions {
-            if execution.synthetic
-                && execution.order_id.as_deref() == Some(raw.order_id.as_str())
-                && remaining > 0.0
-            {
-                let reduction = execution.qty.min(remaining);
-                execution.commission *= (execution.qty - reduction) / execution.qty;
-                execution.qty -= reduction;
-                remaining -= reduction;
+        // A fill without an order ID cannot be attributed to order progress.
+        if !raw.order_id.is_empty() {
+            self.fill_order_progress(&raw.order_id, qty, cx.now);
+            if !snapshot {
+                self.trading_fill_progress(&raw.order_id, qty, execution_milliseconds(time));
             }
-        }
-        self.account
-            .recent_executions
-            .retain(|execution| execution.qty > 0.0);
-        if !snapshot {
-            self.trading_fill_progress(&raw.order_id, qty, execution_milliseconds(time));
         }
         self.account.cache(Execution {
             identity: key,
@@ -1479,6 +1622,8 @@ impl ApexOmni {
                     cx.store.upsert_order(row);
                 }
             }
+            // An open echo while a cancel is settling must not resurrect the order.
+            _ if self.account.cancelling(&raw.id, cx.now) => {}
             _ => {
                 for row in rows {
                     cx.store.upsert_order(row);

@@ -32,11 +32,11 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
-        invalid: bool,
+        skipped: Skipped,
     },
     Tickers {
         rows: Vec<Ticker>,
-        invalid: bool,
+        skipped: Skipped,
     },
     Candles {
         command: CommandId,
@@ -101,6 +101,34 @@ pub(crate) fn interval(value: &str) -> Result<&str, String> {
 
 fn quoted(s: &str) -> String {
     serde_json::to_string(s).expect("string")
+}
+
+/// Unmappable rows of one read or frame, reported once as a summary; the rest still commits.
+#[derive(Default)]
+pub struct Skipped {
+    count: usize,
+    first: Option<String>,
+}
+impl Skipped {
+    pub(crate) fn add(&mut self, id: Option<&str>) {
+        self.count += 1;
+        self.first
+            .get_or_insert_with(|| id.unwrap_or("without an id").into());
+    }
+    pub(crate) fn any(&self) -> bool {
+        self.count > 0
+    }
+    pub(crate) fn report(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
+        if let Some(first) = &self.first {
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "Crypto.com skipped {} unmappable {kind} rows (first: {first})",
+                    self.count
+                ),
+            );
+        }
+    }
 }
 
 impl Cryptocom {
@@ -355,7 +383,7 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows: vec![],
                 indexes: HashMap::new(),
-                invalid: false,
+                skipped: Skipped::default(),
             },
         );
     }
@@ -462,22 +490,35 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows,
                 indexes,
-                invalid,
-            } => match serde_json::from_str::<Instrument>(item) {
-                Ok(row) => {
-                    if let Some(market) = row.market() {
-                        indexes.insert(market.id.clone(), row.underlying_symbol.into());
-                        rows.push(market);
-                    }
+                skipped,
+            } => {
+                // Other instrument types carry fields this venue never reads.
+                let key = serde_json::from_str::<InstrumentKey>(item);
+                if key
+                    .as_ref()
+                    .is_ok_and(|k| k.inst_type != Some("PERPETUAL_SWAP"))
+                {
+                    return;
                 }
-                Err(_) => *invalid = true,
-            },
-            Pending::Tickers { rows, invalid } => {
+                match serde_json::from_str::<Instrument>(item) {
+                    Ok(row) => {
+                        if let Some(market) = row.market() {
+                            indexes.insert(
+                                market.id.clone(),
+                                row.underlying_symbol.unwrap_or_default().into(),
+                            );
+                            rows.push(market);
+                        }
+                    }
+                    Err(_) => skipped.add(key.ok().and_then(|k| k.symbol)),
+                }
+            }
+            Pending::Tickers { rows, skipped } => {
                 // Spot rows may contain null prices; they are outside this venue.
                 match serde_json::from_str::<TickerName>(item) {
                     Ok(name) if cx.store.market(name.i).is_none() => {}
-                    Err(_) => *invalid = true,
-                    Ok(_) => match serde_json::from_str::<TickerRow>(item) {
+                    Err(_) => skipped.add(None),
+                    Ok(name) => match serde_json::from_str::<TickerRow>(item) {
                         Ok(row) => {
                             let mut ticker = Ticker {
                                 id: row.i.into(),
@@ -487,7 +528,7 @@ impl Venue for Cryptocom {
                             row.apply(&mut ticker);
                             rows.push(ticker);
                         }
-                        Err(_) => *invalid = true,
+                        Err(_) => skipped.add(Some(name.i)),
                     },
                 }
             }
@@ -537,10 +578,11 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows,
                 indexes,
-                invalid,
+                skipped,
             } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid instrument row");
+                skipped.report(cx, "instrument");
+                if rows.is_empty() && skipped.any() {
+                    cx.log(LogLevel::Error, "no mappable Crypto.com instrument rows");
                     return;
                 }
                 self.indexes = indexes;
@@ -550,13 +592,14 @@ impl Venue for Cryptocom {
                     "/public/get-tickers",
                     Pending::Tickers {
                         rows: vec![],
-                        invalid: false,
+                        skipped: Skipped::default(),
                     },
                 );
             }
-            Pending::Tickers { rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid ticker row");
+            Pending::Tickers { rows, skipped } => {
+                skipped.report(cx, "ticker");
+                if rows.is_empty() && skipped.any() {
+                    cx.log(LogLevel::Error, "no mappable Crypto.com ticker rows");
                     return;
                 }
                 cx.store.set_tickers(rows);

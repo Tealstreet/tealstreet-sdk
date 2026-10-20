@@ -62,6 +62,9 @@ impl H {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 Action::WsConnect {
                     socket,
                     channel: Some(safe_cex_engine::SocketChannel::Private),
