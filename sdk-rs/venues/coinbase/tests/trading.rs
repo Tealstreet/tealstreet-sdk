@@ -373,6 +373,12 @@ fn entire_batch_is_preflighted_before_any_write() {
     bad.client_order_id = Some("has space".into());
     cases.push(bad);
     let mut bad = good.clone();
+    bad.client_order_id = Some("x".repeat(129));
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.client_order_id = Some("é".repeat(129));
+    cases.push(bad);
+    let mut bad = good.clone();
     bad.take_profit = Some(200.0);
     cases.push(bad);
     let mut bad = good.clone();
@@ -402,6 +408,26 @@ fn entire_batch_is_preflighted_before_any_write() {
         orders: vec![same.clone(), same],
     });
     assert!(s.done(120).unwrap_err().contains("duplicate"));
+}
+
+#[test]
+fn caller_ids_allow_exactly_one_hundred_twenty_eight_unicode_characters() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let caller = "é".repeat(128);
+    let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some(caller.clone());
+    s.command(Command::PlaceOrders {
+        command: 121,
+        orders: vec![order],
+    });
+    let request = s.write();
+    assert_eq!(create_wire(&request).client_order_id, caller);
+    s.reply(
+        request,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"unicode-limit"}}"#,
+    );
+    assert!(s.done(121).is_ok());
 }
 
 #[test]

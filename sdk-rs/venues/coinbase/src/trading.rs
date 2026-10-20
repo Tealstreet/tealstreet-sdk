@@ -309,9 +309,13 @@ impl Coinbase {
             num::adjust(raw, market.precision.price)
         };
         let client = if let Some(id) = &opts.client_order_id {
-            if !valid_id(id) || opts.kind == OrderType::StopLoss || opts.close == Some(true) {
+            if !valid_id(id)
+                || id.chars().count() > 128
+                || opts.kind == OrderType::StopLoss
+                || opts.close == Some(true)
+            {
                 return Err(
-                    "Coinbase caller ID requires one ordinary order and no whitespace".into(),
+                    "Coinbase caller ID requires one ordinary order and 1..128 non-whitespace characters".into(),
                 );
             }
             id.clone()
