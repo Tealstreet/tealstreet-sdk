@@ -212,11 +212,11 @@ fn bracket_entry(h: &mut Harness, command: u32, next: Option<PlaceOrderOpts>) {
         ),
     );
 }
-fn logged_child_rejection(h: &Harness) -> bool {
+fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
     h.actions.iter().any(|action| {
         matches!(action,
         Action::Notice(Notice::Log { level: LogLevel::Error, message })
-        if message.contains("TP/SL") && message.contains("REJECTED"))
+        if message.contains(expected))
     })
 }
 #[test]
@@ -232,7 +232,10 @@ fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
     h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert!(h.pending.is_empty());
     assert_eq!(h.result(10), Ok("[\"entry\",\"sl\"]"));
-    assert!(logged_child_rejection(&h));
+    assert!(logged_child_rejection(
+        &h,
+        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED; still placing the stop-loss"
+    ));
 }
 #[test]
 fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
@@ -252,7 +255,56 @@ fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
     h.respond(after, 200, r#"{"id":"next-id","client_id":"next"}"#);
     assert!(h.pending.is_empty());
     assert_eq!(h.result(11), Ok("[\"entry\",\"tp\",\"next-id\"]"));
-    assert!(logged_child_rejection(&h));
+    assert!(logged_child_rejection(
+        &h,
+        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED; no other leg remains to send"
+    ));
+}
+#[test]
+fn a_wrong_side_bracket_rejects_the_whole_command_before_any_write() {
+    let mut h = private();
+    for (command, side, take_profit, stop_loss, leg) in [
+        (
+            12,
+            OrderSide::Buy,
+            95.,
+            90.,
+            "take-profit 95 must be above the buy entry price 100",
+        ),
+        (
+            13,
+            OrderSide::Buy,
+            110.,
+            100.,
+            "stop-loss 100 must be below the buy entry price 100",
+        ),
+        (
+            14,
+            OrderSide::Sell,
+            105.,
+            110.,
+            "take-profit 105 must be below the sell entry price 100",
+        ),
+        (
+            15,
+            OrderSide::Sell,
+            90.,
+            95.,
+            "stop-loss 95 must be above the sell entry price 100",
+        ),
+    ] {
+        let mut first = opts(OrderType::Market);
+        first.client_order_id = Some("first".into());
+        let mut order = opts(OrderType::Limit);
+        order.client_order_id = None;
+        order.side = side;
+        order.take_profit = Some(take_profit);
+        order.stop_loss = Some(stop_loss);
+        place(&mut h, command, vec![first, order]);
+        assert!(h.pending.is_empty());
+        let error = h.result(command).unwrap_err();
+        assert!(error.contains(leg), "{error}");
+    }
 }
 
 #[test]
