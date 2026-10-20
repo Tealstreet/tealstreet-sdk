@@ -7,15 +7,25 @@ const venue = venueOf('cryptocom');
 const privateUrl = 'wss://stream.crypto.com/exchange/v1/user';
 const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
 const auth = () => {
-  const method = 'public/auth', id = Date.now(), nonce = id, api_key = 'replay-key';
-  const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + nonce).digest('hex');
+  const method = 'public/auth',
+    id = Date.now(),
+    nonce = id,
+    api_key = 'replay-key';
+  const sig = createHmac('sha256', 'replay-secret')
+    .update(method + id + api_key + nonce)
+    .digest('hex');
   return { method, id, nonce, api_key, sig };
 };
 const subscriptions = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', 'user.trade'];
 test('HMAC check binds the signed method to the REST route', () => {
   const body = (method) => {
-    const id = Date.now(), nonce = id, api_key = 'replay-key', params = { client_oid: 'caller' };
-    const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + 'client_oidcaller' + nonce).digest('hex');
+    const id = Date.now(),
+      nonce = id,
+      api_key = 'replay-key',
+      params = { client_oid: 'caller' };
+    const sig = createHmac('sha256', 'replay-secret')
+      .update(method + id + api_key + 'client_oidcaller' + nonce)
+      .digest('hex');
     return JSON.stringify({ method, id, nonce, api_key, params, sig });
   };
   const url = 'https://api.crypto.com/exchange/v1/private/create-order';
@@ -42,17 +52,27 @@ test('bad signatures and missing channels cannot pass the socket audit', () => {
 });
 
 test('HMAC check preserves exact nanosecond integer parameters', () => {
-  const method = 'private/get-trades', id = Date.now(), nonce = id, api_key = 'replay-key';
+  const method = 'private/get-trades',
+    id = Date.now(),
+    nonce = id,
+    api_key = 'replay-key';
   const payload = method + id + api_key + 'end_time1610000000000000001' + nonce;
   const sig = createHmac('sha256', 'replay-secret').update(payload).digest('hex');
-  const body = JSON.stringify({ method, id, nonce, api_key, sig, params: {} }).replace('"params":{}', '"params":{"end_time":1610000000000000001}');
+  const body = JSON.stringify({ method, id, nonce, api_key, sig, params: {} }).replace(
+    '"params":{}',
+    '"params":{"end_time":1610000000000000001}',
+  );
   const url = 'https://api.crypto.com/exchange/v1/private/get-trades';
   assert.equal(venue.checkRequest('POST', url, body), true);
   assert.equal(venue.checkRequest('POST', url, body.replace('1610000000000000001', '1610000000000000002')), false);
 });
 
 test('public audit requires ticker subscriptions before replay', () => {
-  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: ['BTCUSD-PERP'], tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'] });
+  const audit = venue.createSocketAudit('rust', {
+    isPrivate: false,
+    books: ['BTCUSD-PERP'],
+    tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'],
+  });
   const send = (channels) => audit.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels } }));
   send(['book.BTCUSD-PERP.50']);
   assert.equal(audit.ready(), false);
@@ -63,13 +83,56 @@ test('public audit requires ticker subscriptions before replay', () => {
   assert.deepEqual(ready.errors(), []);
 });
 
+test('Bybit startup topics derive all successful seed pages independently of sent subscriptions', async () => {
+  const { subscriptionKeys } = await import('./requests.mjs');
+  const bybit = venueOf('bybit');
+  const row = (symbol, quoteCoin) => ({ symbol, quoteCoin });
+  const seed = (list, extra = {}) => ({
+    type: 'http',
+    method: 'GET',
+    status: 200,
+    url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000',
+    body: JSON.stringify({ retCode: 0, result: { list } }),
+    ...extra,
+  });
+  const required = bybit.startupSubscriptions(
+    [
+      seed([row('BTCUSDT', 'USDT'), row('BTCUSD', 'USD'), row('BTCUSDT', 'USDT')]),
+      seed([row('ETHUSDC', 'USDC')], { url: 'https://api.bybit.com/v5/market/instruments-info?cursor=page2' }),
+      seed([row('NEXTUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/instruments-info?status=PreLaunch' }),
+      seed([row('FAILEDUSDT', 'USDT')], { status: 503 }),
+      seed([row('FAILEDUSDT', 'USDT')], {
+        body: JSON.stringify({ retCode: 10001, result: { list: [row('FAILEDUSDT', 'USDT')] } }),
+      }),
+      seed([row('OTHERUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/tickers' }),
+    ],
+    ['BTCUSDT', 'ETHUSDC'],
+  );
+  const socket = 'wss://stream.bybit.com/v5/public/linear';
+  assert.deepEqual(required, [
+    `WS ${socket}? {"args":["tickers.BTCUSDT"],"op":"subscribe"}`,
+    `WS ${socket}? {"args":["tickers.ETHUSDC"],"op":"subscribe"}`,
+    `WS ${socket}? {"args":["tickers.NEXTUSDT"],"op":"subscribe"}`,
+    `WS ${socket}? {"args":["orderbook.1000.BTCUSDT"],"op":"subscribe"}`,
+    `WS ${socket}? {"args":["orderbook.1000.ETHUSDC"],"op":"subscribe"}`,
+  ]);
+  const pending = new Set(required);
+  const sent = (url, args) => {
+    for (const key of subscriptionKeys(url, JSON.stringify({ op: 'subscribe', args }))) pending.delete(key);
+  };
+  sent('wss://stream.bybit.com/v5/private', ['tickers.BTCUSDT']);
+  assert.equal(pending.size, 5, 'wrong native socket cannot satisfy readiness');
+  sent(socket + '?requestId=generated', ['tickers.BTCUSDT', 'orderbook.1000.BTCUSDT']);
+  assert.equal(pending.size, 3, 'a partial outgoing batch cannot satisfy readiness');
+  sent(socket, ['tickers.ETHUSDC', 'tickers.NEXTUSDT', 'orderbook.1000.ETHUSDC']);
+  assert.equal(pending.size, 0);
+});
 
 test('unrecorded economic websocket methods fail the Crypto.com protocol audit', () => {
   const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [] });
   audit.sent(privateUrl, JSON.stringify({ id: 1, method: 'private/create-order', params: { quantity: '1' } }));
   assert(audit.errors().some((error) => error.includes('unexpected outbound WS method private/create-order')));
 });
-
 
 test('WEEX signed REST and private upgrade headers bind path, body and account', () => {
   const weex = venueOf('weex');
@@ -78,20 +141,26 @@ test('WEEX signed REST and private upgrade headers bind path, body and account',
   const url = 'https://api-contract.weex.com/capi/v3/account/income';
   const body = '{"symbol":"BTCUSDT"}';
   const headers = {
-    'ACCESS-TIMESTAMP': time, 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase',
-    'ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(`${time}${method}/capi/v3/account/income${body}`).digest('base64'),
+    'ACCESS-TIMESTAMP': time,
+    'ACCESS-KEY': 'replay-key',
+    'ACCESS-PASSPHRASE': 'replay-passphrase',
+    'ACCESS-SIGN': createHmac('sha256', 'replay-secret')
+      .update(`${time}${method}/capi/v3/account/income${body}`)
+      .digest('base64'),
   };
   assert.doesNotThrow(() => weex.validateRequest({ method, url, body, headers }));
   assert.throws(() => weex.validateRequest({ method, url, body: '{}', headers }));
   assert.throws(() => weex.validateRequest({ method, url, body, headers: { ...headers, 'ACCESS-KEY': 'another' } }));
   const privateUrl = 'wss://ws-contract.weex.com/v3/ws/private';
-  const upgrade = { ...headers, 'ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64') };
+  const upgrade = {
+    ...headers,
+    'ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64'),
+  };
   assert.doesNotThrow(() => weex.validateSocket(privateUrl, upgrade));
   assert.throws(() => weex.validateSocket(privateUrl, { ...upgrade, 'ACCESS-SIGN': 'invalid' }));
   assert.equal(weex.isWrite(method, url), false);
   assert.equal(weex.isWrite('POST', 'https://api-contract.weex.com/capi/v3/algoOrder'), true);
 });
-
 
 for (const [label, timestamp] of [
   ['missing', undefined],
@@ -106,13 +175,20 @@ for (const [label, timestamp] of [
     test(`WEEX ${transport} rejects ${label} timestamps even with a matching signature`, () => {
       const weex = venueOf('weex');
       const now = 1800000000000;
-      const headers = { 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase',
-        ...(timestamp === undefined ? {} : { 'ACCESS-TIMESTAMP': timestamp }) };
-      const method = 'POST', path = '/capi/v3/account/income', body = '{}';
+      const headers = {
+        'ACCESS-KEY': 'replay-key',
+        'ACCESS-PASSPHRASE': 'replay-passphrase',
+        ...(timestamp === undefined ? {} : { 'ACCESS-TIMESTAMP': timestamp }),
+      };
+      const method = 'POST',
+        path = '/capi/v3/account/income',
+        body = '{}';
       const payload = transport === 'REST' ? `${timestamp}${method}${path}${body}` : `${timestamp}/v3/ws/private`;
       headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(payload).digest('base64');
       if (transport === 'REST') {
-        assert.throws(() => weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }));
+        assert.throws(() =>
+          weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }),
+        );
       } else {
         assert.throws(() => weex.validateSocket('wss://ws-contract.weex.com/v3/ws/private', headers, now));
       }
@@ -121,43 +197,82 @@ for (const [label, timestamp] of [
 }
 
 test('WEEX timestamp freshness accepts both edges of the replay clock window', () => {
-  const weex = venueOf('weex'), now = 1800000000000;
+  const weex = venueOf('weex'),
+    now = 1800000000000;
   for (const offset of [-30000, 0, 30000]) {
     const timestamp = String(now + offset);
-    const headers = { 'ACCESS-TIMESTAMP': timestamp, 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase' };
-    const method = 'POST', path = '/capi/v3/account/income', body = '{}';
-    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(`${timestamp}${method}${path}${body}`).digest('base64');
-    assert.doesNotThrow(() => weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }));
-    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(`${timestamp}/v3/ws/private`).digest('base64');
+    const headers = {
+      'ACCESS-TIMESTAMP': timestamp,
+      'ACCESS-KEY': 'replay-key',
+      'ACCESS-PASSPHRASE': 'replay-passphrase',
+    };
+    const method = 'POST',
+      path = '/capi/v3/account/income',
+      body = '{}';
+    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret')
+      .update(`${timestamp}${method}${path}${body}`)
+      .digest('base64');
+    assert.doesNotThrow(() =>
+      weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }),
+    );
+    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret')
+      .update(`${timestamp}/v3/ws/private`)
+      .digest('base64');
     assert.doesNotThrow(() => weex.validateSocket('wss://ws-contract.weex.com/v3/ws/private', headers, now));
   }
 });
 
-
-
-
 test('Bybit startup topics include all successful stablecoin pages and requested books', () => {
   const bybit = venueOf('bybit');
-  const seed = (list, extra = {}) => ({ type: 'http', method: 'GET', status: 200,
+  const seed = (list, extra = {}) => ({
+    type: 'http',
+    method: 'GET',
+    status: 200,
     url: 'https://api.bybit.com/v5/market/instruments-info?category=linear',
-    body: JSON.stringify({ retCode: 0, result: { list } }), ...extra });
+    body: JSON.stringify({ retCode: 0, result: { list } }),
+    ...extra,
+  });
   const rows = [
-    seed([{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'BTCUSD', quoteCoin: 'USD' }]),
-    seed([{ symbol: 'ETHUSDC', quoteCoin: 'USDC' }], { url: 'https://api.bybit.com/v5/market/instruments-info?cursor=next' }),
-    seed([{ symbol: 'NEWUSDT', quoteCoin: 'USDT' }, { symbol: 'BTCUSDT', quoteCoin: 'USDT' }], { url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&status=PreLaunch' }),
+    seed([
+      { symbol: 'BTCUSDT', quoteCoin: 'USDT' },
+      { symbol: 'BTCUSD', quoteCoin: 'USD' },
+    ]),
+    seed([{ symbol: 'ETHUSDC', quoteCoin: 'USDC' }], {
+      url: 'https://api.bybit.com/v5/market/instruments-info?cursor=next',
+    }),
+    seed(
+      [
+        { symbol: 'NEWUSDT', quoteCoin: 'USDT' },
+        { symbol: 'BTCUSDT', quoteCoin: 'USDT' },
+      ],
+      { url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&status=PreLaunch' },
+    ),
     seed([{ symbol: 'FAILEDUSDT', quoteCoin: 'USDT' }], { status: 503 }),
     seed([], { body: '{"retCode":10001,"result":{"list":[{"symbol":"FAILEDUSDT","quoteCoin":"USDT"}]}}' }),
-    seed([{ symbol: 'SPOTUSDT', quoteCoin: 'USDT' }], { url: 'https://api.bybit.com/v5/market/instruments-info?category=spot' }),
+    seed([{ symbol: 'SPOTUSDT', quoteCoin: 'USDT' }], {
+      url: 'https://api.bybit.com/v5/market/instruments-info?category=spot',
+    }),
   ];
   const url = 'wss://stream.bybit.com/v5/public/linear?requestId=taped&max_active_time=1m';
   rows.push({ type: 'ws', url });
   const expected = bybit.startupSubscriptions(rows, ['BTCUSDT', 'ETHUSDC']);
-  assert.deepEqual(expected, subscriptionKeys(url, { op: 'subscribe', args: [
-    'tickers.BTCUSDT', 'tickers.ETHUSDC', 'tickers.NEWUSDT', 'orderbook.1000.BTCUSDT', 'orderbook.1000.ETHUSDC',
-  ] }));
+  assert.deepEqual(
+    expected,
+    subscriptionKeys(url, {
+      op: 'subscribe',
+      args: [
+        'tickers.BTCUSDT',
+        'tickers.ETHUSDC',
+        'tickers.NEWUSDT',
+        'orderbook.1000.BTCUSDT',
+        'orderbook.1000.ETHUSDC',
+      ],
+    }),
+  );
   const pending = new Map(expected.map((key) => [key, false]));
   const sent = (socket, topics) => {
-    for (const key of subscriptionKeys(socket, { op: 'subscribe', args: topics })) if (pending.has(key)) pending.set(key, true);
+    for (const key of subscriptionKeys(socket, { op: 'subscribe', args: topics }))
+      if (pending.has(key)) pending.set(key, true);
   };
   const ready = () => [...pending.values()].every(Boolean);
   sent(url.replace('requestId=taped', 'requestId=generated'), ['orderbook.1000.BTCUSDT', 'orderbook.1000.ETHUSDC']);
@@ -177,21 +292,65 @@ test('BloFin login checks account, fresh timestamp, nonce and hex-base64 signatu
   const url = 'wss://openapi.blofin.com/ws/private';
   const now = Date.now();
   const message = (patch = {}) => {
-    const arg = { apiKey: 'replay-key', passphrase: 'replay-passphrase', timestamp: now, nonce: 'fresh-nonce', ...patch };
-    arg.sign ??= Buffer.from(createHmac('sha256', 'replay-secret')
-      .update(`/users/self/verifyGET${arg.timestamp}${arg.nonce}`).digest('hex')).toString('base64');
+    const arg = {
+      apiKey: 'replay-key',
+      passphrase: 'replay-passphrase',
+      timestamp: now,
+      nonce: 'fresh-nonce',
+      ...patch,
+    };
+    arg.sign ??= Buffer.from(
+      createHmac('sha256', 'replay-secret').update(`/users/self/verifyGET${arg.timestamp}${arg.nonce}`).digest('hex'),
+    ).toString('base64');
     return JSON.stringify({ op: 'login', args: [arg] });
   };
   const socket = { url };
   const feeds = '{"op":"subscribe","args":[{"channel":"orders","instType":"SWAP","instId":"ANY"}]}';
   assert.throws(() => venue.validateSocketMessage(socket, feeds, now));
   assert.throws(() => venue.validateSocketFrame(socket, '{"event":"login","code":"0"}'));
-  for (const patch of [{ sign: 'wrong' }, { apiKey: 'other' }, { passphrase: 'other' }, { nonce: '' },
-    { timestamp: now - 30001 }, { timestamp: now + 30001 }, { timestamp: 'bad' }]) {
+  for (const patch of [
+    { sign: 'wrong' },
+    { apiKey: 'other' },
+    { passphrase: 'other' },
+    { nonce: '' },
+    { timestamp: now - 30001 },
+    { timestamp: now + 30001 },
+    { timestamp: 'bad' },
+  ]) {
     assert.throws(() => venue.validateSocketMessage({ url }, message(patch), now));
   }
   venue.validateSocketMessage(socket, message(), now);
   assert.throws(() => venue.validateSocketMessage(socket, feeds, now));
   venue.validateSocketFrame(socket, '{"event":"login","code":"0"}');
   venue.validateSocketMessage(socket, feeds, now);
+});
+
+test('Bybit variant startup topics keep native categories, depths and configured origins', () => {
+  for (const [name, symbol, quoteCoin, category, depth, origin] of [
+    ['bybitinverse', 'BTCUSD', 'USD', 'inverse', 1000, 'wss://stream.bybit.com'],
+    ['bybitspot', 'BTCUSDT', 'USDT', 'spot', 200, 'wss://stream.bybit.com'],
+    ['bybitdemo', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://stream.bybit.com'],
+    ['hyrotrader', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://challenge.example.test'],
+  ]) {
+    const publicWs = `${origin}/v5/public/${category}`;
+    const records = [
+      {
+        type: 'http',
+        method: 'GET',
+        status: 200,
+        url: `https://example.test/v5/market/instruments-info?category=${category}`,
+        body: JSON.stringify({ retCode: 0, result: { list: [{ symbol, quoteCoin }] } }),
+      },
+      { type: 'ws', url: `${publicWs}?requestId=generated`, text: '{}' },
+    ];
+    if (name === 'hyrotrader') records.unshift({ type: 'config', options: { endpoints: { publicWs } } });
+    assert.deepEqual(
+      venueOf(name).startupSubscriptions(records, [symbol]),
+      [
+        `WS ${publicWs}? {"args":["tickers.${symbol}"],"op":"subscribe"}`,
+        `WS ${publicWs}? {"args":["orderbook.${depth}.${symbol}"],"op":"subscribe"}`,
+      ],
+      name,
+    );
+  }
 });

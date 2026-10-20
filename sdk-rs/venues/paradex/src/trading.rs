@@ -249,6 +249,12 @@ fn place_operations(
     bands: &HashMap<String, f64>,
     require_quotes: bool,
 ) -> Result<VecDeque<Operation>, String> {
+    if orders
+        .iter()
+        .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+    {
+        return Err("Bybit BBO and TickSize controls are not supported by Paradex".into());
+    }
     validate_caller_ids(orders, cx)?;
     let signer = account
         .credentials()

@@ -300,3 +300,10 @@ findings will be posted as PR comments and addressed before merging on green CI.
   Clippy pass; merged replay harness passes224 checks.
 - Final artifact/replay gates and exact-head green CI remain required before
   landing. Earlier checkpoint measurements above are historical, not a waiver.
+- Landing then advanced through Bybit variants #1307. Integration preserves its
+  socket/action allocation changes, typed request matching, independently selected
+  fixture writes and stricter memory baselines. Paradex rejects the newly exposed
+  Bybit-only order controls before any quote or write. Independent merge review
+  caught the optional TS signing-module import inside the CPU timer; it now runs
+  before CPU sampling, like WASM initialization, while remaining inside the early
+  retained-memory baseline. Both binary ingress and all signature checks remain.

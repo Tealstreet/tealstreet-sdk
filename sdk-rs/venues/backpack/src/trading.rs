@@ -332,6 +332,11 @@ impl Backpack {
         cx: &Cx<'_, Pending>,
         orders: Vec<PlaceOrderOpts>,
     ) -> Result<Vec<Step>, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit BBO and TickSize controls are not supported by Backpack".into());
+        }
         let mut caller = HashSet::new();
         let mut prepared = Vec::new();
         for o in &orders {
@@ -440,9 +445,11 @@ impl Backpack {
                         trigger_type: old.trigger_type,
                         tp_trigger_type: None,
                         sl_trigger_type: None,
-                        max_slippage_pct: None,
                         client_order_id: None,
                         close: None,
+                        max_slippage_pct: None,
+                        bybit_bbo: None,
+                        bybit_slippage_tolerance_ticks: None,
                     };
                     let mut steps = self.placement_steps(cx, &o)?;
                     steps.insert(

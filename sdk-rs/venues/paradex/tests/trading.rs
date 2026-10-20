@@ -722,3 +722,34 @@ fn an_amend_that_never_left_the_jwt_queue_does_not_keep_an_uncertain_target() {
             .contains("\"price\":\"99\"")
     );
 }
+
+#[test]
+fn unsupported_bybit_controls_reject_the_whole_batch_before_quotes_or_writes() {
+    for bbo in [false, true] {
+        for level in [1., f64::NAN, f64::INFINITY] {
+            let mut h = private();
+            let first = opts(OrderType::Limit);
+            let mut unsupported = opts(OrderType::Market);
+            unsupported.client_order_id = Some("unsupported-control".into());
+            unsupported.max_slippage_pct = Some(0.1);
+            if bbo {
+                unsupported.bybit_bbo = Some(safe_cex_engine::model::BybitBbo {
+                    side_type: "Counterparty".into(),
+                    level,
+                });
+            } else {
+                unsupported.bybit_slippage_tolerance_ticks = Some(level);
+            }
+            place(&mut h, 180, vec![first, unsupported]);
+            assert!(
+                h.result(180)
+                    .unwrap_err()
+                    .contains("not supported by Paradex")
+            );
+            assert!(
+                h.pending.is_empty(),
+                "unsupported controls must not fetch quotes or send writes"
+            );
+        }
+    }
+}

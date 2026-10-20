@@ -103,6 +103,44 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     )));
 }
 
+fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
+    let (mut e, _) = ready_unattributed();
+    let before = e.snapshot_frame(NOW).to_vec();
+    e.take_frame(NOW);
+    place(&mut e, vec![limit(), bad]);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions.iter().all(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 7, result: Err(error) })
+                if error.contains("Bybit BBO and TickSize controls")
+        )),
+        "unexpected batch effects: {actions:?}"
+    );
+    assert_eq!(actions.len(), 1, "batch must reject exactly once");
+    assert_eq!(e.snapshot_frame(NOW), before);
+    assert!(e.take_frame(NOW).is_none(), "rejection dirtied the store");
+}
+
+#[test]
+fn bybit_bbo_on_later_batch_item_rejects_before_any_read_write_or_mutation() {
+    let mut bad = limit();
+    bad.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 1.0,
+    });
+    rejects_bybit_control_without_batch_effects(bad);
+}
+
+#[test]
+fn bybit_ticks_on_later_batch_item_reject_before_any_read_write_or_mutation() {
+    for ticks in [0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut bad = limit();
+        bad.bybit_slippage_tolerance_ticks = Some(ticks);
+        rejects_bybit_control_without_batch_effects(bad);
+    }
+}
+
 #[test]
 fn placement_scales_market_metadata_and_returns_native_index() {
     let (mut e, _) = ready_unattributed();
