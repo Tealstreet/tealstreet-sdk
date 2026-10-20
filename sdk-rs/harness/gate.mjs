@@ -12,6 +12,7 @@ import { gunzipSync } from 'node:zlib';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { memoryMetricErrors } from './memory.mjs';
+import { cpuObjectiveMet } from './cpu-objective.mjs';
 import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput, fixPhemexAccount } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
@@ -957,8 +958,8 @@ if (venue.family === 'coinbase') console.log(`(documented Coinbase corrections: 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) {
-  if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
-  if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
+  if (!cpuObjectiveMet(r.cpuMs, t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
+  if (!cpuObjectiveMet(r.steadyCpuMs, t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
   if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
   if (!(r.peakMB < t.peakMB)) failures.push('Rust sampled peak memory is not below TS');
 }
