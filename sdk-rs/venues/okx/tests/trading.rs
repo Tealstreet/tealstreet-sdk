@@ -1492,6 +1492,18 @@ fn trading_failures_are_classified_without_changing_their_text() {
             Some(Outcome::Unknown),
             None,
         ),
+        (
+            r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"50026","sMsg":"System error"}]}"#,
+            Some(ErrorKind::Rejected),
+            None,
+            Some("50026"),
+        ),
+        (
+            r#"{"code":"50013","msg":"Systems are busy","data":[]}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Unknown),
+            Some("50013"),
+        ),
     ] {
         let mut e = trading_engine();
         let out = place(&mut e, vec![order(limit)]);
@@ -1511,4 +1523,31 @@ fn trading_failures_are_classified_without_changing_their_text() {
             failure.message
         );
     }
+}
+
+#[test]
+fn a_partially_accepted_batch_is_not_reported_as_rejected() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#),
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"sell","amount":2,"price":42000}"#),
+        ],
+    );
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        6.0,
+    );
+    let failure = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command");
+    assert_eq!(failure.outcome, None, "one order is live: {failure:?}");
 }

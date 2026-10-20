@@ -978,9 +978,22 @@ impl Okx {
             .iter()
             .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty());
         let first_code = failed.clone().next().map(|a| a.s_code);
+        // Only 51xxx proves a refused leg, and an accepted leg means something happened.
+        let definitive = failed.clone().all(|a| a.s_code.starts_with("51"))
+            && !acks.iter().any(|a| {
+                matches!(a.s_code, "" | "0")
+                    && a.s_msg.is_empty()
+                    && (!a.ord_id.is_empty() || !a.algo_id.is_empty())
+            });
         let errors: Vec<_> = failed
             .map(|a| format!("{} (code {})", a.s_msg, a.s_code))
             .collect();
+        let refused = |mut error: VenueError| {
+            if !definitive {
+                error.outcome = None;
+            }
+            error
+        };
         if envelope.code != "0"
             && !(job.continue_cancel_errors && envelope.code == "2" && !errors.is_empty())
         {
@@ -988,14 +1001,14 @@ impl Okx {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
                 rejection(error, Some(envelope.code), response.status)
             } else {
-                rejection(errors.join("; "), first_code, response.status)
+                refused(rejection(errors.join("; "), first_code, response.status))
             };
             self.trade_failed(cx, request, error);
             return;
         }
         if !errors.is_empty() {
             if !job.continue_cancel_errors {
-                let error = rejection(errors.join("; "), first_code, response.status);
+                let error = refused(rejection(errors.join("; "), first_code, response.status));
                 self.trade_failed(cx, request, error);
                 return;
             }
@@ -1052,16 +1065,18 @@ impl Okx {
 fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
     let kind = match (code, status) {
         (Some("50011" | "50061"), _) | (_, 429) => ErrorKind::RateLimited,
-        (Some("50111" | "50112" | "50113" | "50114" | "50119"), _) | (_, 401) => {
-            ErrorKind::AuthInvalid
-        }
+        (Some("50111" | "50113" | "50114" | "50119"), _) | (_, 401) => ErrorKind::AuthInvalid,
         (Some("50110" | "50120"), _) | (_, 403) => ErrorKind::AuthPermission,
         (Some("50014" | "51000"), _) => ErrorKind::InvalidInput,
         _ => ErrorKind::Rejected,
     };
-    let mut error = VenueError::new(message)
-        .kind(kind)
-        .outcome(Outcome::Rejected);
+    // System errors and busy replies do not prove the venue refused the write.
+    let outcome = if matches!(code, Some("50001" | "50013" | "50026")) {
+        Outcome::Unknown
+    } else {
+        Outcome::Rejected
+    };
+    let mut error = VenueError::new(message).kind(kind).outcome(outcome);
     if let Some(code) = code.filter(|code| !code.is_empty()) {
         error = error.venue_code(code);
     }
