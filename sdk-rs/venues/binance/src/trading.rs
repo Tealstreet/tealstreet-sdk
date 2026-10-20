@@ -9,7 +9,9 @@ use safe_cex_engine::model::{
     Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, StopTriggerType,
     TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use std::collections::{HashMap, VecDeque};
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
@@ -70,8 +72,10 @@ struct Job {
     /// Run every step even after a failure (cancel-all's two families).
     continue_on_error: bool,
     ids: Vec<String>,
-    error: Option<String>,
+    error: Option<VenueError>,
     amendment: Option<Amendment>,
+    /// Orders the command placed, for partial-batch detail.
+    total: usize,
 }
 
 struct Amendment {
@@ -222,9 +226,9 @@ impl BinanceFutures {
         | Command::FetchAccount { command }
         | Command::FetchOrderBook { command, .. } = &command
         {
-            cx.done(
+            cx.fail(
                 *command,
-                Err("This Binance command is not supported".into()),
+                not_sent("This Binance command is not supported").kind(ErrorKind::Unsupported),
             );
             return;
         }
@@ -237,15 +241,20 @@ impl BinanceFutures {
                 _ => None,
             };
             if let Some(id) = id {
-                cx.done(
+                cx.fail(
                     id,
-                    Err("Binance Spot does not support derivative settings".into()),
+                    not_sent("Binance Spot does not support derivative settings")
+                        .kind(ErrorKind::Unsupported),
                 );
                 return;
             }
         }
+        let mut total = 0;
         let (id, plan) = match command {
-            Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
+            Command::PlaceOrders { command, orders } => {
+                total = orders.len();
+                (command, self.plan_place(cx, &orders))
+            }
             Command::CancelOrders { command, ids } => {
                 let orders = ids
                     .iter()
@@ -382,17 +391,18 @@ impl BinanceFutures {
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.done(id, Err("Binance trading needs an API key".into()));
+            let error = not_sent("Binance trading needs an API key").kind(ErrorKind::AuthInvalid);
+            cx.fail(id, error);
             return;
         }
         match plan {
             Ok(job) => {
-                self.trading.jobs.insert(id, job);
+                self.trading.jobs.insert(id, Job { total, ..job });
                 self.advance(cx, id);
             }
             Err(message) => {
                 cx.log(LogLevel::Error, message.clone());
-                cx.done(id, Err(message));
+                cx.fail(id, not_sent(message).kind(ErrorKind::InvalidInput));
             }
         }
     }
@@ -434,7 +444,7 @@ impl BinanceFutures {
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
-                    Err(error) => job.error = Some(error),
+                    Err(error) => job.error = Some(error.into()),
                 }
             }
             self.advance(cx, command);
@@ -442,24 +452,17 @@ impl BinanceFutures {
         }
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
-            let result = match job.error {
-                Some(error) if self.is_inverse() && !job.ids.is_empty() => {
-                    #[derive(serde::Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Partial<'a> {
-                        message: &'a str,
-                        partial_order_ids: &'a [String],
-                    }
-                    Err(serde_json::to_string(&Partial {
-                        message: &error,
-                        partial_order_ids: &job.ids,
-                    })
-                    .unwrap_or(error))
+            match job.error {
+                // An inverse batch stops at its first failure; earlier legs stand.
+                Some(error) if self.is_inverse() => {
+                    cx.fail(command, error.partial(&job.ids, job.total, job.ids.len()))
                 }
-                Some(error) => Err(error),
-                None => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-            };
-            cx.done(command, result);
+                Some(error) => cx.fail(command, error),
+                None => cx.done(
+                    command,
+                    Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
+                ),
+            }
             return;
         };
         job.outstanding = step.len();
@@ -654,7 +657,7 @@ impl BinanceFutures {
                 cx.log(LogLevel::Error, message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                job.error.get_or_insert(message);
+                job.error.get_or_insert_with(|| failure(code, message));
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
@@ -1498,6 +1501,33 @@ impl BinanceFutures {
     }
 }
 
+/// A trading failure classified by its Binance code; code 0 is a transport
+/// failure, a non-JSON HTTP error or an unproven acknowledgement.
+fn failure(code: i64, message: String) -> VenueError {
+    let (kind, outcome) = match code {
+        0 => (None, Outcome::Unknown),
+        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
+        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
+        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
+        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
+        -1022 | -2008 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
+        -1002 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
+        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
+        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+    };
+    let mut error = VenueError::new(message.clone()).outcome(outcome);
+    error.kind = kind;
+    if code != 0 {
+        error = error.venue_code(code.to_string()).venue_message(message);
+    }
+    error
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
 fn single(method: Method, path: &'static str, query: Query, call: Call) -> Job {
     Job {
         steps: VecDeque::from([vec![Planned {
@@ -2213,7 +2243,7 @@ mod audit_tests {
                         .any(|action| matches!(action, Action::Http(_))),
                     "{variant:?} {kind:?} fail_at={fail_at}"
                 );
-                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if error.contains("entropy unavailable"))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
+                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 91, error }) if error.message.contains("entropy unavailable") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
             }
         }
     }

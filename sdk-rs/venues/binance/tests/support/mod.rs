@@ -19,6 +19,8 @@ pub struct Harness {
     pub closed: Vec<SocketId>,
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
+    /// Structured detail of failed commands.
+    pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
     pub logs: Vec<String>,
 }
 
@@ -46,6 +48,7 @@ impl Harness {
             closed: Vec::new(),
             timers: Vec::new(),
             done: Vec::new(),
+            failures: Vec::new(),
             logs: Vec::new(),
         };
         harness.engine.start(harness.now);
@@ -83,7 +86,8 @@ impl Harness {
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.legacy_text())))
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push((command, error));
                 }
                 Action::Notice(Notice::StartupFailed { error }) => {
                     panic!("unexpected Binance startup failure: {error}")
