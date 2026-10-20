@@ -629,6 +629,14 @@ export const VENUES = {
     requestBodies: true,
     matchRequestBody: true,
     volatileBodyFields: true,
+    requestBody(body, { method, url }) {
+      const route = new URL(url);
+      if (method !== 'POST' || route.origin !== 'https://rpc.txflow-testnet.xyz' || route.pathname !== '/exchange'
+        || !body?.action || typeof body.action !== 'object' || Array.isArray(body.action)) return body;
+      // The independent validator checks the original signed nonce before matching.
+      const { nonce: _nonce, ...matched } = body;
+      return matched;
+    },
     compareWriteOrder: true,
     compareFillPrices: true,
     compareSubscriptions: true,

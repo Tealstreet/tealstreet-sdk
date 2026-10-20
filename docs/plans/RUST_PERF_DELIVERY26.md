@@ -170,3 +170,25 @@ prior Rust/SDK/host/parity/size validation. Refresh this one shared helper in th
 control, preserve the original failed collection, then freeze a fresh config and
 run the same declared 61-private/34-public protocol. This is a correctness repair
 before public sampling; no numerical retries or performance tuning occurred.
+
+## TxFlow nonce matching reconciliation
+
+The fresh collection passed 23 private profiles, then stopped at TxFlow TS
+replay with eight unmatched writes. Public collection still had zero children.
+Its signed request had a fresh monotonically increasing nonce; stricter shared
+request matching retained it while the tape used a fixed signing nonce.
+
+Add a TxFlow-only descriptor projection for the top-level nonce on POST
+`https://rpc.txflow-testnet.xyz/exchange` action envelopes. Signature, freshness,
+monotonicity and replay checks still examine the untouched original body before
+matching. Caller IDs, economic fields, vault/confirmation, nested nonce values
+and other routes/venues remain exact. Two actual counterexamples proved
+RED→GREEN, seven targeted protocol tests and all 634 harness tests pass, and
+independent source review passes. The repaired TxFlow private gate passes
+(35 frames, two markets/tickers); its CPU/memory remain informational.
+
+`RUST_PERF_DELIVERY26_TXFLOW.json.gz` preserves the failed collection and fix
+proofs. Check each remaining 37 private profiles once diagnostically to identify
+any additional correctness integration failures before the final clean fixed
+61-private/34-public run. Keep every diagnostic result. No public sampling,
+Rust changes, rebuild, numerical retry or tuning occurred in this repair phase.

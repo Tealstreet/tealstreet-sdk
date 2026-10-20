@@ -72,6 +72,53 @@ test('profile constructs a separate verifier for each TS/Rust implementation and
   }
 }));
 
+test('matching accepts a fresh independently signed TxFlow nonce without bypassing nonce validation', () => freeze(() => {
+  const action = native('caller-nonce');
+  const expected = independentlySigned(action).body;
+  const actual = independentlySigned(action, { nonce: EPOCH + 400 }).body;
+  for (const impl of ['ts', 'rust']) {
+    const tape = new Tape([
+      { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-nonce' }] },
+      { type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(expected), status: 200, body: '{}' },
+    ], VENUES.txflow, true, 100, impl, OPTIONS);
+    assert.equal(tape.respond('POST', `${ORIGIN}/exchange`, actual, request().headers).status, 200);
+    assert.equal(tape.invalidSignatures, 0);
+    tape.assertWritesConsumed();
+    assert.throws(() => tape.respond('POST', `${ORIGIN}/exchange`, actual, request().headers), /nonce/);
+    assert.equal(tape.invalidSignatures, 1, 'matching must never hide a repeated signed nonce');
+    assert.throws(() => tape.assertWritesConsumed(), /invalid replay signature/i);
+  }
+}));
+
+test('TxFlow nonce matching is confined to its signed action envelope and preserves economic and nested identities', () => {
+  const body = { action: { type: 'order', ...native('caller-exact'), nonce: 10 }, nonce: EPOCH, confirm: 'executed' };
+  const key = (value, method = 'POST', url = `${ORIGIN}/exchange`, venue = VENUES.txflow) =>
+    venue.requestKey(method, url, value, new Set(['caller-exact']));
+  const before = structuredClone(body);
+  assert.equal(key(body), key({ ...body, nonce: EPOCH + 400 }));
+  assert.deepEqual(body, before, 'the original body must remain available to signature validation');
+  for (const change of [
+    (value) => { value.action.orders[0].p = '50001.0'; },
+    (value) => { value.action.orders[0].s = '0.02'; },
+    (value) => { value.action.orders[0].c = 'caller-other'; },
+    (value) => { value.action.nonce++; },
+    (value) => { value.confirm = 'accepted'; },
+    (value) => { value.vaultAddress = VAULT; },
+  ]) {
+    const changed = structuredClone(body);
+    change(changed);
+    assert.notEqual(key(body), key(changed));
+  }
+  for (const [method, url] of [
+    ['GET', `${ORIGIN}/exchange`], ['POST', `${ORIGIN}/info`],
+    ['POST', 'https://rpc.txflow.com/exchange'], ['POST', 'https://other.example/exchange'],
+    ['POST', 'http://rpc.txflow-testnet.xyz/exchange'],
+  ]) assert.notEqual(key(body, method, url), key({ ...body, nonce: EPOCH + 400 }, method, url));
+  assert.notEqual(key({ nonce: EPOCH }), key({ nonce: EPOCH + 400 }));
+  assert.notEqual(key(body, 'POST', `${ORIGIN}/exchange`, VENUES.bybit),
+    key({ ...body, nonce: EPOCH + 400 }, 'POST', `${ORIGIN}/exchange`, VENUES.bybit));
+});
+
 test('preimage field order, inclusion of action type and decimal spelling are independently significant', () => freeze(() => {
   const body = native('ordered');
   const row = body.orders[0];
