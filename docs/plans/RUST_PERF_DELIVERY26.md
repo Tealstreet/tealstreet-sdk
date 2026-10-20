@@ -715,3 +715,38 @@ environment files, source and aggregate bindings. This improves reviewable
 evidence and does not add publishing or live-account automation. Local full
 Rust verification and isolated current-control/release builds are still active;
 the PR remains draft and the full performance task remains unfinished.
+
+## Verified 27-family release checkpoint; merge consumer landing before scoring
+
+Source `a5814effbc` now passes the complete local Rust checks: 2,813 tests in
+212 groups, formatting, banned patterns, strict native workspace Clippy and
+strict WASM workspace Clippy. All 27 isolated family Clippy checks pass. The
+release produces 243 physical family files; independent review verifies their
+bytes, 27 equal Node/web binaries, 470 unchanged selected source inputs and
+243 archived prior artifacts. Under pinned Node22.23.3, actual WASM SDK436,
+host182 and offline parity44 pass. These integration replays are unscored;
+no final public/private performance cohort was started.
+
+Keep the size gate failure. Physical local sizes are Binance966505,
+Bitrue848358, Hyperliquid1092744 and KuCoinSpot718746; other23 families fit.
+They differ slightly from CI, so the earlier exact-match condition does not
+hold and no cap edits are authorized by that conditional review. Preserve the
+failed size log. The original control's 435/34 protected inputs,9 aggregate
+bindings and181 refreshed common files pass independent checks, but remain
+unscored historical inputs. `RUST_PERF_DELIVERY27_RELEASE_CHECKPOINT.json.gz`
+retains the source/release/control proofs, actual tests, failures and reviewed
+134-counterexample collection policy. Its SHA is
+`20291867dc6f8074ee8fc51628ac616f577e0bf044a147e47064a431a27923c0`.
+
+Landing advanced to `fc809a9d85` (#1342): public-feed ownership, consumer
+startup and packaged loader proofs change production sources. Next phase:
+merge it before scoring; preserve shared-aware book reservation and ticker
+revisions, the bounded ingress/signing contracts, and Paradex's incoming
+host-z/engine2 profile. Adapt CLI/MCP/React Native consumers to venue-family
+artifacts, with no aggregate runtime fallback, and prove packaged startup
+outside the checkout. Use the incoming guarded URL resolver as the sole
+socket URL cache. Run phase review, required package checks and fresh actual
+family builds. Prepare a new exact landing control in an isolated target;
+only then freeze the common helpers/Node22 inputs and execute the declared
+40-public/64-private collection once. The draft PR1344 remains unfinished;
+CI must pass before merge into `feat/rust-rewrite`.
