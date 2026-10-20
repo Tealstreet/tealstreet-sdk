@@ -1291,7 +1291,8 @@ struct Subscription<'a> {
     args: &'a [Topic<'a>],
 }
 
-const BARS: [(Interval, &str); 13] = [
+const BARS: [(Interval, &str); 14] = [
+    (Interval::S1, "1s"),
     (Interval::M1, "1m"),
     (Interval::M3, "3m"),
     (Interval::M5, "5m"),

@@ -1478,7 +1478,7 @@ impl Coinbase {
                 to_ms,
             } => {
                 let Some((granularity, seconds)) = interval(timeframe) else {
-                    cx.done(command, Err("Unsupported Coinbase candle interval".into()));
+                    cx.done(command, Err(timeframe.unsupported("Coinbase")));
                     return None;
                 };
                 if cx.store.market(&symbol).is_none() {

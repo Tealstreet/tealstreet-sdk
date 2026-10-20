@@ -1146,11 +1146,10 @@ impl Paradex {
                 to_ms,
                 ..
             } => {
-                if interval_ms(interval).is_none() || cx.store.market(&symbol).is_none() {
-                    cx.done(
-                        command,
-                        Err("Unsupported Paradex candle market/interval".into()),
-                    );
+                if interval_ms(interval).is_none() {
+                    cx.done(command, Err(interval.unsupported("Paradex")));
+                } else if cx.store.market(&symbol).is_none() {
+                    cx.done(command, Err("Unknown Paradex candle market".into()));
                 } else {
                     self.fetch_candles(
                         cx,
