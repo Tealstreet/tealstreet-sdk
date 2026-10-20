@@ -768,15 +768,35 @@ export const VENUES = {
         const states = new Map(), failures = [];
         const state = (url, generation) => {
           const key = `${url}#${generation ?? 1}`;
-          if (!states.has(key)) states.set(key, { url, closed: false, authSent: false, ack: false, streams: new Set(), pings: 0, messages: 0 });
+          if (!states.has(key)) states.set(key, { url, closed: false, authSent: false, ack: false, streams: new Set(), prefixCounts: new Map(), pings: 0, messages: 0 });
           return states.get(key);
+        };
+        const hostname = (current, url) => {
+          if (typeof url !== 'string') return new URL(url).hostname;
+          if (current.hostnameUrl !== url) {
+            const value = new URL(url).hostname;
+            current.hostnameUrl = url;
+            current.hostname = value;
+          }
+          return current.hostname;
+        };
+        const subscription = (current, key, add) => {
+          if (add ? current.streams.has(key) : !current.streams.delete(key)) return;
+          if (add) current.streams.add(key);
+          // Every @ boundary is a possible startsWith query, even inside an ID.
+          for (let at = key.indexOf('@'); at !== -1; at = key.indexOf('@', at + 1)) {
+            const prefix = key.slice(0, at + 1);
+            const count = (current.prefixCounts.get(prefix) ?? 0) + (add ? 1 : -1);
+            if (count) current.prefixCounts.set(prefix, count);
+            else current.prefixCounts.delete(prefix);
+          }
         };
         const fail = (message) => failures.push(message);
         return {
           connected(url, generation) { state(url, generation); },
           closed(url, generation) { state(url, generation).closed = true; },
           sent(url, text, generation) {
-            const current = state(url, generation), privateSocket = new URL(url).hostname === 'trades.grvt.io';
+            const current = state(url, generation), privateSocket = hostname(current, url) === 'trades.grvt.io';
             const first = current.messages++ === 0;
             if (current.closed) fail('GRVT sent a frame on a closed socket generation');
             if (text === 'pong') {
@@ -804,9 +824,9 @@ export const VENUES = {
                 fail('GRVT private subscription preceded auth acknowledgement or changed selector');
               else current.streams.add(frame.stream);
             } else if (frame.method === 'subscribe') {
-              for (const selector of frame.params?.selectors ?? []) current.streams.add(`${frame.params.stream}:${selector}`);
+              for (const selector of frame.params?.selectors ?? []) subscription(current, `${frame.params.stream}:${selector}`, true);
             } else if (frame.method === 'unsubscribe') {
-              for (const selector of frame.params?.selectors ?? []) current.streams.delete(`${frame.params.stream}:${selector}`);
+              for (const selector of frame.params?.selectors ?? []) subscription(current, `${frame.params.stream}:${selector}`, false);
             }
           },
           received(url, text, generation) {
@@ -819,15 +839,15 @@ export const VENUES = {
               if (!current.authSent || current.ack) fail('GRVT auth ACK preceded credentials or repeated on the same socket generation');
               else current.ack = true;
             }
-            if (new URL(url).hostname === 'trades.grvt.io' && stream && (frame.f ?? frame.feed)) {
+            if (hostname(current, url) === 'trades.grvt.io' && stream && (frame.f ?? frame.feed)) {
               if (!current.ack || !current.streams.has(stream)) fail('unsubscribed GRVT private data: ' + stream);
               const feed = frame.f ?? frame.feed, selector = frame.s1 ?? frame.selector;
               if ((feed.sa !== undefined && feed.sa !== '777') || (selector && !selector.startsWith('777-')))
                 fail('GRVT private data changed sub-account selector');
             }
-            if (new URL(url).hostname === 'market-data.grvt.io' && stream && (frame.f ?? frame.feed)) {
+            if (hostname(current, url) === 'market-data.grvt.io' && stream && (frame.f ?? frame.feed)) {
               const instrument = (frame.f ?? frame.feed).i ?? (frame.f ?? frame.feed).instrument;
-              if (![...current.streams].some((key) => key.startsWith(`${stream}:${instrument}@`)))
+              if (!current.prefixCounts.has(`${stream}:${instrument}@`))
                 fail('unsubscribed GRVT public data: ' + stream + ':' + instrument);
             }
           },
@@ -836,9 +856,9 @@ export const VENUES = {
             for (const current of states.values()) {
               const { url } = current;
               if (current.pings) fail('missing GRVT pong');
-              if (new URL(url).hostname === 'trades.grvt.io' && isPrivate && !current.closed)
+              if (hostname(current, url) === 'trades.grvt.io' && isPrivate && !current.closed)
                 for (const stream of ['v1.order', 'v1.position', 'v1.fill']) if (!current.streams.has(stream)) fail('missing GRVT private stream: ' + stream);
-              if (new URL(url).hostname === 'market-data.grvt.io' && !current.closed) for (const symbol of books) {
+              if (hostname(current, url) === 'market-data.grvt.io' && !current.closed) for (const symbol of books) {
                 const native = symbol.replace(/_PERP$/, '_Perp');
                 if (!current.streams.has(`v1.book.s:${native}@500-50`)) fail('missing GRVT book subscription: ' + symbol);
               }
