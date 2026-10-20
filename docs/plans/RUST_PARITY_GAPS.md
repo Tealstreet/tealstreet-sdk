@@ -8,9 +8,9 @@ PR into `feat/rust-rewrite`, review findings posted, merge only on green CI.
 ## Phases and verification
 
 1. **Inventory and plan.** Compare current TS runtime capabilities with the
-   merged Rust implementations. Audit the roster for explicitly unfinished
-   capabilities; distinguish future ports and live-connectivity evidence from
-   missing adapter features. Record skips where TS itself lacks the feature.
+   merged Rust implementations. Record skips where TS itself lacks the feature.
+   The roster-wide limitations audit belongs to `feat/rust-parity-sweep` per
+   the user's subsequent scope note.
 2. **Paradex delegated signing.** Trace both TS `remoteSigner` and
    `payloadSigner`, including JWT acquisition, exact signing material, headers,
    private-socket policy, failures, disposal and request correlation. Preserve
@@ -30,8 +30,8 @@ PR into `feat/rust-rewrite`, review findings posted, merge only on green CI.
    balances/orders/executions and recovery, HF trading/amend/cancel and caller
    IDs, and precisely the queries/settings TS supports. Test spot units and
    market buys, token recovery, snapshot races and page traversal.
-5. **Integration and gates.** Review the inventory for small additional gaps,
-   update roster/docs and add deterministic regressions. Run bans, fmt, Clippy,
+5. **Integration and gates.** Update docs for these three venues and add
+   deterministic regressions. Run bans, fmt, Clippy,
    native tests, wasm32 Clippy, SDK typecheck/lint/tests, host/harness tests;
    build and replay public/private gates for Paradex, Bitrue, KuCoin futures
    and spot, plus Binance public/private. Record fresh public traffic for the
@@ -59,10 +59,8 @@ proceed in disjoint scopes; shared host/engine/SDK/harness changes are coordinat
   lookup, including the shared native/parent-ID aliases and sentinel checks.
 - KuCoin spot: TS supports spot. Its HF adapter does not override order/PnL/
   funding history or public trades; do not invent capabilities TS lacks.
-- Roster: explicitly unverified HyroTrader live connectivity is evidence work,
-  not a missing adapter implementation. Binance spot/inverse and the named
-  future venues are separate unported lanes. Several already merged venue rows
-  still say lane running/CI pending; verify PR status before correcting them.
+- Other venue limitations and Phemex gaps are assigned to the separate
+  `feat/rust-parity-sweep` lane and excluded from this PR.
 
 ## Progress
 
@@ -72,9 +70,8 @@ proceed in disjoint scopes; shared host/engine/SDK/harness changes are coordinat
   by the integration lane.
 - Phase 1 audit: inspected current TS implementations rather than interpreting
   the venue API's potential capabilities as the adapter's actual support.
-  GitHub confirms Orderly #1318, KuCoin futures #1312 and Lighter #1319 merged;
-  their stale roster status can be corrected. Bitunix #1309, Phemex #1310,
-  GRVT #1321, Coinbase #1325 and Binance variants #1326 remain separate PRs.
+  The user's subsequent scope note assigns the broader roster audit to another
+  lane; reverted this lane's unrelated status-row changes accordingly.
 - Bitrue phase peer review: KuCoin owner independently compared the complete
   lookup diff and tests against the TS base helper, PASS with no blocker.
   Lookup never commits account snapshots; failures retain cache semantics and
