@@ -218,6 +218,19 @@ jobs:
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.venue == 'binance'
+        with:
+          bun-version: 1.4.3
+      - name: Rust consumer startup and packaged loaders
+        if: matrix.venue == 'binance'
+        run: |
+          yarn workspace @tealstreet/safe-cex-server test-wasm
+          yarn workspace @tealstreet/exchange-mcp test-wasm
+          yarn workspace @tealstreet/cli test-wasm
+          yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn -s workspace @tealstreet/exchange-mcp build
+          corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test

@@ -19,3 +19,19 @@ The native frame server in `sdk-rs/hosts/native` replaces engine execution and
 live frame transport, not these persistence or publicdata adapters. Keep their
 exports and policies until an application migration explicitly replaces them.
 See `docs/plans/RUST_REWRITE.md`, “Native frame server migration”.
+
+## PublicExchangeFactory Rust lifecycle
+
+- A current-hour Redis hit hydrates a lazy exchange without opening sockets or
+  fetching metadata. Consumers that need live feeds explicitly start the exchange.
+- A cold Rust cache miss awaits native startup before reading markets. Empty
+  successful metadata reads are rejected rather than cached.
+- Forced refresh bypasses Redis. If the Rust engine was already started (even
+  externally), a fresh public engine re-fetches native metadata. Startup and cache
+  persistence must succeed before the handle swaps engines and disposes the old
+  one. Failed refresh leaves the last successful handle metadata and engine intact.
+- Read `handle.exchange` again after refresh; do not retain its previous engine
+  reference. Concurrent metadata refreshes share work. Disposing a handle cancels
+  pending native startup and prevents stale completions from publishing a handle.
+- Native factory conformance: build WASM, then run
+  `corepack yarn -s workspace @tealstreet/safe-cex-server test-wasm`.

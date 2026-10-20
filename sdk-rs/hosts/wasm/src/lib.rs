@@ -99,6 +99,14 @@ use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
     fn account_id(&self) -> Option<String>;
+    fn set_public_feed_policy(
+        &mut self,
+        policy: safe_cex_engine::PublicFeedPolicy,
+    ) -> Result<(), &'static str>;
+    fn apply_public_feed(
+        &mut self,
+        update: safe_cex_engine::PublicFeedUpdate,
+    ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
@@ -109,6 +117,18 @@ trait AnyEngine {
 impl<V: Venue> AnyEngine for Engine<V> {
     fn account_id(&self) -> Option<String> {
         Engine::account_id(self).map(str::to_owned)
+    }
+    fn set_public_feed_policy(
+        &mut self,
+        policy: safe_cex_engine::PublicFeedPolicy,
+    ) -> Result<(), &'static str> {
+        Engine::set_public_feed_policy(self, policy)
+    }
+    fn apply_public_feed(
+        &mut self,
+        update: safe_cex_engine::PublicFeedUpdate,
+    ) -> Result<(), &'static str> {
+        Engine::apply_public_feed(self, update)
     }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
@@ -133,6 +153,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicFeedOptions {
+    mode: safe_cex_engine::PublicFeedPolicy,
 }
 
 #[cfg(feature = "kucoin")]
@@ -173,6 +199,10 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[serde(default)]
+    private_only: bool,
+    #[serde(default)]
+    public_feed: Option<PublicFeedOptions>,
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     spot_only: bool,
@@ -567,7 +597,19 @@ impl WasmEngine {
             safe_cex_venue_kraken::sign::Signer::new(secret)
                 .map_err(|error| JsError::new(&error))?;
         }
-        let inner: Box<dyn AnyEngine> = match venue {
+        let policy = options
+            .public_feed
+            .as_ref()
+            .map(|feed| feed.mode)
+            .unwrap_or(if options.private_only {
+                safe_cex_engine::PublicFeedPolicy::Disabled
+            } else {
+                safe_cex_engine::PublicFeedPolicy::Direct
+            });
+        if options.private_only && policy == safe_cex_engine::PublicFeedPolicy::Direct {
+            return Err(JsError::new("privateOnly cannot use direct public feeds"));
+        }
+        let mut inner: Box<dyn AnyEngine> = match venue {
             #[cfg(feature = "breakoutprop")]
             "breakoutprop" => Box::new(Engine::new(BreakoutProp::new(BreakoutOptions {
                 key: options.key.unwrap_or_default(),
@@ -859,6 +901,7 @@ impl WasmEngine {
             }
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
+        inner.set_public_feed_policy(policy).map_err(JsError::new)?;
         Ok(Self { inner })
     }
 
@@ -964,6 +1007,10 @@ impl WasmEngine {
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
         let event = match safe_cex_engine::command::decode_host_input(command_json)? {
+            safe_cex_engine::command::HostInput::PublicFeedUpdate(update) => {
+                self.inner.apply_public_feed(update).map_err(JsError::new)?;
+                return Ok(self.flush());
+            }
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
             safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
                 Event::TickIntervalChanged { interval_ms }

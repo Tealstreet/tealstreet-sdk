@@ -12,6 +12,7 @@ EXCHANGE=bybit EXCHANGE_API_KEY=... EXCHANGE_API_SECRET=... npx @tealstreet/exch
 |---|---|
 | `EXCHANGE` | safe-cex exchange name, such as `bybit` or `bybitdemo`. Required |
 | `EXCHANGE_TESTNET` | `true` for the exchange's testnet |
+| `EXCHANGE_ENGINE` | `rust` to opt into a supported Rust venue; unset uses the venue default |
 | `EXCHANGE_OPTIONS` | `true` to trade the exchange's options, where it offers them on the same account (`bybit` today) |
 | `EXCHANGE_INVERSE` | `true` to trade the exchange's inverse contracts, where it offers them on the same account (`bybit` today) |
 | `EXCHANGE_API_KEY` | API key |
@@ -32,11 +33,11 @@ With `EXCHANGE_INVERSE=true`: the inverse markets join every tool. They carry `i
 
 Results with times also carry `<field>Utc` ISO dates, because safe-cex keeps fill and candle times in seconds and the rest in milliseconds.
 
-The server starts the exchange as soon as it connects, and fetches everything else when asked. It opens no public websockets and turns periodic polling off. Starting still fetches one snapshot of positions, orders and balance, and with a local `EXCHANGE_API_SECRET` most adapters also open their private websocket; signer mode does not, because the websocket login needs the secret.
+The server starts the exchange as soon as it connects, and fetches everything else when asked. It opens no public websockets and turns periodic polling off. Starting still fetches one snapshot of positions, orders and balance, and with a local `EXCHANGE_API_SECRET` most adapters also open their private websocket; signer mode does not, because the websocket login needs the secret. Rust account reads use the engine's current reconciled state. Rust's venue-specific signing and product restrictions still apply; the HMAC proxy signer is not a Rust signing bridge.
 
 ## Develop
 
 ```sh
 yarn test
-yarn build   # dist/index.js, one file with no runtime dependencies
+yarn build   # bundled JS plus release-owned signing and Rust WASM assets
 ```

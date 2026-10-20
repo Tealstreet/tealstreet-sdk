@@ -35,6 +35,11 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
     throw new Error('EXCHANGE_TESTNET must be true or false');
   }
 
+  const engine = optional(env, 'EXCHANGE_ENGINE');
+  if (engine !== undefined && engine !== 'rust') {
+    throw new Error('EXCHANGE_ENGINE must be rust (or unset for the venue default)');
+  }
+
   const metadata = getExchangeMetadata(exchange as ExchangeName);
   const toggle = (name: string, offered: boolean | undefined): boolean => {
     const value = optional(env, name);
@@ -58,6 +63,7 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   return {
     exchange: exchange as ExchangeName,
     options: {
+      ...(engine ? { engine } : {}),
       key: optional(env, 'EXCHANGE_API_KEY') ?? '',
       secret: secret ?? '',
       passphrase: optional(env, 'EXCHANGE_API_PASSPHRASE'),

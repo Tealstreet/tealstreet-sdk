@@ -54,8 +54,14 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it('opts into Rust explicitly without changing the default when unset', () => {
+    expect(readConfig({ ...signerEnv, EXCHANGE_ENGINE: 'rust' }).options.engine).toBe('rust');
+    expect(readConfig(signerEnv).options.engine).toBeUndefined();
+  });
+
   it.each([
     [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
+    [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],

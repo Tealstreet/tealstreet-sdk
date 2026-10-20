@@ -39,7 +39,16 @@ release from the workflow, with SLSA provenance.
 
 ## The bundle
 
-- **One file, no runtime dependencies.** `tsup` inlines everything, including
+Rust accounts load `dist/wasm/rust/safe_cex_wasm.cjs` and its sibling WASM.
+Build the pinned Rust engine from the repository root with `corepack yarn -s
+rust:build-wasm` before the package build; the existing release job does this.
+The `rust-smoke.mjs` probe copies release-owned assets outside the checkout and
+starts a real native Coinbase catalog, so workspace resolution cannot mask a
+missing artifact. `EXCHANGE_ENGINE=rust` selects the supported native path;
+unset keeps the registry default. Tests selected by `SAFE_CEX_WASM_TESTS=1`
+exercise real protocol tool calls and account state, using documented inputs.
+
+- **Bundled JS and owned WASM, no runtime dependencies.** `tsup` inlines everything, including
   every `@tealstreet/*` workspace. Those are not on npm, and a runtime
   dependency on one is what made `npm install -g @tealstreet/cli` fail with
   E404. The release workflow refuses any `dependencies` field.

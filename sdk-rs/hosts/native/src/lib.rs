@@ -28,6 +28,8 @@ use tokio::task::AbortHandle;
 #[derive(Debug)]
 pub enum HostEvent {
     TickIntervalChanged(f64),
+    /// Trusted host/provider ingress; network command clients cannot send it.
+    PublicFeedUpdate(safe_cex_engine::PublicFeedUpdate),
     WsOpened(SocketId),
     WsMessage(SocketId, String),
     WsBinary(SocketId, Vec<u8>),
@@ -129,6 +131,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
+            HostEvent::PublicFeedUpdate(update) => {
+                if let Err(error) = engine.apply_public_feed(update) {
+                    // A configuration error is observable through the normal notice path.
+                    engine.report_public_feed_error(error);
+                }
+            }
             HostEvent::TickIntervalChanged(interval_ms) => {
                 engine.handle(now, Event::TickIntervalChanged { interval_ms })
             }

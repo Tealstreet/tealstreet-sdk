@@ -108,6 +108,15 @@ jobs:
       - name: Test
         run: yarn --cwd "$PACKAGE_DIR" test-ci
 
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: wasm32-unknown-unknown
+      - name: Build the Rust engine included in the package
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          corepack yarn -s rust:build-wasm
+
       # Also writes dist/THIRD_PARTY_LICENSES.md, and fails on a bundled
       # dependency whose licence is not allowed.
       - name: Build

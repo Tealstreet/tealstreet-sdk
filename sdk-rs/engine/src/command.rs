@@ -331,6 +331,7 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 #[derive(Debug, PartialEq)]
 pub enum HostInput {
     Command(Command),
+    PublicFeedUpdate(crate::PublicFeedUpdate),
     TickIntervalChanged { interval_ms: f64 },
 }
 
@@ -344,6 +345,26 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         op: std::borrow::Cow<'a, str>,
     }
     let header: Header<'_> = serde_json::from_str(json)?;
+    if header.op == "publicFeedUpdate" {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Control {
+            op: String,
+            #[serde(default)]
+            tickers: Vec<crate::public_feed::PublicTicker>,
+            #[serde(default)]
+            books: Vec<crate::public_feed::PublicBook>,
+            #[serde(default)]
+            candles: Vec<crate::public_feed::PublicCandle>,
+        }
+        let control: Control = serde_json::from_str(json)?;
+        debug_assert_eq!(control.op, "publicFeedUpdate");
+        return Ok(HostInput::PublicFeedUpdate(crate::PublicFeedUpdate {
+            tickers: control.tickers,
+            books: control.books,
+            candles: control.candles,
+        }));
+    }
     if header.op != "setTickInterval" {
         return decode_command(json).map(HostInput::Command);
     }
