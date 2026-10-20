@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
+import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
   asterRequestUrl,
@@ -1401,6 +1402,7 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  polymarket,
   kucoin: {
     ...kucoin,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
@@ -1421,9 +1423,11 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))].filter(
-    (value) => value?.defaults && value?.interceptors,
-  );
+  [...new Set(Object.values(exchange).flatMap((value) => [
+    value,
+    value?.axiosInstance,
+    ...Object.values(value && typeof value === 'object' ? value : {}),
+  ]))].filter((value) => value?.defaults && value?.interceptors);
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */
 export const configuredOptions = (name) => {

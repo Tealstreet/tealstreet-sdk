@@ -1,0 +1,1110 @@
+//! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
+mod account;
+mod history;
+pub mod sign;
+mod trading;
+mod wire;
+
+use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, PredictionMarket, Ticker};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use wire::*;
+
+pub(crate) const REST: &str = "https://clob.polymarket.com";
+const GAMMA_PAGE: usize = 100;
+const GAMMA: &str = "https://gamma-api.polymarket.com";
+pub const DATA: &str = "https://data-api.polymarket.com";
+const SOCKETS: [&str; 2] = [
+    "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+    "wss://ws-subscriptions-clob.polymarket.com/ws/user",
+];
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketOptions {
+    pub api_key: Option<String>,
+    pub api_secret: Option<String>,
+    pub api_passphrase: Option<String>,
+    #[serde(default)]
+    pub signer_type: u8,
+    pub funder_address: Option<String>,
+    pub market_slugs: Option<Vec<String>>,
+}
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    pub public_data_only: bool,
+    pub key: Option<String>,
+    pub polymarket: Option<PolymarketOptions>,
+}
+pub enum Pending {
+    Account(account::Request),
+    Trade(trading::Request),
+    Book {
+        command: CommandId,
+        token: String,
+        limit: Option<u32>,
+    },
+    Markets {
+        count: usize,
+        rows: Vec<Market>,
+        metadata: Vec<PredictionMarket>,
+        invalid: bool,
+    },
+    Midpoints {
+        offset: usize,
+    },
+    Candles {
+        command: Option<CommandId>,
+        symbol: String,
+        interval: String,
+        limit: usize,
+        rows: Vec<Candle>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        invalid: bool,
+    },
+}
+#[derive(Default)]
+pub(crate) struct Connection {
+    socket: Option<SocketId>,
+    open: bool,
+    ping: Option<TimerId>,
+    reconnect: Option<TimerId>,
+    awaiting_pong: bool,
+}
+#[derive(Default)]
+struct BookState {
+    book: Book,
+    subscribers: usize,
+    synced: bool,
+    timestamp: f64,
+}
+struct CandleSubscription {
+    users: usize,
+    last: f64,
+}
+pub struct Polymarket {
+    pub(crate) options: Options,
+    pub(crate) account: account::Account,
+    pub(crate) trading: trading::Trading,
+    pub(crate) credentials: Option<sign::Credentials>,
+    pub(crate) address: Option<String>,
+    pub(crate) connections: [Connection; 2],
+    books: HashMap<String, BookState>,
+    market_ids: HashSet<String>,
+    market_cursors: HashSet<String>,
+    market_symbols: HashSet<String>,
+    candles: BTreeMap<(String, String), CandleSubscription>,
+    candle_timer: Option<TimerId>,
+    seed_tickers: Vec<Ticker>,
+    seeded_tokens: HashSet<String>,
+    public_retry: Option<(TimerId, Option<usize>)>,
+    public_attempts: u8,
+    quote_times: HashMap<String, f64>,
+    trade_times: HashMap<String, f64>,
+    tick_times: HashMap<String, f64>,
+}
+pub(crate) fn encode(text: &str) -> String {
+    let mut s = String::new();
+    for b in text.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            s.push(b as char);
+        } else {
+            s.push_str(&format!("%{b:02X}"));
+        }
+    }
+    s
+}
+pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
+    if !(200..300).contains(&response.status) {
+        return Err(format!(
+            "Polymarket HTTP {}: {}",
+            response.status, response.body
+        ));
+    }
+    if let Ok(e) = serde_json::from_str::<ApiError>(response.body)
+        && let Some(error) = e.error
+    {
+        return Err(format!("Polymarket: {}", e.message.unwrap_or(error)));
+    }
+    Ok(())
+}
+fn tick_supported(tick: f64) -> bool {
+    [0.1, 0.01, 0.005, 0.0025, 0.001, 0.0001].contains(&tick)
+}
+impl Polymarket {
+    pub fn new(options: Options) -> Self {
+        let address = options
+            .key
+            .as_deref()
+            .and_then(|k| safe_cex_crypto::ethereum::private_key_address(k).ok());
+        Self {
+            options,
+            address,
+            credentials: None,
+            account: Default::default(),
+            trading: Default::default(),
+            market_ids: Default::default(),
+            market_cursors: Default::default(),
+            market_symbols: Default::default(),
+            connections: Default::default(),
+            books: Default::default(),
+            candles: Default::default(),
+            candle_timer: None,
+            seed_tickers: vec![],
+            seeded_tokens: Default::default(),
+            public_retry: None,
+            public_attempts: 0,
+            quote_times: Default::default(),
+            trade_times: Default::default(),
+            tick_times: Default::default(),
+        }
+    }
+    fn markets(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        cursor: Option<String>,
+        rows: Vec<Market>,
+        metadata: Vec<PredictionMarket>,
+    ) {
+        let mut url = format!("{GAMMA}/markets/keyset?active=true&closed=false&limit={GAMMA_PAGE}");
+        if let Some(slugs) = self
+            .options
+            .polymarket
+            .as_ref()
+            .and_then(|p| p.market_slugs.as_ref())
+        {
+            if slugs.is_empty()
+                || slugs.len() > 100
+                || slugs.iter().any(|s| s.trim().is_empty())
+                || slugs.iter().collect::<HashSet<_>>().len() != slugs.len()
+            {
+                cx.log(
+                    LogLevel::Error,
+                    "Polymarket marketSlugs must contain1..100 unique nonempty slugs",
+                );
+                return;
+            }
+            for slug in slugs {
+                url.push_str(&format!("&slug={}", encode(slug)));
+            }
+        }
+        if let Some(cursor) = &cursor {
+            url.push_str(&format!("&after_cursor={}", encode(cursor)));
+        }
+        cx.request_streamed(
+            Method::Get,
+            url,
+            vec![],
+            ArrayAt::Field("markets"),
+            Pending::Markets {
+                count: 0,
+                rows,
+                metadata,
+                invalid: false,
+            },
+        );
+    }
+    fn midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
+        let rows = cx.store.markets();
+        if offset >= rows.len() {
+            let rows = std::mem::take(&mut self.seed_tickers)
+                .into_iter()
+                .filter(|t| self.seeded_tokens.contains(&t.id))
+                .collect();
+            self.seeded_tokens.clear();
+            cx.store.set_tickers(rows);
+            self.public_attempts = 0;
+            self.public_ready(cx);
+            return;
+        }
+        #[derive(Serialize)]
+        struct Token<'a> {
+            token_id: &'a str,
+        }
+        let body = serde_json::to_string(
+            &rows[offset..rows.len().min(offset + 100)]
+                .iter()
+                .map(|m| Token { token_id: &m.id })
+                .collect::<Vec<_>>(),
+        )
+        .expect("token list");
+        cx.request(
+            Method::Post,
+            format!("{REST}/midpoints"),
+            vec![("Content-Type", "application/json".into())],
+            Some(body),
+            Pending::Midpoints { offset },
+        );
+    }
+    fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.books.is_empty() {
+            self.connect(cx, 0);
+        }
+        let private_intent = self.options.key.as_ref().is_some_and(|k| !k.is_empty())
+            || self.options.polymarket.as_ref().is_some_and(|p| {
+                p.api_key.is_some()
+                    || p.api_secret.is_some()
+                    || p.api_passphrase.is_some()
+                    || p.signer_type != 0
+                    || p.funder_address.is_some()
+            });
+        if self.options.public_data_only || !private_intent {
+            cx.store.set_balance(Default::default());
+            cx.store.set_positions(vec![]);
+            cx.store.set_orders(vec![]);
+        } else {
+            self.start_private(cx);
+        }
+    }
+    pub(crate) fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        let c = &mut self.connections[index];
+        if c.socket.is_some() {
+            return;
+        }
+        c.socket = Some(cx.connect_feed(
+            SOCKETS[index],
+            if index == 0 {
+                SocketChannel::Public
+            } else {
+                SocketChannel::Private
+            },
+            if index == 0 { "market" } else { "user" },
+            true,
+        ));
+    }
+    fn subscription(&self, cx: &mut Cx<'_, Pending>, ids: Vec<String>, operation: Option<&str>) {
+        if ids.is_empty() {
+            return;
+        }
+        if let Some(socket) = self.connections[0]
+            .socket
+            .filter(|_| self.connections[0].open)
+        {
+            #[derive(Serialize)]
+            struct Subscription<'a> {
+                assets_ids: Vec<String>,
+                #[serde(skip_serializing_if = "Option::is_none", rename = "type")]
+                kind: Option<&'a str>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                operation: Option<&'a str>,
+                custom_feature_enabled: bool,
+            }
+            cx.send(
+                socket,
+                serde_json::to_string(&Subscription {
+                    assets_ids: ids,
+                    kind: operation.is_none().then_some("market"),
+                    operation,
+                    custom_feature_enabled: true,
+                })
+                .expect("subscription"),
+            );
+        }
+    }
+    fn subscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        let state = self.books.entry(symbol.clone()).or_default();
+        state.subscribers += 1;
+        if state.subscribers > 1 {
+            return;
+        }
+        if let Some(market) = cx.store.market(&symbol) {
+            let id = market.id.clone();
+            if self.connections[0].socket.is_none() {
+                self.connect(cx, 0);
+            } else {
+                self.subscription(cx, vec![id], Some("subscribe"));
+            }
+        } else if cx.store.loaded().markets {
+            self.books.remove(&symbol);
+            cx.log(
+                LogLevel::Error,
+                format!("Unknown Polymarket symbol: {symbol}"),
+            );
+        }
+    }
+    fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        if text.trim_start().starts_with('[') {
+            if let Ok(events) = serde_json::from_str::<Vec<PublicEvent>>(text) {
+                for event in events {
+                    self.public_event(cx, event);
+                }
+            }
+        } else if let Ok(event) = serde_json::from_str::<PublicEvent>(text) {
+            self.public_event(cx, event);
+        }
+    }
+    fn public_event(&mut self, cx: &mut Cx<'_, Pending>, event: PublicEvent<'_>) {
+        match event.event_type.as_ref() {
+            "book" => {
+                let Some(symbol) = cx
+                    .store
+                    .market_by_id(&event.asset_id)
+                    .map(|m| m.symbol.clone())
+                else {
+                    return;
+                };
+                let Some(state) = self.books.get_mut(&symbol) else {
+                    return;
+                };
+                let timestamp = event.timestamp.map_or(0.0, |n| n.0);
+                if timestamp < state.timestamp {
+                    return;
+                }
+                let (Some(bids), Some(asks)) = (event.bids, event.asks) else {
+                    return;
+                };
+                if bids
+                    .iter()
+                    .chain(&asks)
+                    .any(|l| !valid_level(l.price.0, l.size.0))
+                {
+                    return;
+                }
+                state.book.clear();
+                for (side, levels) in [(BookSide::Bids, bids), (BookSide::Asks, asks)] {
+                    for level in levels {
+                        state.book.apply(side, level.price.0, level.size.0);
+                    }
+                }
+                self.quote_times
+                    .entry(symbol.clone())
+                    .and_modify(|t| *t = t.max(timestamp))
+                    .or_insert(timestamp);
+                state.timestamp = timestamp;
+                state.synced = true;
+                cx.book_changed(&symbol);
+            }
+            "price_change" => {
+                for change in event.price_changes {
+                    if !valid_level(change.price.0, change.size.0)
+                        || !["BUY", "SELL"].contains(&change.side.as_ref())
+                    {
+                        continue;
+                    }
+                    let Some(symbol) = cx
+                        .store
+                        .market_by_id(&change.asset_id)
+                        .map(|m| m.symbol.clone())
+                    else {
+                        continue;
+                    };
+                    let timestamp = event.timestamp.map_or(cx.now, |n| n.0);
+                    let previous = self.quote_times.entry(symbol.clone()).or_insert(0.0);
+                    if timestamp < *previous {
+                        continue;
+                    }
+                    *previous = timestamp;
+                    if let Some(state) = self.books.get_mut(&symbol).filter(|s| s.synced) {
+                        let timestamp = event.timestamp.map_or(state.timestamp, |n| n.0);
+                        let side = match change.side.as_ref() {
+                            "BUY" => BookSide::Bids,
+                            "SELL" => BookSide::Asks,
+                            _ => continue,
+                        };
+                        if timestamp >= state.timestamp
+                            && valid_level(change.price.0, change.size.0)
+                        {
+                            state.book.apply(side, change.price.0, change.size.0);
+                            state.timestamp = timestamp;
+                            cx.book_changed(&symbol);
+                        }
+                    }
+                    let bid = change
+                        .best_bid
+                        .map(|n| n.0)
+                        .filter(|v| (0.0..=1.0).contains(v));
+                    let ask = change
+                        .best_ask
+                        .map(|n| n.0)
+                        .filter(|v| (0.0..=1.0).contains(v));
+                    cx.store.update_ticker(&symbol, |t| {
+                        if let Some(bid) = bid {
+                            t.bid = bid;
+                        }
+                        if let Some(ask) = ask {
+                            t.ask = ask;
+                        }
+                        if let (Some(bid), Some(ask)) = (bid, ask) {
+                            t.mark = (bid + ask) / 2.0;
+                            t.index = t.mark;
+                        }
+                    });
+                }
+            }
+            "last_trade_price" => {
+                if let (Some(m), Some(p)) = (cx.store.market_by_id(&event.asset_id), event.price) {
+                    if !(0.0..=1.0).contains(&p.0) {
+                        return;
+                    }
+                    let symbol = m.symbol.clone();
+                    let timestamp = event.timestamp.map_or(cx.now, |n| n.0);
+                    let previous = self.trade_times.entry(symbol.clone()).or_insert(0.0);
+                    if timestamp < *previous {
+                        return;
+                    }
+                    *previous = timestamp;
+                    if (0.0..=1.0).contains(&p.0) {
+                        cx.store.update_ticker(&symbol, |t| t.last = p.0);
+                    }
+                }
+            }
+            "tick_size_change" => {
+                if let (Some(market), Some(tick)) = (
+                    cx.store.market_index_by_id(&event.asset_id),
+                    event.new_tick_size,
+                ) {
+                    if !tick_supported(tick.0) {
+                        return;
+                    }
+                    let timestamp = event.timestamp.map_or(cx.now, |n| n.0);
+                    let previous = self
+                        .tick_times
+                        .entry(event.asset_id.to_string())
+                        .or_insert(0.0);
+                    if timestamp < *previous {
+                        return;
+                    }
+                    *previous = timestamp;
+                    let mut rows = cx.store.prediction_markets().unwrap_or_default().to_vec();
+                    if let Some(row) = rows.iter_mut().find(|m| m.market == market) {
+                        row.tick_size = tick.0;
+                    }
+                    cx.store.set_prediction_markets(rows);
+                    cx.store.update_markets(|m| {
+                        if m.id == event.asset_id {
+                            m.precision.price = f64::from(safe_cex_engine::num::decimals(tick.0));
+                        }
+                    });
+                }
+            }
+            "market_resolved" => {
+                cx.store.update_markets(|m| {
+                    if event.assets_ids.iter().any(|id| *id == m.id) {
+                        m.active = false;
+                    }
+                });
+            }
+            _ => {}
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn fetch_candles(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: Option<CommandId>,
+        symbol: String,
+        interval: String,
+        limit: Option<u32>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    ) {
+        let result = (|| {
+            let market = cx
+                .store
+                .market(&symbol)
+                .ok_or("Unknown Polymarket symbol")?;
+            if !["1m", "5m", "15m", "1h", "4h", "1d"].contains(&interval.as_str()) {
+                return Err("Unsupported Polymarket interval");
+            }
+            if limit == Some(0)
+                || from_ms
+                    .into_iter()
+                    .chain(to_ms)
+                    .any(|v| !v.is_finite() || v < 0.0)
+                || matches!((from_ms,to_ms),(Some(a),Some(b)) if a>b)
+            {
+                return Err("Invalid Polymarket candle bounds");
+            }
+            if from_ms.is_none() && to_ms.is_some() {
+                return Err("Polymarket upper-only candle bounds require from");
+            }
+            if from_ms.is_some_and(|from| from < 1000.0) {
+                return Err("Polymarket candle from must be at least 1000 milliseconds");
+            }
+            let mut path = format!("{REST}/prices-history?market={}", encode(&market.id));
+            if let Some(from) = from_ms {
+                path.push_str(&format!("&startTs={}", (from / 1000.0).floor()));
+            }
+            if let Some(to) = to_ms {
+                path.push_str(&format!("&endTs={}", (to / 1000.0).floor()));
+            }
+            // The API requires a time selector even when callers omit bounds.
+            if from_ms.is_none() && to_ms.is_none() {
+                path.push_str("&interval=max");
+            }
+            let fidelity = match interval.as_str() {
+                "1m" => 1,
+                "5m" => 5,
+                "15m" => 15,
+                "1h" => 60,
+                "4h" => 240,
+                "1d" => 1440,
+                _ => unreachable!(),
+            };
+            path.push_str(&format!("&fidelity={fidelity}"));
+            Ok(path)
+        })();
+        match result {
+            Ok(path) => {
+                cx.request_streamed(
+                    Method::Get,
+                    path,
+                    vec![],
+                    ArrayAt::Field("history"),
+                    Pending::Candles {
+                        command,
+                        symbol,
+                        interval,
+                        limit: limit.unwrap_or(u32::MAX) as usize,
+                        rows: vec![],
+                        from_ms,
+                        to_ms,
+                        invalid: false,
+                    },
+                );
+            }
+            Err(e) => {
+                if let Some(command) = command {
+                    cx.done(command, Err(e.into()));
+                } else {
+                    cx.log(LogLevel::Error, e);
+                }
+            }
+        }
+    }
+}
+fn valid_level(price: f64, size: f64) -> bool {
+    (0.0..=1.0).contains(&price) && size >= 0.0
+}
+impl Venue for Polymarket {
+    type Pending = Pending;
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.markets(cx, None, vec![], vec![]);
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        let Some(i) = self
+            .connections
+            .iter()
+            .position(|c| c.socket == Some(socket))
+        else {
+            return;
+        };
+        self.connections[i].open = true;
+        if i == 0 {
+            let ids = self
+                .books
+                .keys()
+                .filter_map(|s| cx.store.market(s).map(|m| m.id.clone()))
+                .collect();
+            self.subscription(cx, ids, None);
+        } else {
+            if let Some(subscription) = self.private_subscription() {
+                cx.send(socket, subscription);
+            }
+            self.account_reconcile(cx);
+        }
+        cx.send(socket, "PING");
+        self.connections[i].awaiting_pong = true;
+        self.connections[i].ping = Some(cx.set_timer(10000.0));
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        let Some(i) = self
+            .connections
+            .iter()
+            .position(|c| c.socket == Some(socket) && c.open)
+        else {
+            return;
+        };
+        if text == "PONG" {
+            self.connections[i].awaiting_pong = false;
+            return;
+        }
+        if i == 0 {
+            self.public_message(cx, text);
+        } else {
+            self.private_message(cx, text);
+        }
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        let Some(i) = self
+            .connections
+            .iter()
+            .position(|c| c.socket == Some(socket))
+        else {
+            return;
+        };
+        let c = &mut self.connections[i];
+        c.socket = None;
+        c.open = false;
+        c.awaiting_pong = false;
+        if let Some(t) = c.ping.take() {
+            cx.clear_timer(t);
+        }
+        c.reconnect = Some(cx.set_timer(1000.0));
+        if i == 0 {
+            for state in self.books.values_mut() {
+                state.synced = false;
+                state.timestamp = 0.0;
+                state.book.clear();
+            }
+        }
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = pending {
+            self.account_response(cx, request, response);
+            return;
+        }
+        if let Pending::Trade(request) = pending {
+            self.trading_response(cx, request, response);
+            return;
+        }
+        if let Pending::Book {
+            command,
+            token,
+            limit,
+        } = pending
+        {
+            self.book_response(cx, command, &token, limit, response);
+            return;
+        }
+        if let Err(e) = success(response) {
+            self.on_request_failed(cx, pending, &e);
+            return;
+        }
+        match pending {
+            Pending::Account(_) | Pending::Trade(_) | Pending::Book { .. } => unreachable!(),
+            Pending::Markets {
+                count,
+                rows,
+                metadata,
+                invalid,
+            } => {
+                if invalid {
+                    cx.log(
+                        LogLevel::Error,
+                        "Invalid Polymarket market page; preserving previous snapshot",
+                    );
+                    return;
+                }
+                if count > GAMMA_PAGE {
+                    cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
+                    return;
+                }
+                #[derive(Deserialize)]
+                struct Page<'a> {
+                    markets: Vec<serde::de::IgnoredAny>,
+                    #[serde(borrow)]
+                    next_cursor: Option<std::borrow::Cow<'a, str>>,
+                }
+                let Ok(page) = serde_json::from_str::<Page>(response.body) else {
+                    cx.log(LogLevel::Error, "Invalid Polymarket keyset envelope");
+                    return;
+                };
+                if !page.markets.is_empty() {
+                    cx.log(LogLevel::Error, "Unstreamed Polymarket market page");
+                    return;
+                }
+                if let Some(cursor) = page.next_cursor {
+                    if cursor.is_empty()
+                        || self.market_cursors.len() >= 10000
+                        || !self.market_cursors.insert(cursor.to_string())
+                    {
+                        cx.log(LogLevel::Error, "Polymarket market cursor did not advance");
+                        return;
+                    }
+                    self.markets(cx, Some(cursor.into_owned()), rows, metadata);
+                    return;
+                }
+                if count == GAMMA_PAGE {
+                    cx.log(
+                        LogLevel::Error,
+                        "Polymarket market page is missing its next cursor",
+                    );
+                    return;
+                }
+                cx.store.set_markets(rows);
+                cx.store.set_prediction_markets(metadata);
+                let tickers = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .map(|m| Ticker {
+                        id: m.id.clone(),
+                        symbol: m.symbol.clone(),
+                        ..Ticker::default()
+                    })
+                    .collect();
+                self.seed_tickers = tickers;
+                self.midpoints(cx, 0);
+            }
+            Pending::Midpoints { offset } => {
+                match serde_json::from_str::<HashMap<String, Number>>(response.body) {
+                    Ok(prices) => {
+                        for (id, p) in prices {
+                            if !(0.0..=1.0).contains(&p.0) {
+                                continue;
+                            }
+                            if let Some(i) = cx.store.market_index_by_id(&id)
+                                && let Some(t) = self.seed_tickers.get_mut(i as usize)
+                            {
+                                t.bid = p.0;
+                                t.ask = p.0;
+                                t.last = p.0;
+                                t.mark = p.0;
+                                t.index = p.0;
+                                self.seeded_tokens.insert(id);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.on_request_failed(
+                            cx,
+                            Pending::Midpoints { offset },
+                            &format!("Invalid Polymarket midpoints: {e}"),
+                        );
+                        return;
+                    }
+                }
+                self.midpoints(cx, offset + 100);
+            }
+            Pending::Candles {
+                command,
+                symbol,
+                interval,
+                limit,
+                mut rows,
+                from_ms,
+                to_ms,
+                invalid,
+            } => {
+                if invalid {
+                    if let Some(c) = command {
+                        cx.done(c, Err("Invalid Polymarket price history".into()));
+                    }
+                    return;
+                }
+                rows.retain(|c| {
+                    from_ms.is_none_or(|from| c.timestamp >= from)
+                        && to_ms.is_none_or(|to| c.timestamp <= to)
+                });
+                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                rows.dedup_by(|later, earlier| {
+                    if later.timestamp == earlier.timestamp {
+                        *earlier = *later;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if rows.len() > limit {
+                    rows.drain(..rows.len() - limit);
+                }
+                if let Some(c) = command {
+                    cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
+                } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval.clone()))
+                {
+                    for row in rows {
+                        if row.timestamp > sub.last {
+                            cx.candle(&symbol, &interval, row);
+                            sub.last = row.timestamp;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        match pending {
+            Pending::Account(request) => self.account_item(_cx, request, item),
+            Pending::Markets {
+                count,
+                rows,
+                metadata,
+                invalid,
+                ..
+            } => {
+                *count += 1;
+                let Ok(gm) = serde_json::from_str::<Gamma>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                let Some((ids, outcomes)) =
+                    gm.clob_token_ids.as_deref().zip(gm.outcomes.as_deref())
+                else {
+                    return;
+                };
+                let (Ok(ids), Ok(outcomes)) = (
+                    serde_json::from_str::<Vec<String>>(ids),
+                    serde_json::from_str::<Vec<String>>(outcomes),
+                ) else {
+                    return;
+                };
+                if ids.len() != outcomes.len() {
+                    return;
+                }
+                let tick = gm.order_price_min_tick_size.map_or(0.01, |n| n.0);
+                for (id, outcome) in ids.into_iter().zip(outcomes) {
+                    if id.is_empty()
+                        || !id.bytes().all(|b| b.is_ascii_digit())
+                        || outcome.is_empty()
+                    {
+                        continue;
+                    }
+                    let symbol = format!("{}-{outcome}", gm.slug);
+                    if !self.market_ids.insert(id.clone())
+                        || !self.market_symbols.insert(symbol.clone())
+                    {
+                        continue;
+                    }
+                    let market = rows.len() as u32;
+                    metadata.push(PredictionMarket {
+                        market,
+                        condition_id: gm.condition_id.to_string(),
+                        outcome: outcome.clone(),
+                        question: gm.question.to_string(),
+                        description: gm.description.to_string(),
+                        end_date: gm.end_date.to_string(),
+                        slug: gm.slug.to_string(),
+                        tick_size: tick,
+                        neg_risk: gm.neg_risk.unwrap_or(false),
+                    });
+                    rows.push(Market {
+                        id,
+                        symbol,
+                        pretty_symbol: None,
+                        base: gm.slug.to_string(),
+                        quote: "pUSD".into(),
+                        active: gm.active
+                            && !gm.closed
+                            && gm.enable_order_book != Some(false)
+                            && gm.accepting_orders != Some(false),
+                        precision: Precision {
+                            amount: 2.0,
+                            price: f64::from(safe_cex_engine::num::decimals(tick)),
+                        },
+                        limits: Limits {
+                            amount: MinMax {
+                                min: gm.order_min_size.map_or(0.0, |n| n.0),
+                                max: 1_000_000.0,
+                            },
+                            leverage: MinMax { min: 1.0, max: 1.0 },
+                            price: None,
+                        },
+                        contract_size: Some(1.0),
+                        is_expiring: None,
+                        is_inverse: None,
+                        is_spot: None,
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    });
+                }
+            }
+            Pending::Candles { rows, invalid, .. } => {
+                match serde_json::from_str::<HistoryPoint>(item) {
+                    Ok(point) if point.t.0 >= 0.0 && (0.0..=1.0).contains(&point.p.0) => {
+                        rows.push(Candle {
+                            timestamp: point.t.0 * 1000.0,
+                            open: point.p.0,
+                            high: point.p.0,
+                            low: point.p.0,
+                            close: point.p.0,
+                            volume: 0.0,
+                        })
+                    }
+                    _ => *invalid = true,
+                }
+            }
+            _ => {}
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let retry = match pending {
+            Pending::Trade(request) => {
+                self.trading_failed(cx, request, error);
+                return;
+            }
+            Pending::Account(request) => {
+                self.account_failed(cx, request);
+                return;
+            }
+            Pending::Book { command: c, .. }
+            | Pending::Candles {
+                command: Some(c), ..
+            } => {
+                cx.done(c, Err(error.into()));
+                return;
+            }
+            Pending::Markets { .. } => Some(None),
+            Pending::Midpoints { offset } => Some(Some(offset)),
+            _ => None,
+        };
+        cx.log(LogLevel::Error, error);
+        if let Some(offset) = retry
+            && self.public_attempts < 3
+        {
+            self.public_attempts += 1;
+            self.public_retry = Some((
+                cx.set_timer(f64::from(self.public_attempts) * 1000.0),
+                offset,
+            ));
+        }
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
+        if self.public_retry.as_ref().is_some_and(|(t, _)| *t == timer) {
+            let (_, offset) = self.public_retry.take().expect("matching retry");
+            if let Some(offset) = offset {
+                self.midpoints(cx, offset);
+            } else {
+                self.market_ids.clear();
+                self.market_symbols.clear();
+                self.market_cursors.clear();
+                self.markets(cx, None, vec![], vec![]);
+            }
+            return;
+        }
+        for i in 0..2 {
+            if self.connections[i].reconnect == Some(timer) {
+                self.connections[i].reconnect = None;
+                self.connect(cx, i);
+                return;
+            }
+            if self.connections[i].ping == Some(timer) {
+                self.connections[i].ping = None;
+                if let Some(socket) = self.connections[i].socket {
+                    if self.connections[i].awaiting_pong {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    } else {
+                        cx.send(socket, "PING");
+                        self.connections[i].awaiting_pong = true;
+                        self.connections[i].ping = Some(cx.set_timer(10000.0));
+                    }
+                }
+                return;
+            }
+        }
+        if self.candle_timer == Some(timer) {
+            self.candle_timer = None;
+            let subscriptions = self.candles.keys().cloned().collect::<Vec<_>>();
+            for (symbol, interval) in subscriptions {
+                self.fetch_candles(
+                    cx,
+                    None,
+                    symbol,
+                    interval,
+                    None,
+                    Some(cx.now - 60000.0),
+                    Some(cx.now),
+                );
+            }
+            if !self.candles.is_empty() {
+                self.candle_timer = Some(cx.set_timer(5000.0));
+            }
+        }
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        match command {
+            Command::SetTickerSymbols { .. } => {}
+            Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
+            Command::UnsubscribeOrderBook { symbol } => {
+                if let Some(state) = self.books.get_mut(&symbol) {
+                    state.subscribers = state.subscribers.saturating_sub(1);
+                    if state.subscribers == 0 {
+                        self.books.remove(&symbol);
+                        if let Some(m) = cx.store.market(&symbol) {
+                            self.subscription(cx, vec![m.id.clone()], Some("unsubscribe"));
+                        }
+                    }
+                }
+            }
+            Command::FetchCandles {
+                command,
+                symbol,
+                interval,
+                limit,
+                from_ms,
+                to_ms,
+            } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
+            Command::SubscribeCandles { symbol, interval } => {
+                let sub = self
+                    .candles
+                    .entry((symbol.clone(), interval.clone()))
+                    .or_insert(CandleSubscription {
+                        users: 0,
+                        last: 0.0,
+                    });
+                sub.users += 1;
+                if sub.users == 1 {
+                    self.fetch_candles(
+                        cx,
+                        None,
+                        symbol,
+                        interval,
+                        None,
+                        Some(cx.now - 60000.0),
+                        Some(cx.now),
+                    );
+                }
+                if self.candle_timer.is_none() {
+                    self.candle_timer = Some(cx.set_timer(5000.0));
+                }
+            }
+            Command::UnsubscribeCandles { symbol, interval } => {
+                let key = (symbol, interval);
+                if let Some(s) = self.candles.get_mut(&key) {
+                    s.users = s.users.saturating_sub(1);
+                    if s.users == 0 {
+                        self.candles.remove(&key);
+                    }
+                }
+                if self.candles.is_empty()
+                    && let Some(t) = self.candle_timer.take()
+                {
+                    cx.clear_timer(t);
+                }
+            }
+            Command::CancelOrdersWithSymbols { command, orders } => self.trading_command(
+                cx,
+                Command::CancelOrders {
+                    command,
+                    ids: orders.into_iter().map(|o| o.id).collect(),
+                },
+            ),
+            command @ (Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::AmendOrder { .. }
+            | Command::CancelSymbolOrders { .. }) => self.trading_command(cx, command),
+            command @ (Command::Query { .. }
+            | Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. }
+            | Command::FetchLeverage { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchStpMode { .. }
+            | Command::SetStpMode { .. }) => self.read_command(cx, command),
+        }
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.books.get(symbol).filter(|s| s.synced).map(|s| &s.book)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(
+            self.books
+                .iter()
+                .filter(|(_, s)| s.synced)
+                .map(|(s, b)| (s.as_str(), &b.book)),
+        )
+    }
+}

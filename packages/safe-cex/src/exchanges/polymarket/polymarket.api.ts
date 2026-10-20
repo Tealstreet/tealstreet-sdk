@@ -212,6 +212,10 @@ export class PolymarketAPI {
       {
         baseURL: POLYMARKET_CONFIG.GAMMA_API,
         timeout: 30000,
+        paramsSerializer: {
+          // Gamma accepts repeated slug= values; slug[]= is silently ignored.
+          serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }),
+        },
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
@@ -557,20 +561,47 @@ export class PolymarketAPI {
     active?: boolean;
     closed?: boolean;
     archived?: boolean;
+    slug?: string[];
     limit?: number;
     offset?: number;
   }): Promise<GammaMarketInfo[]> {
-    const limit = params?.limit ?? 500;
-    let offset = params?.offset ?? 0;
+    const { limit: requestedLimit = 100, offset, ...filters } = params ?? {};
+    const slugs = filters.slug;
+    if (slugs !== undefined && (!Array.isArray(slugs) || slugs.length === 0 || slugs.length > 100 ||
+        slugs.some((slug) => typeof slug !== 'string' || !slug.trim()) || new Set(slugs).size !== slugs.length)) {
+      throw new Error('Polymarket Gamma slug filter must contain 1-100 unique nonempty strings');
+    }
+    if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+      throw new Error('Polymarket Gamma limit must be a positive integer');
+    }
+    if (offset !== undefined && offset !== 0) {
+      throw new Error('Polymarket Gamma keyset pagination does not support a nonzero offset');
+    }
+    // Offset pagination is capped at 10,000; keyset cursors enumerate the whole
+    // universe. Its effective page limit is 100, even if callers request more.
+    const limit = Math.min(requestedLimit, 100);
     const markets: GammaMarketInfo[] = [];
-
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
     while (true) {
-      const { data } = await this.gammaXhr.get<GammaMarketInfo[]>('/markets', {
-        params: { ...params, limit, offset },
+      const { data } = await this.gammaXhr.get<{ markets: GammaMarketInfo[]; next_cursor?: string }>('/markets/keyset', {
+        params: { ...filters, limit, ...(cursor !== undefined ? { after_cursor: cursor } : {}) },
       });
-      markets.push(...data);
-      if (data.length < limit) return markets;
-      offset += limit;
+      if (!data || !Array.isArray(data.markets) || data.markets.length > limit || data.markets.some((market) => !market || typeof market !== 'object' || Array.isArray(market))) {
+        throw new Error('Invalid Polymarket Gamma keyset market page');
+      }
+      const next = data.next_cursor;
+      if (next === undefined) {
+        if (data.markets.length === limit) throw new Error('Polymarket Gamma full keyset page is missing its cursor');
+        markets.push(...data.markets);
+        return markets;
+      }
+      if (typeof next !== 'string' || !next.trim() || cursors.has(next)) {
+        throw new Error('Invalid or repeated Polymarket Gamma keyset cursor');
+      }
+      cursors.add(next);
+      markets.push(...data.markets);
+      cursor = next;
     }
   }
 
