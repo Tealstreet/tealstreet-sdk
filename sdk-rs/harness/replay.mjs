@@ -265,7 +265,7 @@ async function runRust() {
     async (accountReady) => {
       await until(() => {
         host.flush();
-        return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && (!tape.audit || tape.audit.ready());
+        return replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && (!tape.audit || tape.audit.ready(accountReady));
       }, 'Rust startup');
       await until(() => tape.open.size > 0, 'Rust initial socket');
     },
@@ -408,6 +408,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.coinNativeAmounts) row.extra = { remainingNative: orders.remainingNative?.[i] };
     if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
@@ -415,6 +416,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
     if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
@@ -614,6 +616,7 @@ async function runTs() {
         accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
       await until(() => !isPrivate || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);
       await until(() => tape.open.size > 0, 'TS initial socket');
+      await until(() => !tape.audit || tape.audit.ready(accountReady), 'TS protocol readiness');
     },
     (record) => tsCommand(exchange, store, record),
     clock,
@@ -646,7 +649,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins) ? { coins: store.balance.coins ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -701,7 +704,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
-    ...(venue.inverseNativeAmounts ? { remainingNative: o.extra?.remainingNative } : {}),
+    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { remainingNative: o.extra?.remainingNative ?? (venue.coinNativeAmounts && values.impl === 'ts' ? o.remaining : undefined) } : {}),
     ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     remaining: o.remaining,
     reduceOnly: Boolean(o.reduceOnly),
@@ -715,7 +718,7 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
-    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
+    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { contractsNative: p.extra?.contractsNative ?? p.info?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative ?? (venue.coinNativeAmounts ? p.unrealizedPnl : undefined) } : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,
@@ -728,7 +731,8 @@ function normalizeAccount(account) {
     hedged: account.hedged,
     balance: account.balance,
     orders: account.orders.map(order).sort(bySymbol),
-    positions: account.positions.map(position).sort(bySymbol),
+    // Zero-size rows are compared through the settings table, as in the TS view.
+    positions: account.positions.filter((p) => p.contracts > 0).map(position).sort(bySymbol),
     settings: account.settings
       .map((s) => ({
         symbol: s.symbol,

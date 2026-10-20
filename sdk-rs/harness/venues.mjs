@@ -2,6 +2,7 @@
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
@@ -1017,18 +1018,31 @@ export const VENUES = {
       }
     },
   },
-  binance: {
-    rust: 'binance',
+  ...Object.fromEntries([
+    ['binance', 'BinanceExchange'], ['binancepm', 'BinancePMExchange'],
+    ['binanceinverse', 'BinanceInverseExchange'], ['binancespot', 'BinanceSpotExchange'],
+  ].map(([name, className]) => [name, {
+    rust: name,
     requestKey: typedRequest,
-    ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
-    /** Depth topics are registered once each book subscription reaches the socket. */
+    validateRequest: validateBinanceRequest,
+    subscriptionMessage: binanceSubscriptionMessage,
+    recordTickerSymbols: binanceTickerSymbols,
+    ts: { module: `${root}/binance/${name}.exchange.ts`, className, name },
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
-      count,
-    privateSocket: '/private/ws',
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+    privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
+    ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancespot' ? { compareFillPrices: true, compareCoins: true } : {}),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
-  },
+    ...(name === 'binancespot' ? {
+      bootstrapPrivateFromTape: true,
+      socketRequest: spotSocketRequest,
+      socketResponse: spotSocketResponse,
+      createSocketAudit: createBinanceSpotSocketAudit,
+      prepareTs: prepareBinanceSpot,
+    } : {}),
+  }])),
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
   bybitspot: bybit('bybitspot', 'BybitSpotExchange'),

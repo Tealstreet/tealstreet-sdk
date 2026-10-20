@@ -14,6 +14,7 @@ import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterComma
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
+import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
@@ -254,7 +255,38 @@ const KNOWN_TS_FIXES = {
     // Native bracket clears and corrected sources win over delayed placement acks.
     // Repeated private execution IDs emit one fill within the replay window.
   },
+  // PM TS cancelSymbolOrders deletes regular orders only, leaving conditional
+  // stops live. Rust's independent fixture plan requires both DELETE families.
   binancepm: (ts, rust) => KNOWN_TS_FIXES.binance(ts, rust),
+  // Spot aggregate !ticker@arr/!bookTicker streams were retired; the TS replay
+  // adapter sends documented per-symbol ticker shards and uses TS's own handlers.
+  // Signature-only subscriptions use session.subscriptions, not session.status.
+  // COIN-M's documented fixes also have native regression proofs: exact split
+  // totals, plain-trigger/caller-ID whole-batch rejection, post-only amendment,
+  // cumulative-fill/terminal replay fences and malformed openOrders retention.
+  // TS cancel-all marks already FILLED rows canceled; use explicit tape events.
+  binanceinverse: (ts) => fixBinanceFilledStatus(ts.account, tapeRecords, false),
+  // Other documented Binance variant fixes have native regression proofs:
+  // - TS split lots divide the whole request and can round away quantity;
+  //   Rust sends max-size lots plus the exact native-unit remainder.
+  // - Spot attached stops inherit entry timeInForce and may exceed max quantity;
+  //   Rust removes incompatible fields and splits every protective leg.
+  // - Spot drops reduceOnly/close and plain-order triggerPrice; COIN-M also
+  //   drops plain-order triggerPrice. Rust rejects before any batch write.
+  // - COIN-M overrides omit caller-ID batch preflight, despite rejecting IDs;
+  //   Rust rejects the whole batch before placing an earlier order.
+  // - TS cancel/replace loses post-only TIF; Rust retains the native semantics.
+  // - Spot cancel executionReport.C identifies the original client order; TS
+  //   instead targets c, which can be the cancellation request's client ID.
+  // - Spot/COIN-M duplicate cumulative executions can emit fills again and
+  //   stale NEW events reopen terminal orders; Rust fences by native order ID.
+  // - COIN-M malformed openOrders responses become authoritative empty in TS;
+  //   Rust preserves the previous order state and retries reconciliation.
+  // TS reports resting executionReport.p instead of this trade's L.
+  binancespot: (ts) => {
+    fixBinanceSpotFills(ts.account, tapeRecords);
+    fixBinanceFilledStatus(ts.account, tapeRecords, true);
+  },
   bingx: (ts) => {
     const account = ts.account;
     if (!account) return;

@@ -30,6 +30,7 @@ write({ type: 'meta', epoch: started, private: false });
 
 const live = nativeTransport();
 const ordinals = new Map();
+const tickerSymbols = new Set();
 const recording = {
   ...live,
   connect(url, handlers) {
@@ -44,6 +45,7 @@ const recording = {
       },
       onMessage: (text) => {
         frames++;
+        for (const symbol of venue.recordTickerSymbols?.(text) ?? []) tickerSymbols.add(symbol);
         write({ type: 'ws', url, socket, text });
         handlers.onMessage(text);
       },
@@ -129,9 +131,11 @@ setTimeout(
     host.dispose();
     tape.end(() => {
       console.log(
-        JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }),
+        JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size, ...(venue.recordTickerSymbols ? { tickerSymbols: tickerSymbols.size } : {}) }),
       );
-      process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
+      const requested = values.books.split(',').filter(Boolean);
+      const tickersReady = !venue.recordTickerSymbols || requested.every((symbol) => tickerSymbols.has(symbol));
+      process.exit(frames > 0 && seenBooks.size >= requested.length && tickersReady ? 0 : 1);
     });
   },
   Number(values.seconds) * 1000,

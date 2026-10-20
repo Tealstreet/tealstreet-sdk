@@ -1205,7 +1205,7 @@ test('Backpack cancellation client IDs stay exact while only valid creation IDs 
       assert.throws(() => new Tape(records, venue, false, 100, 'typo'), /Unknown replay implementation/);
       assert.throws(
         () => new Tape([{ ...records[0], impl: 'typo' }], venue, false, 100, 'rust'),
-        /Unknown HTTP record/,
+        /Unknown tape record/,
       );
     }
   });
@@ -1291,4 +1291,21 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.equal(tape.unserved, 0);
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+});
+
+
+test('implementation tags independently scope websocket requests and replies', () => {
+  const records = ['ts', 'rust'].flatMap((impl) => [
+    { impl, type: 'ws-send', url: 'wss://example.test/ws', text: JSON.stringify({id: impl, method: impl}) },
+    { impl, type: 'ws', t: 1, url: 'wss://example.test/ws', text: JSON.stringify({id: impl, status: 200}) },
+  ]);
+  const venue = { socketRequest: (message) => ({id: message.id, key: message.method}) };
+  for (const impl of ['ts', 'rust']) {
+    const tape = new Tape(records, venue, true, 100, impl);
+    assert.equal(tape.frames.length, 1);
+    assert.equal(JSON.parse(tape.frames[0].text).id, impl);
+    assert.deepEqual([...tape.recordedSocketRequests.values()], [impl]);
+  }
+  assert.throws(() => new Tape(records, venue), /require a replay implementation/);
+  assert.throws(() => new Tape([{...records[0], impl:'typo'}], venue, true, 100, 'rust'), /Unknown tape record/);
 });

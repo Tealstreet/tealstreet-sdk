@@ -44,7 +44,10 @@
     "rust:public-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader --public",
     "rust:replay": "ESBUILD_WORKER_THREADS=0 node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
-    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
+    "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
+    "rust:private-tape-binancespot": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancespot",
+    "rust:private-tape-binanceinverse": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binanceinverse",
+    "rust:private-tape-binancepm": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancepm"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
