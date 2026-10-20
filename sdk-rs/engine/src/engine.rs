@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
+use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
@@ -111,6 +112,12 @@ pub enum Notice {
     CommandDone {
         command: CommandId,
         result: Result<String, String>,
+    },
+    /// Completes a command with a structured failure; hosts report it like a
+    /// `CommandDone` error, plus the detail.
+    CommandFailed {
+        command: CommandId,
+        error: VenueError,
     },
 }
 
@@ -883,6 +890,18 @@ impl<P> Cx<'_, P> {
         self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
+    }
+
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_locks.finish(command, true);
+            self.io.active_commands.remove(&command);
+        }
+        self.io.actions.push(Action::Notice(Notice::CommandFailed {
+            command,
+            error: error.into(),
+        }));
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.

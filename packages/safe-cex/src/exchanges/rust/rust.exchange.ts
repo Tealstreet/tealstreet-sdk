@@ -381,6 +381,10 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
+    if (this.name === 'binance') {
+      // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
     if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);

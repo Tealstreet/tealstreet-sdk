@@ -325,7 +325,7 @@ fn streamed_partial_success_never_publishes_before_valid_envelope() {
     assert_eq!(e.store().positions()[0].symbol, "ETHUSDC");
 }
 #[test]
-fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
+fn missing_positions_is_failure_but_a_bad_row_keeps_the_slice_balance() {
     let (mut e, a, _) = started();
     response(
         &mut e,
@@ -334,6 +334,9 @@ fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
         200,
         r#"{"code":0,"data":{"account":{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"0"}}}"#,
     );
+    assert!(!e.store().loaded().positions);
+    assert_eq!(e.store().balance().total, 0.);
+    // A NaN row skips only that symbol; the USDC balance still updates.
     response(
         &mut e,
         NOW,
@@ -341,8 +344,24 @@ fn missing_positions_or_nan_is_failure_instead_of_empty_authority() {
         200,
         &envelope("USDC", 200., 19., &ETH.replace("\"1\"", "\"NaN\"")),
     );
-    assert!(!e.store().loaded().positions);
-    assert_eq!(e.store().balance().total, 0.);
+    assert!(e.store().position("ETHUSDC").is_none());
+    assert_eq!(e.store().balance().used, 19.);
+}
+#[test]
+fn bad_position_row_keeps_the_stored_position_and_still_refreshes_the_balance() {
+    let (mut e, a, _) = started();
+    seed(&mut e, &a);
+    let held = e.store().position("BTCUSDT").unwrap().contracts;
+    let refresh = refresh(&mut e, NOW + 2_000.);
+    response(
+        &mut e,
+        NOW + 2_000.,
+        request(&refresh, "currency=USDT").id,
+        200,
+        &envelope("USDT", 5000., 77., &BTC.replace("69000", "0")),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, held);
+    assert_eq!(e.store().balance().used, 77. + 19.);
 }
 #[test]
 fn private_auth_snapshot_and_triggered_are_nonterminal() {
@@ -779,7 +798,8 @@ fn rejected_position_cannot_supply_the_only_mode_for_snapshot_authority() {
             r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{long},{short}]}}"#
         ),
     );
-    assert!(!e.store().loaded().orders);
+    // The rest of the frame applies, but the unmodelled leg borrows no mode.
+    assert!(e.store().loaded().orders);
     assert!(e.store().positions().is_empty());
     assert!(e.store().setting("BTCUSDT").is_none());
     let corrected_long = long.replace("\"transactTimeNs\":0", "\"transactTimeNs\":1");
@@ -788,10 +808,9 @@ fn rejected_position_cannot_supply_the_only_mode_for_snapshot_authority() {
         &mut e,
         socket,
         &format!(
-            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{corrected_long},{corrected_short}]}}"#
+            r#"{{"type":"incremental","sequence":2,"positions_p":[{corrected_long},{corrected_short}]}}"#
         ),
     );
-    assert!(e.store().loaded().orders);
     assert_eq!(e.store().positions().len(), 2);
 }
 
@@ -877,7 +896,7 @@ fn complete_rest_omission_fences_same_version_ws_but_allows_old_active_rest() {
 }
 
 #[test]
-fn invalid_semantic_snapshot_cannot_consume_sequence_or_partial_authority() {
+fn invalid_semantic_rows_are_skipped_without_blocking_the_frame() {
     for bad_row in [
         format!(r#""positions_p":[{}]"#, BTC.replace("69000", "0")),
         r#""accounts_p":[{"currency":"USDT","accountBalanceRv":"9000","totalUsedBalanceRv":"-1"}]"#
@@ -892,19 +911,20 @@ fn invalid_semantic_snapshot_cannot_consume_sequence_or_partial_authority() {
             s,
             &format!(r#"{{"type":"snapshot","sequence":1,"orders_p":[],{bad_row}}}"#),
         );
-        assert!(!e.store().loaded().orders);
+        // The bad row is skipped; the frame (here the order snapshot) still applies.
+        assert!(e.store().loaded().orders);
         assert_eq!(e.store().balance(), &balance);
         assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
         ws(
             &mut e,
             s,
             &format!(
-                r#"{{"type":"snapshot","sequence":1,"orders_p":[{}],"positions_p":[{}]}}"#,
+                r#"{{"type":"incremental","sequence":2,"orders_p":[{}],"positions_p":[{}]}}"#,
                 order("New", 1),
                 BTC.replace("0.01", "0.02")
+                    .replace("1700000000000000000", "1700000000000000009")
             ),
         );
-        assert!(e.store().loaded().orders);
         assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
         assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
     }
@@ -1088,4 +1108,23 @@ fn unsupported_order_type_or_status_skips_only_that_row() {
     let frame = e.take_frame(NOW).unwrap();
     let data = execution_rows(frame, 1);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
+}
+#[test]
+fn bad_stream_position_row_still_applies_the_frame_balance() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, "");
+    let before = e.store().balance().used;
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"incremental","sequence":2,"timestamp":1700000000000000100,"positions_p":[{}],"accounts_p":[{{"currency":"USDT","accountBalanceRv":"1000","totalUsedBalanceRv":"80"}}]}}"#,
+            BTC.replace("69000", "0")
+        ),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+    assert_ne!(e.store().balance().used, before);
+    assert_eq!(e.store().balance().used, 80. + 19.);
 }
