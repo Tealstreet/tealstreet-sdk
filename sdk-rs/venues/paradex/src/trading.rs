@@ -900,14 +900,16 @@ impl Trading {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
                         },
                     );
-                    while job
-                        .operations
-                        .front()
-                        .is_some_and(|op| matches!(op.kind, Kind::Place { child: true, .. }))
-                    {
-                        job.operations.pop_front();
-                    }
+                    // A failed entry orphans its children; a failed child must not skip its
+                    // sibling, or a rejected TP would leave the position without its SL.
                     if !child {
+                        while job
+                            .operations
+                            .front()
+                            .is_some_and(|op| matches!(op.kind, Kind::Place { child: true, .. }))
+                        {
+                            job.operations.pop_front();
+                        }
                         job.errors.push(error);
                     }
                 } else {
