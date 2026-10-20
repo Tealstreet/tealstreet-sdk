@@ -64,3 +64,15 @@ Task: `.aimux/plans/paradex-and-emitter.md`; spec/process:
   Independent review confirms pure decode before application, intact per-book
   gap recovery, continued valid frames, and malformed traffic cannot hide silence.
   Blank-number fixes remain coordinated with the startup lane, not duplicated.
+- Phase3 PASS: all 124 venue tests (31 trading, 33 public, 23 account,
+  15 history, 7 delegated, 5 signing, 10 unit), venue Clippy, format and bans
+  pass. Six new failure scenarios reproduced against original trading behavior
+  with 24 existing controls passing. Independent review found/fixed optional
+  message-type rejection masking; its new no-state-commit test passes. All
+  independent placements are attempted without replaying ambiguous writes;
+  entry failures skip dependent children and retain other accepted IDs.
+  Child failures use Error notices, and integer leverage matches confirmed state.
+  Official integer schema: https://docs.paradex.trade/api/prod/account/upsert-account-margin
+  Known TS placement bugs are declared in the harness without normalizing output.
+  Lifecycle-only differences were not used as repair criteria. README's obsolete
+  payload-signing rejection claim was also corrected against delegated tests.
