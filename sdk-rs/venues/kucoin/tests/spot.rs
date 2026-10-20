@@ -680,3 +680,35 @@ fn invalid_active_order_financial_geometry_preserves_last_good_snapshot() {
         assert_eq!(h.e.store().orders()[0].price, 90.0);
     }
 }
+#[test]
+fn a_recovery_read_started_after_execution_keeps_newer_fill_and_price_floors() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","side":"buy","type":"match","status":"match","orderType":"limit","price":"91","size":"2","filledSize":"0.7","remainSize":"1.3","matchSize":"0.2","matchPrice":"89.5","tradeId":"new-fill","ts":1700000000001000000u64}));
+    h.timer(250.0);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    h.reply(
+        "/active/page",
+        &format!(r#"{{"code":"200000","data":{{"totalPage":1,"items":[{ORDER}]}}}}"#),
+    );
+    let o = &h.e.store().orders()[0];
+    assert_eq!((o.price, o.filled, o.remaining), (91.0, 0.7, 1.3));
+}
+#[test]
+fn recovery_cannot_merge_a_native_size_smaller_than_the_known_fill_floor() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","side":"buy","type":"match","status":"match","orderType":"limit","price":"91","size":"2","filledSize":"0.7","remainSize":"1.3","matchSize":"0.2","matchPrice":"89.5","tradeId":"new-fill","ts":1700000000001000000u64}));
+    h.timer(250.0);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    h.reply("/active/page",r#"{"code":"200000","data":{"totalPage":1,"items":[{"id":"order-1","symbol":"BTC-USDT","type":"limit","side":"buy","status":"open","price":"92","size":"0.5","dealSize":"0.2","remainSize":"0.3","lastUpdatedAt":1700000000002}]}}"#);
+    let o = &h.e.store().orders()[0];
+    assert_eq!(
+        (o.amount, o.price, o.filled, o.remaining),
+        (2.0, 91.0, 0.7, 1.3)
+    );
+}

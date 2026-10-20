@@ -790,7 +790,7 @@ impl Venue for KucoinSpot {
                         );
                         return;
                     }
-                    if let Some(o) = row.order(cx.now, None, false) {
+                    if let Some(mut o) = row.order(cx.now, None, false) {
                         if o.id.is_empty()
                             || o.amount < 0.0
                             || o.filled < 0.0
@@ -809,6 +809,14 @@ impl Venue for KucoinSpot {
                                 "invalid or oversized KuCoin Spot active-order snapshot",
                             );
                             return;
+                        }
+                        if let Some(current) = cx.store.order(&o.id) {
+                            if o.last_update < current.last_update || o.amount < current.filled {
+                                o = current.clone();
+                            } else {
+                                o.filled = o.filled.max(current.filled);
+                                o.remaining = o.remaining.min((o.amount - o.filled).max(0.0));
+                            }
                         }
                         if !self.terminal.contains(&o.id) && o.status == OrderStatus::Open {
                             r.rows.push(o);
