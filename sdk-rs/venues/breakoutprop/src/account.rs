@@ -246,7 +246,8 @@ pub(crate) fn parse_portfolio(
         if (leg.filled_quantity + leg.remaining_quantity - leg.quantity).abs() > tolerance
             || leg.filled_quantity > leg.quantity + tolerance
             || leg.remaining_quantity > leg.quantity + tolerance
-            || leg.quantity <= 0.0
+            || leg.quantity < 0.0
+            || (leg.quantity == 0.0 && leg.position_effect != "CLOSE")
             || leg.filled_quantity < 0.0
             || leg.remaining_quantity < 0.0
             || leg.price < 0.0

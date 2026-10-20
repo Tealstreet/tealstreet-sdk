@@ -291,6 +291,10 @@ impl<'a> Response<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
+    /// Host configuration update; infinity pauses optional venue polling.
+    TickIntervalChanged {
+        interval_ms: f64,
+    },
     WsOpened {
         socket: SocketId,
     },
@@ -694,6 +698,7 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
+    fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
@@ -749,6 +754,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            Event::TickIntervalChanged { interval_ms } => {
+                self.venue.on_tick_interval(&mut cx, interval_ms)
+            }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),

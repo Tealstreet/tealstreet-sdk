@@ -646,7 +646,7 @@ export class BreakoutpropExchange extends BaseExchange {
       if (!data.orderId) {
         throw new Error('No order ID received');
       }
-      return data.orderId;
+      return [String(data.orderId)];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -674,7 +674,7 @@ export class BreakoutpropExchange extends BaseExchange {
       this.store.update({
         loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
       });
-      await this.tick();
+      loop(() => this.tick(), this.getTickInterval());
       return;
     }
 

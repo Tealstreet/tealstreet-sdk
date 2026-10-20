@@ -145,7 +145,7 @@ describe('Breakout Prop official DX REST order contract', () => {
       releaseCancel = resolve;
     });
     vi.spyOn(exchange, 'cancelOrder').mockReturnValue(cancelPending.then(() => 'old-order'));
-    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(43);
+    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['43']);
     const update = exchange.updateOrder({
       order: {
         id: 'old-order',
@@ -166,7 +166,7 @@ describe('Breakout Prop official DX REST order contract', () => {
     await Promise.resolve();
     expect(placeOrder).not.toHaveBeenCalled();
     releaseCancel();
-    await expect(update).resolves.toBe(43);
+    await expect(update).resolves.toEqual(['43']);
     expect(placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 3657 }));
   });
 

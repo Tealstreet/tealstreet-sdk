@@ -16,11 +16,8 @@ fn documented_market_steps_and_margin_rates_are_not_decimal_counts() {
     assert_eq!(market.contract_size, Some(1.0));
     assert_eq!(market.base, "ETH");
     assert!(rig.engine.store().market("XBTUSD").is_none());
-    assert!(
-        rig.dispatch_times
-            .windows(2)
-            .all(|window| window[1] - window[0] >= 200.0)
-    );
+    assert_eq!(rig.dispatch_times.len(), 5);
+    assert!(rig.dispatch_times[4] - rig.dispatch_times[0] < 10.0);
 }
 
 #[test]
@@ -584,6 +581,7 @@ fn a_delayed_read_retry_cannot_hold_ready_work_past_the_rate_limit() {
     let old = rig.next_request();
     assert_eq!(rig.now, 1000.0);
     rig.failure(&old);
+    let ready_at = rig.now;
     rig.command(Command::FetchCandles {
         command: 9,
         symbol: "ETHUSD".into(),
@@ -593,13 +591,44 @@ fn a_delayed_read_retry_cannot_hold_ready_work_past_the_rate_limit() {
         limit: None,
     });
     let fresh = rig.next_request();
-    assert_eq!(rig.now, 1200.0);
+    assert_eq!(rig.now, ready_at);
     assert!(fresh.body.as_ref().unwrap().contains(r#""candleType":"m""#));
     rig.reply(&fresh, 200, r#"{"events":[]}"#);
     assert!(rig.result(9).is_ok());
     let retry = rig.next_request();
     assert_eq!(rig.now, 2001.0);
     assert_eq!(retry.body, old.body);
+}
+
+#[test]
+fn burst_budget_never_exceeds_five_requests_in_a_rolling_second() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    for command in 10..30 {
+        rig.command(Command::FetchCandles {
+            command,
+            symbol: "ETHUSD".into(),
+            interval: "1h".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+    }
+    assert!(rig.requests.is_empty());
+    for _ in 0..15 {
+        rig.next_request();
+    }
+    assert!(rig.dispatch_times[5] >= 1_000.0);
+    for (index, time) in rig.dispatch_times.iter().enumerate() {
+        let in_window = rig.dispatch_times[..=index]
+            .iter()
+            .filter(|prior| **prior > time - 1_000.0)
+            .count();
+        assert!(
+            in_window <= 5,
+            "time {time}: {in_window} requests in one second"
+        );
+    }
 }
 
 #[test]
@@ -681,4 +710,89 @@ fn responses_already_in_flight_cannot_restart_failed_authentication() {
     assert!(rig.requests.is_empty());
     assert!(rig.timers.is_empty());
     assert!(!rig.engine.store().loaded().markets);
+}
+
+fn tick_interval(rig: &mut Rig, interval_ms: f64) {
+    rig.engine
+        .handle(rig.now, Event::TickIntervalChanged { interval_ms });
+    rig.collect();
+}
+
+#[test]
+fn incident_slowdown_rearms_poll_without_an_immediate_request() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    let before = rig.timers.clone();
+    for invalid in [f64::NAN, f64::NEG_INFINITY, 0.0, -1.0] {
+        tick_interval(&mut rig, invalid);
+        assert_eq!(rig.timers, before);
+    }
+    let updated_at = rig.now;
+    tick_interval(&mut rig, 10_000.0);
+    assert!(rig.requests.is_empty());
+    let request = rig.next_request();
+    assert!(request.url.ends_with("/marketdata"));
+    assert_eq!(rig.now, updated_at + 10_000.0);
+}
+
+#[test]
+fn pause_stops_polling_after_inflight_read_and_resume_waits_new_interval() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    let request = rig.next_request();
+    tick_interval(&mut rig, f64::INFINITY);
+    rig.reply(&request, 200, QUOTES);
+    assert!(rig.timers.is_empty());
+    assert!(rig.requests.is_empty());
+    rig.now += 5_000.0;
+    let resumed_at = rig.now;
+    tick_interval(&mut rig, 3_000.0);
+    assert!(rig.requests.is_empty());
+    let request = rig.next_request();
+    assert!(request.url.ends_with("/marketdata"));
+    assert_eq!(rig.now, resumed_at + 3_000.0);
+}
+
+#[test]
+fn configured_infinite_interval_pauses_polls_but_preserves_rate_limited_queries() {
+    let mut rig = Rig::new(Options {
+        key: "example-user".into(),
+        secret: "example-password".into(),
+        public_data_only: true,
+        tick_interval: f64::INFINITY,
+        ..Options::default()
+    });
+    rig.boot();
+    assert!(rig.timers.is_empty());
+    assert!(rig.requests.is_empty());
+    rig.command(Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: "1h".into(),
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    assert!(rig.requests.is_empty());
+    let request = rig.next_request();
+    assert_eq!(rig.now, 1_000.0);
+    rig.reply(&request, 200, r#"{"events":[]}"#);
+    assert!(rig.result(9).is_ok());
+    assert!(rig.timers.is_empty());
+}
+
+#[test]
+fn unchanged_polling_controls_never_postpone_an_existing_deadline() {
+    let mut rig = Rig::defaults();
+    rig.boot();
+    let deadline = *rig.timers.values().min_by(|a, b| a.total_cmp(b)).unwrap();
+    let original = rig.timers.clone();
+    for _ in 0..5 {
+        rig.now += 100.0;
+        tick_interval(&mut rig, 2_000.0);
+        assert_eq!(rig.timers, original);
+    }
+    let quote = rig.next_request();
+    assert!(quote.url.ends_with("/marketdata"));
+    assert_eq!(rig.now, deadline);
 }

@@ -147,7 +147,8 @@ orders therefore send `CLOSE`; all others send `OPEN`. The first-party single
 order schema does not require `positionCode`, so the adapter does not guess a
 legacy-host extension.
 
-Orders use GTC and a `tealstreet-<uuid>` client code. Amount and price are
+Orders use GTC and a `tealstreet-<uuid>` client code. Placement returns the
+SDK string-array order-ID shape, normalizing the native numeric ACK. Amount and price are
 adjusted to market steps. Cancellation includes the standard `If-Match: *` precondition required by DX
 REST; errors, including 412, propagate without a replacement. Bulk cancellation
 runs batches of ten, awaits every
@@ -172,3 +173,26 @@ targeted Breakout audit suite, and the complete deterministic test suite.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+
+## Rust engine
+
+The `sdk-rs/venues/breakoutprop` port uses the same DXtrade API and account
+model. Native session authentication stays in `Authorization: DXAPI …`;
+Tealstreet proxy JWT authorization uses the separate `Tealstreet-Authorization`
+policy, including the native serialized routing plan. There is no signing or
+exchange socket. Initial session/market reads may use the five-request burst
+budget; subsequent attempts stay within five per rolling second.
+
+Native position codes distinguish multiple lots on one symbol. Account snapshots
+validate nested identities and commit atomically. Confirmed cancellation protects
+against stale snapshots for 60 seconds; reads launched before successful writes
+are revision-fenced. An amendment verifies the canceled order's final, zero-fill
+history before creating its replacement. Failed or ambiguous proof sends no
+replacement. Unrepresentable attached protections, trigger sources, close flags
+and slippage controls fail before any batch write.
+
+Polling intervals honor initial and live slowdown multipliers. An explicit
+infinite interval pauses polling; native queries still work. Repeated unchanged
+configuration updates preserve the existing poll deadline. History axes without
+a TS implementation keep their branded, empty, no-I/O fallbacks.

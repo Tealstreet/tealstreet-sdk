@@ -106,3 +106,26 @@ verification.
   credentials stop timers/deactivate; discovery/config errors explicitly settle
   wrapper startup. Zero-size placeholders remain represented by SETTINGS per
   the engine spec. Successful-write tombstone population is tested in phase 3.
+- Phase 3 independent review cleared native payloads, ACK-to-code routing,
+  cancellation locks, no ambiguous write retries, read revision fences and
+  cancellation tombstones. Review caught a poll-only amendment race: DELETE
+  success has no fill evidence. Replacements now require a documented filtered
+  history read proving the exact chain is CANCELED with zero fills. Missing,
+  inconsistent, filled or failed proof aborts replacement. Explicit zero/CLOSE
+  payloads remain supported without asserting close-all semantics.
+- Phase 4 review found proxy JWT overwriting DXAPI, inert history capability
+  branding, public-only validation, and incident slowdown control gaps. Routing
+  uses the existing separate Tealstreet-Authorization policy; direct/HOW/native
+  preserve DXAPI. Typed live interval controls support slowdown, pause and
+  resume; multiplier listeners are removed on disposal.
+- Public gate initially exposed an actual startup latency regression: TS permits
+  a five-request burst, while the initial Rust scheduler inserted 200ms after
+  every call. Replace it with a bounded rolling five-per-second budget.
+  No CPU/memory threshold or economic comparison is relaxed.
+- Latest scripted native result before final controls review: 89 tests pass;
+  strict clippy/fmt pass. Wrapper/utility suites: 34 pass. Generic harness: 271
+  pass. Compiled frame/host tests: 3 pass before adding interval control proof.
+- Phase 3 and core control re-review clear: 90 crate tests pass, including 26
+  trading integration contracts; workspace all-target clippy passes. The poll
+  control is idempotent so repeated unchanged worker configuration cannot starve
+  polling. Native history fallbacks and exact candle requests are also tested.

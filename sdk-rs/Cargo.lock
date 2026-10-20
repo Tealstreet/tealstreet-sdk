@@ -3705,6 +3705,7 @@ dependencies = [
 name = "safe-cex-venue-breakoutprop"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
  "serde_json",

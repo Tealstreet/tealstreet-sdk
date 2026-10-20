@@ -1,6 +1,8 @@
 //! Legacy Breakout DXtrade: authenticated REST polling, with no exchange socket.
 mod account;
+mod history;
 mod session;
+mod trading;
 pub(crate) mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -45,7 +47,7 @@ pub struct BreakoutProp {
     queue: VecDeque<Pending>,
     dispatch_timer: Option<(TimerId, f64)>,
     poll_timer: Option<TimerId>,
-    next_request_at: f64,
+    request_times: VecDeque<f64>,
     instruments: Option<Vec<wire::Instrument<'static>>>,
     details: Option<Vec<wire::Details<'static>>>,
     instruments_pending: bool,
@@ -55,6 +57,7 @@ pub struct BreakoutProp {
     portfolio_started: bool,
     last_portfolio_version: Option<u64>,
     order_revision: u64,
+    trading: trading::TradingState,
     terminal_orders: HashMap<String, f64>,
     books: HashMap<String, (usize, Book)>,
     candles: HashMap<(String, String), usize>,
@@ -71,6 +74,7 @@ pub struct Pending {
 pub(crate) enum Operation {
     Login,
     Discover,
+    Trade(trading::Request),
     Instruments {
         rows: Vec<wire::Instrument<'static>>,
         invalid: bool,
@@ -168,7 +172,7 @@ struct EventType<'a> {
 
 impl BreakoutProp {
     pub fn new(mut options: Options) -> Self {
-        if !options.tick_interval.is_finite() || options.tick_interval <= 0.0 {
+        if options.tick_interval.is_nan() || options.tick_interval <= 0.0 {
             options.tick_interval = 2_000.0;
         }
         Self {
@@ -180,7 +184,7 @@ impl BreakoutProp {
             queue: VecDeque::new(),
             dispatch_timer: None,
             poll_timer: None,
-            next_request_at: f64::NEG_INFINITY,
+            request_times: VecDeque::with_capacity(5),
             instruments: None,
             details: None,
             instruments_pending: false,
@@ -190,6 +194,7 @@ impl BreakoutProp {
             portfolio_started: false,
             last_portfolio_version: None,
             order_revision: 0,
+            trading: trading::TradingState::default(),
             terminal_orders: HashMap::new(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -269,7 +274,19 @@ impl BreakoutProp {
         else {
             return;
         };
-        let dispatch_at = self.next_request_at.max(next_ready);
+        while self
+            .request_times
+            .front()
+            .is_some_and(|time| *time + 1_000.0 <= cx.now)
+        {
+            self.request_times.pop_front();
+        }
+        let capacity_at = if self.request_times.len() < 5 {
+            cx.now
+        } else {
+            self.request_times[0] + 1_000.0
+        };
+        let dispatch_at = capacity_at.max(next_ready);
         if dispatch_at > cx.now {
             if self.dispatch_timer.is_none_or(|(_, at)| dispatch_at < at) {
                 if let Some((timer, _)) = self.dispatch_timer.take() {
@@ -311,13 +328,22 @@ impl BreakoutProp {
                 ),
             ));
         }
+        if method == Method::Delete {
+            headers.push(("If-Match", "*".into()));
+        }
         let stream = operation.stream();
-        let id = cx.request(method, format!("{BASE_URL}/{path}"), headers, body, pending);
+        let id = cx.request(
+            method,
+            format!("{BASE_URL}/{}", path.trim_start_matches('/')),
+            headers,
+            body,
+            pending,
+        );
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
         }
-        self.next_request_at = cx.now + 200.0;
+        self.request_times.push_back(cx.now);
         if let Some((timer, _)) = self.dispatch_timer.take() {
             cx.clear_timer(timer);
         }
@@ -337,6 +363,9 @@ impl BreakoutProp {
                 .map_err(|_| "Invalid DXtrade market-data request".to_owned())
         };
         Ok(match operation {
+            Operation::Trade(request) => {
+                (request.method, request.path.clone(), request.body.clone())
+            }
             Operation::Login => {
                 if self.options.key.is_empty() || self.options.secret.is_empty() {
                     return Err("Missing DXtrade username or password".into());
@@ -422,7 +451,11 @@ impl BreakoutProp {
     }
 
     pub(crate) fn arm_poll(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.auth_failed && !self.auth_draining && self.poll_timer.is_none() {
+        if !self.auth_failed
+            && !self.auth_draining
+            && self.options.tick_interval.is_finite()
+            && self.poll_timer.is_none()
+        {
             self.poll_timer = Some(cx.set_timer(self.options.tick_interval));
         }
     }
@@ -614,8 +647,23 @@ impl BreakoutProp {
         }
     }
 
+    fn record_canceled(&mut self, cx: &Cx<'_, Pending>, id: &str, code: &str) {
+        self.terminal_orders.retain(|_, at| cx.now - *at < 60_000.0);
+        self.terminal_orders.insert(id.to_owned(), cx.now);
+        self.terminal_orders.insert(code.to_owned(), cx.now);
+        for order in cx.store.orders().iter().filter(|order| {
+            order.id == id || order.id == code || order.client_order_id.as_deref() == Some(code)
+        }) {
+            self.terminal_orders.insert(order.id.clone(), cx.now);
+            if let Some(client) = &order.client_order_id {
+                self.terminal_orders.insert(client.clone(), cx.now);
+            }
+        }
+    }
+
     fn fail_operation(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation, error: &str) {
         match operation {
+            Operation::Trade(request) => self.on_trade_failed(cx, request, error.into()),
             Operation::Portfolio { .. } => {
                 self.portfolio_pending = false;
                 cx.log(LogLevel::Error, error);
@@ -729,6 +777,7 @@ impl Venue for BreakoutProp {
             return;
         }
         match pending.operation {
+            Operation::Trade(request) => self.on_trade_response(cx, request, response.body),
             Operation::Portfolio {
                 revision,
                 initial,
@@ -757,6 +806,7 @@ impl Venue for BreakoutProp {
                         });
                         self.last_portfolio_version = Some(snapshot.version);
                         snapshot.commit(cx);
+                        self.trading.reconcile(cx.store, cx.now);
                     }
                 }
                 if initial && cx.store.loaded().balance {
@@ -964,7 +1014,9 @@ impl Venue for BreakoutProp {
             self.fail_operation(cx, pending.operation, &self.auth_error.clone());
             return;
         }
-        if pending.network_attempt < 3 {
+        if !matches!(&pending.operation, Operation::Trade(request) if request.method != Method::Get)
+            && pending.network_attempt < 3
+        {
             pending.network_attempt += 1;
             pending.ready_at = cx.now + 1_000.0 * f64::from(pending.network_attempt);
             pending.operation.reset();
@@ -983,6 +1035,17 @@ impl Venue for BreakoutProp {
             self.poll_timer = None;
             self.poll(cx);
         }
+    }
+
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
+        if interval_ms.is_nan() || interval_ms <= 0.0 || interval_ms == self.options.tick_interval {
+            return;
+        }
+        self.options.tick_interval = interval_ms;
+        if let Some(timer) = self.poll_timer.take() {
+            cx.clear_timer(timer);
+        }
+        self.arm_poll(cx);
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1044,20 +1107,22 @@ impl Venue for BreakoutProp {
                     );
                 }
             }
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::CancelOrdersWithSymbols { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchStpMode { command }
+            command @ (Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::CancelOrdersWithSymbols { .. }
+            | Command::AmendOrder { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::SetLeverage { .. }
+            | Command::SetMarginType { .. }
+            | Command::SetPositionMode { .. }) => {
+                self.on_trade_command(cx, command);
+            }
+            Command::Query { command, query } => history::query(cx, command, query),
+            Command::FetchLeverage { command, .. } => cx.done(command, Ok("null".into())),
+            Command::FetchStpMode { command }
             | Command::SetStpMode { command, .. }
             | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. }
-            | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => {
+            | Command::FetchOrderBook { command, .. } => {
                 cx.done(command, Err("Unsupported BreakoutProp command".into()));
             }
         }
