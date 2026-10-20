@@ -1202,3 +1202,46 @@ test('production TS command dispatch forwards leverage side and position-mode sy
   await command(exchange, {}, { op: 'setPositionMode', hedged: true, symbol: 'BTCUSDT' }, {});
   assert.deepEqual(seen, [['BTCUSDT', 5, 'long'], [true, 'BTCUSDT']]);
 });
+
+
+test('production Coinbase market projection preserves contract flags required by strict midpoint proof', async () => {
+  const { compareCoinbaseSpotMidpoints } = await import('./coinbase-spot-midpoints.mjs');
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('const marketFields = '), end = source.indexOf('\nconst assertReplayIntegrity = ', start);
+  assert(start >= 0 && end > start);
+  const product = {
+    product_id: 'DEEP-USD', product_type: 'SPOT', future_product_details: null,
+    base_currency_id: 'DEEP', quote_currency_id: 'USD', status: 'online',
+    is_disabled: false, trading_disabled: false, base_increment: '1', price_increment: '0.00001',
+    base_min_size: '1', base_max_size: '100000000', price: '0.01875', volume_24h: '2625844',
+    approximate_quote_24h_volume: '49234.58',
+  };
+  const rawMarket = {
+    id: 'DEEP-USD', symbol: 'DEEP-USD', base: 'DEEP', quote: 'USD', active: true,
+    isSpot: true, isInverse: false, isExpiring: false, contractSize: 1,
+    precision: { amount: 1, price: 0.00001 }, limits: { amount: { min: 1, max: 100000000 } },
+  };
+  const records = [
+    { type: 'meta', venue: 'coinbase', profile: 'spot', private: false },
+    { type: 'http', t: 10, requestOrdinal: 0, method: 'GET', status: 200,
+      url: 'https://api.coinbase.com/api/v3/brokerage/market/products?limit=1000',
+      body: JSON.stringify({ products: [product], num_products: 1,
+        pagination: { has_next: false, has_prev: false, next_cursor: '', prev_cursor: '' } }) },
+  ];
+  for (const name of ['coinbase', 'coinbasespot']) {
+    const project = new Function('venue', `${source.slice(start, end)};return marketFields;`)(venueOf(name));
+    const output = (quoteVolume) => ({ markets: [project({ ...rawMarket })],
+      tickers: [{ symbol: 'DEEP-USD', last: 0.01875, volume: 2625844, quoteVolume }] });
+    const ts = output(49234.57), rust = output(49234.58);
+    const prove = () => compareCoinbaseSpotMidpoints({ venue: name, records, ts, rust });
+    const proof = prove();
+    assert.equal(proof.equivalent, true, `${name}: ${proof.reason}`);
+    assert.deepEqual(proof.exceptions.map((row) => row.symbol), ['DEEP-USD']);
+    for (const [field, invalid] of [['isSpot', false], ['isInverse', true], ['isExpiring', true]]) {
+      const expected = rust.markets[0][field];
+      rust.markets[0][field] = invalid;
+      assert.equal(prove().equivalent, false, `${name}: changed ${field} must invalidate the proof`);
+      rust.markets[0][field] = expected;
+    }
+  }
+});

@@ -3299,3 +3299,37 @@ may differ; books/auth/account/request/metric checks remain independent.
 Kraken duplicate validator is shared while exactBigInt nonce/signature/activation
 fences stay intact. Commit and push resolvedmerge now, actualPRround2reviews
 thenall41strictCIgreen beforemerge. No localrelease/timing/sweep executed.
+
+## Published round2 / c34 CI repairs
+
+Actualpublished c34e4153be isMERGEABLE. Public/host andprivate/trading/query
+adversarial reviews PASS; harness review findsP2: Coinbase's strictmidpoint
+proof requires isSpot/isInverse/isExpiring omittedby sharedmarketprojection.
+Production-source regression fails before (marketidentity/contractunits differ).
+Retain these flags fromactualTS/native markets forCoinbase family, same as
+Bybit; unchangedproof rejects eachflippedflag forbothaliases.170focused
+replay/gate/midpoint casesPASS after, independentreviewPASS.
+
+CI nativeClippy/testfailto compilePhemexsockettest: incomingbyvaluehelper
+expectsrawEngine while ourfixture usesits causal-timerwrapper. Importexisting
+crate::support::Engine inhelper; everyflap/backoffassertion unchanged.111Phemex
+tests plusstrictalltargetClippy/fmtPASS, independentauditPASS.
+
+CIhelpers hasoneflakyunit: memory.test's isolatedNodechild canreclaim36foreign
+ArrayBufferbytes, invalidating assertedzero. Preserveactualsignedobserveddelta
+exactly; addfrozen countercontrols forsingleWASMaddition, ordinary4096frame
+andnegative36 reclaim.17memorycasesPASS. Productionmemory.mjs formula,
+signedcountervalidation, quiet100ms/deadline1s/sampler unchanged. Thisunit
+provesexactaccounting, not independentrealV8exclusion ofWASMfromarrayBuffers;
+removed empiricalzeroassumption isnot claimedasproof. IndependentauditPASS.
+
+BothrootCIjobs failonly staleMCPconfignegative expectingBitunixRustunavailable.
+Replace withpositiveBitunixRustfutures/default-unsetcase; retainallothernegative
+validationcases andproductionguards.17focusedMCPconfigcasesPASS.
+
+CurrentCIalso hascompleted HyperliquidSpot retained-memoryFAIL (rounded1.9MB/
+1.9MB, CPU/correctnessPASS), MEXCRustlogicalstartup timeout (incomplete), plus
+same memoryunit failure inOrderly/KuCoin/KrakenSpot. Preserve c34logs; no
+unchanged completedperformancefailure retry. Investigate soundHLIretained/
+monotoniclinearpeak reduction andMEXCcausalstartup before nextpush. No local
+WASMrelease/replay/timing/size job underoverseerloadrule. CurrentCI_NOTgreen.

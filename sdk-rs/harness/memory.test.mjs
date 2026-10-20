@@ -11,7 +11,8 @@ test('retained frame backing buffers are included', () => {
   assert.equal(retainedMemory(before, after), frame.byteLength - 10_000);
 });
 test('linear wasm memory is counted exactly once', () => {
-  // Isolate runtime accounting from buffers reclaimed from neighboring tests.
+  // Isolate allocation from neighboring tests, but keep any signed runtime
+  // buffer delta: even this child can reclaim unrelated V8 backing stores.
   const { before, after, bytes } = JSON.parse(execFileSync(process.execPath, [
     '--expose-gc', '--input-type=module', '--eval', `
       globalThis.gc();
@@ -24,8 +25,20 @@ test('linear wasm memory is counted exactly once', () => {
     `,
   ], { encoding: 'utf8' }));
   assert.equal(bytes, 16 * 65536);
-  assert.equal(after.arrayBuffers - before.arrayBuffers, 0);
-  assert.equal(retainedMemory(before, after, bytes), after.heapUsed - before.heapUsed + bytes);
+  assert.equal(
+    retainedMemory(before, after, bytes),
+    after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + bytes,
+  );
+
+  // Frozen counters pin exact accounting independently of foreign GC noise.
+  // WASM is supplied separately; ordinary retained frame buffers still count.
+  const baseline = Object.freeze({ heapUsed: 100_000, arrayBuffers: 400_000 });
+  const wasmOnly = Object.freeze({ heapUsed: 90_000, arrayBuffers: 400_000 });
+  const frame = new ArrayBuffer(4096);
+  const withFrame = Object.freeze({ ...wasmOnly, arrayBuffers: wasmOnly.arrayBuffers + frame.byteLength });
+  assert.equal(retainedMemory(baseline, wasmOnly, bytes), bytes - 10_000);
+  assert.equal(retainedMemory(baseline, withFrame, bytes), bytes - 10_000 + frame.byteLength);
+  assert.equal(retainedMemory(baseline, { ...wasmOnly, arrayBuffers: 399_964 }, bytes), bytes - 10_036);
 });
 
 test('three equal samples do not hide a delayed loader-buffer release', async () => {
