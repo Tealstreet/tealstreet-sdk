@@ -11,7 +11,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -123,7 +123,7 @@ impl PhemexPerpetuals {
             startup_retry: None,
             discovery: Default::default(),
             paused_until: 0.,
-            account: account::State::default(),
+            account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
             income: income::State::default(),
@@ -206,7 +206,10 @@ impl PhemexPerpetuals {
         }
         self.public.socket =
             Some(cx.connect_channel(self.ws(), safe_cex_engine::SocketChannel::Public));
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
     }
     fn send(&mut self, cx: &mut Cx<'_, Pending>, method: &str, params: String) {
         if !self.public.open {
