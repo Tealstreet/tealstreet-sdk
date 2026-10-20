@@ -135,14 +135,21 @@ impl KrakenSpot {
         let mut steps = VecDeque::new();
         for o in orders {
             steps.push_back(self.prepare(cx, o)?);
-            if o.kind == OrderType::Limit {
+            // A zero leg means "none", matching the TS truthiness check.
+            let stop_loss = o.stop_loss.filter(|p| *p != 0.);
+            let take_profit = o.take_profit.filter(|p| *p != 0.);
+            if stop_loss.is_some() || take_profit.is_some() {
+                if o.kind != OrderType::Limit {
+                    return Err(
+                        "Kraken Spot does not support take-profit/stop-loss legs on a market entry; use a limit entry or place TP/SL separately"
+                            .into(),
+                    );
+                }
                 for (kind, price) in [
-                    (OrderType::StopLoss, o.stop_loss),
-                    (OrderType::TakeProfit, o.take_profit),
+                    (OrderType::StopLoss, stop_loss),
+                    (OrderType::TakeProfit, take_profit),
                 ] {
-                    if let Some(price) = price
-                        && price != 0.
-                    {
+                    if let Some(price) = price {
                         let mut child = o.clone();
                         child.kind = kind;
                         child.side = o.side.opposite();
