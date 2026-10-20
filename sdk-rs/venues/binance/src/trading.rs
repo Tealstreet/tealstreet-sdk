@@ -1736,9 +1736,9 @@ impl BinanceFutures {
         };
         target.native.is_some()
             && current == target.native
+            && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id)
             && cx.store.order(&target.id).is_none_or(|order| {
-                order.symbol == target.symbol
-                    && (!(self.is_spot() || self.is_inverse()) && is_algo(order.kind)) == strategy
+                (!(self.is_spot() || self.is_inverse()) && is_algo(order.kind)) == strategy
             })
     }
 

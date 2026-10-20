@@ -233,3 +233,10 @@ reverification has begun while this first patch completes its gates.
   review reran 13 audit trading and 19 lifecycle tests and closed every finding.
   Final selected Binance WASM rebuild/replays and combined-host checks follow;
   the completed final Bybit/Aster replay gates remain recorded in their logs.
+- A final ordering control also rejects known old regular/strategy native rows
+  in a REST read started after a foreign-symbol NEW but before the old cancel
+  reply. Unseen native generations can still establish the next binding.
+  Stream/snapshot guards use the current symbol: inferring native namespace
+  from order type would incorrectly reject triggered STOP_MARKET executions.
+  The original stop tests remain unchanged; all 138 Binance tests, strict
+  Clippy and formatting pass after this narrower correction.

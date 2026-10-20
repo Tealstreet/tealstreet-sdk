@@ -624,3 +624,64 @@ fn pm_old_symbol_strategy_ack_and_stream_cannot_retire_the_new_symbol_row() {
         );
     }
 }
+
+#[test]
+fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_native_can_bind() {
+    for stale_strategy in [false, true] {
+        let mut h = ready_orders(Variant::PortfolioMargin, Some(false));
+        h.event(Event::Command(Command::CancelSymbolOrders {
+            command: 100,
+            symbol: "BTCUSDT".into(),
+        }));
+        let regular = h.take("/papi/v1/um/allOpenOrders");
+        let strategy = h.take("/papi/v1/um/conditional/allOpenOrders");
+        h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"ETHUSDT","c":"maker","i":13,"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+        h.message("/pm/ws", r#"{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","fs":"UM","so":{"s":"ETHUSDT","c":"stop","si":43,"S":"SELL","st":"STOP_MARKET","q":"9","p":"0","sp":"89","os":"NEW","R":true,"wt":"MARK_PRICE","ps":"BOTH","cp":false,"i":0}}"#);
+        let new_regular = h.engine.store().order("maker").unwrap().clone();
+        let new_strategy = h.engine.store().order("stop").unwrap().clone();
+        assert_eq!(new_regular.symbol, "ETHUSDT");
+        assert_eq!(new_strategy.symbol, "ETHUSDT");
+        let orders = |native: u64| {
+            format!(
+                r#"[{{"symbol":"BTCUSDT","orderId":{native},"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}}]"#
+            )
+        };
+        let strategies = |native: u64| {
+            format!(
+                r#"[{{"symbol":"BTCUSDT","strategyId":{native},"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"7","price":"0","side":"SELL","stopPrice":"90"}}]"#
+            )
+        };
+        h.advance(10_000.0);
+        let old_orders = if stale_strategy {
+            "[]".to_owned()
+        } else {
+            orders(12)
+        };
+        let old_strategies = if stale_strategy {
+            strategies(42)
+        } else {
+            "[]".to_owned()
+        };
+        h.respond("/papi/v1/um/openOrders", 200, &old_orders);
+        h.respond("/papi/v1/um/conditional/openOrders", 200, &old_strategies);
+        assert_eq!(h.engine.store().order("maker"), Some(&new_regular));
+        assert_eq!(h.engine.store().order("stop"), Some(&new_strategy));
+        // A genuinely new native generation can establish the next binding by REST.
+        h.message("/pm/ws", "{}");
+        h.advance(10_000.0);
+        h.respond("/papi/v1/um/openOrders", 200, &orders(14));
+        h.respond("/papi/v1/um/conditional/openOrders", 200, &strategies(44));
+        for id in ["maker", "stop"] {
+            let row = h.engine.store().order(id).unwrap();
+            assert_eq!(
+                (row.symbol.as_str(), row.status),
+                ("BTCUSDT", OrderStatus::Open)
+            );
+        }
+        let before = h.engine.store().orders().to_vec();
+        h.reply(regular.id, 200, "", r#"{"code":200,"msg":"success"}"#);
+        h.reply(strategy.id, 200, "", r#"{"code":200,"msg":"success"}"#);
+        assert_eq!(h.engine.store().orders(), before);
+        assert!(h.result(100).unwrap().is_ok());
+    }
+}

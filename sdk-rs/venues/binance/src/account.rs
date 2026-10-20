@@ -1005,6 +1005,33 @@ impl BinanceFutures {
         }
     }
 
+    pub(crate) fn client_order_row_is_foreign(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        client: &str,
+    ) -> bool {
+        cx.store
+            .order(client)
+            .is_some_and(|order| order.symbol != symbol)
+    }
+
+    fn known_client_binding_is_foreign(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        client: &str,
+        native: u64,
+        strategy: bool,
+    ) -> bool {
+        let known = if strategy {
+            self.pm_strategy_native_order_id(symbol, client)
+        } else {
+            self.spot_native_order_id(symbol, client)
+        };
+        known == Some(native) && self.client_order_row_is_foreign(cx, symbol, client)
+    }
+
     /// Commit the orders snapshot once both halves are in. A failed half is
     /// not authoritative: the store keeps its orders and the tick retries.
     fn finish_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1032,6 +1059,8 @@ impl BinanceFutures {
                     .native_executed
                     .get(&(symbol.clone(), *native))
                     .is_some_and(|(seen, terminal)| *terminal || *seen > *filled)
+                    || ((self.is_spot() || self.options.portfolio_margin)
+                        && self.known_client_binding_is_foreign(cx, symbol, client, *native, false))
                     || (self.is_spot()
                         && self
                             .account
@@ -1039,11 +1068,15 @@ impl BinanceFutures {
                             .get(&(symbol.clone(), client.clone()))
                             .is_some_and(|current| *current > *native))
             })
-            || join.native_strategies.iter().any(|(symbol, _, native)| {
-                self.account
-                    .terminal_strategies
-                    .contains(&(symbol.clone(), *native))
-            })
+            || join
+                .native_strategies
+                .iter()
+                .any(|(symbol, client, native)| {
+                    self.account
+                        .terminal_strategies
+                        .contains(&(symbol.clone(), *native))
+                        || self.known_client_binding_is_foreign(cx, symbol, client, *native, true)
+                })
             || join
                 .algo
                 .iter()
@@ -1214,7 +1247,7 @@ impl BinanceFutures {
             .get(&key)
             .copied()
             .unwrap_or_default();
-        let foreign_row = cx.store.order(&id).is_some_and(|order| order.symbol != o.s);
+        let foreign_row = self.client_order_row_is_foreign(cx, &o.s, &id);
         let stale_incarnation = self.options.portfolio_margin
             && ((native_terminal
                 && self
@@ -1404,7 +1437,7 @@ impl BinanceFutures {
                 self.account.terminal_strategies.insert(key);
             }
             if (terminal && (o.os == "NEW" || current.is_some_and(|current| current != native)))
-                || (cx.store.order(&id).is_some_and(|order| order.symbol != o.s)
+                || (self.client_order_row_is_foreign(cx, &o.s, &id)
                     && (o.os != "NEW" || current == Some(native)))
             {
                 return;
@@ -2043,10 +2076,7 @@ impl BinanceFutures {
             .spot_client_native
             .get(&client_key)
             .is_some_and(|current| *current > native)
-            || (cx
-                .store
-                .order(&id)
-                .is_some_and(|order| order.symbol != event.s)
+            || (self.client_order_row_is_foreign(cx, &event.s, &id)
                 && (event.status != "NEW"
                     || self.account.spot_client_native.get(&client_key) == Some(&native)))
         {
