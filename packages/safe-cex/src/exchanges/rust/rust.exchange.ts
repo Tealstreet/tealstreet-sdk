@@ -728,6 +728,8 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         ...transport.engineOptions,
         publicFeed: { mode: this.publicFeedMode },
+        // The engine reports account sections missing at startup only when untilLoaded waits for them.
+        accountStartup: !this.isPublicDataOnly,
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );

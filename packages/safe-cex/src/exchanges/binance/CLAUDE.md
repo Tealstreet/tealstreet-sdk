@@ -12,7 +12,10 @@ COIN-M placement and order amounts are native contract counts; market
 at the mark price, `notional` is native quantity times contract size, and
 position PnL/margin remains in collateral coin. Aggregate wallet balances are
 USD-valued; an unpriced coin retains its native balance without inventing a USD
-price. Stops, trailing orders and regular orders share COIN-M's regular order
+price. The USD total waits for a missing quote only while one is plausible: any
+catalogued USD route before the ticker seed, afterwards only a TRADING route,
+for at most 30s after the seed. Then the coin counts at 0 (one warning per
+asset), as TS does; a partial catalogue still waits. Stops, trailing orders and regular orders share COIN-M's regular order
 endpoints. COIN-M caller client IDs remain unsupported and reject the entire
 batch before writes.
 

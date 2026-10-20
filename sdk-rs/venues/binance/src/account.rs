@@ -31,6 +31,9 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 /// Retain execution identities across reconnects without an unbounded event log.
 const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
 const SPOT_EXECUTION_WINDOW: usize = 16_384;
+/// After the ticker seed, a tradable pair that still has no quote stops holding
+/// the wallet's USD total after this long; the asset is then valued at 0.
+const VALUATION_WAIT_MS: f64 = 30_000.0;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
 
 pub enum Request {
@@ -157,6 +160,9 @@ pub struct AccountState {
     valuation_refresh_required: bool,
     valuation_warned: bool,
     valuation_repair_pending: bool,
+    valuation_wait_since: Option<f64>,
+    /// Funded assets valued at 0 for want of a price; each is warned about once.
+    zero_valued_assets: HashSet<String>,
     native_asset_marks: HashMap<String, f64>,
 }
 
@@ -495,6 +501,7 @@ impl BinanceFutures {
     fn tick(&mut self, cx: &mut Cx<'_, Pending>) {
         let now = cx.now;
         self.account.tick_timer = Some(cx.set_timer(HEALTH_CHECK_MS));
+        self.revalue_pending_wallet(cx);
         if self.account.orders_stale && now - self.account.last_orders_retry_at >= ORDERS_RETRY_MS {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);
@@ -1333,6 +1340,7 @@ impl BinanceFutures {
             return;
         };
         let mut missing_price = false;
+        let mut zero_valued = Vec::new();
         let mut native_price_used = false;
         let mut balance = Balance::default();
         let mut details = Vec::new();
@@ -1367,12 +1375,11 @@ impl BinanceFutures {
                 balance.free += available * price;
                 balance.used += initial * price;
                 balance.upnl += unrealized * price;
-            } else if self.asset_has_valuation_market(cx.store, &asset.asset) {
+            } else if self.awaits_valuation_price(cx.store, cx.now, &asset.asset) {
                 missing_price = true;
                 cx.store.want_ticker_for_base(&asset.asset);
-            } else if !self.account.valuation_warned {
-                cx.log(LogLevel::Warning, "Binance wallet asset has no supported valuation market; native amount retained");
-                self.account.valuation_warned = true;
+            } else {
+                zero_valued.push(asset.asset.clone());
             }
             if self.is_inverse() {
                 coins.push(CoinBalance {
@@ -1395,6 +1402,7 @@ impl BinanceFutures {
         if self.is_inverse() {
             cx.store.set_coin_balances(coins);
         }
+        self.note_valuation_wait(cx, missing_price, zero_valued);
         if missing_price {
             if !self.account.valuation_warned {
                 cx.log(
@@ -2109,11 +2117,61 @@ impl BinanceFutures {
             .filter(|p| *p > 0.0)
             .unwrap_or(fallback)
     }
+    /// An unpriced funded asset holds the USD total only while a quote is
+    /// plausible: a tradable route exists and its bounded wait has not run out.
+    fn awaits_valuation_price(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+        asset: &str,
+    ) -> bool {
+        if self.catalogue_partial {
+            return true;
+        }
+        let expired = self
+            .account
+            .valuation_wait_since
+            .is_some_and(|since| now - since >= VALUATION_WAIT_MS);
+        !expired
+            && !self.account.zero_valued_assets.contains(asset)
+            && self.asset_has_valuation_market(store, asset)
+    }
+    fn note_valuation_wait(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        missing_price: bool,
+        zero_valued: Vec<String>,
+    ) {
+        if !missing_price {
+            self.account.valuation_wait_since = None;
+        } else if cx.store.loaded().tickers && self.account.valuation_wait_since.is_none() {
+            self.account.valuation_wait_since = Some(cx.now);
+        }
+        // An asset that regained a price gets a fresh wait if it loses it again.
+        self.account
+            .zero_valued_assets
+            .retain(|asset| zero_valued.contains(asset));
+        for asset in zero_valued {
+            if !STABLECOINS.contains(&asset.as_str())
+                && self.account.zero_valued_assets.insert(asset.clone())
+            {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Binance wallet asset {asset} has no supported valuation market; valued at 0, native amount retained"),
+                );
+            }
+        }
+    }
+    /// Before the ticker seed any catalogued route may still be quoted; after
+    /// it, only a TRADING market can produce a price (BREAK/settling cannot).
     fn asset_has_valuation_market(&self, store: &safe_cex_engine::Store, asset: &str) -> bool {
         if self.catalogue_partial {
             return true;
         }
-        let current = |market: &&Market| self.catalogue_symbols.contains(&market.symbol);
+        let seeded = store.loaded().tickers;
+        let current = |market: &&Market| {
+            (market.active || !seeded) && self.catalogue_symbols.contains(&market.symbol)
+        };
         if self.is_spot() {
             return store.markets().iter().filter(current).any(|market| {
                 market.base == asset && matches!(market.quote.as_str(), "USD" | "USDT" | "USDC")
@@ -2383,19 +2441,21 @@ impl BinanceFutures {
     }
     fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         let mut missing_price = false;
+        let mut zero_valued = Vec::new();
         let mut balance = Balance::default();
         let mut coins = Vec::with_capacity(self.account.spot_balances.len());
         let mut currencies = Vec::with_capacity(self.account.spot_balances.len());
         for (asset, &(free, used)) in &self.account.spot_balances {
             let price = self.asset_usd_price(cx.store, asset);
             let total = free + used;
-            let unpriced = (free != 0.0 || used != 0.0)
-                && !(price.is_finite() && price > 0.0)
-                && self.asset_has_valuation_market(cx.store, asset);
-            if unpriced {
-                cx.store.want_ticker_for_base(asset);
+            if (free != 0.0 || used != 0.0) && !(price.is_finite() && price > 0.0) {
+                if self.awaits_valuation_price(cx.store, cx.now, asset) {
+                    cx.store.want_ticker_for_base(asset);
+                    missing_price = true;
+                } else {
+                    zero_valued.push(asset.clone());
+                }
             }
-            missing_price |= unpriced;
             balance.free += free * price;
             balance.used += used * price;
             balance.total += total * price;
@@ -2425,6 +2485,7 @@ impl BinanceFutures {
         currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
         cx.store.set_coin_balances(coins);
         cx.store.set_currency_balances(currencies);
+        self.note_valuation_wait(cx, missing_price, zero_valued);
         self.account.valuation_pending = missing_price;
         if missing_price {
             if !self.account.valuation_warned {

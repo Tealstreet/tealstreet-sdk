@@ -414,7 +414,8 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        h.collect();
+        let actions = std::mem::take(&mut h.actions);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -429,4 +430,99 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             OrderStatus::Open
         );
     }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (200, "{}", unknown),
+        (503, "busy", unknown),
+        (
+            400,
+            "bad",
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":306,"message":"INSUFFICIENT_AVAILABLE_BALANCE"}"#,
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":42901,"message":"TOO_MANY_REQUESTS"}"#,
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        ),
+        (200, r#"{"code":50001,"message":"internal"}"#, unknown),
+        (
+            200,
+            r#"{"code":43012,"message":"self trade"}"#,
+            (None, None),
+        ),
+    ] {
+        let mut h = Harness::new();
+        h.load();
+        command(
+            &mut h,
+            Command::CancelSymbolOrders {
+                command: 1,
+                symbol: "BTCUSD-PERP".into(),
+            },
+        );
+        let r = h.http("cancel-all-orders");
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status,
+                headers: "",
+                body,
+            },
+        });
+        pace(&mut h);
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            (error.kind, error.outcome),
+            classified,
+            "{status} {body}: {}",
+            error.message
+        );
+        assert!(h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { command: 1, result: Err(text) })
+                if *text == error.legacy_text()
+        )));
+    }
+    // Transport loss on a write is Unknown; preflight refusals were never sent.
+    let mut h = Harness::new();
+    h.load();
+    command(
+        &mut h,
+        Command::CancelSymbolOrders {
+            command: 1,
+            symbol: "BTCUSD-PERP".into(),
+        },
+    );
+    let r = h.http("cancel-all-orders");
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "reset",
+    });
+    pace(&mut h);
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    command(
+        &mut h,
+        Command::SetMarginType {
+            command: 2,
+            symbol: "BTCUSD-PERP".into(),
+            isolated: true,
+        },
+    );
+    assert_eq!(
+        (h.failures[1].kind, h.failures[1].outcome),
+        (Some(ErrorKind::Unsupported), Some(Outcome::NotSent))
+    );
 }
