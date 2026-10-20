@@ -43,3 +43,44 @@ test('missing or nonfinite recorded epochs preserve the real clock', () => {
     assert.equal(context.Date.now, realNow);
   }
 });
+
+test('only MEXC and Orderly public replays install the virtual timer clock in either runtime', () => {
+  const predicate = source.match(/^const publicReplayClock = .*;$/m)?.[0];
+  assert.ok(predicate);
+  const constructors = [...source.matchAll(/const clock = publicReplayClock \? new ReplayClock\(metadata\?\.epoch \?\? Date\.now\(\)\) : undefined;/g)];
+  assert.equal(constructors.length, 2, 'both actual runtime constructors share the scoped predicate');
+  for (const name of ['binance', 'bybit', 'okx', 'cryptocom', 'weex', 'bingx', 'mexc', 'blofin',
+    'backpack', 'bitget', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'orderly', 'tealstreet-dex', 'woofi']) {
+    for (const isPrivate of [false, true]) {
+      const venue = { orderlyProtocol: ['orderly', 'tealstreet-dex', 'woofi'].includes(name) };
+      for (const constructor of constructors) {
+        const clock = vm.runInNewContext(`${predicate}\n${constructor[0]}\nclock`, {
+          values: { venue: name }, venue, isPrivate, metadata: { epoch: 123 },
+          ReplayClock: class { constructor(epoch) { this.epoch = epoch; } },
+        });
+        const expected = !isPrivate && (name === 'mexc' || venue.orderlyProtocol);
+        assert.equal(Boolean(clock), expected, `${name} private=${isPrivate}`);
+        if (clock) assert.equal(clock.epoch, 123);
+      }
+    }
+  }
+});
+
+test('recorded metadata options and testnet preserve credential and explicit config precedence', () => {
+  const optionsSource = source.slice(source.indexOf('const replayOptions = '), source.indexOf('const credentials = '));
+  const run = (isPrivate, config = {}) => vm.runInNewContext(`${optionsSource}\nreplayOptions`, {
+    venue: { options: { testnet: false, applicationId: 'venue' },
+      publicOptions: { key: 'public-key' }, replayCredentials: { key: 'private-key', secret: 'private-secret' } },
+    metadata: { options: { applicationId: 'recorded', testnet: false, key: 'metadata-key' }, testnet: true },
+    config, isPrivate, values: { venue: 'orderly' },
+  });
+  for (const isPrivate of [false, true]) {
+    const options = run(isPrivate);
+    assert.equal(options.applicationId, 'recorded');
+    assert.equal(options.testnet, true);
+    assert.equal(options.key, isPrivate ? 'private-key' : 'public-key');
+    const explicit = run(isPrivate, { options: { applicationId: 'explicit', testnet: false } });
+    assert.equal(explicit.applicationId, 'explicit');
+    assert.equal(explicit.testnet, false);
+  }
+});

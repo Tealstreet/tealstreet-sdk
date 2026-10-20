@@ -1,8 +1,8 @@
-import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
+  ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
   Execution,
@@ -22,9 +22,13 @@ import type {
 } from '../../types';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 
+import bs58 from 'bs58';
+
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { venueFamily } from '@tealstreet/safe-cex-wasm/venues';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
@@ -40,6 +44,12 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
+  'tealstreet-dex': 'tealstreet-dex',
+  kodiakfi: 'kodiakfi',
+  mode: 'mode',
+  salsadex: 'salsadex',
+  what: 'what',
+  woofi: 'woofi',
   binancepm: 'binancepm',
   bitget: 'bitget',
   bitgetusdc: 'bitgetusdc',
@@ -65,8 +75,16 @@ export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefin
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
+const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  'tealstreet-dex': orderlyClientOrderIdRule,
+  kodiakfi: orderlyClientOrderIdRule,
+  mode: orderlyClientOrderIdRule,
+  salsadex: orderlyClientOrderIdRule,
+  what: orderlyClientOrderIdRule,
+  woofi: orderlyClientOrderIdRule,
   woo: {
     label: 'WOO',
     mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
@@ -111,7 +129,22 @@ export type WasmEngineModule = {
  * Workers, the Node build on servers and in tests. Registered once by the
  * host, like the transport.
  */
-let loadWasmEngine: ((venue: string) => Promise<WasmEngineModule>) | undefined;
+const defaultWasmInitializations = new Map<string, Promise<WasmEngineModule>>();
+const defaultWasmLoader = (venue: string): Promise<WasmEngineModule> => {
+  const family = venueFamily(venue);
+  let loading = defaultWasmInitializations.get(family);
+  if (!loading) {
+    loading = import('@tealstreet/safe-cex-wasm/engine')
+      .then(({ loadEngine }) => loadEngine(venue))
+      .catch((error) => {
+        if (defaultWasmInitializations.get(family) === loading) defaultWasmInitializations.delete(family);
+        throw error;
+      });
+    defaultWasmInitializations.set(family, loading);
+  }
+  return loading;
+};
+let loadWasmEngine: (venue: string) => Promise<WasmEngineModule> = defaultWasmLoader;
 export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngineModule>) => {
   loadWasmEngine = loader;
 };
@@ -134,6 +167,9 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private startup?: Promise<void>;
+  private startupFailure?: Error;
+  private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Set<(book: OrderBook) => void>>();
@@ -163,7 +199,8 @@ export class RustEngineExchange extends BaseExchange {
         const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
         const orders = await this.fetchHistoricalOrders({ from, to });
         return wooOrdersToPositionRecords(orders, {
-          account: opts.account, from,
+          account: opts.account,
+          from,
           resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
         });
       };
@@ -184,7 +221,13 @@ export class RustEngineExchange extends BaseExchange {
     if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
 
-  start = async () => {
+  // Startup is single-use, including failures; a retry needs a new account instance.
+  start = (): Promise<void> => {
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
+    return (this.startup ??= this.startEngine());
+  };
+
+  private startEngine = async () => {
     assertEngineAccountRouting(this.options);
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
@@ -196,9 +239,36 @@ export class RustEngineExchange extends BaseExchange {
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
-    if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
-    const { WasmEngine } = await loadWasmEngine(RUST_VENUES[this.name]!);
-    if (this.isDisposed) return;
+    if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
+      if (!this.options.applicationId || !/^[A-Za-z0-9_-]+$/.test(this.options.applicationId)) {
+        throw new Error('Orderly private applicationId is required');
+      }
+      for (const key of [this.options.key, this.options.secret]) {
+        const encoded = key?.replace(/^ed25519:/, '') ?? '';
+        try {
+          if (bs58.decode(encoded).length !== 32) throw new Error();
+        } catch {
+          throw new Error('Orderly requires base58-encoded 32-byte key and secret');
+        }
+      }
+    }
+    const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
+      const disposed = () => {
+        if (!this.isDisposed) return;
+        this.startupWaiters.delete(disposed);
+        reject(new Error('Exchange disposed during startup'));
+      };
+      this.startupWaiters.add(disposed);
+      try {
+        void loadWasmEngine(RUST_VENUES[this.name]!)
+          .then(resolve, reject)
+          .finally(() => this.startupWaiters.delete(disposed));
+      } catch (error) {
+        this.startupWaiters.delete(disposed);
+        reject(error);
+      }
+    });
+    if (this.isDisposed) throw new Error('Exchange disposed during startup');
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
@@ -213,6 +283,7 @@ export class RustEngineExchange extends BaseExchange {
         publicDataOnly: Boolean(publicDataOnly),
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
+        ...(orderlyNames.has(this.name) ? { tickInterval: this.options.extra?.tickInterval } : {}),
         ...(this.name === 'lighter'
           ? {
               apiKeyIndex: this.options.apiKeyIndex,
@@ -228,10 +299,17 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack' ? { ...transport, now: virtualClock.getCurrentTimeMs } : transport,
+      this.name === 'backpack' || orderlyNames.has(this.name)
+        ? { ...transport, now: virtualClock.getCurrentTimeMs }
+        : transport,
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
+        onDeactivate: () => {
+          this.startupFailure = new Error(`${this.name} credentials were rejected`);
+          for (const wake of this.startupWaiters) wake();
+          this.emitter.emit('deactivate');
+        },
       },
     );
     this.host.start();
@@ -244,7 +322,12 @@ export class RustEngineExchange extends BaseExchange {
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
-    await this.untilLoaded();
+    try {
+      await this.untilLoaded();
+    } catch (error) {
+      this.dispose();
+      throw error;
+    }
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
@@ -278,19 +361,24 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Resolves once markets and tickers, and the account unless public-only, have loaded. */
   private untilLoaded = () =>
-    new Promise<void>((resolve) => {
+    new Promise<void>((resolve, reject) => {
       const ready = () => {
         const loaded = this.store.loaded;
         const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
         return loaded.markets && loaded.tickers && account;
       };
-      if (ready()) return resolve();
-      const unsubscribe = this.store.subscribe(() => {
-        if (ready() || this.isDisposed) {
-          unsubscribe();
-          resolve();
-        }
-      });
+      let unsubscribe = () => {};
+      const wake = () => {
+        if (!this.startupFailure && !this.isDisposed && !ready()) return;
+        unsubscribe();
+        this.startupWaiters.delete(wake);
+        if (this.startupFailure || this.isDisposed)
+          reject(this.startupFailure ?? new Error('Exchange disposed during startup'));
+        else resolve();
+      };
+      this.startupWaiters.add(wake);
+      unsubscribe = this.store.subscribe(wake);
+      wake();
     });
 
   /** Valid once the account's balance loads; the engine's first error says why not. */
@@ -356,6 +444,24 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
 
+  getAccount = async (): Promise<ExchangeAccount> => {
+    if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
+    if (!this.host) await this.start();
+    await this.untilLoaded();
+    const accountId = this.options.applicationId;
+    if (!accountId || this.isPublicDataOnly) throw new Error('Orderly private account ID is required');
+    return { userId: accountId, affiliateId: accountId };
+  };
+
+  setAllLeverage = async (leverage: number) => {
+    if (orderlyNames.has(this.name)) await this.command({ op: 'setLeverage', symbol: '', leverage });
+    else {
+      for (const position of this.store.positions) {
+        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage);
+      }
+    }
+  };
+
   setLeverage = async (symbol: string, leverage: number) => {
     await this.command({ op: 'setLeverage', symbol, leverage });
   };
@@ -402,7 +508,8 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue'].includes(this.name) || orderlyNames.has(this.name))
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };
@@ -416,14 +523,18 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
-    this.command<HistoricalOrder[]>({
+  fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (orderlyNames.has(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('Orderly order history does not support orderId or status filters'));
+    }
+    return this.command<HistoricalOrder[]>({
       op: 'fetchOrderHistory',
       symbol: opts?.symbol,
       from: opts?.from,
       to: opts?.to,
       limit: opts?.limit,
     });
+  };
 
   fetchIncomeHistory = (opts?: IncomeHistoryOptions) =>
     this.command<IncomeRecord[]>({
@@ -482,5 +593,6 @@ export class RustEngineExchange extends BaseExchange {
     this.host?.dispose();
     this.host = undefined;
     super.dispose();
+    for (const wake of this.startupWaiters) wake();
   }
 }

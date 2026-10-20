@@ -33,6 +33,11 @@ by venue, and aliases share their family's module. The default Cargo features
 retain all registered venues for workspace checks. CI builds isolated modules
 and enforces each fixed budget from `harness/wasm-budgets.json`.
 
+The default `@tealstreet/safe-cex-wasm/engine` loader selects the same family
+packages as the explicit SDK loaders. Browser entry points share initialization
+by family so concurrent accounts and aliases keep one live WASM instance;
+failed initialization may retry. Node entry points share Node's module cache.
+
 ## Account transport routing
 
 Venues emit real URLs and logical socket roles; the core never chooses a proxy.

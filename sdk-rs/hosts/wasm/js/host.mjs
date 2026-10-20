@@ -5,7 +5,7 @@
 // transport = {
 //   now(): number,
 //   connect(url, { onOpen, onMessage, onClose }): { send(text), close() },
-//   request({ method, url, headers, body }):
+//   request({ method, url, headers, body, signal }):
 //     Promise<{ status, headers?: string, body: Uint8Array | AsyncIterable<Uint8Array> }>,
 //     (`headers` as `name: value` lines; a streamed body is fed to the engine
 //     chunk by chunk so large lists never sit whole in its memory),
@@ -26,6 +26,7 @@ export class EngineHost {
     this.sockets = new Map();
     this.timers = new Map();
     this.commands = new Map();
+    this.requests = new Map();
     this.nextCommand = 1;
     this.batchMessages = batchMessages;
     this.messages = [];
@@ -97,6 +98,8 @@ export class EngineHost {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    for (const controller of this.requests.values()) controller.abort();
+    this.requests.clear();
     if (this.batchTimer !== undefined) this.transport.clearTimeout(this.batchTimer);
     this.batchTimer = undefined;
     this.messages.length = 0;
@@ -214,6 +217,29 @@ export class EngineHost {
     for (const actions of pendingActions) this.run(actions);
   }
 
+  async request(action) {
+    const id = action.request;
+    const controller = new AbortController();
+    this.requests.set(id, controller);
+    try {
+      const response = await this.transport.request({
+        method: action.method,
+        url: action.url,
+        headers: Object.fromEntries(action.headers),
+        body: action.body,
+        signal: controller.signal,
+      });
+      if (!this.disposed) await this.receive(id, response);
+    } catch (error) {
+      if (this.disposed) return;
+      this.drainMessages();
+      if (this.disposed) return;
+      this.run(this.engine.httpFailed(id, String(error?.message ?? error), this.transport.now()));
+    } finally {
+      this.requests.delete(id);
+    }
+  }
+
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
     for (const action of JSON.parse(actionsJson)) {
@@ -276,23 +302,7 @@ export class EngineHost {
         this.sockets.delete(action.socket);
         break;
       case 'http': {
-        const id = action.request;
-        transport
-          .request({
-            method: action.method,
-            url: action.url,
-            headers: Object.fromEntries(action.headers),
-            body: action.body,
-          })
-          .then(
-            (response) => this.receive(id, response),
-            (error) => {
-              if (this.disposed) return;
-              this.drainMessages();
-              if (this.disposed) return;
-              this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
-            },
-          );
+        void this.request(action);
         break;
       }
       case 'setTimer': {
@@ -311,6 +321,9 @@ export class EngineHost {
       case 'clearTimer':
         transport.clearTimeout(this.timers.get(action.timer));
         this.timers.delete(action.timer);
+        break;
+      case 'deactivate':
+        this.handlers.onDeactivate?.();
         break;
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
@@ -353,10 +366,16 @@ export class EngineHost {
 async function* chunks(stream) {
   if (!stream) return;
   const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    yield value;
+  let complete = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) { complete = true; return; }
+      yield value;
+    }
+  } finally {
+    if (!complete) await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 

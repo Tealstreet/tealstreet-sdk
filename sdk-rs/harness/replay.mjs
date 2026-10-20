@@ -50,11 +50,14 @@ const isPrivate =
   config.private ?? metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
 const replayOptions = {
   ...venue.options,
+  ...metadata?.options,
+  ...(typeof metadata?.testnet === 'boolean' ? { testnet: metadata.testnet } : {}),
   ...(isPrivate
     ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
+const publicReplayClock = !isPrivate && (values.venue === 'mexc' || venue.orderlyProtocol === true);
 const credentials = { key: replayOptions.key, secret: replayOptions.secret, passphrase: replayOptions.passphrase };
 const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
@@ -139,10 +142,10 @@ async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust);
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, replayOptions);
   const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
-  const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
@@ -282,6 +285,7 @@ async function runRust() {
     }
   }
   if (profile) metrics.profile = profile.methods;
+  const protocolErrors = tape.audit?.errors() ?? [];
   host.dispose();
   clock?.restore();
 
@@ -324,7 +328,7 @@ async function runRust() {
     writes: tape.writes,
     missingWrites: tape.missingWrites,
     unusedWrites: tape.missingWrites,
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
     subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),
@@ -390,7 +394,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 async function runTs() {
   const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
-  const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
+  const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
   class TapeWebSocket {
     static CONNECTING = 0;
@@ -605,6 +609,7 @@ async function runTs() {
         })),
       }
     : undefined;
+  const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
   return {
@@ -615,7 +620,7 @@ async function runTs() {
     writes: tape.writes,
     missingWrites: tape.missingWrites,
     unusedWrites: tape.missingWrites,
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
     subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),

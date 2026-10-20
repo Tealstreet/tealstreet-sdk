@@ -19,6 +19,7 @@ pub struct Store {
     ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
     positions: Vec<Position>,
+    position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
     /// Per-market account settings, keyed by market index.
@@ -410,6 +411,14 @@ impl Store {
         self.changes.markets = true;
     }
 
+    /// Preserve venue-defined position identity when symbol/mode cannot derive it.
+    pub fn retain_position_ids(&mut self) {
+        if !self.position_ids {
+            self.position_ids = true;
+            self.changes.positions = true;
+        }
+    }
+
     pub fn loaded(&self) -> Loaded {
         self.loaded
     }
@@ -595,6 +604,15 @@ impl Store {
         if changes.positions {
             let count = self.positions.len();
             size += 8 + (4 + 8 * count).next_multiple_of(8) + 72 * count;
+            if self.position_ids {
+                size += (4 * count).next_multiple_of(8);
+                strings += count;
+                string_bytes += self
+                    .positions
+                    .iter()
+                    .map(|position| position.id.len())
+                    .sum::<usize>();
+            }
         }
         if changes.balance {
             size += 40;
@@ -781,6 +799,12 @@ impl Store {
         ];
         for column in columns {
             w.f64s(positions.iter().map(column));
+        }
+        if self.position_ids {
+            for p in positions {
+                let id = w.string(&p.id);
+                w.u32(id);
+            }
         }
         w.end();
     }
@@ -1195,6 +1219,50 @@ mod tests {
         let mut writer = FrameWriter::new(vec![], 0.0);
         store.write(&pending, &mut writer);
         writer.finish()
+    }
+
+    #[test]
+    fn position_identity_frame_hint_preserves_wire_without_buffer_growth() {
+        for count in [0, 1, 2, 257] {
+            for ids in [false, true] {
+                let mut store = Store::default();
+                if ids {
+                    store.retain_position_ids();
+                }
+                store.set_positions(
+                    (0..count)
+                        .map(|index| Position {
+                            id: format!("position雪{index}"),
+                            symbol: "BTCUSDC".into(),
+                            side: crate::model::PositionSide::Long,
+                            entry_price: 100.0,
+                            notional: 100.0,
+                            leverage: 10.0,
+                            margin_type: None,
+                            position_mode: None,
+                            unrealized_pnl: 0.0,
+                            realized_pnl: None,
+                            contracts: 1.0,
+                            liquidation_price: 50.0,
+                            margin_size: None,
+                            last_update: None,
+                        })
+                        .collect(),
+                );
+                let pending = store.take_pending();
+                let size = 16 + store.frame_size_hint(&pending);
+                let buffer = Vec::with_capacity(size);
+                let capacity = buffer.capacity();
+                let mut writer = FrameWriter::new(buffer, 1.0);
+                store.write(&pending, &mut writer);
+                let frame = writer.finish();
+                assert!(frame.len() <= size);
+                assert_eq!(frame.capacity(), capacity);
+                let mut plain = FrameWriter::new(Vec::new(), 1.0);
+                store.write(&pending, &mut plain);
+                assert_eq!(frame, plain.finish());
+            }
+        }
     }
 
     #[test]

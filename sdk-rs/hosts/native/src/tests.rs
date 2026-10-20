@@ -14,6 +14,9 @@ impl Venue for RecordingVenue {
         self.0.push((cx.now, socket, text.into()));
         cx.send(socket, text);
         cx.log(LogLevel::Info, text);
+        if text == "deactivate" {
+            cx.deactivate();
+        }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, _: u16) {
         self.0.push((cx.now, socket, "closed".into()));
@@ -265,4 +268,44 @@ async fn standalone_event_channel_preserves_delivery_and_receiver_drop_cancellat
     drop(received);
     events.closed().await;
     assert!(events.send(HostEvent::WsClosed(SocketId(7), 1000)).is_err());
+}
+
+#[test]
+fn deactivation_notices_preserve_action_order_after_a_timestamped_batch() {
+    let mut host = host();
+    for (now, text) in [(1.0, "before"), (2.0, "deactivate"), (3.0, "after")] {
+        host.events
+            .send_at(HostEvent::WsMessage(SocketId(1), text.into()), now)
+            .unwrap();
+    }
+    dispatch_next(&mut host);
+    let mut notices = Vec::new();
+    host.execute(&mut |notice| notices.push(notice));
+    assert_eq!(
+        notices,
+        [
+            Notice::Log {
+                level: LogLevel::Info,
+                message: "before".into()
+            },
+            Notice::Log {
+                level: LogLevel::Info,
+                message: "deactivate".into()
+            },
+            Notice::Deactivate,
+            Notice::Log {
+                level: LogLevel::Info,
+                message: "after".into()
+            },
+        ]
+    );
+    assert_eq!(
+        host.engine
+            .venue()
+            .0
+            .iter()
+            .map(|(now, _, _)| *now)
+            .collect::<Vec<_>>(),
+        [1.0, 2.0, 3.0]
+    );
 }

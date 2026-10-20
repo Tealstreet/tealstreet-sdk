@@ -154,10 +154,16 @@ export const workersTransport = () => ({
 async function* chunks(stream) {
   if (!stream) return;
   const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    yield value;
+  let complete = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) { complete = true; return; }
+      yield value;
+    }
+  } finally {
+    if (!complete) await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -231,6 +237,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
             transport,
             {
               onFrame: (frame) => this.broadcast(frame),
+              onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
               onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
             },
           );
@@ -252,6 +259,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
         } finally {
           if (this.starting === starting) this.starting = undefined;
         }
+
         return;
       }
       if (message.op === 'command') {

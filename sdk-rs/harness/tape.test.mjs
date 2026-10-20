@@ -1371,3 +1371,26 @@ test('new venue recorded opens retain incoming routing metadata without changing
   for (const rust of ['bitrue', 'woo', 'lighter']) assert.deepEqual(new Tape(records, { rust }).frames, records);
   assert.deepEqual(new Tape(records, { rust: 'bybit' }).frames, [records[1]]);
 });
+
+test('legacy sockets keep subscription, delivery and close behavior without correlation state', async () => {
+  const address = 'wss://fstream.binance.com/ws';
+  const tape = new Tape([], VENUES.binance, false);
+  const delivered = [], closed = [];
+  const socket = tape.connect(address, () => {}, (text) => delivered.push(text), (code) => closed.push(code));
+  await new Promise(setImmediate);
+  for (const field of ['recordedSocketRequests', 'recordedSocketQueues']) assert.equal(tape[field], undefined);
+  for (const field of ['requests', 'requestIds', 'requestCounts', 'mappedRequests', 'responseIds']) assert.equal(socket[field], undefined);
+  const topic = 'btcusdt@depth20@100ms';
+  tape.send(socket, JSON.stringify({ method: 'SUBSCRIBE', params: [topic], id: 1 }));
+  assert.ok(socket.subscriptions.has(topic));
+  const text = '{"e":"depthUpdate","s":"BTCUSDT","b":[["1","2"]],"a":[["3","4"]]}';
+  assert.equal(await tape.socketFor(address, text, 0), socket);
+  tape.deliver(socket, text);
+  assert.deepEqual(delivered, [text]);
+  tape.send(socket, JSON.stringify({ method: 'UNSUBSCRIBE', params: [topic], id: 2 }));
+  assert.equal(socket.subscriptions.has(topic), false);
+  tape.close(socket, 1006);
+  tape.close(socket, 1006);
+  assert.deepEqual(closed, [1006]);
+  assert.equal(tape.invalidSignatures, 0);
+});

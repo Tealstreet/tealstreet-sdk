@@ -962,7 +962,10 @@ async fn feed_connection(
         url,
         vec![],
         Some(channel),
-        feed.map(|feed| safe_cex_engine::SocketContext { feed, recover }),
+        feed.map(|feed| safe_cex_engine::SocketContext {
+            feed: feed.into(),
+            recover,
+        }),
         send,
     );
     assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));

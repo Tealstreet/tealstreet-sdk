@@ -939,9 +939,26 @@ the error.
 ## Rust engine loading
 
 The registered WASM loader receives the Rust venue name. `loadWebEngine` and
-`loadNodeEngine` select a family package (`backpack`, `binance`, `bingx`, `bitget`, `bitrue`, `blofin`, `bybit`, `cryptocom`, `hyperliquid`, `lighter`, `mexc`, `okx`, `weex`, `woo`); aliases
+`loadNodeEngine` select a family package (`backpack`, `binance`, `bingx`, `bitget`, `bitrue`, `blofin`, `bybit`, `cryptocom`, `hyperliquid`, `lighter`, `mexc`, `okx`, `orderly`, `weex`, `woo`); aliases
 share a module, while different families instantiate separate binaries. Browser
 imports use literal family subpaths so a browser downloads only its venue. Add
 a family to the WASM Cargo features, package exports, shared `venueFamily`
-registry and both loader switches when registering another Rust venue. CI checks
+registry and the explicit/default browser loader switches when registering another Rust venue.
+Default and explicit browser paths share `engine-cache` initialization by family;
+never initialize the same family module twice while an account is alive. CI checks
 each family against `sdk-rs/harness/wasm-budgets.json`.
+
+## Orderly Rust engine
+
+Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue
+with broker options. Production registries must not import the frozen replay
+reference in `src/__tests__/reference/orderly`. ED25519 signatures cover exact
+request bytes. The shared engine transport supports direct requests, proxies
+and the built-in raw HTTP-over-WebSocket adapter (`supportsTunnel: true`).
+Authorization may add intermediary headers but must not change the original
+URL suffix, body, method or venue headers. Socket roles and feed identities
+are declared by the venue; the shared host applies account routing policy.
+Custom provider upgrade headers require a capable host and are checked before
+engine construction. History `orderId`/`status` filters fail explicitly rather
+than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
+for native IDs, margin modes, caller IDs and socket capacity.

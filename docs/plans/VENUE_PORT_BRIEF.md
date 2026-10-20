@@ -52,7 +52,8 @@ script beside `rust:private-tape`. Extend `replay.mjs` generically; never
 break Binance.
 
 Register each WASM family in `hosts/wasm/js/venues.mjs`, package exports,
-`loadWebEngine`'s literal import switch, and `harness/wasm-budgets.json`.
+`loadWebEngine`'s and `hosts/wasm/js/engine.web.mjs`'s literal import
+switches, and `harness/wasm-budgets.json`.
 Aliases share a family. `build.sh` builds every `venue-*` feature separately;
 CI checks each family's size, and loaders select by venue. Never restore an
 aggregate browser module when adding a venue.

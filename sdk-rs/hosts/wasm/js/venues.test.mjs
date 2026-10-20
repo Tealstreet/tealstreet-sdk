@@ -16,6 +16,7 @@ const aliases = {
   hyperliquid: ['hyperliquid'],
   lighter: ['lighter'],
   mexc: ['mexc'],
+  orderly: ['orderly', 'tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],
   weex: ['weex'],
   woo: ['woo'],

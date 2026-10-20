@@ -101,3 +101,20 @@ test('sampling cleanup retains a simultaneous replay error before the write erro
   }), (actual) => actual.name === 'AggregateError' && actual.errors.length === 2
     && actual.errors[0] === replayError && actual.errors[1] === cleanupError);
 });
+
+test('both runtimes snapshot protocol coverage before disposal closes its live audit generations', () => {
+  for (const name of ['runRust', 'runTs']) {
+    const start = source.indexOf(`async function ${name}()`);
+    const snapshot = source.indexOf('  const protocolErrors = tape.audit?.errors() ?? [];', start);
+    const restore = source.indexOf('  clock?.restore();', snapshot);
+    assert.ok(snapshot > start && restore > snapshot, name);
+    let closed = false;
+    const dispose = () => { closed = true; };
+    const errors = vm.runInNewContext(`${source.slice(snapshot, restore)}\nprotocolErrors`, {
+      tape: { audit: { errors: () => closed ? ['missing live subscriptions'] : [] } },
+      host: { dispose }, exchange: { dispose },
+    });
+    assert.equal(closed, true, `${name} actually disposed`);
+    assert.deepEqual(Array.from(errors), [], `${name} captures coverage while sockets are alive`);
+  }
+});

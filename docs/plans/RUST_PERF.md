@@ -745,3 +745,25 @@ Keep14control/build/protocol/manifests as a verified, unmeasured checkpoint;
 merge this landing and extend to15families before freezing new measurements.
 The original11 negative cohort remains unchanged. Current working tree is clean
 at24677c3766 before this integration; never stash or discard checkpoint evidence.
+
+
+Orderly integration phase:mergef66bdc26f9 preserves15optional-family builds,
+adds ordereddeactivation and abortableHTTP/stream cleanup without losing batch
+barriers, raw arrival timestamps, feed routing or cancellation. Public virtual
+clock remains scoped to MEXC and Orderly on both sides; recorded finite epochs
+still applygenerically. Keep incoming strict snapshot request/reply correlation
+and socket-generation audits, plus protocol errors captured beforedisposal;
+legacy sockets avoid allocating correlation-only state. Harness251passes;
+reciprocal independent harness/host reviews pass. Native36, scopedhost76 and
+position-ID reservation1pass. New position identity tails are included in the
+frame reservation, including padding/UTF8 strings, with legacywire unchanged.
+
+Default-loader integration must select a family, coalesce imports per family
+and share browser initialization with explicitloadWebEngine. A portable shared
+cache handles concurrent/alias use and initialization failure retries; Node
+uses the selected CommonJSmodule cache. Keep both browser literalimport switches
+registered. Incoming account startup is single-use, disposals reject pending
+startup, deactivation wakes accountwaiters and customregisteredloader control
+is preserved. Defaultloader4 and OrderlySDKtransport38tests pass after adapting
+new mocks to the required venue and wsMessages interface. Freeze/review this
+merge before15-family builds, baseline and the new predeclaredcomparison.

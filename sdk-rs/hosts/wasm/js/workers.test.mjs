@@ -399,3 +399,17 @@ test('a Workers raw socket failure reports one abnormal close despite a followin
   raw.close(1000);
   assert.deepEqual(events, ['error', 1006]);
 });
+
+test('credential deactivation reaches connected Workers clients once', async () => {
+  const received = [];
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    start() { return '[{"op":"deactivate"}]'; }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send: (text) => received.push(JSON.parse(text)) };
+  object.clients.add(client);
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'orderly', options: {} }));
+    assert.deepEqual(received, [{ op: 'deactivate' }]);
+  } finally { object.leave(client); }
+});

@@ -16,6 +16,7 @@
     feature = "venue-backpack",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
+    feature = "venue-orderly",
     feature = "venue-lighter",
     feature = "venue-okx"
 )))]
@@ -51,6 +52,8 @@ use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "venue-okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "venue-orderly")]
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "venue-weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "venue-woo")]
@@ -111,6 +114,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "venue-backpack",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
+    feature = "venue-orderly",
     feature = "venue-lighter",
     feature = "venue-okx"
 ))]
@@ -134,6 +138,7 @@ struct EngineOptions {
         feature = "venue-woo",
         feature = "venue-cryptocom",
         feature = "venue-hyperliquid",
+        feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-bitget",
         feature = "venue-okx"
@@ -159,6 +164,7 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[cfg(any(
         feature = "venue-hyperliquid",
+        feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-woo"
     ))]
@@ -176,6 +182,9 @@ struct EngineOptions {
     #[cfg(feature = "venue-weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "venue-orderly")]
+    #[serde(default)]
+    tick_interval: Option<f64>,
 }
 #[cfg(feature = "venue-hyperliquid")]
 #[derive(Deserialize)]
@@ -204,6 +213,7 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    Deactivate,
     WsConnect {
         socket: u32,
         url: &'a str,
@@ -276,7 +286,7 @@ impl ActionOut<'_> {
             } => {
                 json_string_length(url)
                     + channel.map_or(0, json_string_length)
-                    + context.map_or(0, |context| json_string_length(context.feed))
+                    + context.map_or(0, |context| json_string_length(&context.feed))
                     + headers.as_ref().map_or(0, |headers| {
                         headers
                             .iter()
@@ -369,6 +379,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -687,6 +698,7 @@ impl WasmEngine {
         feature = "venue-backpack",
         feature = "venue-weex",
         feature = "venue-hyperliquid",
+        feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-okx"
     ))]
@@ -701,6 +713,25 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-orderly")]
+            "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+                Box::new(Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })))
+            }
             #[cfg(feature = "venue-lighter")]
             "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
                 testnet: options.testnet,
@@ -1008,7 +1039,7 @@ mod action_tests {
                 url: "wss://example.test".into(),
                 channel: Some(safe_cex_engine::SocketChannel::Business),
                 context: Some(safe_cex_engine::SocketContext {
-                    feed: "swap\nfeed",
+                    feed: "swap\nfeed".into(),
                     recover: true,
                 }),
             },
@@ -1030,5 +1061,11 @@ mod action_tests {
         );
         assert!(rows[1].get("channel").is_none());
         assert!(rows[1].get("context").is_none());
+    }
+    #[test]
+    fn forwards_deactivation_to_the_host() {
+        let encoded = encode(&[Action::Notice(Notice::Deactivate)]);
+        let rows: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(rows, serde_json::json!([{"op": "deactivate"}]));
     }
 }
