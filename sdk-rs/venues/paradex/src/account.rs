@@ -412,10 +412,8 @@ impl Account {
                     .as_ref()?
                     .payload_request(&signature)
                     .map(|payload| {
-                        let field = format!(
-                            "\"signature\":{}",
-                            serde_json::to_string(&signature).expect("string serializable")
-                        );
+                        let mut field = String::from("\"signature\":");
+                        field.push_str(&serde_json::to_string(&signature).expect("string serializable"));
                         (payload, SignatureTarget::JsonField(field))
                     })
             })
