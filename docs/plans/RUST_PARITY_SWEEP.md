@@ -324,3 +324,21 @@ than treating the original port boundary as a waiver.
   all25venue WASM ceilings. Merged CI preserves both OKX public additions and
   all Binance variants:91replays(34public/57private),25venue/30Rustjobs.
   Final root/compiled-WASM/size/replay verification follows on this union.
+
+### Final merged native and transport quality
+
+- Locked workspace native2431+3doctests PASS. The later native-host routing
+  repair adds one test; its final complete41/41nativehost run plus strict
+  all-target Clippy PASS replaces the prior40host cases, yielding2432+3 on
+  byte-identical remaining Rust sources. This is a split-run attribution;
+  exact-head CI will rerun the complete final workspace.
+- Workspace fmt/bans/native all-target Clippy PASS; final locked full-workspace
+  wasm32 Clippy PASS. Native-host strict golden counter now requires all60
+  cases; the test-only header conversion warning and original stale56counter
+  failure are retained in logs and corrected before the passing final run.
+- Final331/331 SDK/frame/transport tests, full SDK typecheck/lint and independent
+  merge/policy review PASS. Native host consumed the same frozen provider-derived
+  golden fixture. `readPublicHttp` is optional host policy, contains no secret,
+  and adds no WASM payload/engine field.
+- Runtime is frozen at47f68ce883. Final root44/28/27 checks and combined25-venue
+  release build started; no public CPU scoring overlaps this quality work.
