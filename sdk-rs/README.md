@@ -54,8 +54,10 @@ and React Native load it for every venue. `corepack yarn rust:build-wasm
 `hosts/wasm/pkg/{web,node}/<family>`. The default browser/Workers loader
 (`@tealstreet/safe-cex-wasm/engine`) fetches only the family of the account's
 venue (`js/venues.mjs` maps every venue name to its family), and a bundler
-emits one chunk per family. A family package is about a tenth of the combined
-engine's bytes and cold-load CPU (`docs/plans/RUST_WASM_FAMILIES.md`).
+emits one chunk per family. Any browser or Metro bundle that includes safe-cex
+resolves all 27 family imports, so run `--families` before bundling. A family
+package is about a tenth of the combined engine's bytes and cold-load CPU
+(`docs/plans/RUST_WASM_FAMILIES.md`).
 `--venue hyperliquid` (or any venue name) builds that venue's family in place
 of the combined bindings, for replay gates. CI applies the 1.2 MB budget to
 every family package.
