@@ -78,3 +78,11 @@ condition = "AND"
 paths = ["^sdk-rs/harness/venues\\.mjs$"]
 regexTarget = "secret"
 regexes = ["^cmVwbGF5LXNlY3JldA==$"]
+
+# Existing Polymarket boundary-test HMAC key: base64("safe-fake-secret").
+[[rules.allowlists]]
+description = "Public synthetic Polymarket boundary-test API secret."
+condition = "AND"
+paths = ["^packages/safe-cex/src/__tests__/audit-regressions/polymarket\\.rust-boundary\\.wasm\\.test\\.ts$"]
+regexTarget = "secret"
+regexes = ["^c2FmZS1mYWtlLXNlY3JldA==$"]

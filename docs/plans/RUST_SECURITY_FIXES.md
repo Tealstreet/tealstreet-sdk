@@ -420,3 +420,22 @@ live trading, weakened parity oracle, or performance threshold changes.
   no runtime/build/fixture path is excluded. Recheck artifact manifests and
   rerun the full Wasm suite plus all remaining combined checks before public
   timing. No performance, semantic or partial-write assertion is relaxed.
+
+### Combined acceptance and exact scanner fixture policy
+
+- All combined checks pass: 100 host tests, 444 Wasm SDK tests across 16
+  files, server/MCP/CLI/React Native loaders, frame/native-session contracts,
+  product semantics, startup/polling and Aster/Bitget/spot protocol regressions.
+  Scripted smoke 10/10 and harness 601/601 pass, plus MCP build/smoke. All
+  31 immutable artifact manifests recheck successfully; runtime remains `9fe87d1eed`.
+- Exporting the newly touched Polymarket test exposes its pre-existing public
+  synthetic API secret (base64 of `safe-fake-secret`). Preserve the scanner's
+  one-finding receipt. Add an exception requiring both that exact public byte
+  string and exact test path, consistent with the narrowed vector policy.
+  Refreshed export: 157 files, zero findings. A new secret in that same path
+  and the known fake secret in another path each remain detected (one finding,
+  exit 1). No real credential was identified; no broad exemption is restored.
+- Before timed public replays, the external guard separately checks staged and
+  unstaged paths, since aggregate `git diff HEAD` can hide canceled index/work
+  tree changes. Current status and both diffs were independently confirmed
+  clean during accepted checks. This guard improvement changes no SDK input.
