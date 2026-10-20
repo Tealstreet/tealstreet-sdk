@@ -188,3 +188,35 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
   strict; do not reuse old sampler scores as current measurements.
 - Updated final plan:49 local replays (23public/26private),7contract controls,
   all24per-feature size limits; CI83replays(30public/53private),29Rustjobs.
+
+### GRVT supported-product extension (scope correction)
+
+The deeper source audit supersedes the initial perpetual-only conclusion above:
+TS catalog, generic instrument-hash signing, individual/global cancellation,
+positions/orders and chaser fills support returned FUTURE/CALL/PUT instruments.
+The original port's product boundary is a declared supported gap under this
+sweep. STABLE_PERP follows the generic TS path but must retain its exact native
+kind and the TS `isPerpetual` flag rather than guessing financial semantics.
+
+1. Public/private phase: retain validated native kind alongside signing metadata;
+   admit documented derivatives, set exact product flags, preserve metadata-refresh
+   safety, and read complete mixed product account snapshots/history without a
+   hardcoded perpetual filter. Test simultaneous same-base/perp/expiry/strike
+   identities, quantities, PnL and stale/failed snapshot protection.
+2. Trading/query phase: reuse validated generic native signing and conversions.
+   Exact symbol cancellation must obtain authoritative instrument-scoped open
+   orders and cancel only those native identities. Never use kind/base/quote
+   bulk cancellation for dated/option symbols: the endpoint has no instrument
+   selector and would also cancel sibling expiries/strikes. Fail closed on
+   incomplete reads; retain global account-wide cancellation. Paired TS repair
+   follows the same safe symbol boundary. Test partial failures/session rotation,
+   pagination/truncation, no write retries, fill progress and sibling preservation.
+3. Harness/gates phase: extend documented mixed-product fixtures and independent
+   signature/identity controls, review each phase, then rerun GRVT/Binance and
+   touched-venue gates plus the fixed per-venue size ceiling. Live non-perpetual
+   availability is unverified, not evidence of TS unsupported capability.
+
+Native GRVT and paired TS/harness work have disjoint owners and cross-review;
+commit at stable phases. No gate normalization, raised budget or broad-copy TS
+method bodies. The census/PR body must reflect the closed product gap rather
+than treating the original port boundary as a waiver.
