@@ -886,7 +886,13 @@ impl Venue for KucoinSpot {
         let data = match result {
             Ok(d) => d,
             Err(e) => {
-                self.on_request_failed(cx, pending, &e);
+                if let Pending::Write(job) = pending {
+                    cx.command_error(job.command, &e);
+                    let error = crate::wire::write_failure(response.status, response.body, e);
+                    self.write_failed(cx, job, error);
+                } else {
+                    self.on_request_failed(cx, pending, &e);
+                }
                 return;
             }
         };
@@ -1220,7 +1226,7 @@ impl Venue for KucoinSpot {
             }
             Pending::Write(j) => {
                 cx.command_error(j.command, error);
-                cx.done(j.command, Err(error.into()));
+                self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
             Pending::Candles { command, .. }
