@@ -772,3 +772,23 @@ Lighter/MEXC fail-closed guards remain intact.42SDK and36host checks PASS.
 Engine61/Bitunix58 and crypto24+integration/doctests PASS; deleted crypto
 wrappers have no surviving callers. Root typecheck44/lint28 PASS; preceding
 full root27tasks PASS. Final workspace and exact merged-head CI continue.
+
+### Lighter snapshot arithmetic correction
+
+On965495d88d, all14other venue replay lanes pass, including Bitunix with its
+throughput profile (WASM774,849bytes; TS/Rust main452.8/372.4ms, steady
+197.1/151.3ms, retained3.6/2.1MB, peak17.9/15.8MB; private42records PASS).
+Lighter's exact intermediate book hashes expose duplicate-price REST snapshot
+amounts accumulated with plain Rust += instead of TS safe-math.add. Independent
+fixture arithmetic reproduces both CI hashes exactly:4.3779200000000005
+versus4.37792. Fix production Lighter snapshot aggregation only, preserving
+TS's per-add decimal rounding and duplicate source order through stable sort.
+Prices/delta replacement/nonce handling and all gate comparisons stay intact.
+
+A captured-payload native regression fails before/passes after for both REST
+and WebSocket snapshots, both sides, tiny quantities and distinct off-step
+prices. All86Lighternative tests, scopedfmt/Clippy and independent source
+review PASS. Native WASM compilation PASS; complete public/private replays and
+exact-head CI follow this reviewable checkpoint. Full prior workspace/WASM
+checks PASS; local root rerun encountered import deadlines on the busy host,
+with no deadline/assertion changes. Final CI must be entirely green to merge.

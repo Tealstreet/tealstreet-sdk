@@ -131,6 +131,45 @@ fn book_nonce_chain_ignores_offsets_and_rejects_gap() {
     );
 }
 #[test]
+fn rest_and_ws_snapshots_sum_duplicate_sizes_without_float_noise_or_price_quantization() {
+    // BTC REST seed rows from the committed live tape share this exact price.
+    let depth = r#"{"nonce":10,"bids":[{"price":"81647.2","remaining_base_amount":"0.00523"},{"price":"81647.2","remaining_base_amount":"4.37269"},{"price":"81647.21","size":"0.00000001"},{"price":"81647.21","size":"0.00000002"}],"asks":[{"price":"81648","size":"0.1"},{"price":"81648","size":"0.2"},{"price":"81648.001","size":"0.00000001"}]}"#;
+    for rest in [true, false] {
+        let (mut e, socket) = seeded();
+        book(&mut e);
+        let request = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        if rest {
+            reply(&mut e, request, depth);
+        } else {
+            send(
+                &mut e,
+                socket,
+                2_000.0,
+                &format!(
+                    r#"{{"channel":"order_book:0","type":"subscribed/order_book","order_book":{depth}}}"#,
+                ),
+            );
+        }
+        let book = e.book("ETH").unwrap();
+        assert_eq!(
+            book.bids(),
+            [(81647.21, 0.00000003), (81647.2, 4.37792)],
+            "REST={rest}"
+        );
+        assert_eq!(
+            book.asks(),
+            [(81648.0, 0.3), (81648.001, 0.00000001)],
+            "REST={rest}"
+        );
+    }
+}
+#[test]
 fn rest_book_seed_cannot_replace_newer_ws_and_depth_is_not_truncated() {
     let (mut e, s) = seeded();
     book(&mut e);
