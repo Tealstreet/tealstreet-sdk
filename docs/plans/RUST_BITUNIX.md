@@ -3253,3 +3253,20 @@ Consumer loader totals20 (server11/MCP5/CLI2/RN2), packagedMCP smoke PASS.
 Independent admission audit approves exactlyone qualifiedlifecycle attempt:
 originalstackpoints to baseline765 and emptyoutputdirectory, not a measured
 performance outcome. Native jobs are stopped beforequalification/replay.
+
+## Overseer load-rule override: publish for strict CI verification
+
+2026-10-20T15:02UTC overseer directs focusedlocal checks only with
+CARGO_BUILD_JOBS=4; no localWASMrelease/timing/size/sweep jobs. Push and let
+CI run these gates; merge onlygreen. This supersedes the earlier localfourgate
+beforepush plan. Stop only our waiting shell51203/qualifier51217 before ANY
+freshlifecycle replay was admitted (69419 exits143; noqualifiedreplaylog).
+Latest aggregateCPU700.7>500; its qualification log preserves everyreading.
+No local releasegate script was started and no new performance sample exists.
+
+Publish current reviewed/source-verified checkpoint and explicitly label all
+pre-c44 performance receipts historical. Actualheadround2 source reviews,
+all41exactheadCIchecks including mandatoryBitunix/Binance gates, complete
+Bitrue and lifecycle remain prerequisites to merge. No deadline, sampler,
+CPU/memory/module cap, inputfixture or equality/oracle change. No completed
+performancefailure is retried unchanged. Then winddown, nofollowupwork.
