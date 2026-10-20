@@ -106,133 +106,104 @@ ordinary provider proxy selection remains intact.
 
 Independent Bitrue-owner review found two P1 cases and one P2 case: auth URL
 contains `/auth/{subkey}`, JWT must bypass account HOW/proxy routing, and
-returned query arrays require TS's comma serializer. Fixes are being verified
+returned query arrays require TS's comma serializer. Fixes were verified
 with real suffixed paths, host route metadata and array regression cases.
 Independent re-review passes for the corrected wrapper, route policy and
-inventory scope. Root focused TS checks passed 241 tests before the final
-auth-path/array cases were added; full rerun is required for the final head.
+inventory scope. The final repository suite also covers
+the auth-path, array and callback receiver/arity regressions.
 
-## Implementation checkpoint
+## Implementation and reviews
 
-- Bitrue implementation `c114e7af84`, fresh fixture `62b5c23ca6`: 67 native
-  tests, 22 TS contracts/history tests and the real WASM SDK boundary pass.
-  Standard public/private gates pass; exact proof is `/tmp/parity-bitrue-proof.json`.
-  Public medians TS/Rust 272.549/221.129 ms CPU, 178.799/143.902 ms steady,
-  18,556,825/2,658,340 retained bytes. WASM 748,567 bytes.
-- Paradex phase peer review passes after auth-route and query serializer fixes.
-  Engine 61, native host 40, Paradex 113 tests pass; host tests 58 and a real
-  SDK-to-WASM delegated signing vector pass. Native disposal now cancels the
-  pending signer callback when the host receiver closes. Standard behavioral
-  replays pass, but the signing addition currently exceeds the fixed WASM
-  budget by 1,453 bytes; size work is still required before landing.
-- KuCoin spot peer reviews found and fixed dropped late executions, unsafe
-  partial/malformed snapshots, and missing caller context on uncached native
-  amendment/cancellation. Legacy amendment parsing remains unchanged; a
-  spot-only `amendOrderWithSymbol` operation carries the explicit context.
-  Entire KuCoin crate with spot at that checkpoint: 122 tests and all-target
-  Clippy pass (corrected the earlier summed total; individual groups unchanged).
-- Shared integration peer review passes. Currency and lookup result comparison
-  symmetrically project transfer-model financial fields and identity for both
-  implementations; tests prove financial/identity corruption still differs.
-  Harness 314 tests pass. Routing/SDK focused suite 239 tests passes. Full root
-  typecheck (44 tasks) and lint (28 tasks) pass before the final small edits.
-- KuCoin private HOW now follows actual TS API factories even when the tunnel
-  preference is false/unset; eighteen real-factory cases and six serialized
-  native golden cases cover that policy. Paradex JWT fetch always goes direct.
-- Intentional KuCoin spot TS fixes: deduplicate executions, preserve newer
-  private state and last-good orders across stale/failed/malformed reads, and
-  encode caller IDs as URL components. Listed in `KNOWN_TS_FIXES`; no financial
-  output rewriting is used.
-- Remaining: size budget, all final-head public/private replays (including
-  KuCoin futures/spot and Binance), complete checks, adversarial PR review and CI.
+- Bitrue: `c114e7af84`, positive-query follow-up `3d7f54506a`. Native 68
+  tests pass. Cache/open-order lookup matches TS aliases, sentinels, symbol scope,
+  non-definitive misses and failure fallback without account-store mutation.
+  Duplicate placement-unit bookkeeping is removed only from the returned lookup
+  copy; financial extras and the original Store remain intact. Independent review
+  passes. Unsupported TS histories and mode setters remain skipped, as above.
+- Paradex: delegated host/engine boundary, direct JWT route, generic remote HTTP
+  adapter and callback receiver/arity fixes are implemented and reviewed. Native
+  venue 115 tests pass. The exact opaque signature/header bridge is verified by
+  two actual SDK-to-WASM tests, including CR/LF rejection before HTTP and native
+  cancellation/deadline tests. `remoteSigner` alone does not replace TS's local
+  key/payloadSigner requirement for JWT acquisition.
+- KuCoin Spot: typed public/private/trading/query state machine, feature-gated
+  registration, fresh bullet-token recovery and SDK context commands are in place.
+  Native 135 tests pass, including 36 Spot. Current/newer malformed financial rows
+  are rejected before execution emission/dedup; rejected IDs remain reusable.
+  Late distinct executions survive stale/terminal state fences. Missing/null
+  required balances preserve good state. Missing/null/empty amend ACK IDs retain
+  the original ID, matching TS. Root, Bitrue and independent correctness reviews
+  pass after fixes (`84dd4f063e`, `d784821eed`).
+- Intentional Spot TS fixes are listed in `KNOWN_TS_FIXES`: deduplicate executions;
+  preserve newer private state and good snapshots across stale/failed/malformed
+  reads; reject malformed financial rows; encode native caller IDs as URL parts.
+  The entry performs no financial output rewriting. Lookup/currency comparison
+  symmetrically projects transfer-model fields for both implementations, with
+  mutation tests retaining financial and identity differences.
+- Landing integration: Phemex `db10d6bfd3`, Coinbase `916fc8c498`, Polymarket
+  `5be8a2c727`, GRVT `168a639673`. Independent merge reviews preserve incoming
+  capabilities and this lane's SDK/host/harness changes. Exhaustive test action
+  handlers reject unexpected delegated signing; new Spot-only commands receive
+  explicit unsupported replies in the strict Polymarket/GRVT dispatchers.
+  Other venue capability gaps and roster rows remain outside this lane's scope.
 
-### Landing integration and review follow-up
+## Size and packaging
 
-- Merged landing Phemex `45d7a3fb98` in `db10d6bfd3`, retaining both sets of
-  host/SDK registrations, harness controls, optional byte/text APIs and signing
-  callbacks. This imports the landing structure only; Phemex capability gaps
-  remain outside this lane's scope.
-- Fresh independent review found two inherited TS financial bugs in KuCoin
-  spot: malformed WS executions/order rows could reach the store, and missing/
-  null required REST balance fields became zeros. Fixes preserve good state,
-  validate execution fields before emission, and retain late executions before
-  stale-order/terminal fences. Follow-up review also guards a newer WS row
-  whose total size is smaller than a previously observed cumulative fill.
-- Bitrue private tape now includes a positive client-ID lookup in addition to
-  non-definitive misses; the comparison promotes documented raw client-ID
-  aliases while retaining all financial/native identities.
-- Repository tests pass (27 tasks; safe-cex 7,254 tests in each invocation),
-  root typecheck and lint pass. Subsequent small fixes need focused/final checks.
-- Size experiment: removing the body re-parser and using a bounded vector
-  made the pre-landing artifact only 125 bytes over budget. The landing's
-  optional text byte/batch ABI raises the excess to 3,591 bytes. A formatter
-  experiment added 36 bytes and was reverted. The next reviewable trim is to
-  omit optional text byte/batch exports from the standalone Paradex build:
-  its hot path is SBE binary, and the host already supports ordinary text
-  fallback for control messages. Combined builds retain those optional APIs.
-- Optional text ingress saved 985 bytes but left Paradex 2,606 bytes over the
-  unchanged budget. The next trim replaces only the WASM signer-header JSON
-  ingress with validated header lines; the callback and native APIs stay typed.
-  Peer review passes for byte preservation and rejection of CR/LF injection.
-- Full workspace Clippy exposed Bybit's exhaustive test action match after the
-  shared signing action was added. Its harness now explicitly rejects delegated
-  signing, preserving the local signer assumption; independent review passes.
-- Landing advanced to Coinbase `5c0e437faf`; merge it before final artifact
-  builds. Coinbase capabilities and the roster-wide sweep remain outside scope.
-- Coinbase landing merged in `916fc8c498`, Polymarket landing `a0c11afd87`
-  merged in `5be8a2c727`. Independent merge reviews pass. Both retain this
-  lane's scoped registrations and the incoming venue APIs/transfer layouts.
-- Header-line ingress `77ebeed5e3` passes six standalone WASM tests, 37 JS host
-  tests after Coinbase integration, and two actual SDK signing tests. The latter
-  proves exact bridge bytes separately from normal HTTP header whitespace
-  normalization. The Coinbase-only `accountId` export is now feature gated in
-  `3d6144d555`; combined/Coinbase builds retain it.
-- The latest artifact is 1,262,278 bytes, 3,987 over budget after incoming
-  prediction metadata added common Store/frame work. Add an engine feature for
-  this optional metadata, enabled by Polymarket, to keep other standalone builds
-  lean while preserving its complete behavior and frame layout when enabled.
-- Independent Spot re-review found execution geometry needed validation before
-  emitting or consuming a trade ID. Bound by explicit native total/cumulative
-  quantities; preflight the known-fill floor on current/newer open rows while
-  retaining legitimate older/terminal executions. Regression/fix in progress.
-- Current complete root lint passes 28 tasks. The merged-source native and
-  harness pipelines are running; prior incomplete runs spanning landing merges
-  are not final gate evidence.
+The fixed per-venue budget remains **1,258,291 bytes**. Paradex signing was
+trimmed through a typed precomputed hash, bounded pending vector, in-place
+signature field replacement and validated header-line WASM ingress. Callback
+headers remain a Record; native event headers remain typed pairs. Exact bridge
+bytes are distinguished from ordinary HTTP header whitespace normalization.
 
-### Final verification checkpoint
+Standalone Paradex omits optional text byte/batch ingress (SBE binary and stable
+text control entry remain) and Coinbase's account-ID ABI; combined builds retain
+those APIs. Optional prediction storage/frames use the engine `prediction`
+feature, enabled by Polymarket. Feature-off/on engine tests (67/69), exact frame
+layout/lifecycle tests and Polymarket's 87 native tests pass. Feature-enabled
+behavior is unchanged.
 
-- Prediction packaging `131fa13fae`: engine feature off/on 67/69 tests,
-  Polymarket 87, standalone Paradex WASM 6 and both scoped Clippy modes pass.
-  Independent review passes; feature-on frame behavior is unchanged.
-- Spot execution preflight `84dd4f063e`: 135 native tests, including 36 Spot,
-  and Clippy pass. Root and Bitrue independent reviews pass. Invalid execution
-  IDs remain reusable by corrected native rows; legitimate late fills survive.
-- Full workspace: 2,141 native tests, fmt, all-target Clippy, wasm32 Clippy and
-  banned-pattern checks pass. Root typecheck 44 tasks, lint 28 tasks, harness
-  373 tests pass. Repository tests are rerunning after a fixture-order-only
-  Coinbase merge fix; all 58 by-name routing golden values are unchanged.
-- Paradex standard standalone build `26fd74339e`: web and Node each
-  **1,257,099 bytes**, SHA-256
-  `75a8611dbcbbb0ebe6b217bbbe97baf64f85a2113c4dc451c7a5c3700be4765b`.
-  The fixed 1,258,291-byte budget is unchanged. Only its standalone host uses
-  `opt-level=2`; default and other standalone builds retain their profiles.
-  Standard build reproduces the measured candidate byte for byte.
-- Paradex public three-run gate passes: 15,085 frames, 66 markets/tickers,
-  two books. Median TS/Rust CPU 824.587/768.698 ms, steady 508.390/389.793 ms,
-  retained 22,252,865/2,386,964 bytes. Private correctness passes 33 frames,
-  15 commands; two actual SDK signing tests pass on the same artifact.
-  Proof: `/tmp/parity-paradex-proof.json`. Normal egress comparison is enabled.
-- Remaining: final repository tests; Binance and Bitrue replays; feature-on
-  Polymarket packaging replay; KuCoin Spot SDK/capture/public/private gates and
-  futures gates; combined build/host SDK tests; PR reviews and green CI.
+Only the standalone Paradex host uses `opt-level=2`; ordinary/default builds
+retain their existing profiles. Standard Yarn builds reproduce the measured
+artifact exactly: web and Node each **1,257,099 bytes**, SHA-256
+`75a8611dbcbbb0ebe6b217bbbe97baf64f85a2113c4dc451c7a5c3700be4765b`.
+Its CPU, memory, private replay and SDK tests pass; this is a measured compiler
+tradeoff with no budget or gate relaxation.
 
-- GRVT landing `5d7589f296` merged in `168a639673`; independent merge review
-  passes. Added explicit unsupported handling for the Spot-only amendment command
-  in GRVT's exhaustive command dispatcher, with peer review and workspace Clippy.
-  Its new harness baseline/async major-GC measurement is preserved, so previous
-  performance numbers are checkpoints: final replays are refreshed under it.
-  Paradex's post-merge standard artifact is byte-identical to the recorded SHA.
-- Post-GRVT typecheck 44 tasks, lint 28 tasks and harness 391 tests pass. Native
-  checks are completing. The repository rerun uses serial Turbo tasks and four
-  Vitest workers after two constructor/import timeout failures under parallel load;
-  assertions and timeouts are unchanged.
+Bitrue's initial final replay missed main-thread CPU by 0.3 ms (259.623 versus
+259.853 ms) despite matching behavior and passing steady CPU/memory. Raw runs
+showed narrow margins. A standalone venue-crate `opt-level=3` candidate is being
+measured for a robust margin; the combined build retains its size profile. The
+failed checkpoint is retained, and no failed gate is reported as passed.
+
+## Final gates
+
+All gates use normal egress comparison. The GRVT landing's symmetric
+before-verifier-setup baseline and async major-GC measurement are retained;
+performance checkpoints from before that merge have been refreshed.
+
+| Venue | Public frames | TS/Rust CPU ms | TS/Rust retained bytes | Private frames/commands | Status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Paradex | 15,085 | 1,362.011 / 1,143.063 | 18,758,073 / 2,352,276 | 33 / 15 | PASS, 3 public runs; SDK 2 |
+| Binance | 873 | 298.521 / 157.508 | 16,384,705 / 2,511,524 | 14 / 3 | PASS, 3 public runs |
+| Bitrue | 3,208 | pending optimization | pending final proof | 23 / 8 | Private + SDK 1 PASS; public pending |
+| KuCoin Spot | pending fresh capture | pending | pending | pending | Pending package handoff |
+| KuCoin futures | pending fresh capture | pending | pending | pending | Pending package handoff |
+| Polymarket packaging | existing fixture | pending | pending | pending | Pending feature-on replay |
+
+Paradex public capture has 66 markets/tickers and two books. Binance has 917
+markets, 783 tickers and three books. Both post-GRVT standard artifact hashes
+match their earlier builds byte for byte. Exact commands, tape hashes, raw runs
+and artifact provenance are in `/tmp/parity-paradex-proof.json` and
+`/tmp/parity-binance-proof.json`; final numbers will be retained here and in PR.
+
+Repository verification passes: **2,228 native workspace tests**, fmt,
+workspace/all-target Clippy, wasm32 Clippy and bans; root typecheck **44 tasks**,
+lint **28 tasks**, harness **391 tests**, repository tests **27 tasks** with
+safe-cex **7,333 tests in each test-ci/test-unit invocation**. The final repository
+run uses serial Turbo tasks and four Vitest workers after import/constructor
+wall-clock timeouts under parallel load; assertions and timeouts are unchanged.
+Spot's final ACK adjustment also passes its full 135-test crate and Clippy.
+
+Remaining: Bitrue public performance; feature-on Polymarket packaging replay;
+KuCoin Spot actual SDK, fresh capture/public/private gates and futures gates;
+combined build/host/SDK tests; PR correctness reviews and exact-head green CI.
