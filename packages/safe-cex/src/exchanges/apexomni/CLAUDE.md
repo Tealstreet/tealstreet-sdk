@@ -736,3 +736,24 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends the caller's ID as both `clientId` and `clientOrderId`; it is hashed into the signed nonce, so it is resolved before SDK init and signing. Rule: non-empty, no whitespace.
 - Mapped orders expose `clientOrderId` from the venue's `clientOrderId` or `clientId` field.
+
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+## Rust startup valuation
+
+The Rust engine keeps reported private `unrealisedPnl` authoritative for positions
+and the balance aggregate. Public ticker placeholders, zero, non-finite or
+conflicting quotes cannot manufacture a funded-account loss. When a private
+position omits PnL, Rust retains that position's prior finite valuation and warns;
+new exposure remains visible with unavailable PnL represented as zero. Realized
+PnL stays separate. Wallet total remains `totalEquityValue - upnl`, with native
+margin-derived free/used values preserved. The dedicated native
+`tests/startup_valuation.rs` covers startup, native updates and omission recovery.

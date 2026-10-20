@@ -64,7 +64,8 @@ pub(crate) struct Public {
     supervisor: Supervisor,
     sequence: Option<u64>,
     poll: Option<TimerId>,
-    retry: Option<TimerId>,
+    // Instruments are `None`; concurrent CFM and Spot product reads each own a key.
+    retry: safe_cex_engine::startup::Backoff<Option<ProductKind>>,
     kind: Option<ProductKind>,
     pub books: HashMap<String, Depth>,
     candles: HashMap<(String, String), (u32, Option<Candle>)>,
@@ -542,7 +543,7 @@ impl Coinbase {
     }
     pub(crate) fn public_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         pending: &mut Request,
         item: &str,
     ) {
@@ -559,6 +560,7 @@ impl Coinbase {
                     }
                     if row.base_increment <= 0. || row.quote_increment <= 0. {
                         *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let symbol = format!("{}-INTX", row.symbol);
@@ -597,6 +599,7 @@ impl Coinbase {
                         .any(|n| *n < 0.)
                         {
                             *invalid = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                             return;
                         }
                         tickers.push(Ticker {
@@ -625,7 +628,10 @@ impl Coinbase {
                         });
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Request::Products {
                 markets,
@@ -640,6 +646,7 @@ impl Coinbase {
                         || (row.product_type == "SPOT" && future)
                     {
                         *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let spot = row.product_type == "SPOT" && !future;
@@ -670,6 +677,7 @@ impl Coinbase {
                     let Some(contract) = contract.filter(|n| n.is_finite() && *n > 0.) else {
                         if !expiring {
                             *invalid = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                         }
                         return;
                     };
@@ -679,6 +687,7 @@ impl Coinbase {
                         || row.base_max_size < row.base_min_size
                     {
                         *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let base = row
@@ -741,7 +750,10 @@ impl Coinbase {
                         ..Ticker::default()
                     });
                 }
-                Err(_) => *invalid = true,
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Request::Candles { rows, invalid, .. } | Request::Daily { rows, invalid, .. } => {
                 match serde_json::from_str::<CandleRow>(item)
@@ -795,7 +807,7 @@ impl Coinbase {
                 invalid,
                 initial,
             } => {
-                if invalid {
+                if invalid && markets.is_empty() {
                     self.public_failed(
                         cx,
                         Request::Instruments {
@@ -808,9 +820,15 @@ impl Coinbase {
                     );
                     return;
                 }
+                let missing_quotes = invalid && tickers.is_empty();
+                if !missing_quotes {
+                    self.public.retry.succeeded(cx, &None);
+                }
                 if initial {
                     cx.store.set_markets(markets);
-                    cx.store.set_tickers(tickers);
+                    if !missing_quotes {
+                        cx.store.set_tickers(tickers);
+                    }
                     self.public_pending(cx);
                     self.connect_public(cx);
                     if self.options.public_data_only || self.options.key.is_empty() {
@@ -818,11 +836,26 @@ impl Coinbase {
                         cx.store.set_positions(vec![]);
                         cx.store.set_balance(Default::default());
                     }
+                } else if !cx.store.loaded().tickers && !tickers.is_empty() {
+                    cx.store.set_tickers(tickers);
                 } else {
                     for ticker in tickers {
                         cx.store
                             .update_ticker(&ticker.symbol.clone(), |old| *old = ticker);
                     }
+                }
+                if missing_quotes {
+                    self.public_failed(
+                        cx,
+                        Request::Instruments {
+                            markets: vec![],
+                            tickers: vec![],
+                            invalid: true,
+                            initial: false,
+                        },
+                        "No valid Coinbase instrument quote rows",
+                    );
+                    return;
                 }
                 if self.public.poll.is_none() {
                     self.public.poll = Some(cx.set_timer(1000.));
@@ -837,21 +870,6 @@ impl Coinbase {
                 invalid,
             } => {
                 if generation != self.public.generation {
-                    return;
-                }
-                if invalid {
-                    self.public_failed(
-                        cx,
-                        Request::Products {
-                            kind,
-                            generation,
-                            cursors: vec![],
-                            markets: vec![],
-                            tickers: vec![],
-                            invalid: true,
-                        },
-                        "Malformed Coinbase products",
-                    );
                     return;
                 }
                 #[derive(serde::Deserialize)]
@@ -910,12 +928,28 @@ impl Coinbase {
                             cursors,
                             markets,
                             tickers,
-                            invalid: false,
+                            invalid,
                         },
                         Some(&next),
                     );
                     return;
                 }
+                if invalid && markets.is_empty() {
+                    self.public_failed(
+                        cx,
+                        Request::Products {
+                            kind,
+                            generation,
+                            cursors: vec![],
+                            markets: vec![],
+                            tickers: vec![],
+                            invalid: true,
+                        },
+                        "Malformed Coinbase products",
+                    );
+                    return;
+                }
+                self.public.retry.succeeded(cx, &Some(kind));
                 for ticker in &tickers {
                     self.public.products.insert(
                         ticker.symbol.clone(),
@@ -1040,11 +1074,16 @@ impl Coinbase {
                     state.retry = Some(cx.set_timer(2000.));
                 }
             }
-            _ => {
+            pending => {
+                let key = match pending {
+                    Request::Products { kind, .. } => Some(kind),
+                    _ => None,
+                };
                 cx.log(LogLevel::Warning, error);
-                if self.public.retry.is_none() {
-                    self.public.retry = Some(cx.set_timer(1000.));
+                if let Some(timer) = self.public.poll.take() {
+                    cx.clear_timer(timer);
                 }
+                self.public.retry.failed(cx, key);
             }
         }
     }
@@ -1079,7 +1118,8 @@ impl Coinbase {
             }
             return true;
         }
-        if self.public.poll == Some(timer) || self.public.retry == Some(timer) {
+        let retry = self.public.retry.on_timer(timer).is_some();
+        if self.public.poll == Some(timer) || retry {
             if self.public.poll == Some(timer) {
                 self.public.poll = None;
                 // Initial private reconciliation scans every working status and
@@ -1088,9 +1128,6 @@ impl Coinbase {
                     self.public.poll = Some(cx.set_timer(self.public_poll_interval()));
                     return true;
                 }
-            }
-            if self.public.retry == Some(timer) {
-                self.public.retry = None;
             }
             match self.public.kind.unwrap_or(ProductKind::Intx) {
                 ProductKind::Intx => {

@@ -75,9 +75,9 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
-    let a: Vec<_> = e.drain_actions().collect();
+    let mut a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
-    let a: Vec<_> = e.drain_actions().collect();
+    a.extend(e.drain_actions());
     let socket = a
         .iter()
         .filter_map(|a| {
@@ -1124,6 +1124,81 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
     assert_eq!(e.store().balance().used, 49.);
     assert_eq!(e.store().balance().total, 4090.);
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let (mut e, actions, _) = started();
+    response(
+        &mut e,
+        NOW,
+        request(&actions, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., &BTC.replace("BTCUSDT", "MISSINGUSDT")),
+    );
+    assert!(!e.store().loaded().positions);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn unknown_owned_live_position_cannot_grant_snapshot_authority_or_consume_sequence() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    let before = e.store().positions().to_vec();
+    let balance = e.store().balance().clone();
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{}]}}"#,
+            BTC.replace("BTCUSDT", "MISSINGUSDT")
+        ),
+    );
+    assert_eq!(e.store().positions(), before);
+    assert_eq!(*e.store().balance(), balance);
+    assert!(!e.store().loaded().orders);
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{BTC}]}}"#),
+    );
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn unknown_working_live_order_cannot_clear_previous_snapshot_or_consume_sequence() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    push_orders(&mut e, socket, "incremental", 1, &order("New", 1));
+    let before = e.store().orders().to_vec();
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":2,"orders_p":[{}]}}"#,
+            order("New", 2).replace("BTCUSDT", "MISSINGUSDT")
+        ),
+    );
+    assert_eq!(e.store().orders(), before);
+    assert!(!e.store().loaded().orders);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":2,"orders_p":[{}]}}"#,
+            order("New", 2).replace("69000", "70000")
+        ),
+    );
+    // The corrected same-sequence snapshot is accepted, while the newer
+    // incremental row remains protected by the existing snapshot race fence.
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().order("one").unwrap().price, 69000.0);
+}
+
 #[test]
 fn unsupported_order_type_or_status_skips_only_that_row() {
     let (mut e, a, s) = started();
