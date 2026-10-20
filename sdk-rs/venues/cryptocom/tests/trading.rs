@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
+use safe_cex_engine::model::{BybitBbo, OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 fn order() -> PlaceOrderOpts {
@@ -61,6 +61,39 @@ fn invalid_or_duplicate_caller_ids_reject_entire_batch_before_writes() {
                 command: 1,
                 result: Err(_)
             })
+        )));
+    }
+}
+
+#[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for bbo in [true, false] {
+        let mut h = Harness::new();
+        h.load();
+        let mut second = order();
+        second.client_order_id = Some("second".into());
+        if bbo {
+            second.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        } else {
+            second.bybit_slippage_tolerance_ticks = Some(2.0);
+        }
+        command(
+            &mut h,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![order(), second],
+            },
+        );
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 1,
+                result: Err(message)
+            }) if message.contains("Bybit")
         )));
     }
 }

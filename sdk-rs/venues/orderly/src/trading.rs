@@ -960,6 +960,17 @@ impl Orderly {
         let Some(id) = trade_id(&command) else {
             return;
         };
+        if let Command::PlaceOrders { orders, .. } = &command
+            && orders
+                .iter()
+                .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+        {
+            cx.done(
+                id,
+                Err("Bybit BBO and TickSize controls are not supported by Orderly".into()),
+            );
+            return;
+        }
         if self.account.credentials.is_none()
             || !cx.store.loaded().orders
             || !cx.store.loaded().positions

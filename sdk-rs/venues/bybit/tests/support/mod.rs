@@ -2,7 +2,8 @@
 //! documented V5 payloads (bybit-exchange.github.io/docs/v5).
 #![allow(dead_code)]
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketChannel,
+    SocketId, TimerId,
 };
 use safe_cex_venue_bybit::{BybitLinear, Options};
 
@@ -20,6 +21,7 @@ pub struct Harness {
     pub now: f64,
     pub requests: Vec<HttpRequest>,
     pub sockets: Vec<(SocketId, String)>,
+    pub socket_channels: Vec<(SocketId, Option<SocketChannel>)>,
     pub sent: Vec<(SocketId, String)>,
     pub closed: Vec<SocketId>,
     pub timers: Vec<(TimerId, f64)>,
@@ -44,6 +46,7 @@ impl Harness {
             now: 1_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
+            socket_channels: Vec::new(),
             sent: Vec::new(),
             closed: Vec::new(),
             timers: Vec::new(),
@@ -73,7 +76,15 @@ impl Harness {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
                 Action::Http(request) => self.requests.push(request),
-                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                    ..
+                } => {
+                    self.sockets.push((socket, url));
+                    self.socket_channels.push((socket, channel));
+                }
                 Action::WsConnectWithHeaders { .. } => {
                     panic!("Bybit authenticates sockets with an auth message")
                 }

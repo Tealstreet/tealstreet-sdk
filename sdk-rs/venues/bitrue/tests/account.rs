@@ -1,7 +1,7 @@
 use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::wire::{section, sections};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketChannel, SocketId,
 };
 use safe_cex_venue_bitrue::{Bitrue, Options};
 const MARKET: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":10,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
@@ -40,7 +40,14 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url, .. } if url.contains("fapiws.bitrue.com") => {
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                    ..
+                } if url.contains("fapiws.bitrue.com") => {
+                    assert_eq!(url, "wss://fapiws.bitrue.com/stream?listenKey=futures-key");
+                    assert_eq!(channel.as_ref(), Some(&SocketChannel::Private));
                     Some(*socket)
                 }
                 _ => None,
@@ -176,6 +183,12 @@ fn private_socket_watchdog_recovers_without_a_spot_fallback() {
         "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey"
     );
     assert_eq!(r.method, Method::Post);
+    h.respond(r, r#"{"code":200,"data":{"listenKey":"replacement-key"}}"#);
+    assert!(h.actions.iter().any(|action| matches!(
+        action,
+        Action::WsConnect { socket, url, channel: Some(SocketChannel::Private), .. }
+            if *socket != old && url == "wss://fapiws.bitrue.com/stream?listenKey=replacement-key"
+    )));
 }
 #[test]
 fn account_positions_and_settings_are_authoritative_and_missing_schema_is_not_empty() {

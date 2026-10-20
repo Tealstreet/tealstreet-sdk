@@ -5,7 +5,15 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
-import { callerIdsOf, canonicalUrl, isWriteRequest, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
+import {
+  callerIdsOf,
+  canonicalUrl,
+  isWriteRequest,
+  requestKey,
+  selectResponse,
+  subscriptionKey,
+  subscriptionKeys,
+} from './requests.mjs';
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
@@ -85,7 +93,8 @@ test('POST info reads repeat while trading writes consume; other POSTs remain wr
   for (const url of [info, 'https://api.hyperliquid-testnet.xyz/info']) {
     assert.equal(isWriteRequest('POST', url), false);
     const queue = [{ body: 'snapshot' }];
-    for (let i = 0; i < 10; i++) assert.equal(selectResponse(queue, 0, { write: isWriteRequest('POST', url) }).body, 'snapshot');
+    for (let i = 0; i < 10; i++)
+      assert.equal(selectResponse(queue, 0, { write: isWriteRequest('POST', url) }).body, 'snapshot');
     assert.equal(queue.length, 1);
   }
   assert.equal(isWriteRequest('POST', exchange), true);
@@ -113,7 +122,9 @@ test('OKX generated broker IDs normalize while broker-prefixed caller IDs remain
   const url = 'https://www.okx.com/api/v5/trade/order';
   const generated = 'e847386590ce4dBC0000000000000000';
   const caller = 'e847386590ce4dBC0000000000000001';
-  const options = { generatedBodyId: (key, value) => ['clOrdId', 'algoClOrdId'].includes(key) && value.startsWith('e847386590ce4dBC') };
+  const options = {
+    generatedBodyId: (key, value) => ['clOrdId', 'algoClOrdId'].includes(key) && value.startsWith('e847386590ce4dBC'),
+  };
   const ids = new Set([caller]);
   const key = (id) => requestKey('POST', url, { instId: 'BTC-USDT-SWAP', clOrdId: id }, ids, options);
   assert.equal(key(generated), key('e847386590ce4dBC0000000000000002'));
@@ -123,20 +134,35 @@ test('OKX generated broker IDs normalize while broker-prefixed caller IDs remain
 
 test('OKX login identity normalizes validated clocks/signatures and keeps passphrase', () => {
   const url = 'wss://ws.okx.com:8443/ws/v5/private';
-  const login = (timestamp, sign, passphrase = 'passphrase') => ({ op: 'login', args: [{ apiKey: 'key', passphrase, timestamp, sign }] });
+  const login = (timestamp, sign, passphrase = 'passphrase') => ({
+    op: 'login',
+    args: [{ apiKey: 'key', passphrase, timestamp, sign }],
+  });
   assert.equal(subscriptionKey(url, login('1', 'a')), subscriptionKey(url, login('2', 'b')));
   assert.notEqual(subscriptionKey(url, login('1', 'a')), subscriptionKey(url, login('1', 'a', 'other')));
-  assert.deepEqual(subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }, { channel: 'positions', instType: 'ANY' }] }), [
-    ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }] }),
-    ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'positions', instType: 'ANY' }] }),
-  ]);
+  assert.deepEqual(
+    subscriptionKeys(url, {
+      op: 'subscribe',
+      args: [
+        { channel: 'orders', instType: 'SWAP' },
+        { channel: 'positions', instType: 'ANY' },
+      ],
+    }),
+    [
+      ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }] }),
+      ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'positions', instType: 'ANY' }] }),
+    ],
+  );
 });
 
 test('POST info identity includes every query field and ignores JSON key order', () => {
   const key = (body) => requestKey('post', info, body);
   assert.equal(key('{"user":"alice","type":"userFees"}'), key({ type: 'userFees', user: 'alice' }));
-  for (const body of [{ type: 'userFees', user: 'bob' }, { type: 'userFunding', user: 'alice' },
-    { type: 'userFees', user: 'alice', dex: 'xyz' }]) {
+  for (const body of [
+    { type: 'userFees', user: 'bob' },
+    { type: 'userFunding', user: 'alice' },
+    { type: 'userFees', user: 'alice', dex: 'xyz' },
+  ]) {
     assert.notEqual(key(body), key({ type: 'userFees', user: 'alice' }));
   }
   assert.notEqual(key({ type: 'userFunding', startTime: 1 }), key({ type: 'userFunding', startTime: 2 }));
@@ -145,7 +171,8 @@ test('POST info identity includes every query field and ignores JSON key order',
 test('Hyperliquid generated cloids/signatures normalize while caller IDs and action fields remain exact', () => {
   const body = (id, price = '10', nonce = 1) => ({
     action: { type: 'order', orders: [{ a: 0, p: price, c: id }], grouping: 'na' },
-    nonce, signature: { r: `r${nonce}`, s: 's', v: 27 },
+    nonce,
+    signature: { r: `r${nonce}`, s: 's', v: 27 },
   });
   const key = (body) => requestKey('POST', exchange, body, callerIds);
   assert.equal(key(body(cloid(3))), key(body(cloid(4), '10', 2)));
@@ -156,38 +183,63 @@ test('Hyperliquid generated cloids/signatures normalize while caller IDs and act
 });
 
 test('Binance URL and batch caller IDs survive normalization', () => {
-  const key = (id, timestamp = 1) => requestKey('POST',
-    `https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&newClientOrderId=${id}&timestamp=${timestamp}&signature=s${timestamp}`,
-    undefined, callerIds);
+  const key = (id, timestamp = 1) =>
+    requestKey(
+      'POST',
+      `https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&newClientOrderId=${id}&timestamp=${timestamp}&signature=s${timestamp}`,
+      undefined,
+      callerIds,
+    );
   assert.equal(key('generated-a'), key('generated-b', 2));
   assert.equal(key('generated-a'), requestKey('POST', 'https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT'));
   assert.notEqual(key('caller-a'), key('caller-b'));
-  const batch = (id) => requestKey('POST', `https://fapi.binance.com/fapi/v1/batchOrders?batchOrders=${encodeURIComponent(JSON.stringify([
-    { symbol: 'BTCUSDT', newClientOrderId: id, quantity: '1' },
-  ]))}`, undefined, callerIds);
+  const batch = (id) =>
+    requestKey(
+      'POST',
+      `https://fapi.binance.com/fapi/v1/batchOrders?batchOrders=${encodeURIComponent(
+        JSON.stringify([{ symbol: 'BTCUSDT', newClientOrderId: id, quantity: '1' }]),
+      )}`,
+      undefined,
+      callerIds,
+    );
   assert.equal(batch('generated-a'), batch('generated-b'));
   assert.notEqual(batch('caller-a'), batch('caller-b'));
 });
 
 test('large numeric IDs remain distinct in URL and JSON bodies', () => {
   assert.notEqual(requestKey('GET', `${info}?oid=9007199254740992`), requestKey('GET', `${info}?oid=9007199254740993`));
-  assert.notEqual(requestKey('POST', info, '{"oid":9007199254740992}'), requestKey('POST', info, '{"oid":9007199254740993}'));
+  assert.notEqual(
+    requestKey('POST', info, '{"oid":9007199254740992}'),
+    requestKey('POST', info, '{"oid":9007199254740993}'),
+  );
 });
 
 test('form body identities normalize clocks and preserve caller IDs', () => {
-  assert.equal(requestKey('POST', info, 'symbol=BTC&timestamp=1&signature=a'), requestKey('POST', info, new URLSearchParams('signature=b&timestamp=2&symbol=BTC')));
-  assert.notEqual(requestKey('POST', info, 'clientOrderId=caller-a', callerIds), requestKey('POST', info, 'clientOrderId=caller-b', callerIds));
+  assert.equal(
+    requestKey('POST', info, 'symbol=BTC&timestamp=1&signature=a'),
+    requestKey('POST', info, new URLSearchParams('signature=b&timestamp=2&symbol=BTC')),
+  );
+  assert.notEqual(
+    requestKey('POST', info, 'clientOrderId=caller-a', callerIds),
+    requestKey('POST', info, 'clientOrderId=caller-b', callerIds),
+  );
 });
 
 test('websocket identity ignores heartbeat and transport IDs but preserves subscriptions', () => {
   const socket = 'wss://api.hyperliquid.xyz/ws';
   assert.equal(subscriptionKey(socket, '{"method":"ping"}'), undefined);
-  assert.equal(subscriptionKey(socket, '{"method":"SUBSCRIBE","id":1,"params":["a","b"]}'), subscriptionKey(socket, '{"params":["b","a"],"id":2,"method":"SUBSCRIBE"}'));
+  assert.equal(
+    subscriptionKey(socket, '{"method":"SUBSCRIBE","id":1,"params":["a","b"]}'),
+    subscriptionKey(socket, '{"params":["b","a"],"id":2,"method":"SUBSCRIBE"}'),
+  );
   assert.deepEqual(subscriptionKeys(socket, '{"method":"SUBSCRIBE","id":1,"params":["a","b"]}'), [
     ...subscriptionKeys(socket, '{"method":"SUBSCRIBE","id":2,"params":["a"]}'),
     ...subscriptionKeys(socket, '{"method":"SUBSCRIBE","id":3,"params":["b"]}'),
   ]);
-  assert.notEqual(subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}'), subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}'));
+  assert.notEqual(
+    subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}'),
+    subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}'),
+  );
 });
 
 test('Bybit socket routing ignores cosmetic requestId while preserving other query fields', () => {
@@ -200,13 +252,19 @@ test('Bybit socket routing ignores cosmetic requestId while preserving other que
 test('Bybit auth expires/signatures normalize but the account and feed set stay exact', () => {
   const url = 'wss://stream.bybit.com/v5/private';
   const auth = (key, expires, signature) => ({ op: 'auth', args: [key, expires, signature] });
-  assert.equal(subscriptionKey(url, auth('key-a', '100', 'a')), subscriptionKey(`${url}?requestId=generated`, auth('key-a', '200', 'b')));
+  assert.equal(
+    subscriptionKey(url, auth('key-a', '100', 'a')),
+    subscriptionKey(`${url}?requestId=generated`, auth('key-a', '200', 'b')),
+  );
   assert.notEqual(subscriptionKey(url, auth('key-a', '100', 'a')), subscriptionKey(url, auth('key-b', '100', 'a')));
   assert.deepEqual(subscriptionKeys(url, { op: 'subscribe', args: ['order', 'position'], req_id: 'a' }), [
     ...subscriptionKeys(url, { op: 'subscribe', args: ['order'], req_id: 'b' }),
     ...subscriptionKeys(url, { op: 'subscribe', args: ['position'], req_id: 'c' }),
   ]);
-  assert.notEqual(subscriptionKey(url, { op: 'subscribe', args: ['order'] }), subscriptionKey(url, { op: 'subscribe', args: ['wallet'] }));
+  assert.notEqual(
+    subscriptionKey(url, { op: 'subscribe', args: ['order'] }),
+    subscriptionKey(url, { op: 'subscribe', args: ['wallet'] }),
+  );
 });
 
 test('trim keeps body-specific replies, caller cloids and untimed config', () => {
@@ -214,16 +272,43 @@ test('trim keeps body-specific replies, caller cloids and untimed config', () =>
   try {
     const tape = join(dir, 'input.jsonl');
     const out = join(dir, 'output.jsonl.gz');
-    const records = [{ type: 'config', private: true }, ...[1, 2, 3, 4].flatMap((n) => [
-      { t: n, type: 'command', orders: [{ clientOrderId: cloid(n) }] },
-      { t: n, type: 'http', method: 'POST', url: exchange,
-        requestBody: JSON.stringify({ action: { type: 'order', orders: [{ c: cloid(n) }] }, nonce: n }), status: 200, body: '[]' },
-    ]), ...[1, 2, 3, 4].map((n) => ({ t: n, type: 'http', method: 'POST', url: info, requestBody: JSON.stringify({ type: `query${n}` }), status: 200, body: '[]' }))];
+    const records = [
+      { type: 'config', private: true },
+      ...[1, 2, 3, 4].flatMap((n) => [
+        { t: n, type: 'command', orders: [{ clientOrderId: cloid(n) }] },
+        {
+          t: n,
+          type: 'http',
+          method: 'POST',
+          url: exchange,
+          requestBody: JSON.stringify({ action: { type: 'order', orders: [{ c: cloid(n) }] }, nonce: n }),
+          status: 200,
+          body: '[]',
+        },
+      ]),
+      ...[1, 2, 3, 4].map((n) => ({
+        t: n,
+        type: 'http',
+        method: 'POST',
+        url: info,
+        requestBody: JSON.stringify({ type: `query${n}` }),
+        status: 200,
+        body: '[]',
+      })),
+    ];
     assert.equal(callerIdsOf(records).size, 4);
     writeFileSync(tape, records.map((record) => JSON.stringify(record)).join('\n'));
-    const result = spawnSync('corepack', ['yarn', '-s', 'rust:trim-tape', '--tape', tape, '--seconds', '1', '--out', out], { encoding: 'utf8' });
+    const result = spawnSync(
+      'corepack',
+      ['yarn', '-s', 'rust:trim-tape', '--tape', tape, '--seconds', '1', '--out', out],
+      { encoding: 'utf8' },
+    );
     assert.equal(result.status, 0, result.stderr);
-    const kept = gunzipSync(readFileSync(out)).toString().trim().split('\n').map((line) => JSON.parse(line));
+    const kept = gunzipSync(readFileSync(out))
+      .toString()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
     assert.equal(kept[0].type, 'config');
     assert.equal(kept.filter((record) => record.type === 'http').length, 8);
   } finally {
@@ -231,12 +316,17 @@ test('trim keeps body-specific replies, caller cloids and untimed config', () =>
   }
 });
 
-
 test('Crypto.com envelope projection keeps exact caller IDs and unsafe nanosecond parameters', () => {
   const url = 'https://api.crypto.com/exchange/v1/private/get-trades';
   const options = { requestBody: (body) => body.params };
-  const key = (end, caller = 'caller-a', nonce = 1) => requestKey('POST', url,
-    `{"id":${nonce},"method":"private/get-trades","sig":"generated","params":{"end_time":${end},"client_oid":"${caller}"},"nonce":${nonce}}`, callerIds, options);
+  const key = (end, caller = 'caller-a', nonce = 1) =>
+    requestKey(
+      'POST',
+      url,
+      `{"id":${nonce},"method":"private/get-trades","sig":"generated","params":{"end_time":${end},"client_oid":"${caller}"},"nonce":${nonce}}`,
+      callerIds,
+      options,
+    );
   assert.equal(key('1610000000000000001'), key('1610000000000000001', 'caller-a', 2));
   assert.notEqual(key('1610000000000000001'), key('1610000000000000002'));
   assert.notEqual(key('1610000000000000001'), key('1610000000000000001', 'caller-b'));
@@ -246,10 +336,13 @@ test('Crypto.com subscriptions compare channels across batches and normalize aud
   const url = 'wss://stream.crypto.com/exchange/v1/user';
   const options = { cryptoProtocol: true };
   const keys = (message) => subscriptionKeys(url, message, new Set(), options);
-  assert.deepEqual(keys({ id: 1, nonce: 100, method: 'subscribe', params: { channels: ['user.order', 'user.trade'] } }), [
-    ...keys({ id: 2, nonce: 200, method: 'subscribe', params: { channels: ['user.order'] } }),
-    ...keys({ id: 3, nonce: 300, method: 'subscribe', params: { channels: ['user.trade'] } }),
-  ]);
+  assert.deepEqual(
+    keys({ id: 1, nonce: 100, method: 'subscribe', params: { channels: ['user.order', 'user.trade'] } }),
+    [
+      ...keys({ id: 2, nonce: 200, method: 'subscribe', params: { channels: ['user.order'] } }),
+      ...keys({ id: 3, nonce: 300, method: 'subscribe', params: { channels: ['user.trade'] } }),
+    ],
+  );
   const auth = (api_key, nonce) => ({ id: nonce, nonce, method: 'public/auth', api_key, sig: String(nonce) });
   assert.deepEqual(keys(auth('key-a', 1)), keys(auth('key-a', 2)));
   assert.notDeepEqual(keys(auth('key-a', 1)), keys(auth('key-b', 1)));
@@ -369,9 +462,12 @@ test('nested map order is ignored and unsafe numeric order IDs remain exact', ()
 
 test('subscription matching ignores request IDs and batching, retaining native topics', () => {
   const socket = 'wss://ws-market-swap.qq-os.com/ws';
-  assert.deepEqual(subscriptionKeys(socket, '{"id":"random","reqType":"sub","dataType":"market.contracts"}', new Set(), { bingxProtocol: true }), [
-    'WS wss://ws-market-swap.qq-os.com/ws? {"dataType":"market.contracts","reqType":"sub"}',
-  ]);
+  assert.deepEqual(
+    subscriptionKeys(socket, '{"id":"random","reqType":"sub","dataType":"market.contracts"}', new Set(), {
+      bingxProtocol: true,
+    }),
+    ['WS wss://ws-market-swap.qq-os.com/ws? {"dataType":"market.contracts","reqType":"sub"}'],
+  );
   assert.deepEqual(subscriptionKeys(socket, 'Ping', new Set(), { bingxProtocol: true }), []);
   assert.deepEqual(subscriptionKeys(socket, '{"pong":1}', new Set(), { bingxProtocol: true }), []);
   assert.deepEqual(
@@ -398,7 +494,10 @@ test('Bybit connection IDs vary while body types and subscription topics stay ex
       'wss://stream.bybit.com/v5/private?requestId=fresh',
       '{"op":"subscribe","args":["order","execution"]}',
     ),
-    ['WS wss://stream.bybit.com/v5/private? {"args":["order"],"op":"subscribe"}', 'WS wss://stream.bybit.com/v5/private? {"args":["execution"],"op":"subscribe"}'],
+    [
+      'WS wss://stream.bybit.com/v5/private? {"args":["order"],"op":"subscribe"}',
+      'WS wss://stream.bybit.com/v5/private? {"args":["execution"],"op":"subscribe"}',
+    ],
   );
 });
 
@@ -438,7 +537,13 @@ test('Crypto signing envelope varies while typed params and caller IDs remain ex
   const venue = venueOf('cryptocom');
   const route = 'https://api.crypto.com/exchange/v1/private/create-order';
   const key = (params, id = 1) =>
-    requestKey('POST', route, JSON.stringify({ id, method: 'private/create-order', nonce: id, sig: String(id), params }), new Set(['caller']), venue);
+    requestKey(
+      'POST',
+      route,
+      JSON.stringify({ id, method: 'private/create-order', nonce: id, sig: String(id), params }),
+      new Set(['caller']),
+      venue,
+    );
   assert.equal(key({ quantity: '1', client_oid: 'caller' }, 1), key({ client_oid: 'caller', quantity: '1' }, 2));
   assert.notEqual(key({ quantity: '1', client_oid: 'caller' }), key({ quantity: 1, client_oid: 'caller' }));
   assert.notEqual(key({ client_oid: 'caller' }), key({ client_oid: 'other' }));
@@ -448,28 +553,77 @@ test('Crypto signing envelope varies while typed params and caller IDs remain ex
       'wss://stream.crypto.com/exchange/v1/market',
       '{"method":"subscribe","params":{"channels":["ticker.BTCUSD-PERP"]}}',
     ),
-    ['WS wss://stream.crypto.com/exchange/v1/market? {"method":"subscribe","params":{"channels":["ticker.BTCUSD-PERP"]}}'],
+    [
+      'WS wss://stream.crypto.com/exchange/v1/market? {"method":"subscribe","params":{"channels":["ticker.BTCUSD-PERP"]}}',
+    ],
   );
+});
+
+test('Bybit spot instrument equivalence leaves other categories and routes exact', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('bybitspot');
+  const root = 'https://api.bybit.com/v5/market/instruments-info';
+  const key = (url) => requestKey('GET', url, undefined, new Set(), venue);
+  assert.equal(key(`${root}?category=spot&limit=1000&cursor=invalid`), key(`${root}?category=spot`));
+  assert.notEqual(key(`${root}?category=linear&limit=1000`), key(`${root}?category=linear`));
+  assert.notEqual(
+    key('https://api.bybit.com/v5/order/realtime?category=spot&cursor=next'),
+    key('https://api.bybit.com/v5/order/realtime?category=spot'),
+  );
+  assert.notEqual(
+    requestKey('GET', `${root}?category=spot&limit=1000`, undefined, new Set(), venueOf('bybit')),
+    requestKey('GET', `${root}?category=spot`, undefined, new Set(), venueOf('bybit')),
+  );
+});
+
+test('Hyro generated identities vary while caller IDs, categories and native quantities stay exact', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('hyrotrader');
+  const url = 'https://challenge.example.test/v5/order/create';
+  const key = (body, ids = new Set()) => requestKey('POST', url, body, ids, venue);
+  assert.equal(
+    key({ category: 'linear', qty: '1', orderLinkId: 'generated-one' }),
+    key({ category: 'linear', qty: '1', orderLinkId: 'generated-two' }),
+  );
+  assert.notEqual(
+    key({ orderLinkId: 'caller' }, new Set(['caller'])),
+    key({ orderLinkId: 'generated' }, new Set(['caller'])),
+  );
+  assert.notEqual(key({ category: 'linear', qty: '1' }), key({ category: 'inverse', qty: '1' }));
+  assert.notEqual(key({ qty: '1' }), key({ qty: 1 }));
+  assert.notEqual(key({ qty: '1' }), key({ qty: '2' }));
 });
 
 test('BloFin normalized login keeps credentials and topics while verified nonce and signature vary', async () => {
   const { venueOf } = await import('./venues.mjs');
   const venue = venueOf('blofin');
   const url = 'wss://openapi.blofin.com/ws/private';
-  const login = (apiKey, nonce) => subscriptionKeys(url, { op: 'login', args: [
-    { apiKey, passphrase: 'passphrase', timestamp: nonce, nonce: String(nonce), sign: String(nonce) },
-  ] }, new Set(), venue);
+  const login = (apiKey, nonce) =>
+    subscriptionKeys(
+      url,
+      {
+        op: 'login',
+        args: [{ apiKey, passphrase: 'passphrase', timestamp: nonce, nonce: String(nonce), sign: String(nonce) }],
+      },
+      new Set(),
+      venue,
+    );
   assert.deepEqual(login('key-a', 1), login('key-a', 2));
   assert.notDeepEqual(login('key-a', 1), login('key-b', 1));
-  assert.notDeepEqual(subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instId: 'ANY' }] }),
-    subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instId: 'BTC-USDT' }] }));
+  assert.notDeepEqual(
+    subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instId: 'ANY' }] }),
+    subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instId: 'BTC-USDT' }] }),
+  );
 });
 
 test('caller IDs are collected from every command shape without collecting tape responses', () => {
-  assert.deepEqual(callerIdsOf([
-    { type: 'command', orders: [{ clientOrderId: 'place' }], nested: { clientOrderId: 'amend' } },
-    { type: 'http', body: { clientOrderId: 'unrelated' } },
-  ]), new Set(['place', 'amend']));
+  assert.deepEqual(
+    callerIdsOf([
+      { type: 'command', orders: [{ clientOrderId: 'place' }], nested: { clientOrderId: 'amend' } },
+      { type: 'http', body: { clientOrderId: 'unrelated' } },
+    ]),
+    new Set(['place', 'amend']),
+  );
 });
 
 

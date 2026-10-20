@@ -24,6 +24,33 @@ fn done(e: &mut Driver) -> Result<String, String> {
         .expect("command completed")
 }
 #[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for (field, value) in [
+        (
+            "bybitBbo",
+            serde_json::json!({"sideType":"Queue","level":1}),
+        ),
+        ("bybitSlippageToleranceTicks", serde_json::json!(2)),
+    ] {
+        let (mut e, _) = ready();
+        let mut orders = serde_json::json!([
+            {"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"42"},
+            {"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"43"}
+        ]);
+        orders[1][field] = value;
+        place(&mut e, 1, &orders.to_string());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                result: Err(error), ..
+            }) if error.contains("Bybit")
+        )));
+    }
+}
+
+#[test]
 fn caller_uint32_is_numeric_on_wire_and_bad_batch_ids_reject_before_any_write() {
     let (mut e, _) = ready();
     for id in ["0", "01", "4294967296", "-1", "1.0", "test"] {
