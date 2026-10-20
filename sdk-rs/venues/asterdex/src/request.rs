@@ -20,6 +20,9 @@ pub struct RequestState {
     clock_timer: Option<TimerId>,
     retries: HashMap<TimerId, Box<SignedRequest>>,
     awaiting_clock: VecDeque<Box<SignedRequest>>,
+    public_queue: VecDeque<Box<SignedRequest>>,
+    public_used: u8,
+    public_timer: Option<TimerId>,
 }
 
 pub struct SignedRequest {
@@ -177,11 +180,32 @@ impl AsterDex {
         }
     }
 
-    fn dispatch_signed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        mut request: Box<SignedRequest>,
-    ) -> bool {
+    fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) -> bool {
+        // Public market data shares the TS public client's budget. Its optional
+        // unauthenticated leverage-bracket fallback still belongs to primaryAPI.
+        if request.public && !matches!(&request.pending, Pending::MarketBrackets { .. }) {
+            self.requests.public_queue.push_back(request);
+            self.drain_public(cx);
+            true
+        } else {
+            self.issue_request(cx, request)
+        }
+    }
+
+    fn drain_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        while self.requests.public_used < 10 {
+            let Some(request) = self.requests.public_queue.pop_front() else {
+                break;
+            };
+            if self.requests.public_used == 0 {
+                self.requests.public_timer = Some(cx.set_timer(1000.0));
+            }
+            self.requests.public_used += 1;
+            self.issue_request(cx, request);
+        }
+    }
+
+    fn issue_request(&mut self, cx: &mut Cx<'_, Pending>, mut request: Box<SignedRequest>) -> bool {
         if request.public {
             let url = format!("{}{}", self.urls.rest, request.path);
             match request.stream {
@@ -411,6 +435,12 @@ impl AsterDex {
     }
 
     pub(crate) fn on_request_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.requests.public_timer == Some(timer) {
+            self.requests.public_timer = None;
+            self.requests.public_used = 0;
+            self.drain_public(cx);
+            return true;
+        }
         if let Some(request) = self.requests.retries.remove(&timer) {
             self.dispatch_signed(cx, request);
             return true;
@@ -435,12 +465,28 @@ mod tests {
         inner: AsterDex,
         method: Method,
         streamed: bool,
+        public: bool,
     }
 
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
             self.inner.requests.last_sync_success = Some(cx.now);
+            if self.public {
+                for command in 0..11 {
+                    self.inner.public_read(
+                        cx,
+                        &format!("/fapi/v1/public-{command}"),
+                        Pending::Klines {
+                            command,
+                            rows: Vec::new(),
+                            malformed: false,
+                        },
+                        Some(ArrayAt::Root),
+                    );
+                }
+                return;
+            }
             self.inner.signed(
                 cx,
                 self.method,
@@ -495,7 +541,22 @@ mod tests {
         fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
             self.inner.on_request_timer(cx, timer);
         }
-        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+            if self.public {
+                if let Command::FetchLeverage { command, symbol } = command {
+                    self.inner.public_read(
+                        cx,
+                        &format!("/fapi/v1/{symbol}"),
+                        Pending::Klines {
+                            command,
+                            rows: Vec::new(),
+                            malformed: false,
+                        },
+                        Some(ArrayAt::Root),
+                    );
+                }
+                return;
+            }
             let pending = Pending::Klines {
                 command: 7,
                 rows: Vec::new(),
@@ -550,6 +611,7 @@ mod tests {
                     inner: AsterDex::new(options),
                     method,
                     streamed: false,
+                    public: false,
                 }),
                 now: 1_700_000_000_000.0,
                 requests: Vec::new(),
@@ -804,6 +866,240 @@ mod tests {
         assert_eq!(h.engine.venue().inner.requests.offset_ms, saved);
     }
 
+    fn public_probe() -> Engine<Probe> {
+        Engine::new(Probe {
+            inner: AsterDex::new(Options {
+                public_data_only: true,
+                ..Options::default()
+            }),
+            method: Method::Get,
+            streamed: true,
+            public: true,
+        })
+    }
+
+    #[test]
+    fn public_budget_is_ten_per_timer_window_fifo_and_does_not_refund_failures() {
+        let mut engine = public_probe();
+        engine.start(0.0);
+        let mut first = Vec::new();
+        let mut reset = None;
+        for action in engine.drain_actions() {
+            match action {
+                Action::Http(request) => first.push(request),
+                Action::SetTimer { timer, at_ms } => {
+                    assert_eq!(at_ms, 1000.0);
+                    reset = Some(timer);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(first.len(), 10);
+        assert_eq!(engine.venue().inner.requests.public_queue.len(), 1);
+        assert!(first.iter().all(|request| request.headers.is_empty()));
+        let failed = first.remove(0);
+        // This row must not survive the retry, even though the failed attempt
+        // already delivered it through the streamed selector.
+        engine.handle(
+            100.0,
+            Event::HttpStart {
+                request: failed.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        engine.handle(
+            100.0,
+            Event::HttpChunk {
+                request: failed.id,
+                data: br#"[[1000,"1","2","0.5","1.5","3",0,"0",1,"0","0","0"],"#,
+            },
+        );
+        engine.handle(
+            100.0,
+            Event::HttpFailed {
+                request: failed.id,
+                error: "connection reset",
+            },
+        );
+        let retry = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => {
+                    assert_eq!(at_ms, 1100.0);
+                    Some(timer)
+                }
+                Action::Http(_) => {
+                    panic!("failure must neither refund a slot nor retry immediately")
+                }
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            999.0,
+            Event::Command(Command::FetchLeverage {
+                command: 99,
+                symbol: "later".into(),
+            }),
+        );
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        let reset = reset.unwrap();
+        engine.handle(1000.0, Event::TimerFired { timer: reset });
+        let mut admitted = Vec::new();
+        for action in engine.drain_actions() {
+            match action {
+                Action::Http(request) => admitted.push(request),
+                Action::SetTimer { at_ms, .. } => assert_eq!(at_ms, 2000.0),
+                _ => {}
+            }
+        }
+        assert_eq!(admitted.len(), 2);
+        assert!(admitted[0].url.ends_with("/public-10"));
+        assert!(admitted[1].url.ends_with("/later"));
+        engine.handle(1001.0, Event::TimerFired { timer: reset });
+        assert_eq!(
+            engine.venue().inner.requests.public_used,
+            2,
+            "old timer cannot reset the current window"
+        );
+        assert_eq!(engine.drain_actions().count(), 0);
+        engine.handle(1100.0, Event::TimerFired { timer: retry });
+        let retry = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .unwrap();
+        assert!(retry.url.ends_with("/public-0"));
+        assert_eq!(
+            engine.venue().inner.requests.public_used,
+            3,
+            "a retry consumes a fresh slot"
+        );
+        assert!(retry.headers.is_empty());
+        engine.handle(
+            1100.0,
+            Event::HttpStart {
+                request: retry.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        engine.handle(
+            1100.0,
+            Event::HttpChunk {
+                request: retry.id,
+                data: br#"[[2000,"2","3","1","2.5","4",0,"0",1,"0","0","0"]]"#,
+            },
+        );
+        engine.handle(1100.0, Event::HttpEnd { request: retry.id });
+        let result = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandDone { command: 0, result }) => Some(result.unwrap()),
+                _ => None,
+            })
+            .unwrap();
+        #[derive(Deserialize)]
+        struct Row {
+            timestamp: f64,
+        }
+        let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
+        assert_eq!(rows.len(), 1, "partial failed rows must be reset");
+        assert_eq!(rows[0].timestamp, 2.0);
+    }
+
+    #[test]
+    fn public_retry_waiting_at_boundary_stays_behind_fifo_and_next_window_is_bounded() {
+        let mut engine = public_probe();
+        engine.start(0.0);
+        let mut first = Vec::new();
+        let mut reset = None;
+        for action in engine.drain_actions() {
+            match action {
+                Action::Http(request) => first.push(request),
+                Action::SetTimer { timer, .. } => reset = Some(timer),
+                _ => {}
+            }
+        }
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: first[0].id,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "upstream timeout",
+                },
+            },
+        );
+        let retry = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, .. } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        // Exercise either ordering of callbacks with the same deadline: the
+        // retry joins the existing queue without bypassing its older request.
+        engine.handle(1000.0, Event::TimerFired { timer: retry });
+        assert_eq!(engine.drain_actions().count(), 0);
+        for command in 20..30 {
+            engine.handle(
+                1000.0,
+                Event::Command(Command::FetchLeverage {
+                    command,
+                    symbol: format!("later-{command}"),
+                }),
+            );
+        }
+        assert_eq!(engine.drain_actions().count(), 0);
+        engine.handle(
+            1000.0,
+            Event::TimerFired {
+                timer: reset.unwrap(),
+            },
+        );
+        let mut admitted = Vec::new();
+        let mut next_reset = None;
+        for action in engine.drain_actions() {
+            match action {
+                Action::Http(request) => admitted.push(request),
+                Action::SetTimer { timer, at_ms } => {
+                    assert_eq!(at_ms, 2000.0);
+                    next_reset = Some(timer);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(admitted.len(), 10);
+        assert!(admitted[0].url.ends_with("/public-10"));
+        assert!(admitted[1].url.ends_with("/public-0"));
+        assert!(admitted[9].url.ends_with("/later-27"));
+        assert_eq!(engine.venue().inner.requests.public_queue.len(), 2);
+        engine.handle(
+            2000.0,
+            Event::TimerFired {
+                timer: next_reset.unwrap(),
+            },
+        );
+        let admitted: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(admitted.len(), 2);
+        assert!(admitted[0].url.ends_with("/later-28"));
+        assert!(admitted[1].url.ends_with("/later-29"));
+    }
+
     struct PublicHarness {
         engine: Engine<AsterDex>,
         now: f64,
@@ -860,14 +1156,26 @@ mod tests {
             });
         }
         fn retry(&mut self, delay: f64) {
-            let index = self
+            let target = self.now + delay;
+            assert!(
+                self.timers.iter().any(|(timer, at)| *at == target
+                    && self.engine.venue().requests.retries.contains_key(timer)),
+                "retry timer"
+            );
+            // A quota reset can share the retry deadline. Deliver both in
+            // causal order instead of assuming the retry is the only timer.
+            while let Some((index, _)) = self
                 .timers
                 .iter()
-                .position(|(_, at)| *at == self.now + delay)
-                .expect("retry timer");
-            let (timer, at) = self.timers.remove(index);
-            self.now = at;
-            self.event(Event::TimerFired { timer });
+                .enumerate()
+                .filter(|(_, (_, at))| *at <= target)
+                .min_by(|(_, (_, a)), (_, (_, b))| a.total_cmp(b))
+            {
+                let (timer, at) = self.timers.remove(index);
+                self.now = at;
+                self.event(Event::TimerFired { timer });
+            }
+            self.now = target;
         }
     }
 

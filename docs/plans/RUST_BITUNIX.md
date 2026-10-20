@@ -1087,3 +1087,28 @@ quota/FIFO/stream/retry, secondbulk-success and partialbatch publication
 regressions. Independent phase review, rebuilt artifact and unchanged full
 gates follow. No OI erasure, reference normalization or weakened threshold.
 Checkpoint merged source before this bounded native correction.
+
+### Next landing: Kraken and ApeX Omni
+
+Origin advances via7da56dc8a5(PR1323 Kraken futures) to ecb313026f(PR1324
+ApeX Omni) while Aster's bounded OI/public-budget fix runs. Complete/review/
+checkpoint Aster first, then fetch/read brief and merge without stash.
+Preserve our strict all-run books/candles/outbound/peak and signed memory
+backbone; incoming gates still compare only final books. Integrate actual
+production typed auth/body hooks and per-socket ApeX protocol state, tighten
+route-scoped generated-ID rules and commit Kraken nonce only after valid
+auth. Investigate Kraken's documented depth correction against every
+intermediate hash, retaining independent input-based expectations rather
+than adopting weaker final-only checks. Native/hosts/harness scopes review
+compatibility separately. Expected20venues/24public/42private with prior
+parity cases; require all30registered CI checks green before landing.
+
+Aster OI/public-budget correction complete:104native tests, fmt/bans/native
+and WASM strictClippy PASS; independent phase review no findings. Raw native
+replay exactly matches all631TS tickers,2books and130intermediate book
+timestamps/hashes with zero transport/protocol errors. Unchanged3-runpublic
+PASS384frames/608markets/631tickers/2books: TS/Rust main145.9/76.9ms, steady
+50.1/31.8ms, retained10.6/2.2MB, sampledpeak36.6/10.2MB. Newmodule1,028,015/
+1,258,291bytes. Rebuilt V1/V3private14frames/4commands each and3parity cases
+PASS. No reference/timing/threshold/sample changes. Checkpoint native-only
+correction before nextlanding merge.
