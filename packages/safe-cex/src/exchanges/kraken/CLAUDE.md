@@ -802,7 +802,9 @@ Unsupported UI intervals use the nearest lower supported Kraken interval. In par
 
 - REST pair names: `XXBTZUSD`, `XETHZUSD` (non-standard Kraken format)
 - WebSocket v2 symbols: `BTC/USD`, `ETH/USD` (standard format with `/`)
-- We use `wsname` from AssetPairs as the canonical symbol (matches WS v2)
+- We keep `wsname` from AssetPairs as the SDK symbol. WS v2 uses the normalized
+  market ID (`BTC/USD` for REST `XBT/USD`); translate subscriptions and incoming
+  ticker/book/candle records in both directions.
 - `pairName` (REST key) is stored in `market.info.pairName` for REST API calls
 - `altname` (for example `XBTUSD`) is stored from AssetPairs and indexed alongside `wsname`, `pairName`, and `prettySymbol` when reconciling open orders. OpenOrders descriptions use this identity, so matching only canonical `XBT/USD` would orphan BTC orders.
 
@@ -811,6 +813,7 @@ Unsupported UI intervals use the nearest lower supported Kraken interval. In par
 Kraken uses non-standard asset codes. The `normalizeAsset()` function in `krakenspot.types.ts` handles:
 
 - `XBT` / `XXBT` -> `BTC`
+- `XDG` / `XXDG` -> `DOGE` (WS v2 rejects raw XDG pair names)
 - `XETH` -> `ETH`
 - `ZUSD` -> `USD`
 - Many others (see `ASSET_ALIASES` map)
@@ -886,7 +889,8 @@ This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeO
 ## Rust futures engine
 
 `exchangeName: 'kraken'` with `engine: 'rust'` selects `sdk-rs/venues/kraken`.
-Kraken Spot remains a separate TypeScript adapter. Futures sockets share their
+`krakenspot` selects the separate Spot state machine in the same Rust crate;
+TypeScript adapters and default registry selection remain in place. Futures sockets share their
 upstream URL but carry explicit Public/Private engine roles. Each private
 connection requests and signs a fresh challenge; balances reconcile over REST.
 
@@ -903,3 +907,13 @@ state fence delayed REST/ACKs. Protective amendments preserve trigger provenance
 replace remaining quantity only, and stop if execution races cancellation.
 History failures and unwalkable page boundaries fail explicitly. Tests and gate
 proofs are tracked in `docs/plans/KRAKEN_RUST_PORT.md`.
+
+Rust Spot uses exact form-byte HMAC-SHA512 authentication and a fresh REST
+token for every WS-v2 private socket generation. Native `txid` remains the
+order identity across atomic amendments; generated `cl_ord_id` does not enable
+caller-supplied IDs. Fixed 1x/isolated settings replace zero-size derivative
+placeholders. Both public parsers truncate cached books to subscribed depth
+after updates, since Kraken does not delete levels falling outside that depth.
+Spot USD valuation resolves normalized asset identity through its market,
+including `XXBT` holdings with an `XBT/USD` SDK ticker. Spot port scope, review
+and gate evidence are tracked in `docs/plans/RUST_SPOT_PRODUCTS.md`.

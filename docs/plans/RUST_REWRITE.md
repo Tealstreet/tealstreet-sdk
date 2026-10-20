@@ -396,6 +396,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
 | Hyperliquid perps | done (#1306) |
+| Hyperliquid Spot, Kraken Spot | implemented in existing crates; phase reviews and live public/documented private gates in progress ([spot plan](RUST_SPOT_PRODUCTS.md)); no TS venue deletion |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
 | Bitrue futures | done (#1314) |

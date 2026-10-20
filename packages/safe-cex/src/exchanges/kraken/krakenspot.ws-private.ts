@@ -207,11 +207,12 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
 
   private parseOrder = (item: any): Order | null => {
     const orderId = item.order_id;
-    const symbol = item.symbol;
-    if (!orderId || !symbol) return null;
+    const wireSymbol = item.symbol;
+    if (!orderId || !wireSymbol) return null;
 
-    const market = this.parent.store.markets.find((m) => m.symbol === symbol);
+    const market = this.store.marketsBySymbol[wireSymbol] ?? this.store.marketsById[wireSymbol];
     if (!market) return null;
+    const symbol = market.symbol;
 
     const orderType = ORDER_TYPE[item.order_type] || OrderType.Limit;
     const side = item.side === 'buy' ? OrderSide.Buy : OrderSide.Sell;
@@ -237,7 +238,9 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       timeInForce = OrderTimeInForce.PostOnly;
     }
 
-    const price = parseFloat(item.limit_price || item.stop_price || item.trigger_price || '0');
+    const trigger = item.triggers?.actual_price ??
+      (item.triggers?.price_type === 'static' ? item.triggers?.price : undefined);
+    const price = parseFloat(trigger ?? item.limit_price ?? item.stop_price ?? item.trigger_price ?? '0');
     const timestamp = item.timestamp ? new Date(item.timestamp).getTime() : Date.now();
 
     return {

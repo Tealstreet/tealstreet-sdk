@@ -209,12 +209,14 @@ export const realVenue = (name: ExchangeName) => {
       (record.requestBody as string | undefined)?.includes('spotMetaAndAssetCtxs'));
     if (!row) throw new Error('Hyperliquid spot fixture lacks native spot metadata');
     const [meta, contexts] = JSON.parse(row.body!) as [HyperSpotMetaInput, { coin?: string; midPx?: string }[]];
+    const positional = contexts.length === meta.universe.length && contexts.every((context) => !context.coin);
     for (const [index, instrument] of meta.universe.entries()) {
       const base = meta.tokens.find((token) => token.index === instrument.tokens[0])?.name;
+      const quote = meta.tokens.find((token) => token.index === instrument.tokens[1])?.name;
       const context = contexts.find((context) => context.coin === instrument.name) ??
-        (contexts[index]?.coin === undefined ? contexts[index] : undefined);
-      if (base && context?.midPx)
-        spotMarkets.push({ id: instrument.name, symbol: `${base}/USDC`, base, quote: 'USDC' });
+        (positional ? contexts[index] : undefined);
+      if (base && quote && context?.midPx)
+        spotMarkets.push({ id: instrument.name, symbol: `${base}/${quote}`, base, quote });
     }
   }
   if (name === 'krakenspot') {
@@ -222,7 +224,7 @@ export const realVenue = (name: ExchangeName) => {
     if (!row) throw new Error('Kraken spot fixture lacks native AssetPairs');
     const pairs = (JSON.parse(row.body!) as { result: Record<string, KrakenSpotPairInput> }).result;
     const aliases: Record<string, string> = {
-      XBT: 'BTC', XXBT: 'BTC', XETH: 'ETH', XXRP: 'XRP', XLTC: 'LTC', XXLM: 'XLM',
+      XBT: 'BTC', XXBT: 'BTC', XDG: 'DOGE', XXDG: 'DOGE', XETH: 'ETH', XXRP: 'XRP', XLTC: 'LTC', XXLM: 'XLM',
       XXMR: 'XMR', XZEC: 'ZEC', XREP: 'REP', XETC: 'ETC', XDAO: 'DAO', XMLN: 'MLN',
       ZUSD: 'USD', ZEUR: 'EUR', ZGBP: 'GBP', ZJPY: 'JPY', ZCAD: 'CAD', ZAUD: 'AUD',
     };
