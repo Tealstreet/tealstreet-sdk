@@ -91,6 +91,7 @@ struct SpotBook {
 }
 pub struct KucoinSpot {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
     books: BTreeMap<String, SpotBook>,
@@ -99,6 +100,9 @@ pub struct KucoinSpot {
     balance_revision: u64,
     orders_loading: bool,
     balance_loading: bool,
+    wallet_valuation_pending: bool,
+    tickers_applied: bool,
+    wallet_unquoted_warned: bool,
     poll: Option<TimerId>,
     heal_orders: Option<TimerId>,
     heal_balance: Option<TimerId>,
@@ -129,6 +133,7 @@ impl KucoinSpot {
             .flatten();
         Self {
             options,
+            discovery: Default::default(),
             credentials,
             sockets: Default::default(),
             books: Default::default(),
@@ -137,6 +142,9 @@ impl KucoinSpot {
             balance_revision: 0,
             orders_loading: false,
             balance_loading: false,
+            wallet_valuation_pending: false,
+            tickers_applied: false,
+            wallet_unquoted_warned: false,
             poll: None,
             heal_orders: None,
             heal_balance: None,
@@ -146,6 +154,32 @@ impl KucoinSpot {
             fills: Default::default(),
             fill_order: Default::default(),
         }
+    }
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.streamed(
+            cx,
+            if tickers {
+                "/api/v1/market/allTickers"
+            } else {
+                "/api/v2/symbols"
+            },
+            if tickers {
+                ArrayAt::Path(&["data", "ticker"])
+            } else {
+                ArrayAt::EnvelopeField("data")
+            },
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    invalid: false,
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    invalid: false,
+                }
+            },
+        );
     }
     fn request(
         &self,
@@ -387,11 +421,13 @@ impl KucoinSpot {
             *timer = Some(cx.set_timer(250.0));
         }
     }
-    fn account_balance(&self, cx: &mut Cx<'_, Pending>, data: &RawValue) -> Result<(), String> {
+    fn account_balance(&mut self, cx: &mut Cx<'_, Pending>, data: &RawValue) -> Result<(), String> {
         let rows: Vec<Account> = serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
         let mut sum = Balance::default();
         let mut currencies = vec![];
         let mut coins = vec![];
+        let mut unpriced = false;
+        let mut unquoted = false;
         for r in rows {
             if r.currency.is_empty() || r.available.0 < 0.0 || r.holds.0 < 0.0 || r.balance.0 < 0.0
             {
@@ -400,10 +436,27 @@ impl KucoinSpot {
             let p = if matches!(r.currency, "USD" | "USDT" | "USDC") {
                 1.0
             } else {
-                ["USDT", "USDC", "USD"]
-                    .into_iter()
-                    .find_map(|q| cx.store.ticker(&format!("{}-{q}", r.currency)))
-                    .map_or(0.0, |t| t.last)
+                let symbols = ["USDT", "USDC", "USD"].map(|q| format!("{}-{q}", r.currency));
+                let price = symbols
+                    .iter()
+                    .filter_map(|symbol| cx.store.ticker(symbol))
+                    .map(|t| t.last)
+                    .find(|last| last.is_finite() && *last > 0.0);
+                // Before the first ticker snapshot, a tradable USD route without a
+                // quote is not evidence of zero value; afterwards it is valued at 0.
+                if price.is_none()
+                    && r.balance.0 > 0.0
+                    && symbols
+                        .iter()
+                        .any(|symbol| cx.store.market(symbol).is_some_and(|m| m.active))
+                {
+                    if self.tickers_applied {
+                        unquoted = true;
+                    } else {
+                        unpriced = true;
+                    }
+                }
+                price.unwrap_or(0.0)
             };
             currencies.push(CurrencyBalance {
                 currency: r.currency.into(),
@@ -424,6 +477,24 @@ impl KucoinSpot {
             sum.total += r.balance.0 * p;
         }
         cx.store.set_currency_balances(currencies);
+        let newly_unpriced = unpriced && !self.wallet_valuation_pending;
+        self.wallet_valuation_pending = unpriced;
+        if unpriced {
+            if newly_unpriced {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin Spot USD wallet valuation awaits a valid quote; retaining prior USD balance",
+                );
+            }
+            return Ok(());
+        }
+        if unquoted && !self.wallet_unquoted_warned {
+            cx.log(
+                LogLevel::Warning,
+                "KuCoin Spot wallet currency has no USD quote; valued at 0",
+            );
+        }
+        self.wallet_unquoted_warned = unquoted;
         cx.store.set_coin_balances(coins);
         cx.store.set_balance(sum);
         Ok(())
@@ -696,15 +767,7 @@ impl Venue for KucoinSpot {
             );
             return;
         }
-        self.streamed(
-            cx,
-            "/api/v2/symbols",
-            ArrayAt::EnvelopeField("data"),
-            Pending::Markets {
-                rows: vec![],
-                invalid: false,
-            },
-        );
+        self.discovery_read(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(channel) = self.sockets.iter().position(|c| c.socket == Some(socket)) {
@@ -777,15 +840,16 @@ impl Venue for KucoinSpot {
             self.reconnect(cx, c);
         }
     }
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Markets { rows, invalid } => match serde_json::from_str::<Instrument>(item) {
+            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
+            {
                 Ok(r) => rows.push(r.market()),
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Tickers { rows, invalid } => match serde_json::from_str::<Price>(item) {
+            Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Pending::Candles { rows, invalid, .. } => match candle(item) {
                 Ok(c) => rows.push(c),
@@ -815,38 +879,38 @@ impl Venue for KucoinSpot {
         };
         match pending {
             Pending::Markets { rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin Spot markets");
+                if invalid || rows.is_empty() {
+                    self.discovery.failed(cx, false);
                     return;
                 }
+                self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(rows);
                 self.fixed_settings(cx);
-                self.streamed(
-                    cx,
-                    "/api/v1/market/allTickers",
-                    ArrayAt::Path(&["data", "ticker"]),
-                    Pending::Tickers {
-                        rows: vec![],
-                        invalid: false,
-                    },
-                );
-            }
-            Pending::Tickers { mut rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin Spot tickers");
-                    return;
-                }
-                rows.retain(|r| cx.store.market(&r.symbol).is_some());
-                cx.store.set_tickers(rows);
-                self.bullet(cx, 0);
+                self.discovery_read(cx, true);
                 if self.credentials.is_some() {
-                    self.bullet(cx, 1);
                     self.balance(cx);
                     self.orders(cx);
                     self.poll = Some(cx.set_timer(5000.0));
                 } else {
                     cx.store.set_orders(vec![]);
                     cx.store.set_balance(Balance::default());
+                }
+            }
+            Pending::Tickers { mut rows, invalid } => {
+                rows.retain(|r| cx.store.market(&r.symbol).is_some());
+                if invalid || rows.is_empty() {
+                    self.discovery.failed(cx, true);
+                    return;
+                }
+                self.discovery.succeeded(cx, &true);
+                cx.store.set_tickers(rows);
+                self.tickers_applied = true;
+                if self.wallet_valuation_pending {
+                    self.balance(cx);
+                }
+                self.bullet(cx, 0);
+                if self.credentials.is_some() {
+                    self.bullet(cx, 1);
                 }
             }
             Pending::Bullet {
@@ -1114,6 +1178,7 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let discovery = matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. });
         match pending {
             Pending::Bullet {
                 channel,
@@ -1150,11 +1215,23 @@ impl Venue for KucoinSpot {
                 cx.done(command, Err(error.into()));
                 return;
             }
-            _ => {}
+            Pending::Markets { .. } => self.discovery.failed(cx, false),
+            Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
-        cx.log(LogLevel::Error, error);
+        cx.log(
+            if discovery {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            },
+            error,
+        );
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
+        }
         for channel in 0..2 {
             match self.sockets[channel].supervisor.on_timer(cx, timer) {
                 Tick::Reconnect => {

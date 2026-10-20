@@ -1703,7 +1703,7 @@ async fn routed_signed_network_notices(
     tokio::time::timeout(Duration::from_secs(3), async {
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
-            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message.starts_with("Binance startup request failed:"));
+            startup_failed |= matches!(&notice, Notice::Log { message, .. } if message == "Public discovery read failed; retry scheduled");
             command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) } | Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }
@@ -1782,9 +1782,7 @@ fn rejected_proxy_token(calls: Arc<AtomicUsize>) -> ProxyTokenProvider {
 }
 
 fn assert_proxy_authorization_notices(notices: &[Notice]) {
-    assert!(notices.iter().any(|notice| matches!(notice,
-        Notice::Log { message, .. } if message.contains("Proxy authorization failed")
-    )));
+    // Startup discovery logs a fixed retry warning; the command carries the cause.
     assert!(notices.iter().any(|notice| matches!(notice,
         Notice::CommandDone { command: 411, result: Err(message) }
             if message.contains("Proxy authorization failed")

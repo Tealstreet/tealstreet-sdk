@@ -226,6 +226,7 @@ const KNOWN_TS_FIXES = {
     notes: [
       'Translate AssetPairs XBT and XDG/XXDG identities to accepted WS v2 BTC/DOGE wire symbols while preserving canonical store symbols.',
       'Value normalized BTC holdings through the market identity even when the SDK ticker uses XBT/USD.',
+      'Keep native wallet quantities and prior USD while supported conversion prices or rejected catalogue peers recover; only a clean catalogue proves an asset outside the supported aggregate scope.',
       'Parse documented decimal tick and lot steps canonically instead of exposing Math.pow ULP artifacts as extra precision.',
       'Trim subscribed book depth after each update and clear reconnect book caches.',
       'Fan supported native OHLC updates out to every requested fallback timeframe.',
@@ -291,6 +292,8 @@ const KNOWN_TS_FIXES = {
   // cannot silently reauthenticate and retarget a reused client identity.
   grvt() {},
   polymarket() {
+    // Missing native holding prices cannot use a BBO-only default last=0 or
+    // entry price as observed valuation; unavailable owned metadata fails visibly.
     // Reference repairs (not output normalization): preserve initial array books,
     // every sorted absolute depth change, dynamic ticks and event watermarks;
     // use complete Gamma keyset discovery and interval-minute sampled candles.
@@ -358,6 +361,8 @@ const KNOWN_TS_FIXES = {
   // both bracket siblings preserved during parent cancel/replace amendments.
   // Price-only amendments keep the observed residual quantity; invalid/no-op
   // amendments reject before cancellation and filled sources are not replaced.
+  // Rust balance UPnL uses reported private position PnL, preserving prior
+  // valuation when omitted; zero/unavailable public quotes cannot create losses.
   // TS logs native login rejection and has no auth-completion deadline.
   // Native failure regressions verify closure/backoff without altering replay output.
   apexomni: ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'],
@@ -407,6 +412,9 @@ const KNOWN_TS_FIXES = {
     //   identity and caller ranges, and rejects failed or saturated reads.
     // - Execution limits sort raw milliseconds before serializing seconds.
     // - Income honors the requested kind; fills support all-symbol queries.
+    // - Defer unified/portfolio collateral valuation until real FX and a core
+    //   exposure baseline exist; retain pending native balances across delayed
+    //   REST and recover on live/shared/discovery prices without fake zero USD.
     // The tape compares converged state: no account values are rewritten here.
   },
 
@@ -419,6 +427,7 @@ const KNOWN_TS_FIXES = {
     notes: [
       'Emit one execution by native trade ID; TS emits both the filled order and the execution.',
       'Keep valid live executions during the initial five-second notification guard and inherit by-market execution identity.',
+      'Value account positions from native unrealized_pnl and position_value before public prices; missing PnL retains prior same-side valuation instead of inventing a zero-price entry loss.',
       'Read execution history from trades, not cumulative inactive orders; preserve exact IDs and timestamp range units.',
       'Convert native venue/integrator fee rate ticks to signed quote fees and rebates; retain venue-reported account-side PnL.',
       'Validate integrator approval expiry and both runtime fee caps before attributed order submission.',
@@ -464,9 +473,12 @@ const KNOWN_TS_FIXES = {
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
   bitrue(ts) {
-    // Confirmed leverage survives flat/empty account metadata; TS clears that
-    // rail and blocks fresh-account orders. Native regression tests cover this
-    // correction; no account values or command results are normalized here.
+    // Rust refuses zero/non-finite ticker-derived position losses and aggregates
+    // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
+    // fixBitrue zeroes only the exact snapshot's position-free currency UPnL TS
+    // copied from sumOpenRealizedAmount. Confirmed leverage survives flat/empty
+    // account metadata; TS clears that rail and blocks fresh-account orders.
+    // Native regression tests cover this; command results are not normalized.
     // Flat rows may omit leverage until explicitly set; balance still commits.
     // Cancellation continues after failures, including child fallbacks after a
     // failed parent, and reports each failed ID. TS stops subsequent chunks.
@@ -686,6 +698,7 @@ const KNOWN_TS_FIXES = {
 
   okx: [
     'full books retain levels past a stale last trade',
+    'collateral uses proven native or public FX, never a one-dollar fallback for missing nonstable prices; retain native currencies and prior USD until valuation is available, and hand inverse margin, PnL and normalized exposure to the same recovered quote',
     'paired TS/Rust fix: untraded X-Perp blank quote fields seed and stream finite zeros and zero-open percentage stays zero; one unpriced ticker cannot abort the whole catalog',
     'public trades implement the inherited Not implemented method',
     'candle calendar bounds use UTC independently of host timezone',
@@ -723,6 +736,10 @@ const KNOWN_TS_FIXES = {
     // KNOWN_TS_FIXES (security M5): USD-M REST/WS mappers retain native TIF,
     // and cancel-replace copies it so GTX stays post-only. The paired TS fix
     // keeps strict write identity; no TIF or economic output is normalized.
+    // Native funded-wallet regressions: absent prices preserve native amounts
+    // and prior USD; validated native risk marks can prove startup conversion.
+    // Partial metadata cannot prove an asset unsupported, and real public
+    // prices supersede startup marks without replacing known live state.
     // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
     // stale and skipping restoration; rejected writes were swallowed. Reference
     // setter and deterministic regression are fixed, so no output adjustment.

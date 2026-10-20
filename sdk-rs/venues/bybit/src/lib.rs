@@ -39,8 +39,6 @@ const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
 const TOPICS_PER_SUBSCRIBE: usize = 10;
 const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
-const STARTUP_RETRY_MIN_MS: f64 = 1_000.0;
-const STARTUP_RETRY_MAX_MS: f64 = 60_000.0;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
@@ -122,6 +120,7 @@ pub enum Then {
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
+        rejected: bool,
     },
     Fees(HashMap<String, (f64, f64)>),
     Tickers(Vec<Ticker>),
@@ -203,6 +202,7 @@ struct Startup {
     prelaunch: Option<Vec<Market>>,
     /// Pages of a list whose later pages are still in flight.
     trading_pages: Vec<Market>,
+    trading_rejected: bool,
     prelaunch_pages: Vec<Market>,
     fees: Option<HashMap<String, (f64, f64)>>,
     tickers: Option<Vec<Ticker>>,
@@ -216,8 +216,7 @@ struct Startup {
     account_info: bool,
     option_tickers_pending: HashSet<String>,
     option_tickers: HashMap<String, Vec<Ticker>>,
-    retry_ms: f64,
-    retry: Option<TimerId>,
+    backoff: safe_cex_engine::startup::Backoff<()>,
 }
 
 struct ProductState {
@@ -413,7 +412,6 @@ impl BybitLinear {
                         category,
                         public: Connection::new(),
                         startup: Startup {
-                            retry_ms: STARTUP_RETRY_MIN_MS,
                             prelaunch: (category == Category::Option).then(Vec::new),
                             fees: (category == Category::Option).then(HashMap::new),
                             ..Startup::default()
@@ -465,7 +463,6 @@ impl BybitLinear {
             live_candles: HashMap::new(),
             trade_subscribers: HashMap::new(),
             startup: Startup {
-                retry_ms: STARTUP_RETRY_MIN_MS,
                 prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
                 ..Startup::default()
@@ -779,12 +776,15 @@ impl BybitLinear {
         self.send(
             cx,
             Rest::get("/v5/market/instruments-info", query).streamed(),
-            Then::Markets { prelaunch, markets },
+            Then::Markets {
+                prelaunch,
+                markets,
+                rejected: false,
+            },
         );
     }
 
     fn request_startup(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.startup.retry = None;
         if !self.startup.markets_loaded
             && self.startup.trading.is_none()
             && !self.startup.trading_in_flight
@@ -867,7 +867,7 @@ impl BybitLinear {
     /// A required startup list failed: try the missing ones again, backing off.
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, what: &str, error: &str) {
         cx.log(
-            LogLevel::Error,
+            LogLevel::Warning,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
         if self.category == Category::Option && !self.option_degraded {
@@ -883,12 +883,7 @@ impl BybitLinear {
             // Seeds already loaded elsewhere skip try_load_tickers; publish them too.
             self.try_publish_tickers(cx);
         }
-        if self.startup.retry.is_some() {
-            return;
-        }
-        let delay = self.startup.retry_ms;
-        self.startup.retry_ms = (delay * 2.0).min(STARTUP_RETRY_MAX_MS);
-        self.startup.retry = Some(cx.set_timer(delay));
+        self.startup.backoff.failed(cx, ());
     }
 
     fn on_markets(
@@ -896,6 +891,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         prelaunch: bool,
         mut markets: Vec<Market>,
+        rejected: bool,
         response: Result<Response<'_>, &str>,
     ) {
         if prelaunch && (self.startup.markets_loaded || self.startup.prelaunch.is_some()) {
@@ -912,6 +908,9 @@ impl BybitLinear {
             .and_then(|result| result.next_page_cursor)
             .filter(|cursor| !cursor.is_empty())
             .map(|cursor| cursor.into_owned());
+        if !prelaunch {
+            self.startup.trading_rejected |= rejected;
+        }
         let pages = if prelaunch {
             &mut self.startup.prelaunch_pages
         } else {
@@ -923,6 +922,10 @@ impl BybitLinear {
             return;
         }
         let list = std::mem::take(pages);
+        if !prelaunch && list.is_empty() && self.startup.trading_rejected {
+            self.markets_failed(cx, false, "Trading catalogue has no usable markets");
+            return;
+        }
         if prelaunch {
             if let Some(timer) = self.startup.prelaunch_grace.take() {
                 cx.clear_timer(timer);
@@ -961,6 +964,7 @@ impl BybitLinear {
         } else {
             self.startup.trading_in_flight = false;
             self.startup.trading_pages.clear();
+            self.startup.trading_rejected = false;
             self.retry_startup(cx, "Trading markets", error);
         }
     }
@@ -1067,6 +1071,7 @@ impl BybitLinear {
             let category = self.category;
             for other in self.categories() {
                 self.select_category(other);
+                self.try_start_account(cx);
                 self.try_load_tickers(cx);
             }
             self.select_category(category);
@@ -1117,6 +1122,7 @@ impl BybitLinear {
             return;
         };
         self.startup.tickers_loaded = true;
+        self.startup.backoff.succeeded(cx, &());
         let tickers: Vec<Ticker> = rows
             .into_iter()
             .filter_map(|mut ticker| {
@@ -1523,15 +1529,26 @@ impl BybitLinear {
     }
 }
 
-fn on_item_public(then: &mut Then, item: &str, variant: Variant, category: Category) {
+fn on_item_public(
+    cx: &mut Cx<'_, Pending>,
+    then: &mut Then,
+    item: &str,
+    variant: Variant,
+    category: Category,
+) {
     {
         match then {
-            Then::Markets { markets, .. } => {
-                if let Ok(m) = serde_json::from_str::<Instrument>(item)
-                    && (!variant.is_hyro()
-                        || (m.quote_coin == "USDT"
-                            && (m.contract_type.is_empty()
-                                || m.contract_type == "LinearPerpetual")))
+            Then::Markets {
+                markets, rejected, ..
+            } => {
+                let Ok(m) = serde_json::from_str::<Instrument>(item) else {
+                    *rejected = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                if (!variant.is_hyro()
+                    || (m.quote_coin == "USDT"
+                        && (m.contract_type.is_empty() || m.contract_type == "LinearPerpetual")))
                     && (category != Category::Option
                         || (m.status == "Trading" && derivative_from_wire(&m, category).is_some()))
                 {
@@ -1547,7 +1564,11 @@ fn on_item_public(then: &mut Then, item: &str, variant: Variant, category: Categ
                 }
             }
             Then::Tickers(tickers) | Then::OptionSeed { tickers, .. } => {
-                if let Ok(t) = serde_json::from_str::<TickerRow>(item) {
+                let Ok(t) = serde_json::from_str::<TickerRow>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                {
                     tickers.push(ticker_from_rest(
                         &t,
                         variant == Variant::Linear && category == Category::Inverse,
@@ -1585,9 +1606,11 @@ impl BybitLinear {
             Err(error) => Some((*error).to_owned()),
         };
         match then {
-            Then::Markets { prelaunch, markets } => {
-                self.on_markets(cx, prelaunch, markets, response)
-            }
+            Then::Markets {
+                prelaunch,
+                markets,
+                rejected,
+            } => self.on_markets(cx, prelaunch, markets, rejected, response),
             Then::Fees(fees) => {
                 self.startup.fees_in_flight = false;
                 let rejected = response
@@ -1608,6 +1631,9 @@ impl BybitLinear {
                 self.startup.tickers_in_flight = false;
                 match failure {
                     Some(error) => self.retry_startup(cx, "tickers", &error),
+                    None if tickers.is_empty() => {
+                        self.retry_startup(cx, "tickers", "No usable ticker rows")
+                    }
                     None => {
                         self.startup.tickers = Some(tickers);
                         self.try_load_tickers(cx);
@@ -1878,7 +1904,7 @@ impl BybitLinear {
         if self.public.outbox_timer == Some(timer) {
             self.drain_outbox(cx);
         }
-        if self.startup.retry == Some(timer) {
+        if self.startup.backoff.on_timer(timer).is_some() {
             self.request_startup(cx);
         }
         if self.startup.prelaunch_grace == Some(timer) {
@@ -2084,7 +2110,7 @@ impl Venue for BybitLinear {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }
                 }
-                on_item_public(then, item, self.variant, self.category)
+                on_item_public(cx, then, item, self.variant, self.category)
             }
         }
     }

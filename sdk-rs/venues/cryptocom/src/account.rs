@@ -474,11 +474,19 @@ impl Cryptocom {
             Rows::Positions(rows) => serde_json::from_str::<PositionRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.position(cx.now));
+                } else if num::parse(row.quantity) != 0.0 {
+                    request.invalid = true;
+                    cx.log(LogLevel::Warning, "Crypto.com owned position market unavailable; preserving previous snapshot");
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.order(cx.now, cx.store.order(&id(row.order_id))));
+                } else if row.instrument_name.ends_with("-PERP")
+                    && status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open
+                {
+                    request.invalid = true;
+                    cx.log(LogLevel::Warning, "Crypto.com working order market unavailable; preserving previous orders");
                 }
             }),
             Rows::Balance(balance) => serde_json::from_str::<BalanceRow>(item).map(|row| {

@@ -5,6 +5,21 @@ type LivenessEngine = Engine<safe_cex_venue_woo::Woo>;
 const REJECTED: &str = r#"{"event":"auth","success":false,"message":"bad key"}"#;
 const ACCEPTED: &str = r#"{"event":"auth","success":true}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
+// Private startup begins at markets, so its socket may connect before tickers.
+fn seed_tickers(e: &mut LivenessEngine) -> Vec<Action> {
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    let request = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/v1/public/futures") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    support::response(e, &request, 20.0, support::TICKERS);
+    actions.extend(e.drain_actions());
+    actions
+}
+
 fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
     let mut e = Engine::new(safe_cex_venue_woo::Woo::new(safe_cex_venue_woo::Options {
         key: Some("key".into()),
@@ -15,10 +30,8 @@ fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
-    let request = support::requests(&mut e).remove(0);
-    support::response(&mut e, &request, 20.0, support::TICKERS);
-    let socket = e
-        .drain_actions()
+    let socket = seed_tickers(&mut e)
+        .into_iter()
         .find_map(|a| match a {
             Action::WsConnect {
                 socket,
@@ -237,10 +250,8 @@ fn private_connection_that_never_opens_is_closed_and_backed_off() {
     e.start(0.0);
     let request = support::requests(&mut e).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
-    let request = support::requests(&mut e).remove(0);
-    support::response(&mut e, &request, 20.0, support::TICKERS);
     let now = 20.0;
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = seed_tickers(&mut e);
     let (index, socket) = actions
         .iter()
         .enumerate()

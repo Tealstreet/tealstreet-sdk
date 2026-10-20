@@ -145,7 +145,7 @@ pub(crate) fn log_skipped_at(
     );
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum List {
     Markets,
     Daily,
@@ -190,12 +190,17 @@ pub struct Bingx {
     candles: HashMap<(String, String), u32>,
     seed: Vec<Ticker>,
     seed_index: Vec<Option<usize>>,
+    seed_rows_index: Vec<Option<usize>>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     seed_reported: Vec<bool>,
     sequence: u64,
-    retries: HashMap<TimerId, List>,
-    failures: [u32; 3],
-    // Funding failures commit tickers without it and retry; private start never waits.
+    retries: safe_cex_engine::startup::Backoff<List>,
+    // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
+    // Markets the live stream has priced; a late funding retry never overwrites them.
+    live_priced: Vec<bool>,
+    // Rows created only to hold live fields before the REST seed commits.
+    staged_tickers: Vec<String>,
 }
 
 impl Bingx {
@@ -230,11 +235,14 @@ impl Bingx {
             candles: HashMap::new(),
             seed: Vec::new(),
             seed_index: Vec::new(),
+            seed_rows_index: Vec::new(),
+            live_tickers: Default::default(),
             seed_reported: Vec::new(),
             sequence: 0,
-            retries: HashMap::new(),
-            failures: [0; 3],
+            retries: Default::default(),
             tickers_committed: false,
+            live_priced: Vec::new(),
+            staged_tickers: Vec::new(),
         }
     }
 
@@ -247,17 +255,18 @@ impl Bingx {
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
-        let slot = match kind {
-            List::Markets => 0,
-            List::Daily => 1,
-            List::Premium => 2,
-        };
-        let delay = (1000. * 2f64.powi(self.failures[slot].min(5) as i32)).min(30_000.);
-        self.failures[slot] += 1;
-        self.retries.insert(cx.set_timer(delay), kind);
+        if matches!(kind, List::Premium) {
+            self.seed_reported.fill(false);
+        }
+        self.retries.failed(cx, kind);
     }
 
-    fn read(&self, cx: &mut Cx<'_, Pending>, path: &'static str, pending: Pending) {
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &'static str, pending: Pending) {
+        if !self.tickers_committed
+            && matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. })
+        {
+            self.live_tickers.begin();
+        }
         issue(
             cx,
             self.credentials.as_ref(),
@@ -305,12 +314,18 @@ impl Bingx {
         let market = cx
             .store
             .market_by_id(id)
-            .and_then(|m| cx.store.market_index(&m.symbol))?;
-        self.seed_index.get(market as usize).copied().flatten()
+            .and_then(|m| cx.store.market_index(&m.symbol))? as usize;
+        let slots = if self.tickers_committed {
+            &self.seed_index
+        } else {
+            &self.seed_rows_index
+        };
+        slots.get(market).copied().flatten()
     }
 
-    /// Publishes the seeded tickers and starts the private side. Without a
-    /// funding read every daily ticker is kept; with one, only reported ones.
+    /// Publishes the seeded tickers over any live fields received meanwhile.
+    /// Without a funding read every daily ticker is kept; with one, only
+    /// reported ones. The private side already started at markets.
     fn commit_tickers(&mut self, cx: &mut Cx<'_, Pending>, keep_unreported: bool) {
         let reported = std::mem::take(&mut self.seed_reported);
         if !keep_unreported {
@@ -321,7 +336,17 @@ impl Bingx {
                 keep
             });
         }
-        let rows = std::mem::take(&mut self.seed);
+        let mut rows = std::mem::take(&mut self.seed);
+        let seeded = rows.len();
+        self.live_tickers.finish(cx.store, &mut rows);
+        // TS publishes only seeded tickers; a live-only staged row is dropped.
+        let staged = std::mem::take(&mut self.staged_tickers);
+        let mut index = 0;
+        rows.retain(|row| {
+            index += 1;
+            index <= seeded || !staged.contains(&row.symbol)
+        });
+        self.seed_index.resize(cx.store.markets().len(), None);
         self.seed_index.fill(None);
         for (i, ticker) in rows.iter().enumerate() {
             if let Some(market) = cx.store.market_index(&ticker.symbol) {
@@ -330,9 +355,6 @@ impl Bingx {
         }
         cx.store.set_tickers(rows);
         self.tickers_committed = true;
-        if let Some(c) = &self.credentials {
-            self.account.start(cx, c);
-        }
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -423,11 +445,36 @@ impl Bingx {
                     let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
                         return;
                     };
-                    let Some(ticker) = self.seed_index.get(market as usize).copied().flatten()
-                    else {
-                        return;
+                    // Before the seed commits, a staged row keeps live fields for its overlay;
+                    // afterwards, like TS, markets the daily or funding read omitted stay absent.
+                    let ticker = match self.seed_index.get(market as usize).copied().flatten() {
+                        Some(ticker) => ticker,
+                        None if !self.tickers_committed => {
+                            let symbol = cx.store.markets()[market as usize].symbol.clone();
+                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                                return;
+                            };
+                            if !self.staged_tickers.contains(&symbol) {
+                                self.staged_tickers.push(symbol);
+                            }
+                            ticker as usize
+                        }
+                        None => return,
                     };
                     let step = cx.store.markets()[market as usize].precision.price;
+                    let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
+                    if row.trade_price > 0.0 {
+                        mask |= 7;
+                    }
+                    if row.change_percentage.is_some() {
+                        mask |= 1 << 5;
+                    }
+                    if row.volume.is_some() {
+                        mask |= 1 << 9;
+                    }
+                    if row.value.is_some() {
+                        mask |= 1 << 10;
+                    }
                     cx.store.update_ticker_at(ticker as u32, |t| {
                         if row.trade_price > 0. {
                             t.last = row.trade_price;
@@ -441,6 +488,12 @@ impl Bingx {
                         t.quote_volume = row.value.unwrap_or_default();
                         t.funding_time = 0.;
                     });
+                    let symbol = &cx.store.markets()[market as usize].symbol;
+                    self.live_tickers.record(cx.store, symbol, mask);
+                    if self.live_priced.len() <= market as usize {
+                        self.live_priced.resize(cx.store.markets().len(), false);
+                    }
+                    self.live_priced[market as usize] = true;
                 },
             );
             if result.is_err() {
@@ -696,7 +749,10 @@ impl Venue for Bingx {
                         taker_fee: None,
                         maker_fee: None,
                     }),
-                    Err(_) => skipped.push(row_symbol(item).unwrap_or_default().into_owned()),
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        skipped.push(row_symbol(item).unwrap_or_default().into_owned())
+                    }
                 }
             }
             Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily<'_>>(item) {
@@ -716,7 +772,10 @@ impl Venue for Bingx {
                         })
                     }
                 }
-                Err(_) => skipped.push(row_symbol(item).unwrap_or_default().into_owned()),
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    skipped.push(row_symbol(item).unwrap_or_default().into_owned())
+                }
             },
             Pending::Premium { skipped } => match serde_json::from_str::<Premium<'_>>(item) {
                 Ok(p) => {
@@ -730,13 +789,21 @@ impl Venue for Bingx {
                         t.funding_time = p.next_funding_time;
                     };
                     if self.tickers_committed {
-                        cx.store.update_ticker_at(i as u32, apply);
+                        let live = cx
+                            .store
+                            .market_index_by_id(&p.symbol)
+                            .and_then(|m| self.live_priced.get(m as usize).copied())
+                            .unwrap_or(false);
+                        if !live {
+                            cx.store.update_ticker_at(i as u32, apply);
+                        }
                     } else {
                         apply(&mut self.seed[i]);
                         self.seed_reported[i] = true
                     }
                 }
                 Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
                     let symbol = row_symbol(item);
                     // A malformed funding row keeps its daily ticker, without funding.
                     if !self.tickers_committed
@@ -799,20 +866,20 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets { rows, skipped } if rows.is_empty() && !skipped.is_empty() => {
-                log_skipped(cx, "market", &skipped);
-                self.on_request_failed(
-                    cx,
-                    Pending::Markets { rows, skipped },
-                    "no valid BingX market rows",
-                )
-            }
             Pending::Markets { mut rows, skipped } => {
                 log_skipped(cx, "market", &skipped);
+                if rows.is_empty() {
+                    self.retry_list(cx, List::Markets);
+                    return;
+                }
                 self.account
                     .set_skipped_markets(skipped.iter().map(|id| id.replace('-', "")));
                 rows.shrink_to_fit();
+                self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
+                if let Some(c) = &self.credentials {
+                    self.account.start(cx, c);
+                }
                 self.connect(cx);
                 self.read(
                     cx,
@@ -839,10 +906,16 @@ impl Venue for Bingx {
                         });
                     }
                 }
-                self.seed_index = vec![None; cx.store.markets().len()];
+                // Neither a valid row nor an identifiable placeholder: never publish empty.
+                if rows.is_empty() {
+                    self.retry_list(cx, List::Daily);
+                    return;
+                }
+                self.retries.succeeded(cx, &List::Daily);
+                self.seed_rows_index = vec![None; cx.store.markets().len()];
                 for (i, ticker) in rows.iter().enumerate() {
                     if let Some(index) = cx.store.market_index(&ticker.symbol) {
-                        self.seed_index[index as usize] = Some(i)
+                        self.seed_rows_index[index as usize] = Some(i)
                     }
                 }
                 self.seed_reported = (0..rows.len()).map(|i| i >= reported).collect();
@@ -857,8 +930,19 @@ impl Venue for Bingx {
             }
             Pending::Premium { skipped } => {
                 log_skipped(cx, "funding", &skipped);
-                if !self.tickers_committed {
+                if self.tickers_committed {
+                    self.retries.succeeded(cx, &List::Premium);
+                } else if self.seed_reported.iter().any(|reported| *reported) {
+                    self.retries.succeeded(cx, &List::Premium);
                     self.commit_tickers(cx, false);
+                } else {
+                    // No funding row named any seeded market: keep the daily tickers
+                    // rather than publishing an empty set, and retry funding.
+                    self.on_request_failed(
+                        cx,
+                        Pending::Premium { skipped },
+                        "BingX funding read named no seeded market",
+                    );
                 }
             }
             Pending::Candles {
@@ -897,6 +981,10 @@ impl Venue for Bingx {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let discovery = matches!(
+            &pending,
+            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
+        );
         match pending {
             Pending::Signed(signed) => {
                 self.on_request_failed(cx, signed.inner, error);
@@ -935,7 +1023,14 @@ impl Venue for Bingx {
                 self.retry_list(cx, List::Premium)
             }
         }
-        cx.log(LogLevel::Error, error);
+        cx.log(
+            if discovery {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            },
+            error,
+        );
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.history.on_timer(cx, self.credentials.as_ref(), timer);
@@ -945,7 +1040,7 @@ impl Venue for Bingx {
             }
             return;
         }
-        if let Some(kind) = self.retries.remove(&timer) {
+        if let Some(kind) = self.retries.on_timer(timer) {
             let (path, pending) = match kind {
                 List::Markets => (
                     paths::MARKETS,
