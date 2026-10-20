@@ -71,8 +71,8 @@ final fresh-artifact Hyro gates remain required with unchanged thresholds.
 - Fresh Spot capture after bounded subscription frames: 7,065 frames, 3,729
   markets and two books over 20 seconds; no policy closes. COIN-M live capture:
   203 frames/two books over 20 seconds. Both trimmed fixtures are being gated.
-- First strict private replays pass for all four profiles: USD-M14 frames,
-  PM6, Spot8, COIN-M6. Helper suite235 passes. These measurements precede the
+- First strict private replays pass for all four profiles: USD-M 14 frames,
+  PM 6, Spot 8, COIN-M 6. Helper suite235 passes. These measurements precede the
   final lifecycle fixes and do not replace final-head gates.
 - Final adversarial review found negative/tiny inverse quantities turning into
   full-position stops, cancellation acknowledgements accepted without proof,
@@ -141,7 +141,7 @@ All eight Binance gates pass on that integrated source. Public gates use three
 runs and unchanged thresholds; every public Rust main/steady CPU and retained
 memory metric is below TS. Private gates use one run and assert correctness,
 including zero unserved requests, missing writes, bad signatures or protocol
-errors. Fresh private frame counts: USD-M14, PM6, Spot8, COIN-M6.
+errors. Fresh private frame counts: USD-M 14, PM 6, Spot 8, COIN-M 6.
 
 | Profile | Frames | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB |
 | --- | ---: | ---: | ---: | ---: |
@@ -204,7 +204,7 @@ Final integrated Binance evidence (`16f43063ca`, including KuCoin/AsterDEX): all
 | Spot | 7045 | 753.982/620.454 | 363.794/284.658 | 26.539/7.533 |
 | COIN-M | 202 | 211.416/90.890 | 141.328/54.074 | 15.682/1.515 |
 
-Private frames: USD-M14, PM6, Spot8, COIN-M6; all expected writes, HMAC signatures, subscription identities and account comparisons pass.
+Private frames: USD-M 14, PM 6, Spot 8, COIN-M 6; all expected writes, HMAC signatures, subscription identities and account comparisons pass.
 
 Binance-only WASM **910175 bytes**, budget1258291. SHA-256 `e3b8fb107949471929b153c78df651dddddde320d57610d70d708dca1965f58e`.
 
@@ -219,7 +219,7 @@ remain disclosed; no metric interval or threshold changed.
 
 Final default combined WASM rebuild passes all79 actual WASM cases across six
 files. Both root test scripts pass7011 safe-cex cases; all27 test tasks pass.
-Root typecheck44/lint28 tasks,51 host/wire tests,272 harness helpers, fmt,
+Root typecheck 44/lint 28 tasks,51 host/wire tests,272 harness helpers, fmt,
 bans, strict crate/default WASM Clippy and the secret scan all pass. Phase
 review findings and fixes are ready for PR publication; green PR CI is required
 before merging.
@@ -283,9 +283,53 @@ ApeX landing `ecb313026f` is merged in `01921c6aa5`; independent wrapper and
 harness audits pass. Binance/Bybit/engine/frame implementation is unchanged
 from the twelve-gate source above. The new global `getAccount` wire alias maps
 to Binance's explicit unsupported completion. All304 merged helpers,46 focused
-wrapper/frame cases, typecheck44/lint28 tasks, fmt/bans/default WASM Clippy and
+wrapper/frame cases, typecheck 44/lint 28 tasks, fmt/bans/default WASM Clippy and
 81 actual combined WASM cases pass. Fresh Spot private (including currencies),
 Spot public and USD-M public regression gates pass. The updated Binance-only
 artifact is919064 bytes (limit1258291), SHA-256
 `8895b0178ad8ea2d576c9c1a3a923093de6f5145652cf5fa0cddce80aa775378`.
 Current PR CI must pass before merge; no performance threshold changed.
+
+
+### Paradex transport integration
+
+Final integrated source `a6c00299ff` includes KuCoin, AsterDEX, Kraken, ApeX and Paradex. **All twelve local replay gates pass.** Public values are three-run medians; thresholds and workload are unchanged.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 268.888/125.786 | 151.143/57.835 | 19.142/2.681 |
+| PM | 873 | 238.585/118.070 | 132.180/47.429 | 18.608/2.681 |
+| Spot | 7045 | 924.572/652.282 | 473.297/274.184 | 26.638/7.582 |
+| COIN-M | 202 | 242.342/101.055 | 167.182/56.856 | 15.747/1.530 |
+
+Private frames: USD-M 14, PM 6, Spot 8, COIN-M 6; baseline Bybit public/private 8,743/18 and Hyro 160/13. Every run has zero unserved requests, missing writes, bad signatures or protocol errors. Native Spot currencies are compared independently, including all free/used/total/upnl numbers.
+
+Binance-only WASM: **891,365 bytes**, budget 1,258,291; SHA-256 `dd520bd93540f5eb570cdb11fd24394d853cde44371d945ab241340743ee43e4`.
+
+Verification: 99 Binance native tests; 99 Aster native compatibility cases; fmt/bans and strict crate/default WASM Clippy; 327 merged harness helpers; 263 focused wrapper/frame/transport tests; root typecheck 44/lint 28 tasks. Final combined WASM/host checks: 81/81 real WASM cases and 54/54 host cases PASS. Earlier full root tests passed all 27 tasks; current PR CI must be green before merge.
+
+Hyro public: TS/Rust main 31.503/28.332ms, steady 11.939/9.353ms. One final private informational sample was slower in Rust (main 38.935/41.765ms, steady 20.032/20.120ms). Both unchanged-artifact repeats were faster: main 52.084/29.959 and 44.840/32.889ms; steady 34.787/15.637 and 23.365/18.726ms. Three-sample private medians favor Rust (main44.840/32.889, steady23.365/18.726). All original losses are retained, including the two from #1307. Unchanged-baseline and multiple fresh public builds pass; the new private loss did not repeat. Profiling found shared replay URL/scheduling overhead without establishing an actionable production Rust regression. No speculative Hyro optimization, threshold reduction or interval change; strict machine isolation is not claimed.
+
+Local adversarial reviews and their resolutions are posted on this PR. Review fixes include cancellation proof/deferred remaining sizing, stream generation fencing, native contract multipliers, new shared STP/unsupported-command preflight, and restoring Aster's consumed PositionRisk payload type. Round one found missing native Spot currency slices and generic normalization hiding foreign query-ID aliases; both failures were demonstrated, fixed and independently re-reviewed. Strengthened currency comparisons drop only opaque TS info, and raw alias rejection precedes matching. Final correctness/harness reviews pass. Paradex binary delivery remains explicit; Binance/Bybit text decompression and HMAC behavior are preserved.
+
+
+### Phemex integration and final replay evidence
+
+Integrated source `098bcddcee` includes Phemex. All twelve replay gates PASS. Independent parser/host and harness reviews pass; a separate peer passes the duplicate Binance/PM client-ID cleanup and restored legacy host return union. All 349 merged harness helpers pass. Public values are three-run medians; workloads, thresholds and CPU windows are unchanged.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 183.436/93.762 | 99.136/37.485 | 19.141/2.554 |
+| PM | 873 | 172.347/91.313 | 94.179/36.315 | 18.622/2.554 |
+| Spot | 7045 | 573.400/401.340 | 248.453/113.054 | 26.658/7.708 |
+| COIN-M | 202 | 185.635/77.154 | 128.225/45.616 | 15.779/1.526 |
+
+Private frames: USD-M 14, PM 6, Spot 8 and COIN-M 6. Baseline Bybit public/private 8,743/18 and Hyro 160/13 also pass. Every replay has zero unserved requests, missing writes, bad signatures or protocol errors. Spot currencies retain complete numeric comparison.
+
+Binance-only WASM is **895,040 bytes**, below 1,258,291; SHA-256 `6245539564f89a5b2301ce84c3fba4fb0a1fe5a2d4606eec3c510d6a8b4269e7`.
+
+Merged-source verification: 99 Binance native tests, 38 engine JSON cases, 349 harness helpers, 277 focused wrapper/frame/transport cases; root typecheck 44/lint 28 tasks, workspace fmt/bans and strict Binance/default WASM Clippy all PASS. Fresh combined WASM checks pass 82/82 across six suites; host/wire checks pass 60/60. Gitleaks finds no leaks in the feature commit range.
+
+Hyro public TS/Rust main 35.915/30.283ms, steady 11.816/9.664ms, retained 16.404/0.893MB. Private original main 36.995/32.949ms; steady 18.110/18.348ms is a retained 0.238ms Rust loss. Two unchanged-artifact repeats favor Rust: main 48.028/35.282 and 44.937/40.437ms; steady 24.297/18.388 and 23.475/21.507ms. Three-sample medians main 44.937/35.282 and steady 23.475/18.388ms favor Rust. Earlier losses remain recorded above. No reproducible production regression is established, no threshold or measurement window changed, and no speculative Hyro optimization is claimed.
+
+The Phemex UTF-8/actions host entry and opt-in streaming list omission pass independent review. The reusable 4KB JS ingress scratch and full reserved WASM pages remain counted. Source changes are committed; this PR may merge only on green CI for its pushed head.
