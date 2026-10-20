@@ -2097,3 +2097,17 @@ not fixture padding or a measured-window/warmup change: entire constructor+
 startup still enters every replay cost. Original failed fixture untouched
 until replacement; no future bytes or timestamp synthesis, unchanged120second
 startup cap/20second duration and original gate rules.
+
+Budget implementation checkpoint: partial-catalog regression fails original
+native code at loaded.markets after core metadata alone; proof
+/tmp/bitunix-hl-budget-before.log. New typed dispatcher/bootstrap code passes
+initial Cargo check; full behavioral/queue controls still in progress. Early
+test-driver review caught legacy fixed host timestamps rewinding engine time
+after new causal timer advancement. Keep raw exchange timestamps unchanged,
+but migrate scripted host events to monotonic logical time; fire overdue
+timers at current time with deterministic equal-deadline registration order.
+Never pass old assertions by manufacturing backwards host time. New budget/
+nonce/dispatch controls must use strict raw Engine chronology independently.
+Original invalid parent fixture backed up outside repo:298records/284WS,
+gzipSHA1ae037ecae4713647f9087962cfda6d5f6974c18c156a6c4f92daa853636fdfc,
+rawSHA67ab6d47f99fd53e3fc9e09ef9a41ae91db04f95e9f2b0c39ef6e6099c1e59df.
