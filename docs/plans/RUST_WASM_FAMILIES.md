@@ -98,3 +98,12 @@ Consumers outside this repo: a web build must run `yarn rust:build-wasm
 bundler cannot resolve the family imports. `loadWebEngine(venue)` and
 `setWasmEngineLoader((venue) => …)` now receive the Rust venue; existing
 zero-argument loaders keep working.
+
+## Size budget
+
+The per-family (single-venue) budget rose from 1,258,291 bytes (1.2 MiB) to
+1,310,720 bytes (1.25 MiB) after #1375 and #1399 put the web Bybit family at
+1,260,132 bytes (run `39465253385`, 1,841 bytes over). Families ship
+separately, so the budget bounds one venue's download, not the total. The
+growth is correctness, bridge (typed command outcomes and order-identity
+receipts) and logging code. The combined 13 MiB budget is unchanged.
