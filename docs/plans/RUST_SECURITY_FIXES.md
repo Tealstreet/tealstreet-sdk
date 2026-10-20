@@ -290,3 +290,31 @@ live trading, weakened parity oracle, or performance threshold changes.
   `/tmp/security-v2-all-gates.json`. The final-source code is `5a9314df83`;
   later commits only record documentation. All quality and scanner receipts
   above remain valid. PR creation/review/CI/merge remain outstanding.
+
+### Added named logging leaks from the quality audit
+
+- Accepted the Aimux request in `thread-dmam1oibxrui` to include the named
+  Bitrue/Bybit logging leaks and an all-notice native regression. Read
+  `origin/feat/rust-rewrite:docs/plans/RUST_QUALITY.md` after fetching. Current
+  Bitrue still logs a full rejected private frame; current Bybit logs signed
+  rejection text and forwards the same `origin_string` through final errors.
+  The existing TS Bybit signing regression demonstrates an API key inside that
+  protocol field. Native URL stripping already exists; strengthen its proof
+  through actual engine/host notices, including both Log and CommandDone.
+- Phase plan: preserve fixed subscription/operation diagnostics and numeric
+  codes, strip signed-origin/auth payloads at shared rejection boundaries,
+  retain ordinary venue business messages, and test every emitted notice for
+  sentinel credentials/URLs. Keep request retry counts and trading behavior.
+  Independent review found no further demonstrated credential-bearing case;
+  broader raw-body redaction and the logging facade remain their later lane.
+- Verification order now retains exact isolated bindings/hashes and runs
+  builds/size/private correctness before public timing, so untimed work can
+  advance during host saturation. The `v3` runner reached six early venues;
+  it is paused before Bitrue/Bybit while their fixes are implemented. Public
+  timing has still not started. Artifacts/receipts are checkpoints only.
+- Fetched landing advanced to `702a62050c`, including broker/cancellation fixes
+  and a signing-clock setup repair in the harness. Commit/review the logging
+  phase before merging it, preserve security ownership/window/nonce guards,
+  then regenerate final tapes/replays and final quality checks on the merged
+  source. Existing fixtures need no recapture. No lifecycle-only parity change
+  or sampling-deadline/acceptance relaxation is authorized by this addition.
