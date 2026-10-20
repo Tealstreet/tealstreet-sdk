@@ -137,6 +137,9 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
+          - venue: lighter
+            books: ETH,BTC
+            private_script: rust:private-tape-lighter
           - venue: bitrue
             books: E-BTC-USDT,E-ETH-USDT
             private_script: rust:private-tape-bitrue

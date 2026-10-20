@@ -790,3 +790,33 @@ Use a small funded account and minimum-safe size.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/lighter` for `lighter` perpetuals.
+`lighter-robinhood` continues using its own TS deployment. The Rust host forwards
+Application ID, API key index, integrator index (as exact decimal text), and
+`extra.lighterStopSlippagePct`. Missing local secret or API key index starts
+public-only data. Caller client order IDs are refused on every shape and across
+the entire batch before any engine command/write.
+
+Both sockets use engine timers for handshake, idle and reconnect watchdogs.
+Private fills come exclusively from execution records, deduplicated by native
+trade ID; a filled-order cumulative amount is never another execution. Live
+executions during the first five seconds after connecting are retained, while
+subscription history is suppressed. Settings use per-market confirmation clocks
+and uncertain writes block dependent settings updates until fresh confirmation.
+
+Rust history reads actual executions from `trades`, inactive orders from
+`accountInactiveOrders`, and funding from `positionFunding`. It preserves exact
+IDs, signed rebates and actual account-side realized PnL, converts native fee
+rate ticks using `FeeTick = 1_000_000`, and fails incomplete cursor walks rather
+than returning a successful empty/partial history. Execution results retain SDK
+seconds; engine range inputs use integer milliseconds.
+
+The signer supports current market IDs `0..32767` except reserved `255`; API key
+indices remain `0..254`. Independent TS/Go-WASM vectors cover serialization,
+preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
+first-port grouped-order/approval signer surfaces and their unused 32-byte hash
+helpers are removed; the exchange places bracket siblings sequentially as TS
+currently does. Deliberate TS fixes are listed in the port plan and replay gate.

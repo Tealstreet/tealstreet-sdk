@@ -53,6 +53,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
   paradex: 'paradex',
+  lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -181,6 +182,9 @@ export class RustEngineExchange extends BaseExchange {
         !Boolean(this.options.key && this.options.paradexAddress && this.options.subkeyAddress)
       );
     }
+    if (this.name === 'lighter') {
+      return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
+    }
     if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
     return (
       this.options.publicDataOnly === true ||
@@ -205,7 +209,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key || !this.options.secret)
     ) {
@@ -230,6 +234,13 @@ export class RustEngineExchange extends BaseExchange {
         publicDataOnly: Boolean(publicDataOnly),
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
+        ...(this.name === 'lighter'
+          ? {
+              apiKeyIndex: this.options.apiKeyIndex,
+              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+            }
+          : {}),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
@@ -334,12 +345,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.clientOrderIdRule) this.assertCallerClientOrderIds(orders);
+    this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    if (this.clientOrderIdRule) this.resolveCallerClientOrderId(opts);
+    this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
 
@@ -404,7 +415,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'paradex', 'woo'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'paradex', 'lighter', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
