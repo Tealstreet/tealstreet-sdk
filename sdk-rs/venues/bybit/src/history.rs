@@ -77,6 +77,9 @@ struct Income {
     #[serde(skip_serializing_if = "Option::is_none")]
     trade_id: Option<String>,
     category: &'static str,
+    /// Native row identity: equal for page repeats, distinct for real legs.
+    #[serde(skip)]
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -130,10 +133,30 @@ impl Rows {
             }
             Self::Income(rows) => {
                 rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
+                // Exact page repeats collapse; distinct native rows sharing an id
+                // (same-instant hedge funding legs) get their leg appended instead.
                 let mut seen = HashSet::new();
                 rows.retain(|row| {
-                    seen.insert((row.symbol.clone(), row.tran_id.clone(), row.income_type))
+                    seen.insert((
+                        row.symbol.clone(),
+                        row.tran_id.clone(),
+                        row.income_type,
+                        row.source.clone(),
+                    ))
                 });
+                let mut sources: HashMap<&str, HashSet<&str>> = HashMap::new();
+                for row in rows.iter() {
+                    sources.entry(&row.tran_id).or_default().insert(&row.source);
+                }
+                let shared: HashSet<String> = sources
+                    .into_iter()
+                    .filter(|(_, legs)| legs.len() > 1)
+                    .map(|(id, _)| id.to_owned())
+                    .collect();
+                for row in rows.iter_mut().filter(|row| shared.contains(&row.tran_id)) {
+                    let (id, suffix) = row.tran_id.rsplit_once(':').unwrap_or((&row.tran_id, ""));
+                    row.tran_id = format!("{id}-{}:{suffix}", row.source.replace('|', "-"));
+                }
                 if cap > 0 {
                     rows.truncate(cap);
                 }
@@ -245,23 +268,24 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     let symbol = present(&row.symbol).unwrap_or_default();
     let asset = present(&row.currency).unwrap_or("USDT");
     let trade_id = present(&row.trade_id);
-    // Hedge legs settle at one timestamp with no trade or order id; the native
-    // id, side and signed size keep them apart while exact page repeats collapse.
+    // TS's id shape, kept so stored records stay matched; `source` separates
+    // hedge legs that share it (see `Rows::json`).
     let base: Vec<&str> = [
-        present(&row.id)
-            .or(trade_id)
-            .or(present(&row.order_id))
-            .unwrap_or_default(),
+        trade_id.or(present(&row.order_id)).unwrap_or_default(),
         symbol,
         kind,
-        present(&row.side).unwrap_or_default(),
-        present(&row.size).unwrap_or_default(),
         present(&row.transaction_time).unwrap_or_default(),
     ]
     .into_iter()
     .filter(|part| !part.is_empty())
     .collect();
     let base = base.join("-");
+    let source = [
+        present(&row.id).unwrap_or_default(),
+        present(&row.side).unwrap_or_default(),
+        present(&row.size).unwrap_or_default(),
+    ]
+    .join("|");
     let mut push = |income: f64, category: &'static str, suffix: &str| {
         out.push(Income {
             symbol: symbol.to_owned(),
@@ -272,6 +296,7 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
             tran_id: format!("{base}:{suffix}"),
             trade_id: trade_id.map(str::to_owned),
             category,
+            source: source.clone(),
         });
     };
     let (flow, funding, fee) = (
@@ -549,6 +574,22 @@ impl BybitLinear {
         };
         walk.pages += 1;
         let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
+        // TS stops an unbounded order read at its page cap with a warning and keeps the rows.
+        let capped_orders = matches!(walk.rows, Rows::Orders(_))
+            && walk.cap == 0
+            && walk.pages >= MAX_ORDER_PAGES_PER_WINDOW
+            && cursor
+                .as_ref()
+                .is_some_and(|c| walk.cursor.as_ref() != Some(c));
+        if capped_orders {
+            cx.log(
+                LogLevel::Warning,
+                "Bybit order history reached its page limit; older orders in this window are omitted",
+            );
+            walk.pages = 0;
+            self.next_window(cx, command);
+            return;
+        }
         if !full
             && cursor.as_ref().is_some_and(|cursor| {
                 walk.cursor.as_ref() == Some(cursor)

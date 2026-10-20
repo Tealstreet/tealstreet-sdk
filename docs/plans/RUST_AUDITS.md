@@ -429,8 +429,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
   without a valid side, price, quantity or time are excluded from REST fills.
 - ~~High: income dedupe drops hedge-mode funding legs (`history.rs:131`).~~ Fixed:
-  income ids use the native transaction id, side and signed size, so same-instant
-  hedge legs stay distinct and repeated page rows still collapse.
+  income ids keep TS's shape; distinct native rows that would share one (same-
+  instant hedge legs) get their native id, side and signed size appended, and
+  exact page repeats still collapse.
 - Medium: option failures stall linear startup (`lib.rs:857`).
 - ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
   documentation explicitly permits `baseCoin=All` for `category=option`.
@@ -440,7 +441,8 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - Medium: demo reduce-only fill check missing.
 - Medium: Hyro tears down on one bad poll (`account.rs:1838`).
 - ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
-  every page (up to TS's 20 × 50 per window) instead of truncating to 50; explicit
+  every page up to TS's 20 × 50 per window (then warns and keeps the rows, as TS)
+  instead of truncating to 50; explicit
   limits still cap after every category. Income caps match TS (unchanged).
 - ~~Medium: Partial TP/SL amend semantics — decided: match TS (flip SL/TP on drag),
   do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
