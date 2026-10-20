@@ -30,6 +30,7 @@ write({ type: 'meta', epoch: started, private: false });
 
 const live = nativeTransport();
 const ordinals = new Map();
+let requestOrdinal = 0;
 const recording = {
   ...live,
   connect(url, handlers) {
@@ -73,10 +74,13 @@ const recording = {
     };
   },
   async request(request) {
+    // Concurrent equal requests can finish out of order (e.g. socket tokens).
+    const ordinal = requestOrdinal++;
     const response = await live.request(request);
     const recorded = (body) =>
       write({
         type: 'http',
+        requestOrdinal: ordinal,
         method: request.method,
         url: request.url,
         ...(request.body === undefined ? {} : { requestBody: request.body }),
