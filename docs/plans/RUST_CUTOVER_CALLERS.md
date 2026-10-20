@@ -148,6 +148,18 @@ those TS paths deletable.
 | `packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts`; `exchanges/rust/rust.exchange.ts` option forwarding; `sdk-rs/venues/bybit/` category states | **Combined-product gap closed for the `bybit` linear profile:** saved flags are forwarded and all four inverse/options combinations retain independent public categories and shared private-account reconciliation. Typed option terms, quote/position/account Greeks, chain/expiries and native option order sizing/caller IDs are explicit. | Actual TS/native WASM fixtures compare discovery, private read categories, option APIs and price/limit-IV order payloads; Rust option seeds and depth-25 books have native protocol/frame proofs because TS generic tickers/sockets omit or misroute that product. Unsupported option controls/settings/queries fail explicitly; standalone demo/inverse/spot/Hyro keep their narrower profiles. Preserve external-public policy and live combined/private validation boundaries; do not infer default/deletion readiness. [Evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `sdk-rs/venues/grvt/src/lib.rs` (`on_item` catalog filter); `packages/safe-cex/src/exchanges/grvt/grvt.exchange.ts` (`fetchMarkets` catalog mapping), `packages/safe-cex/src/exchanges/grvt/CLAUDE.md` | Product gap resolved by [explicit retirement decision](GRVT_PRODUCTS_DECISION.md): TS posts `{}` and the official API defaults to `PERPETUAL`. Its generic mapper accepts injected Future/Call/Put rows but drops semantic metadata and cannot correctly cancel their symbols; explicit public non-perpetual catalogs were empty on production/testnet. | Retire only the unexposed mapper-only paths from cutover parity. Preserve TS, public exports and all other consumer/dependency gates. Any future enablement needs real listings, typed kind/expiry/strike/settlement metadata through frames/consumers and complete product lifecycle evidence; generic dispatch and perpetual replay do not prove it. |
 
+## WASM packaging for web consumers
+
+Since #1393 the browser/Workers default loader imports only the account venue's
+family engine (`@tealstreet/safe-cex-wasm/engine` → `pkg/web/<family>`), with
+one literal import per family. **tealstreet-next web builds must run
+`yarn rust:build-wasm --families` before bundling and ship every family engine
+the bundler emits**; a bundle that includes safe-cex fails to resolve without
+all 27 family packages. Node, the CLI, MCP and React Native still load the
+combined build from `yarn rust:build-wasm`, so builds serving both need both.
+`loadWebEngine(venue)` and `setWasmEngineLoader((venue) => …)` now receive the
+Rust venue. Measurements and decision: [RUST_WASM_FAMILIES.md](RUST_WASM_FAMILIES.md).
+
 ## Runtime callers and their replacements
 
 These are the complete direct callers/importers outside the venue runtime
