@@ -6,7 +6,9 @@ use safe_cex_engine::model::{
     PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 pub(crate) use safe_cex_engine::url::encode;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Response, VenueError, num,
+};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -39,6 +41,8 @@ struct Job {
     settings: bool,
     /// Symbols a `PlaceOrders` job may leave with an unknown outcome.
     placing: Vec<String>,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 pub struct Request {
     /// `None` for a venue-originated cancel of an order that landed after cancel-all.
@@ -125,9 +129,13 @@ enum CancelResult {
     Row(Identity),
 }
 
-fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.command_error(command, &error);
-    cx.done(command, Err(error));
+fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: VenueError) {
+    cx.command_error(command, &error.message);
+    cx.fail(command, error);
+}
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
 }
 fn query(pairs: Vec<(&str, String)>) -> String {
     pairs
@@ -973,23 +981,24 @@ impl PhemexPerpetuals {
             return None;
         }
         if self.trading.jobs.len() >= 32 {
-            reject(cx, id, "Phemex too many active trading commands".into());
+            reject(cx, id, not_sent("Phemex too many active trading commands"));
             return None;
         }
         if self.options.public_data_only || self.credentials.is_none() {
-            reject(cx, id, "Phemex private credentials are required".into());
+            let error = not_sent("Phemex private credentials are required");
+            reject(cx, id, error.kind(ErrorKind::AuthInvalid));
             return None;
         }
         if (is_settings || depends_settings) && self.trading.jobs.values().any(|j| j.settings) {
             reject(
                 cx,
                 id,
-                "Phemex account settings update is already in flight".into(),
+                not_sent("Phemex account settings update is already in flight"),
             );
             return None;
         }
         match planned {
-            Err(error) => reject(cx, id, error),
+            Err(error) => reject(cx, id, not_sent(error).kind(ErrorKind::InvalidInput)),
             Ok(steps) => {
                 let mut placing = Vec::new();
                 for step in steps.iter().filter(|_| placement) {
@@ -1006,6 +1015,7 @@ impl PhemexPerpetuals {
                         ids: Vec::new(),
                         settings: is_settings,
                         placing,
+                        effective: false,
                     },
                 );
                 if let Some(symbol) = cancel_all {
@@ -1385,6 +1395,12 @@ impl PhemexPerpetuals {
         })();
         match result {
             Ok(()) => {
+                if let Some(job) = request
+                    .command
+                    .and_then(|command| self.trading.jobs.get_mut(&command))
+                {
+                    job.effective = true;
+                }
                 self.account_write(cx);
                 self.account_refresh(cx);
                 match (request.command, &request.call) {
@@ -1457,7 +1473,15 @@ impl PhemexPerpetuals {
         };
         let job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
-        reject(cx, command, error.into());
+        // A later rejection after a step took effect cannot mean nothing happened.
+        let effective = job.as_ref().is_some_and(|job| job.effective);
+        let error = VenueError::new(error);
+        let error = match outcome {
+            Outcome::Rejected if effective => error,
+            Outcome::Rejected => error.outcome(safe_cex_engine::Outcome::Rejected),
+            Outcome::Unknown => error.outcome(safe_cex_engine::Outcome::Unknown),
+        };
+        reject(cx, command, error);
         // Read only after `reject` raises the fence, so the read postdates the failure.
         let (symbols, not_before) = match outcome {
             Outcome::Rejected => (vec![], cx.now),
