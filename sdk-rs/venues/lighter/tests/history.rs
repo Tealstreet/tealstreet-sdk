@@ -424,3 +424,52 @@ fn windowed_fills_stop_paging_once_rows_are_older_than_the_window() {
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["id"], "in");
 }
+
+/// Pins the exact request sequence of a paged read: trades pages by cursor,
+/// then the funding stage from a fresh cursor. Paging refactors keep it.
+#[test]
+fn paged_income_request_sequence_is_pinned() {
+    let (mut e, _) = ready();
+    let mut urls = Vec::new();
+    let r = query(
+        &mut e,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    urls.push(r.url.clone());
+    answer(&mut e, &r, vec![trade("1", NOW as u64)], Some("t1"));
+    let r = requests(&mut e).into_iter().next().unwrap();
+    urls.push(r.url.clone());
+    answer(&mut e, &r, vec![trade("2", NOW as u64 - 1)], None);
+    let r = requests(&mut e).into_iter().next().unwrap();
+    urls.push(r.url.clone());
+    reply(&mut e, &r, 200, &json!({"code":200,"position_fundings":[{"funding_id":"7","market_id":1,"timestamp":NOW/1000.0,"change":"-0.25"}],"next_cursor":"f1"}).to_string());
+    let r = requests(&mut e).into_iter().next().unwrap();
+    urls.push(r.url.clone());
+    reply(
+        &mut e,
+        &r,
+        200,
+        &json!({"code":200,"position_fundings":[]}).to_string(),
+    );
+    assert!(result(&mut e).is_ok());
+    let host = urls[0].split("/api/").next().unwrap().to_owned();
+    let paths: Vec<_> = urls
+        .iter()
+        .map(|u| u.trim_start_matches(&host).to_owned())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "/api/v1/trades?limit=100&account_index=718895&market_type=perp&sort_by=timestamp&sort_dir=desc&aggregate=false",
+            "/api/v1/trades?limit=100&account_index=718895&market_type=perp&sort_by=timestamp&sort_dir=desc&aggregate=false&cursor=t1",
+            "/api/v1/positionFunding?limit=100&account_index=718895",
+            "/api/v1/positionFunding?limit=100&account_index=718895&cursor=f1",
+        ]
+    );
+}

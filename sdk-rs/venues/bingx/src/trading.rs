@@ -2,11 +2,11 @@
 use crate::Pending;
 use crate::sign::{Credentials, Params};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
-    StopTriggerType, TimeInForce,
+    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::Deserialize;
 use std::{
@@ -69,6 +69,7 @@ enum Call {
     },
 }
 struct Step {
+    receipts: Vec<OrderIdentityReceipt>,
     method: Method,
     path: &'static str,
     params: Params,
@@ -270,7 +271,7 @@ fn placement_id(data: &Data<'_>) -> Result<String, VenueError> {
 }
 fn validated_placement(response: Response<'_>) -> Result<String, VenueError> {
     let (data, _) = response_data(response, false)?;
-    Ok(placement_id(&data)?)
+    placement_id(&data)
 }
 
 impl Trading {
@@ -380,7 +381,7 @@ impl Trading {
                 self.advance(cx, credentials, id);
             }
             Err(error) => {
-                cx.log(LogLevel::Error, error.clone());
+                cx.command_error(id, error.clone());
                 cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
@@ -400,6 +401,7 @@ impl Trading {
             job.steps.clear();
         }
         if let Some(step) = job.steps.pop_front() {
+            cx.command_progress(command, step.receipts);
             crate::issue(
                 cx,
                 credentials,
@@ -608,7 +610,7 @@ impl Trading {
                         error.message
                     );
                 }
-                cx.log(LogLevel::Error, error.message.clone());
+                cx.command_error(command, error.message.clone());
                 // The first failure names the error; any unproven one makes it unknown.
                 let unknown = error.outcome == Some(Outcome::Unknown);
                 let recorded = job.error.get_or_insert(error);
@@ -803,14 +805,22 @@ impl Trading {
         let mut out = Vec::new();
         for &lot in &lots {
             let mut p = params.clone().num("quantity", lot);
+            let mut receipts = Vec::new();
             if matches!(o.kind, OrderType::Limit | OrderType::Market) {
                 let id = match &o.client_order_id {
                     Some(id) => id.clone(),
                     None => generated_id()?,
                 };
                 p = p.str("clientOrderId", &id);
+                receipts.push(OrderIdentityReceipt {
+                    symbol: o.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: id,
+                });
             }
-            out.push(place_step(p));
+            let mut step = place_step(p);
+            step.receipts = receipts;
+            out.push(step);
         }
         for (kind, trigger) in [
             (OrderType::StopLoss, o.stop_loss),
@@ -867,6 +877,7 @@ impl Trading {
                 .ok_or_else(|| format!("Order {id} not found"))?;
             let market = cx.store.market(&o.symbol).ok_or("Order market not found")?;
             job.steps.push_back(Step {
+                receipts: Vec::new(),
                 method: Method::Delete,
                 path: ORDER,
                 params: Params::new().str("symbol", &market.id).str("orderId", id),
@@ -1087,18 +1098,25 @@ impl Trading {
                 id.parse().map_err(|_| "Order id is not a numeric int64")?,
             );
         }
-        params = params.str("clientOrderId", &generated_id()?);
+        let identity = generated_id()?;
+        params = params.str("clientOrderId", &identity);
         if !cx.store.hedged() && o.reduce_only {
             params = params.boolean("reduceOnly", true);
         }
-        Ok(one(
+        let mut job = one(
             Method::Post,
             REPLACE,
             params,
             Call::Replace {
                 old_id: o.id.clone(),
             },
-        ))
+        );
+        job.steps.front_mut().unwrap().receipts = vec![OrderIdentityReceipt {
+            symbol: o.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
+        }];
+        Ok(job)
     }
     fn leverage(
         &self,
@@ -1160,6 +1178,7 @@ impl Trading {
 fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Step {
+            receipts: Vec::new(),
             method,
             path,
             params,
@@ -1170,6 +1189,7 @@ fn one(method: Method, path: &'static str, params: Params, call: Call) -> Job {
 }
 fn place_step(params: Params) -> Step {
     Step {
+        receipts: Vec::new(),
         method: Method::Post,
         path: ORDER,
         params,

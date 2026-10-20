@@ -23,6 +23,9 @@ export {
   isExchangeSupportedOnMobile,
 } from './exchangeMetadata';
 
+export { serializeCommandError, deserializeCommandError } from './commandOutcome';
+export type { SerializedCommandError } from './commandOutcome';
+
 export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
 export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 

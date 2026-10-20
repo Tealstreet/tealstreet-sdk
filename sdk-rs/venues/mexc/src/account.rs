@@ -1297,7 +1297,10 @@ impl MexcFutures {
     }
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Request::Leverage { command, .. } = &request {
+            cx.command_error(*command, error);
             cx.done(*command, Err(error.into()));
+        } else {
+            cx.log(LogLevel::Error, error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);
@@ -1308,7 +1311,6 @@ impl MexcFutures {
                 self.account.staged.clear();
             }
         }
-        cx.log(LogLevel::Error, error);
         if self.account.poll.is_none() {
             self.account.poll = Some(cx.set_timer(2000.0));
         }
