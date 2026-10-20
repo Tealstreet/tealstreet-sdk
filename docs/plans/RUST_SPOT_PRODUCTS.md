@@ -311,3 +311,48 @@ landing remain pending.
   policy filters it. Both touched crates now total 218 passing native tests.
   Final Kraken replay gates and rebuilt combined-host checks follow before
   pushing the reviewed fixes; CI must pass at the exact final PR head.
+
+
+## PR #1339 Kraken account revalidation (supersedes prior metrics)
+
+The PR account fixes stage same-batch order progress and emit executions only
+from trade rows, retaining filled lifecycle closure without a second fill.
+Exhausted explicit signature rejection and malformed nonempty signer material
+now surface native error/deactivation rather than silently leaving startup
+pending. Independent review closes both findings; all 128 native crate tests
+(35 spot, 93 futures), strict Clippy and formatting pass.
+
+These results supersede the earlier Kraken measurement ledger for the rebuilt
+PR artifact. Existing live public fixtures are unchanged; freshly regenerated
+private tapes contain 36 spot and 82 futures records. All four gates run
+serially on the same artifact, without threshold or economic-output changes.
+
+| Gate | Frames | TS / Rust main CPU ms | TS / Rust steady CPU ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Kraken spot public, three runs | 6,166 | 538.8 / 346.3 | 428.8 / 214.6 | 16.4 / 4.3 |
+| Kraken spot private, one run | 19 | 61.5 / 52.6 | 31.8 / 30.3 | 14.8 / 1.0 |
+| Kraken futures public, three runs | 9,641 | 1545.7 / 392.3 | 1147.8 / 238.2 | 16.7 / 2.7 |
+| Kraken futures private, one run | 49 | 133.8 / 56.3 | 35.6 / 29.5 | 16.3 / 1.2 |
+
+All four gates PASS; root also verifies five compiled spot controls, including
+the native batched final-trade/lifecycle regression. Public parity retains
+773 spot and 207 futures markets/tickers with two books for each product.
+Private parity covers two markets/tickers per product; performance remains
+informational. Rust linear memory is 2.5 MB for spot public, 1.0 MB for futures
+public and 0.3 MB for each private replay.
+
+Rebuilt browser and Node WASM are both 1,054,495 bytes, below 1,258,291;
+SHA-256 is `2a71b1c87e99ea665fa31856c52910b0ebb499f4f34143b6f98c9b8649273385`.
+Both touched venue families now pass their superseding PR-fix replay gates.
+Final rebuilt combined-host validation, the final review commit and exact-head
+green CI remain pending before landing.
+
+- Latest landing sync brings Lighter broker/signing variants and the explicit
+  GRVT product retirement decision. Incoming structure and protocol changes are
+  preserved; both spot aliases remain. Runtime inventory is now 49 names / 47
+  Rust aliases / nine defaults / 38 opt-in / two absent (`bitunix`, `kucoinspot`).
+  Merge conflicts were limited to additive alias help/refusal lists and
+  readiness documentation, combined without dropping either lane. All ten
+  venue gates pass on reviewed artifacts; incoming WASM changes are Lighter-
+  feature-gated and do not alter the selected spot/parent/Binance builds.
+  Rebuild the combined host and re-audit the integration before final push.

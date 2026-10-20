@@ -53,6 +53,7 @@ import {
 } from '../bybit/bybit.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
@@ -99,6 +100,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   kraken: 'kraken',
   krakenspot: 'krakenspot',
   lighter: 'lighter',
+  'lighter-robinhood': 'lighter-robinhood',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -342,8 +344,12 @@ export class RustEngineExchange extends BaseExchange {
       );
     }
     if (this.name === 'txflow') return this.options.publicDataOnly === true;
-    if (this.name === 'lighter') {
-      return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      return (
+        this.options.publicDataOnly === true ||
+        (!this.options.secret && !this.options.remoteSigner) ||
+        !this.options.apiKeyIndex
+      );
     }
     if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
     return (
@@ -405,7 +411,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex', 'lighter', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
@@ -488,9 +494,11 @@ export class RustEngineExchange extends BaseExchange {
         applicationId,
         ...((orderlyNames.has(this.name) || this.name === 'breakoutprop') ? { tickInterval: this.options.extra?.tickInterval } : {}),
         ...(this.name === 'breakoutprop' ? { subaccount: this.options.subaccount, tickInterval: this.getTickInterval(), pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY } : {}),
-        ...(this.name === 'lighter'
+        ...(['lighter', 'lighter-robinhood'].includes(this.name)
           ? {
-              apiKeyIndex: this.options.apiKeyIndex,
+              apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+              lighterRemoteSigner: Boolean(this.options.remoteSigner),
+              lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)?.lighterSignerProvider,
               lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
               lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
             }
@@ -641,8 +649,14 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   /** Valid once the account's balance loads; the engine's first error says why not. */
-  validateAccount = (): Promise<ValidateAccountResult> =>
-    new Promise((resolve) => {
+  validateAccount = (): Promise<ValidateAccountResult> => {
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      const index = parseLighterApiKeyIndex(this.options.apiKeyIndex);
+      if (index === undefined || index < 0 || index > 255) {
+        return Promise.resolve({ error: 'Invalid API key index. Expected an integer from 0 to 255.' });
+      }
+    }
+    return new Promise((resolve) => {
       let settled = false;
       let started = false;
       const finish = (result: ValidateAccountResult) => {
@@ -666,6 +680,7 @@ export class RustEngineExchange extends BaseExchange {
       loaded();
       if (!settled) this.start().then(() => { started = true; loaded(); }, (error) => onError(String(error?.message ?? error)));
     });
+  };
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
     if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
@@ -867,7 +882,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'kraken', 'woo', 'coinbase', 'coinbasespot'].includes(this.name)
+      ...(['apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'kraken', 'woo', 'coinbase', 'coinbasespot'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
