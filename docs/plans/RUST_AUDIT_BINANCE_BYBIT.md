@@ -181,7 +181,8 @@ against the freshly merged base before implementing on a fresh follow-up branch:
 - REST candles `from` + `limit`: compute start like TS and cap requests at 1,500.
 - COIN-M partial batch rejection preserves placed IDs alongside the error.
 - PM `close:true` respects an explicit nonzero amount.
-- Unknown `CancelOrders` IDs fail instead of reporting success without I/O.
+- Unknown `CancelOrders` IDs fail instead of reporting success without I/O
+  (now supplied by landing PR #1347; reverify, do not duplicate).
 - History maps `EXPIRED_IN_MATCH` as canceled.
 - Spot/COIN-M history reports unsupported rather than plain empty lists.
 - Sign with `recvWindow` from options.
@@ -191,7 +192,10 @@ against the freshly merged base before implementing on a fresh follow-up branch:
   families. A replay from a canceled strategy can still retire a newer regular
   order reusing its caller ID on the same symbol (inherited, PR review finding).
 
-Leave every `Confirm`/owner-decision item untouched. Repeat phased independent
+- Bybit Partial TP/SL drag flips SL/TP exactly as TS, per the explicit owner
+  decision, with a regression reproducing the current in-place amendment.
+
+Leave all other `Confirm`/owner-decision items untouched. Repeat phased independent
 reviews, regression tests, all touched-family gates, PR reviews posted to the
 PR, green CI and merge for the second PR; no TS venue deletion. Read-only
 reverification has begun while this first patch completes its gates.
@@ -378,3 +382,35 @@ captures were also trimmed and gated separately without replacing that coverage.
   remain unchanged. Rerun CI on the corrected head; never merge while red.
   Earlier Bybit replay/size evidence must be replaced after this correction;
   Binance and AsterDEX protocol behavior is unchanged.
+
+### Latest landing and owner decision
+
+- Merged landing `ec5e2e954b` cleanly after the first correctness reviews.
+  Incoming unknown-ID CancelOrders validation already resolves that requested
+  addendum item; reverify its regressions rather than implement it again.
+  Incoming broker headers and harness signing-clock corrections remain intact.
+- Sam explicitly decided the Bybit Partial TP/SL drag behavior: match TS's
+  SL/TP flip exactly, with a regression, rather than amend the leg in place.
+  This is authorized for the fresh-branch follow-up after PR #1348 merges.
+  The updated Bybit audit section records the decision; other Confirm items
+  remain untouched.
+- The corrected affected-list proof exposed a Demo replay difference for an
+  already Closed row omitted from the cancel-all result. Retaining/removing
+  that terminal row is lifecycle cleanup, with no production impact. Align
+  cleanup without marking omitted live orders terminal or hiding exposure.
+
+- Independent review of merge `6854f75f3f` passes: native cancellation proofs,
+  whole-list unknown-ID validation, signed/unsigned broker headers, symmetric
+  signing-clock reset and prior audit closures coexist correctly. The reviewer
+  independently ran 61 Binance and 78 Bybit focused tests (139 passing).
+
+- Terminal cleanup now matches the local lifecycle on validated successful
+  affected-list ACKs. Captured Closed/Canceled rows may be removed, without
+  adding native terminal proof; omitted Open rows remain visible with a partial
+  cancellation error. The regression failed before the cleanup and proves that
+  cleanup does not invent tombstones or remove later uncaptured arrivals.
+  All 159 Bybit native tests, strict Clippy/format/bans pass; independent review
+  reran 50 trading variants and found no open correctness issue.
+- Merged-source root typecheck (44 tasks), lint (28 tasks) and harness (590
+  tests) pass. Selected artifacts and family replay evidence are being rebuilt
+  after the landing merge and final cleanup; preceding measurements are historical.

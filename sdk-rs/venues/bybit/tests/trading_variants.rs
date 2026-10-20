@@ -668,7 +668,7 @@ fn spot_trigger_cancel_uses_its_native_order_family() {
 }
 
 #[test]
-fn demo_cancel_all_retires_listed_parent_and_projections_preserving_old_fills() {
+fn demo_cancel_all_retires_listed_parent_projections_and_old_terminal_rows() {
     let mut h = ready(Variant::Demo);
     h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"old-filled","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"},{"category":"linear","symbol":"BTCUSDT","orderId":"resting","orderStatus":"New","orderType":"Limit","side":"Buy","price":"99","qty":"1","cumExecQty":"0","leavesQty":"1"}]}"#);
     assert_eq!(h.engine.store().orders().len(), 2);
@@ -688,11 +688,7 @@ fn demo_cancel_all_retires_listed_parent_and_projections_preserving_old_fills() 
         200,
         r#"{"retCode":0,"result":{"list":[{"orderId":"resting","orderLinkId":""}],"success":"1"}}"#,
     );
-    assert_eq!(h.engine.store().orders().len(), 1);
-    assert_eq!(
-        h.engine.store().order("old-filled").unwrap().status,
-        safe_cex_engine::model::OrderStatus::Closed
-    );
+    assert!(h.engine.store().orders().is_empty());
     assert_eq!(h.result(1), Some(&Ok("[]".into())));
     assert!(h.requests.is_empty());
 }
@@ -824,6 +820,69 @@ fn demo_cancel_all_accepts_documented_empty_list_with_no_live_targets() {
 }
 
 #[test]
+fn demo_terminal_cleanup_does_not_prove_cancellation_of_omitted_native_ids() {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"live","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    // Local terminal rows have no native terminal event or cancellation proof.
+    let seed = h.engine.store().order("live").unwrap().clone();
+    for (id, status) in [
+        ("old-filled", safe_cex_engine::model::OrderStatus::Closed),
+        (
+            "old-canceled",
+            safe_cex_engine::model::OrderStatus::Canceled,
+        ),
+    ] {
+        let mut terminal = seed.clone();
+        terminal.id = id.into();
+        terminal.status = status;
+        h.engine.store_mut().upsert_order(terminal);
+    }
+    h.command(Command::CancelSymbolOrders {
+        command: 97,
+        symbol: "BTCUSDT".into(),
+    });
+    // An unrelated terminal arrival was not captured by this command.
+    let mut arrival = seed;
+    arrival.id = "later-terminal".into();
+    arrival.status = safe_cex_engine::model::OrderStatus::Closed;
+    h.engine.store_mut().upsert_order(arrival);
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+    );
+    for id in ["old-filled", "old-canceled"] {
+        assert!(h.engine.store().order(id).is_none());
+    }
+    assert!(h.engine.store().order("later-terminal").is_some());
+    assert!(h.engine.store().order("live").is_some());
+    assert!(h.result(97).unwrap().is_err());
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    let filled = row.replace("live", "old-filled");
+    let canceled = row.replace("live", "old-canceled");
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        &format!(
+            r#"{{"retCode":0,"result":{{"list":[{row},{filled},{canceled}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    for id in ["live", "old-filled", "old-canceled"] {
+        assert_eq!(
+            h.engine.store().order(id).unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open,
+            "terminal cleanup must not invent native cancellation proof for {id}"
+        );
+    }
+}
+
+#[test]
 fn demo_cancel_all_fences_listed_native_ids_absent_from_captured_store() {
     for arrived_during_request in [false, true] {
         let mut h = ready(Variant::Demo);
@@ -885,14 +944,7 @@ fn cancel_all_omitted_targets_that_finished_during_request_are_not_partial_failu
             r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
         );
         assert_eq!(h.result(95), Some(&Ok("[]".into())));
-        assert_eq!(
-            h.engine.store().order("finished").unwrap().status,
-            if status == "Filled" {
-                safe_cex_engine::model::OrderStatus::Closed
-            } else {
-                safe_cex_engine::model::OrderStatus::Canceled
-            }
-        );
+        assert!(h.engine.store().order("finished").is_none());
     }
 }
 

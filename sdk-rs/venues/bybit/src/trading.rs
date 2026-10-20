@@ -907,6 +907,22 @@ impl BybitLinear {
                             self.note_order_terminal(&affected);
                             mark_canceled(cx, &affected, self.local_order_lifecycle());
                         }
+                        if self.local_order_lifecycle() {
+                            // Clean up captured terminal rows without inventing native cancel proof.
+                            let terminal: Vec<_> = ids
+                                .iter()
+                                .filter(|id| {
+                                    cx.store.order(id).is_some_and(|order| {
+                                        matches!(
+                                            order.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    })
+                                })
+                                .cloned()
+                                .collect();
+                            mark_canceled(cx, &terminal, true);
+                        }
                         if omitted != 0 {
                             errors.push(format!("Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"));
                         }
