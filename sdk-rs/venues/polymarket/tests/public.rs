@@ -16,6 +16,7 @@ struct H {
     timers: Vec<(TimerId, f64)>,
     closed: Vec<SocketId>,
     done: Vec<Result<String, String>>,
+    logs: Vec<String>,
 }
 impl H {
     fn new() -> Self {
@@ -31,6 +32,7 @@ impl H {
             timers: vec![],
             closed: vec![],
             done: vec![],
+            logs: vec![],
         };
         h.e.start(h.now);
         h.collect();
@@ -51,6 +53,7 @@ impl H {
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 _ => {}
             }
         }
@@ -125,10 +128,99 @@ fn malformed_encoded_arrays_are_skipped_and_incomplete_page_is_atomic() {
     h.response("/markets",200,r#"[{"conditionId":"x","slug":"bad","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\"]"}]"#);
     assert!(h.e.store().markets().is_empty());
     assert!(h.e.store().loaded().markets);
+}
+#[test]
+fn malformed_gamma_rows_are_skipped_and_null_optional_fields_default() {
     let mut h = H::new();
-    h.response("/markets", 200, r#"[{"slug":"missing condition id"}]"#);
-    assert!(!h.e.store().loaded().markets);
-    assert!(h.e.store().markets().is_empty());
+    let nulls = MARKETS
+        .replace(r#""question":"Who wins?""#, r#""question":null"#)
+        .replace(r#""description":"Test outcome""#, r#""description":null"#)
+        .replace(r#""endDate":"2026-12-31""#, r#""endDate":null"#)
+        .replace(r#""closed":false"#, r#""closed":null"#)
+        .replace(r#""orderMinSize":5"#, r#""orderMinSize":null"#);
+    let body = format!(
+        r#"[{{"slug":"missing condition id"}},null,{{"conditionId":"0x9","slug":"bad-tick","clobTokenIds":"[\"9\"]","outcomes":"[\"Yes\"]","orderPriceMinTickSize":"bogus"}},{}]"#,
+        &nulls[1..nulls.len() - 1]
+    );
+    h.response("/markets", 200, &body);
+    assert!(h.e.store().loaded().markets);
+    assert_eq!(h.e.store().markets().len(), 2);
+    let m = h.e.store().market("election-Yes").unwrap();
+    assert!(m.active);
+    assert_eq!(m.limits.amount.min, 0.0);
+    let meta = &h.e.store().prediction_markets().unwrap()[0];
+    assert_eq!(meta.question, "");
+    assert_eq!(meta.end_date, "");
+    assert!(h.logs.iter().any(|l| l
+        == "Skipped 3 malformed Polymarket market rows: missing condition id, unknown, bad-tick"));
+}
+#[test]
+fn failed_market_reads_keep_retrying_until_the_venue_loads() {
+    let mut h = H::new();
+    for failure in [
+        (500, "unavailable"),
+        (200, "not json"),
+        (200, r#"{"markets":[],"next_cursor":""}"#),
+        (503, "busy"),
+        (200, "{}"),
+    ] {
+        h.response("/markets", failure.0, failure.1);
+        assert!(!h.e.store().loaded().markets);
+        assert!(h.http.is_empty());
+        let (timer, at_ms) = h.timers.pop().expect("market retry scheduled");
+        h.now = at_ms;
+        h.event(Event::TimerFired { timer });
+    }
+    h.load();
+    assert!(h.e.store().loaded().markets);
+    assert_eq!(h.e.store().tickers()[0].mark, 0.5);
+}
+#[test]
+fn null_active_flag_loads_the_market_as_inactive() {
+    let mut h = H::new();
+    h.response(
+        "/markets",
+        200,
+        &MARKETS.replace(r#""active":true"#, r#""active":null"#),
+    );
+    let m = h.e.store().market("election-Yes").unwrap();
+    assert!(!m.active);
+}
+#[test]
+fn failed_midpoint_read_retries_the_same_batch_until_tickers_seed() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    for failure in [(500, "unavailable"), (200, "not a price map")] {
+        h.response("/midpoints", failure.0, failure.1);
+        assert!(h.e.store().tickers().is_empty());
+        assert!(h.http.is_empty());
+        let (timer, at_ms) = h.timers.pop().expect("midpoint retry scheduled");
+        h.now = at_ms;
+        h.event(Event::TimerFired { timer });
+        assert!(h.http.iter().all(|r| r.url.contains("/midpoints")));
+    }
+    h.response(
+        "/midpoints",
+        200,
+        &format!(r#"{{"{TOKEN}":"0.4","2":"0.6"}}"#),
+    );
+    assert_eq!(h.e.store().ticker("election-Yes").unwrap().mark, 0.4);
+    assert_eq!(h.e.store().markets().len(), 2);
+}
+#[test]
+fn market_retry_backoff_grows_by_a_second_and_caps_at_thirty() {
+    let mut h = H::new();
+    let mut delays = vec![];
+    for _ in 0..33 {
+        h.response("/markets", 503, "busy");
+        let (timer, at_ms) = h.timers.pop().expect("market retry scheduled");
+        delays.push(at_ms - h.now);
+        h.now = at_ms;
+        h.event(Event::TimerFired { timer });
+    }
+    assert_eq!(&delays[..3], &[1000.0, 2000.0, 3000.0]);
+    assert!(delays[29..].iter().all(|d| *d == 30000.0));
+    assert_eq!(h.http.len(), 1);
 }
 #[test]
 fn full_books_sort_snapshots_and_apply_every_absolute_change_without_truncation() {
@@ -167,7 +259,7 @@ fn reconnect_discards_book_and_ignores_diffs_until_fresh_snapshot() {
     let t = h
         .timers
         .iter()
-        .find(|(_, at)| *at == h.now + 1000.0)
+        .find(|(_, at)| (750. ..=1000.).contains(&(*at - h.now)))
         .unwrap()
         .0;
     h.now += 1000.0;
@@ -478,4 +570,50 @@ fn selected_market_filters_use_exact_repeated_slugs_and_do_not_create_private_in
         e.start(0.0);
         assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let mut h = H::new();
+    h.load();
+    h.subscribe();
+    socket_checks::flaps(h.e, h.socket.unwrap(), h.now);
+}
+
+#[test]
+fn new_market_interest_during_backoff_waits_and_restores_both_outcomes() {
+    let mut h = H::new();
+    h.load();
+    h.subscribe();
+    let old = h.socket.unwrap();
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (timer, at) = *h
+        .timers
+        .iter()
+        .find(|(_, at)| (750. ..=1000.).contains(&(*at - h.now)))
+        .unwrap();
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "election-No".into(),
+    }));
+    assert_eq!(
+        h.socket,
+        Some(old),
+        "new interest cannot bypass pending backoff"
+    );
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert_ne!(h.socket, Some(old));
+    h.event(Event::WsOpened {
+        socket: h.socket.unwrap(),
+    });
+    assert!(
+        h.sends
+            .iter()
+            .any(|text| text.contains(TOKEN) && text.contains("\"2\""))
+    );
 }

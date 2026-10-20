@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, PredictionMarket, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -53,7 +54,7 @@ pub enum Pending {
         count: usize,
         rows: Vec<Market>,
         metadata: Vec<PredictionMarket>,
-        invalid: bool,
+        skipped: Vec<String>,
     },
     Midpoints {
         offset: usize,
@@ -69,13 +70,24 @@ pub enum Pending {
         invalid: bool,
     },
 }
-#[derive(Default)]
 pub(crate) struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     awaiting_pong: bool,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            awaiting_pong: false,
+            supervisor: Supervisor::new(Config {
+                ping_interval_ms: Some(10_000.),
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct BookState {
@@ -206,9 +218,19 @@ impl Polymarket {
                 count: 0,
                 rows,
                 metadata,
-                invalid: false,
+                skipped: vec![],
             },
         );
+    }
+    fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(LogLevel::Error, error);
+        self.public_retry(cx, None);
+    }
+    /// Startup reads retry until they land; a dead venue is worse than a slow poll.
+    fn public_retry(&mut self, cx: &mut Cx<'_, Pending>, offset: Option<usize>) {
+        self.public_attempts = self.public_attempts.saturating_add(1);
+        let delay = f64::from(self.public_attempts.min(30)) * 1000.0;
+        self.public_retry = Some((cx.set_timer(delay), offset));
     }
     fn midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
         let rows = cx.store.markets();
@@ -264,9 +286,10 @@ impl Polymarket {
     }
     pub(crate) fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
         let c = &mut self.connections[index];
-        if c.socket.is_some() {
+        if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
+        c.supervisor.connecting(cx);
         c.socket = Some(cx.connect_feed(
             SOCKETS[index],
             if index == 0 {
@@ -596,6 +619,7 @@ impl Venue for Polymarket {
             return;
         };
         self.connections[i].open = true;
+        self.connections[i].supervisor.opened(cx);
         if i == 0 {
             let ids = self
                 .books
@@ -611,7 +635,6 @@ impl Venue for Polymarket {
         }
         cx.send(socket, "PING");
         self.connections[i].awaiting_pong = true;
-        self.connections[i].ping = Some(cx.set_timer(10000.0));
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(i) = self
@@ -623,6 +646,7 @@ impl Venue for Polymarket {
         };
         if text == "PONG" {
             self.connections[i].awaiting_pong = false;
+            self.connections[i].supervisor.received(cx.now);
             return;
         }
         if i == 0 {
@@ -643,10 +667,7 @@ impl Venue for Polymarket {
         c.socket = None;
         c.open = false;
         c.awaiting_pong = false;
-        if let Some(t) = c.ping.take() {
-            cx.clear_timer(t);
-        }
-        c.reconnect = Some(cx.set_timer(1000.0));
+        c.supervisor.retry(cx);
         if i == 0 {
             for state in self.books.values_mut() {
                 state.synced = false;
@@ -683,17 +704,20 @@ impl Venue for Polymarket {
                 count,
                 rows,
                 metadata,
-                invalid,
+                skipped,
             } => {
-                if invalid {
+                if !skipped.is_empty() {
                     cx.log(
-                        LogLevel::Error,
-                        "Invalid Polymarket market page; preserving previous snapshot",
+                        LogLevel::Warning,
+                        format!(
+                            "Skipped {} malformed Polymarket market rows: {}",
+                            skipped.len(),
+                            skipped.join(", ")
+                        ),
                     );
-                    return;
                 }
                 if count > GAMMA_PAGE {
-                    cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
+                    self.markets_failed(cx, "Oversized Polymarket Gamma page");
                     return;
                 }
                 #[derive(Deserialize)]
@@ -703,11 +727,11 @@ impl Venue for Polymarket {
                     next_cursor: Option<std::borrow::Cow<'a, str>>,
                 }
                 let Ok(page) = serde_json::from_str::<Page>(response.body) else {
-                    cx.log(LogLevel::Error, "Invalid Polymarket keyset envelope");
+                    self.markets_failed(cx, "Invalid Polymarket keyset envelope");
                     return;
                 };
                 if !page.markets.is_empty() {
-                    cx.log(LogLevel::Error, "Unstreamed Polymarket market page");
+                    self.markets_failed(cx, "Unstreamed Polymarket market page");
                     return;
                 }
                 if let Some(cursor) = page.next_cursor {
@@ -715,17 +739,14 @@ impl Venue for Polymarket {
                         || self.market_cursors.len() >= 10000
                         || !self.market_cursors.insert(cursor.to_string())
                     {
-                        cx.log(LogLevel::Error, "Polymarket market cursor did not advance");
+                        self.markets_failed(cx, "Polymarket market cursor did not advance");
                         return;
                     }
                     self.markets(cx, Some(cursor.into_owned()), rows, metadata);
                     return;
                 }
                 if count == GAMMA_PAGE {
-                    cx.log(
-                        LogLevel::Error,
-                        "Polymarket market page is missing its next cursor",
-                    );
+                    self.markets_failed(cx, "Polymarket market page is missing its next cursor");
                     return;
                 }
                 cx.store.set_markets(rows);
@@ -826,13 +847,21 @@ impl Venue for Polymarket {
                 count,
                 rows,
                 metadata,
-                invalid,
-                ..
+                skipped,
             } => {
                 *count += 1;
-                let Ok(gm) = serde_json::from_str::<Gamma>(item) else {
-                    *invalid = true;
-                    return;
+                let gm = match serde_json::from_str::<Gamma>(item) {
+                    Ok(gm) => gm,
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct Slug<'a> {
+                            #[serde(borrow)]
+                            slug: std::borrow::Cow<'a, str>,
+                        }
+                        let slug = serde_json::from_str::<Slug>(item).ok();
+                        skipped.push(slug.map_or_else(|| "unknown".into(), |s| s.slug.into()));
+                        return;
+                    }
                 };
                 let Some((ids, outcomes)) =
                     gm.clob_token_ids.as_deref().zip(gm.outcomes.as_deref())
@@ -867,9 +896,9 @@ impl Venue for Polymarket {
                         market,
                         condition_id: gm.condition_id.to_string(),
                         outcome: outcome.clone(),
-                        question: gm.question.to_string(),
-                        description: gm.description.to_string(),
-                        end_date: gm.end_date.to_string(),
+                        question: gm.question.as_deref().unwrap_or_default().into(),
+                        description: gm.description.as_deref().unwrap_or_default().into(),
+                        end_date: gm.end_date.as_deref().unwrap_or_default().into(),
                         slug: gm.slug.to_string(),
                         tick_size: tick,
                         neg_risk: gm.neg_risk.unwrap_or(false),
@@ -880,8 +909,8 @@ impl Venue for Polymarket {
                         pretty_symbol: None,
                         base: gm.slug.to_string(),
                         quote: "pUSD".into(),
-                        active: gm.active
-                            && !gm.closed
+                        active: gm.active == Some(true)
+                            && gm.closed != Some(true)
                             && gm.enable_order_book != Some(false)
                             && gm.accepting_orders != Some(false),
                         precision: Precision {
@@ -947,14 +976,8 @@ impl Venue for Polymarket {
             _ => None,
         };
         cx.log(LogLevel::Error, error);
-        if let Some(offset) = retry
-            && self.public_attempts < 3
-        {
-            self.public_attempts += 1;
-            self.public_retry = Some((
-                cx.set_timer(f64::from(self.public_attempts) * 1000.0),
-                offset,
-            ));
+        if let Some(offset) = retry {
+            self.public_retry(cx, offset);
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -974,25 +997,32 @@ impl Venue for Polymarket {
             return;
         }
         for i in 0..2 {
-            if self.connections[i].reconnect == Some(timer) {
-                self.connections[i].reconnect = None;
-                self.connect(cx, i);
-                return;
+            if !self.connections[i].supervisor.owns_timer(timer) {
+                continue;
             }
-            if self.connections[i].ping == Some(timer) {
-                self.connections[i].ping = None;
-                if let Some(socket) = self.connections[i].socket {
-                    if self.connections[i].awaiting_pong {
+            match self.connections[i].supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect(cx, i),
+                SocketTick::Ping if self.connections[i].awaiting_pong => {
+                    if let Some(socket) = self.connections[i].socket {
                         cx.close(socket);
                         self.on_close(cx, socket, 1006);
-                    } else {
-                        cx.send(socket, "PING");
-                        self.connections[i].awaiting_pong = true;
-                        self.connections[i].ping = Some(cx.set_timer(10000.0));
                     }
                 }
-                return;
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = self.connections[i].socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                }
+                SocketTick::Ping => {
+                    if let Some(socket) = self.connections[i].socket {
+                        cx.send(socket, "PING");
+                        self.connections[i].awaiting_pong = true;
+                    }
+                }
+                _ => {}
             }
+            return;
         }
         if self.candle_timer == Some(timer) {
             self.candle_timer = None;
