@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 45
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Budget per single-venue browser bundle.
-      WASM_BUDGET_BYTES: 1258291
+      # Budget per single-venue browser bundle (1.25 MiB; see RUST_WASM_FAMILIES.md).
+      WASM_BUDGET_BYTES: 1310720
     defaults:
       run:
         working-directory: .
@@ -239,8 +239,8 @@ jobs:
             private_script: rust:private-tape-txflow
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Budget per single-venue browser bundle.
-      WASM_BUDGET_BYTES: 1258291
+      # Budget per single-venue browser bundle (1.25 MiB; see RUST_WASM_FAMILIES.md).
+      WASM_BUDGET_BYTES: 1310720
     defaults:
       run:
         working-directory: .
