@@ -8,11 +8,13 @@ mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::ErrorKind;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
@@ -26,6 +28,17 @@ pub struct Options {
     pub passphrase: Option<String>,
     /// Only a host able to attach authenticated upgrade headers may enable it.
     pub private_ws_headers: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub struct Pending {
@@ -59,13 +72,21 @@ struct DeferredGet {
     task: Task,
     stream: Option<ArrayAt>,
 }
+/// Both sockets keep the old watchdog shape: 30s silence, 5s PING, 1s-16s backoff.
+fn socket_supervisor() -> Supervisor {
+    Supervisor::new(Config {
+        connect_timeout_ms: 30_000.0,
+        idle_timeout_ms: 30_000.0,
+        ping_interval_ms: Some(5_000.0),
+        backoff_base_ms: 1_000.0,
+        backoff_cap_ms: 16_000.0,
+        ..Config::default()
+    })
+}
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     next_id: u32,
     operations: VecDeque<f64>,
     topics: HashSet<String>,
@@ -75,10 +96,7 @@ impl Default for Connection {
         Self {
             socket: None,
             open: false,
-            last_received: 0.0,
-            watchdog: None,
-            reconnect: None,
-            attempts: 0,
+            supervisor: socket_supervisor(),
             next_id: 1,
             operations: VecDeque::new(),
             topics: HashSet::new(),
@@ -144,17 +162,18 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let supplied = [&options.key, &options.secret, &options.passphrase]
             .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
         let incomplete_credentials =
             !options.public_data_only && supplied.contains(&true) && supplied.contains(&false);
-        let read_credentials = options.read_credentials.map(|mut read| {
+        let read_credentials = options.read_credentials.clone().map(|mut read| {
             if read.passphrase.is_none() {
                 read.passphrase = options.passphrase.clone();
             }
             read
         });
-        let credentials = match (options.key, options.secret, options.passphrase) {
+        let credentials = match (&options.key, &options.secret, &options.passphrase) {
             (Some(key), Some(secret), Some(passphrase))
                 if !options.public_data_only
                     && !key.is_empty()
@@ -162,9 +181,9 @@ impl WeexFutures {
                     && !passphrase.is_empty() =>
             {
                 Some(sign::Credentials {
-                    key,
-                    secret,
-                    passphrase,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    passphrase: passphrase.clone(),
                 })
             }
             _ => None,
@@ -173,7 +192,7 @@ impl WeexFutures {
             public: Connection::default(),
             active_symbols: HashSet::new(),
             deferred_gets: Vec::new(),
-            account: account::State::default(),
+            account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
@@ -287,8 +306,37 @@ impl WeexFutures {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket =
             Some(cx.connect_channel(paths::PUBLIC_WS, safe_cex_engine::SocketChannel::Public));
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.0));
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
+    }
+    fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => {
+                self.connect_public(cx);
+                let symbols: Vec<_> = self.books.keys().cloned().collect();
+                for s in symbols {
+                    self.snapshot(cx, &s);
+                }
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    let id = self.public.next_id;
+                    self.public.next_id += 1;
+                    cx.send(socket, format!(r#"{{"method":"PING","id":{id}}}"#));
+                }
+            }
+            Tick::TimedOut(_) => {
+                if let Some(s) = self.public.socket {
+                    cx.close(s);
+                    self.on_close(cx, s, 1006);
+                }
+            }
+            Tick::Handled => (),
+        }
+        true
     }
     fn subscription(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
         if !self.public.open {
@@ -404,8 +452,8 @@ impl WeexFutures {
             b.last = None;
             b.buffer.clear();
             b.failures += 1;
-            let delay = (1000.0 * 2f64.powi(b.failures.min(6) as i32 - 1))
-                .min(60_000.0)
+            let delay = Backoff::new(1_000.0, 5, 60_000.0)
+                .delay(b.failures.saturating_sub(1))
                 .max(self.paused_until - cx.now);
             b.retry = Some(cx.set_timer(delay));
         }
@@ -535,8 +583,7 @@ impl Venue for WeexFutures {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.public.operations.clear();
         self.public.topics.clear();
         self.reconcile_topics(cx);
@@ -548,7 +595,7 @@ impl Venue for WeexFutures {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -627,14 +674,7 @@ impl Venue for WeexFutures {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.public.attempts += 1;
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public.supervisor.retry(cx);
         for b in self.books.values_mut() {
             b.last = None;
             b.fetching = false;
@@ -913,32 +953,7 @@ impl Venue for WeexFutures {
                     Some(ArrayAt::Root),
                 );
             }
-        } else if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            let symbols: Vec<_> = self.books.keys().cloned().collect();
-            for s in symbols {
-                self.snapshot(cx, &s);
-            }
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 30_000.0 {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-            } else {
-                if self.public.open {
-                    let id = self.public.next_id;
-                    self.public.next_id += 1;
-                    cx.send(
-                        self.public.socket.unwrap(),
-                        format!(r#"{{"method":"PING","id":{id}}}"#),
-                    );
-                }
-                self.public.watchdog = Some(cx.set_timer(5_000.0));
-            }
-        } else {
+        } else if !self.public_timer(cx, timer) {
             let symbol = self.books.iter_mut().find_map(|(s, b)| {
                 (b.retry == Some(timer)).then(|| {
                     b.retry = None;
@@ -1071,3 +1086,11 @@ impl Venue for WeexFutures {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for WeexFutures {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

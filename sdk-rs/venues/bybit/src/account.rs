@@ -268,6 +268,22 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
                     .all(|value| float_of(value).is_finite())))
 }
 
+/// The first account of a wallet-balance body, verbatim.
+fn raw_wallet_account(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        result: Option<Result<'a>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: Vec<&'a serde_json::value::RawValue>,
+    }
+    let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
+    Some(envelope.result?.list.first()?.get().to_owned())
+}
+
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
     row.account_type.as_deref() == Some("UNIFIED")
         && (float_of(&row.total_equity).is_finite()
@@ -1139,13 +1155,25 @@ impl BybitLinear {
             return;
         }
         let snapshot = self.account.snapshot.take().expect("checked above");
-        if snapshot.revision != self.account.revision {
-            if self.account.snapshot_attempts >= 3 {
-                self.fail_hyro(cx, "private state did not stabilize during reconciliation");
-            } else {
-                self.start_hyro_snapshot(cx);
+        let moved = snapshot.revision != self.account.revision;
+        if moved && self.account.snapshot_attempts < 3 {
+            if self.account.ready {
+                // Hyro streams no wallet, so order/position frames cannot make it stale.
+                self.account.wallet = snapshot.wallet;
+                self.account.coins = Some(snapshot.coins);
+                self.account.hyro_transient_streak = 0;
+                self.commit_balance(cx);
             }
+            self.start_hyro_snapshot(cx);
             return;
+        }
+        // Steady frames must not turn reconciliation into a reconnect loop: after
+        // three overtaken reads, admit this one; the next tick reconciles again.
+        if moved {
+            cx.log(
+                LogLevel::Warning,
+                "HyroTrader private stream kept moving during reconciliation; using the latest snapshot",
+            );
         }
         let mut orders = Vec::new();
         self.account.position_bound.clear();
@@ -2201,6 +2229,7 @@ impl BybitLinear {
                     return;
                 }
                 self.account.hyro_transient |= outcome.is_err();
+                let outcome_body = outcome.as_ref().ok().copied();
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
@@ -2212,6 +2241,10 @@ impl BybitLinear {
                 });
                 match account {
                     Ok((wallet, coins)) => {
+                        // TS keeps the venue's first account verbatim as `balance.info`.
+                        self.balance_info = outcome_body
+                            .and_then(raw_wallet_account)
+                            .or(self.balance_info.take());
                         if self.variant.is_hyro() {
                             if let Some(snapshot) = &mut self.account.snapshot {
                                 snapshot.wallet = Some(wallet);

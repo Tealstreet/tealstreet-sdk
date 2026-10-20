@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketId};
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 pub const INSTRUMENTS: &str = r#"{"code":0,"result":{"data":[{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"#;
 pub const TICKERS: &str = r#"{"code":0,"result":{"data":[{"i":"BTCUSD-PERP","b":"99","k":"101","a":"100","c":"0.01","v":"1","vv":"100"}]}}"#;
@@ -9,19 +9,28 @@ pub const ORDER: &str = r#"{"order_id":"9007199254740993","client_oid":"caller",
 pub struct Harness {
     pub engine: Engine<Cryptocom>,
     pub actions: Vec<Action>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub now: f64,
 }
 impl Harness {
     pub fn new() -> Self {
-        let mut h = Self {
-            engine: Engine::new(Cryptocom::new(Options {
+        Self::with_policy(
+            Options {
                 key: Some("replay-key".into()),
                 secret: Some("replay-secret".into()),
                 ..Default::default()
-            })),
+            },
+            PublicFeedPolicy::Direct,
+        )
+    }
+    pub fn with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
+        let mut h = Self {
+            engine: Engine::new(Cryptocom::new(options)),
             actions: vec![],
+            failures: vec![],
             now: 1_610_000_000_000.0,
         };
+        h.engine.set_public_feed_policy(policy).unwrap();
         h.engine.start(h.now);
         h.collect();
         h.reply("public/get-instruments", INSTRUMENTS);
@@ -29,7 +38,18 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
-        self.actions.extend(self.engine.drain_actions());
+        for action in self.engine.drain_actions() {
+            // Failures as the plain text the host renders.
+            let action = match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                    let result = Err(error.legacy_text());
+                    self.failures.push(error);
+                    Action::Notice(safe_cex_engine::Notice::CommandDone { command, result })
+                }
+                action => action,
+            };
+            self.actions.push(action);
+        }
     }
     pub fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);

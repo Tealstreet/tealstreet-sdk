@@ -12,19 +12,30 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -195,6 +206,7 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let config_error = options
             .read_credentials
             .as_ref()
@@ -204,12 +216,13 @@ impl Bingx {
         } else {
             options
                 .key
-                .zip(options.secret)
+                .as_ref()
+                .zip(options.secret.as_ref())
                 .filter(|(k, s)| !k.is_empty() && !s.is_empty())
                 .map(|(key, secret)| Credentials {
-                    key,
-                    secret,
-                    read: options.read_credentials,
+                    key: key.clone(),
+                    secret: secret.clone(),
+                    read: options.read_credentials.clone(),
                 })
         };
         Self {
@@ -350,7 +363,10 @@ impl Bingx {
             paths::PUBLIC_WS.to_owned(),
             safe_cex_engine::SocketChannel::Public,
         ));
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.open = false;
     }
 

@@ -1,7 +1,9 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::Tick as SocketTick;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -21,6 +23,9 @@ pub enum Request {
         revision: u64,
         issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
+        coverage: SnapshotCoverage<String>,
+        /// Each skipped row's symbol and PnL, as far as they parsed.
+        skipped: Vec<(Option<String>, Option<f64>)>,
     },
     Orders {
         algo: bool,
@@ -32,6 +37,7 @@ pub enum Request {
         seen: HashSet<String>,
         page_count: u32,
         stamps: HashMap<String, (Option<u64>, u64)>,
+        coverage: SnapshotCoverage<String>,
     },
 }
 #[derive(Clone)]
@@ -51,6 +57,26 @@ struct MappedOrder<'r, 'a> {
     timestamp: Option<u64>,
 }
 
+/// Stored positions carry the unified symbol, which keeps any broker suffix.
+fn position_key(native: &str) -> String {
+    symbol(native).unwrap_or_else(|| native.into())
+}
+/// The root id of an order row too malformed to parse.
+fn order_key(item: &str, algo: bool) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity {
+        #[serde(alias = "orderId", default)]
+        order_id: Id,
+        #[serde(alias = "algoOrderId", default)]
+        algo_order_id: Id,
+    }
+    let row: Identity = serde_json::from_str(item).ok()?;
+    Some(if algo {
+        row.algo_order_id.0
+    } else {
+        row.order_id.0
+    })
+}
 fn order_lineages<'r, 'a>(
     root: &'r OrderRow<'a>,
     algo: bool,
@@ -140,7 +166,7 @@ impl Default for Account {
     fn default() -> Self {
         Self {
             credentials: None,
-            socket: Connection::default(),
+            socket: Connection::new(Some(10_000.0)),
             defaults: HashMap::new(),
             leverage: HashMap::new(),
             fallback_leverage: 1.0,
@@ -320,16 +346,21 @@ impl Orderly {
             self.sync_setting(cx, &s);
         }
         self.account_poll(cx, true);
-        if self.account.tick.is_none() {
+        if self.account.tick.is_none() && self.poll_interval().is_finite() {
+            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+        }
+    }
+    pub(crate) fn account_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval: f64) {
+        self.options.tick_interval = Some(safe_cex_engine::engine::bounded_tick_interval(interval));
+        if let Some(timer) = self.account.tick.take() {
+            cx.clear_timer(timer);
+        }
+        if self.account.credentials.is_some() && self.poll_interval().is_finite() {
             self.account.tick = Some(cx.set_timer(self.poll_interval()));
         }
     }
     fn poll_interval(&self) -> f64 {
-        self.options
-            .tick_interval
-            .filter(|v| v.is_finite())
-            .unwrap_or(2000.0)
-            .clamp(1000.0, 3600000.0)
+        safe_cex_engine::engine::bounded_tick_interval(self.options.tick_interval.unwrap_or(2000.0))
     }
     pub(crate) fn sync_setting(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let mode = self.selected_mode(cx, symbol);
@@ -375,6 +406,8 @@ impl Orderly {
                     revision: self.account.positions_revision,
                     issued: self.account.positions_issued,
                     stamps: HashMap::new(),
+                    coverage: SnapshotCoverage::default(),
+                    skipped: Vec::new(),
                 },
             );
         }
@@ -395,6 +428,7 @@ impl Orderly {
                             seen: HashSet::new(),
                             page_count: 0,
                             stamps: HashMap::new(),
+                            coverage: SnapshotCoverage::default(),
                         },
                     );
                 }
@@ -513,11 +547,13 @@ impl Orderly {
             last_update: Some(cx.now),
         }))
     }
+    /// Maps a root and its algo children; working ids on unknown markets go to `unknown`.
     fn orders<'r, 'a>(
         &self,
         cx: &Cx<'_, Pending>,
         r: &'r OrderRow<'a>,
         algo: bool,
+        unknown: &mut Vec<String>,
     ) -> Result<Vec<MappedOrder<'r, 'a>>, String> {
         let mut out = vec![];
         let mut ids = HashSet::new();
@@ -548,10 +584,11 @@ impl Orderly {
                             })
                         });
                 if !final_status {
-                    return Err(
-                        "Orderly working order market unavailable; preserving previous orders"
-                            .into(),
-                    );
+                    unknown.push(if algo {
+                        row.algo_order_id.0.clone()
+                    } else {
+                        row.order_id.0.clone()
+                    });
                 }
                 continue;
             }
@@ -827,37 +864,122 @@ impl Orderly {
                         rows.push((s, margin(&r.default_margin_mode)?));
                     }
                 }
-                Request::Positions { rows, stamps, .. } => {
-                    let r: PositionRow<'_> =
-                        serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    if let Some(p) = self.position(cx, &r)? {
-                        stamps.insert(p.id.clone(), (r.seq, r.timestamp.unwrap_or(0)));
-                        rows.push(p);
-                    }
+                Request::Positions {
+                    rows,
+                    stamps,
+                    coverage,
+                    skipped,
+                    ..
+                } => {
+                    let (symbol, pnl) = match serde_json::from_str::<PositionRow<'_>>(item) {
+                        Ok(r) => match self.position(cx, &r) {
+                            Ok(Some(p)) => {
+                                stamps.insert(p.id.clone(), (r.seq, r.timestamp.unwrap_or(0)));
+                                rows.push(p);
+                                return Ok(());
+                            }
+                            // A flat row closes its symbol even when its mode is unknown.
+                            Ok(None) => return Ok(()),
+                            Err(_) if r.position_qty == 0.0 => return Ok(()),
+                            Err(_) => (
+                                Some(position_key(&r.symbol)),
+                                Some(r.mark_price)
+                                    .filter(|price| price.is_finite() && *price > 0.0)
+                                    .map(|mark| {
+                                        safe_cex_engine::num::round_half_up(
+                                            (mark - r.average_open_price) * r.position_qty * 100.0,
+                                        ) / 100.0
+                                    }),
+                            ),
+                        },
+                        Err(_) => {
+                            #[derive(serde::Deserialize)]
+                            struct Identity<'a> {
+                                #[serde(borrow)]
+                                symbol: std::borrow::Cow<'a, str>,
+                                #[serde(alias = "positionQty", default, borrow)]
+                                position_qty: Option<&'a serde_json::value::RawValue>,
+                            }
+                            #[derive(serde::Deserialize)]
+                            struct Qty(#[serde(deserialize_with = "number")] f64);
+                            if let Ok(r) = serde_json::from_str::<Identity<'_>>(item) {
+                                let flat = r.position_qty.is_some_and(|raw| {
+                                    serde_json::from_str::<Qty>(raw.get())
+                                        .is_ok_and(|qty| qty.0 == 0.0)
+                                });
+                                if flat {
+                                    return Ok(());
+                                }
+                                (Some(position_key(&r.symbol)), None)
+                            } else {
+                                (None, None)
+                            }
+                        }
+                    };
+                    skipped.push((symbol.clone(), pnl));
+                    cx.log(
+                        LogLevel::Warning,
+                        match &symbol {
+                            Some(symbol) => format!("Orderly skipped unmappable position {symbol}"),
+                            None => "Orderly skipped unmappable position without a symbol".into(),
+                        },
+                    );
+                    coverage.reject(symbol);
                 }
                 Request::Orders {
                     algo,
                     rows,
                     proofs,
+                    page,
                     seen,
                     page_count,
                     stamps,
+                    coverage,
                     ..
                 } => {
                     *page_count += 1;
-                    let r: OrderRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    let key = if *algo {
-                        &r.algo_order_id.0
-                    } else {
-                        &r.order_id.0
+                    let parsed = serde_json::from_str::<OrderRow<'_>>(item);
+                    let key = match &parsed {
+                        Ok(r) if *algo => r.algo_order_id.0.clone(),
+                        Ok(r) => r.order_id.0.clone(),
+                        Err(_) => order_key(item, *algo).unwrap_or_default(),
                     };
-                    if !key.is_empty() && !seen.insert(key.clone()) {
+                    let key = (!key.is_empty() && key != "0").then_some(key);
+                    if let Some(key) = &key
+                        && !seen.insert(key.clone())
+                    {
                         return Err("Orderly repeated order page".into());
+                    }
+                    let mut unknown = vec![];
+                    let mapped = parsed
+                        .as_ref()
+                        .ok()
+                        .and_then(|r| self.orders(cx, r, *algo, &mut unknown).ok());
+                    let Some(mapped) = mapped else {
+                        cx.log(
+                            LogLevel::Warning,
+                            match &key {
+                                Some(key) => format!("Orderly skipped unmappable order {key}"),
+                                None => "Orderly skipped unmappable order without an id".into(),
+                            },
+                        );
+                        if key.is_none() {
+                            // Numeric ids cannot collide with this page-position census key.
+                            seen.insert(format!("row:{page}:{page_count}"));
+                        }
+                        coverage.reject(key);
+                        return Ok(());
+                    };
+                    for id in unknown {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Orderly skipped order {id} on an unknown market"),
+                        );
+                        coverage.reject(Some(id));
                     }
                     if let Some((id, proof)) = self.proof(cx, item).filter(|_| !*algo) {
                         proofs.insert(id, proof);
                     }
-                    let mapped = self.orders(cx, &r, *algo)?;
                     for mapped in mapped {
                         let o = mapped.order;
                         if rows.iter().any(|prior| prior.id == o.id) {
@@ -874,9 +996,6 @@ impl Orderly {
             Ok(())
         })();
         if let Err(e) = result {
-            if e == "Orderly working order market unavailable; preserving previous orders" {
-                cx.log(LogLevel::Warning, &e);
-            }
             match request {
                 Request::Modes { invalid, .. }
                 | Request::Positions { invalid, .. }
@@ -934,11 +1053,13 @@ impl Orderly {
                 self.account_ready(cx);
             }
             Request::Positions {
-                rows,
+                mut rows,
                 invalid,
                 revision,
                 issued,
                 stamps,
+                coverage,
+                skipped,
             } => {
                 self.account.inflight[1] = false;
                 if invalid {
@@ -956,19 +1077,46 @@ impl Orderly {
                     cx.log(LogLevel::Error, "Orderly invalid collateral response");
                     return;
                 };
-                let upnl = safe_cex_engine::num::round_half_up(
-                    rows.iter().map(|p| p.unrealized_pnl).sum::<f64>() * 100.0,
-                ) / 100.0;
-                let balance = Balance {
-                    total: meta.total_collateral_value - upnl,
-                    free: meta.free_collateral,
-                    used: meta.total_collateral_value - meta.free_collateral - upnl,
-                    upnl,
-                };
+                let kept = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|p| {
+                        !coverage.allows_absence(&p.symbol) && !rows.iter().any(|q| q.id == p.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                rows.extend(kept);
+                // Collateral is a native aggregate; its PnL split sums the rows plus
+                // retained copies, plus each skipped row with no copy. A skipped row
+                // with neither a copy nor a known PnL leaves the split unknown.
+                let skipped_pnl = skipped.iter().try_fold(0.0, |sum, (symbol, pnl)| {
+                    if symbol
+                        .as_ref()
+                        .is_some_and(|symbol| rows.iter().any(|p| &p.symbol == symbol))
+                    {
+                        Some(sum)
+                    } else {
+                        pnl.map(|pnl| sum + pnl)
+                    }
+                });
+                let balance = skipped_pnl.map(|skipped_pnl| {
+                    let upnl = safe_cex_engine::num::round_half_up(
+                        (skipped_pnl + rows.iter().map(|p| p.unrealized_pnl).sum::<f64>()) * 100.0,
+                    ) / 100.0;
+                    Balance {
+                        total: meta.total_collateral_value - upnl,
+                        free: meta.free_collateral,
+                        used: meta.total_collateral_value - meta.free_collateral - upnl,
+                        upnl,
+                    }
+                });
                 // Positions are pushed, so a stale read only commits the REST-only
                 // balance; stale rows could drop a position opened mid-read.
                 if !current {
-                    cx.store.set_balance(balance);
+                    if let Some(balance) = balance {
+                        cx.store.set_balance(balance);
+                    }
                     self.account_poll(cx, false);
                     return;
                 }
@@ -989,7 +1137,9 @@ impl Orderly {
                     merge_stamp(&mut self.account.position_stamps, id, new);
                 }
                 cx.store.set_positions(rows);
-                cx.store.set_balance(balance);
+                if let Some(balance) = balance {
+                    cx.store.set_balance(balance);
+                }
                 for s in cx
                     .store
                     .markets()
@@ -1010,6 +1160,7 @@ impl Orderly {
                 seen,
                 page_count,
                 stamps,
+                coverage,
             } => {
                 let i = algo as usize;
                 if invalid || revision != self.account.order_revisions[i] {
@@ -1051,6 +1202,7 @@ impl Orderly {
                             seen,
                             page_count: 0,
                             stamps,
+                            coverage,
                         },
                     );
                     return;
@@ -1074,7 +1226,19 @@ impl Orderly {
                     .store
                     .orders()
                     .iter()
-                    .filter(|o| o.parent_id.is_some() != algo || o.status == OrderStatus::Creating)
+                    .filter(|o| {
+                        o.parent_id.is_some() != algo
+                            || o.status == OrderStatus::Creating
+                            || ((!coverage.allows_absence(&o.id)
+                                || o.parent_id
+                                    .as_ref()
+                                    .is_some_and(|p| !coverage.allows_absence(p)))
+                                && !self.account.terminal.contains(&o.id)
+                                && !o.parent_id.as_ref().is_some_and(|p| {
+                                    self.account.terminal.contains(&format!("root:{p}"))
+                                })
+                                && !rows.iter().any(|row| row.id == o.id))
+                    })
                     .cloned()
                     .collect();
                 self.account
@@ -1122,25 +1286,17 @@ impl Orderly {
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = false;
         self.account.socket.open = false;
-        self.account.socket.received = cx.now;
-        if let Some(timer) = self.account.socket.watchdog.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.socket.supervisor.connecting(cx);
         self.account.socket.socket =
             Some(cx.connect_channel(self.private_url(), safe_cex_engine::SocketChannel::Private));
-        // Cover a transport that never produces either open or close.
-        self.account.socket.watchdog = Some(cx.set_timer(10000.0));
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) || self.account.socket.open {
             return;
         }
-        if let Some(timer) = self.account.socket.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         self.account.authenticated = false;
         self.account.socket.open = true;
-        self.account.socket.received = cx.now;
+        self.account.socket.supervisor.opened(cx);
         let timestamp = cx.now as u64;
         let credentials = self.account.credentials.as_ref().unwrap();
         #[derive(Serialize)]
@@ -1171,10 +1327,8 @@ impl Orderly {
                 cx.log(LogLevel::Error, e);
                 cx.close(socket);
                 self.private_close(cx, socket);
-                return;
             }
         }
-        self.account.socket.watchdog = Some(cx.set_timer(10000.0));
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {
@@ -1183,13 +1337,7 @@ impl Orderly {
         self.account.authenticated = false;
         self.account.socket.socket = None;
         self.account.socket.open = false;
-        if let Some(t) = self.account.socket.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.account.socket.attempts = self.account.socket.attempts.saturating_add(1);
-        self.account.socket.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.account.socket.attempts.min(6) as i32 - 1)).min(30000.0),
-        ));
+        self.account.socket.supervisor.retry(cx);
     }
     pub(crate) fn order_terminal(&self, id: &str) -> bool {
         self.account.terminal.contains(id)
@@ -1367,7 +1515,13 @@ impl Orderly {
             }
             return Ok(());
         }
-        let orders = self.orders(cx, r, algo)?;
+        let mut unknown = vec![];
+        let orders = self.orders(cx, r, algo, &mut unknown)?;
+        if !unknown.is_empty() {
+            return Err(
+                "Orderly working order market unavailable; preserving previous orders".into(),
+            );
+        }
         for mapped in orders {
             let order = mapped.order;
             let row = mapped.row;
@@ -1414,7 +1568,7 @@ impl Orderly {
     ) -> Result<(), String> {
         let env: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let socket = self.account.socket.socket.unwrap();
-        self.account.socket.received = cx.now;
+        self.account.socket.supervisor.received(cx.now);
         if env.event == "auth" {
             if env.success != Some(true) {
                 cx.close(socket);
@@ -1426,7 +1580,7 @@ impl Orderly {
             }
             if !self.account.authenticated {
                 self.account.authenticated = true;
-                self.account.socket.attempts = 0;
+                self.account.socket.supervisor.authenticated(cx);
                 for topic in ["executionreport", "algoexecutionreportv2", "position"] {
                     #[derive(Serialize)]
                     struct Sub<'a> {
@@ -1517,30 +1671,47 @@ impl Orderly {
             self.account.tick = None;
             self.account.ticks = self.account.ticks.wrapping_add(1);
             self.account_poll(cx, self.account.ticks.is_multiple_of(4));
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
-            return true;
-        }
-        if self.account.socket.reconnect == Some(timer) {
-            self.account.socket.reconnect = None;
-            self.private_connect(cx);
-            return true;
-        }
-        if self.account.socket.watchdog == Some(timer) {
-            self.account.socket.watchdog = None;
-            let socket = self.account.socket.socket.unwrap();
-            if !self.account.socket.open
-                || !self.account.authenticated
-                || cx.now - self.account.socket.received >= 20000.0
-            {
-                cx.close(socket);
-                self.private_close(cx, socket);
-            } else {
-                self.account.socket.ping_at = cx.now;
-                cx.send(socket, "{\"event\":\"ping\"}");
-                self.account.socket.watchdog = Some(cx.set_timer(10000.0));
+            if self.poll_interval().is_finite() {
+                self.account.tick = Some(cx.set_timer(self.poll_interval()));
             }
             return true;
         }
-        false
+        match self.account.socket.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => return false,
+            SocketTick::Reconnect => self.private_connect(cx),
+            SocketTick::Ping => {
+                if let Some(socket) = self.account.socket.socket {
+                    self.account.socket.ping_at = cx.now;
+                    cx.send(socket, "{\"event\":\"ping\"}");
+                }
+            }
+            SocketTick::TimedOut(_) => {
+                if let Some(socket) = self.account.socket.socket {
+                    cx.close(socket);
+                    self.private_close(cx, socket);
+                }
+            }
+            SocketTick::Handled => {}
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod security_poll_interval {
+    use super::*;
+    #[test]
+    fn native_options_cannot_bypass_bounded_polling_or_pause_semantics() {
+        for (value, expected) in [
+            (0.001, 1000.0),
+            (1e20, 120000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            let venue = Orderly::new(crate::Options {
+                tick_interval: Some(value),
+                ..crate::Options::default()
+            });
+            assert_eq!(venue.poll_interval(), expected);
+        }
     }
 }

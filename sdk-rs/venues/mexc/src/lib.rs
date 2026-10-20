@@ -4,12 +4,14 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, PublicFeedPolicy, Response,
+    SocketId, TimerId, Venue, VenueError,
 };
 use std::collections::{BTreeSet, HashMap};
 use wire::*;
@@ -21,10 +23,22 @@ const MAX_BUFFERED: usize = 2_000;
 
 #[derive(Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 pub enum Pending {
@@ -54,7 +68,7 @@ struct BookState {
 }
 
 pub struct MexcFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
     trading: trading::Trading,
@@ -72,6 +86,7 @@ pub struct MexcFutures {
 
 impl MexcFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.trim().is_empty() => {
                 Some(sign::Credentials {
@@ -298,8 +313,7 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
-        state.retry =
-            Some(cx.set_timer((250.0 * 2f64.powi(state.failures.min(7) as i32)).min(30_000.0)));
+        state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {
         for (side, rows) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {
@@ -499,7 +513,16 @@ impl MexcFutures {
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request.command, error),
+            Pending::Trade(request) => {
+                let error = VenueError::new(error).kind(ErrorKind::Network);
+                // The amend read precedes the replacement, which was never sent.
+                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                    error.outcome(Outcome::NotSent)
+                } else {
+                    error.outcome(Outcome::Unknown)
+                };
+                self.trade_failed(cx, request.command, error)
+            }
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 cx.log(LogLevel::Warning, error);

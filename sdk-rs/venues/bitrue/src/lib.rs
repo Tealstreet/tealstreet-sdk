@@ -10,14 +10,15 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 use wire::{CandleWire, Contract, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
@@ -25,6 +26,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub recv_window: u32,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -107,7 +119,7 @@ struct SocketRead {
     timer: TimerId,
 }
 pub struct Bitrue {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     contracts: HashMap<String, ContractInfo>,
@@ -206,6 +218,7 @@ fn candle(row: &CandleWire<'_>, multiplier: f64) -> Option<Candle> {
 }
 impl Bitrue {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -349,7 +362,10 @@ impl Bitrue {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
     }
     fn subscription(
@@ -869,7 +885,7 @@ impl Venue for Bitrue {
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
-            Job::Trade(r) => self.trade_failed(cx, r, error),
+            Job::Trade(r) => self.trade_lost(cx, r, error),
             Job::History(r) => self.history_failed(cx, r, error),
         }
     }

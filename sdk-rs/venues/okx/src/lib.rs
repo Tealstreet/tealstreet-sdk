@@ -1,5 +1,6 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -8,8 +9,10 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use sign::Credentials;
 use std::collections::{HashMap, HashSet};
@@ -17,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub eea: bool,
@@ -26,6 +29,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,17 +61,31 @@ struct Product {
     settle_ccy: String,
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
     authenticated: bool,
-    auth_deadline: Option<f64>,
-    last_received: f64,
-    ping_at: Option<f64>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Connection {
+    // Only pongs prove liveness: an unanswered ping retires the socket one cadence later.
+    fn new(login: bool) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            authenticated: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 10_000.0,
+                auth_timeout_ms: login.then_some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 30_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -71,6 +99,7 @@ struct BookState {
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Markets {
         kind: InstrumentType,
@@ -106,11 +135,12 @@ pub struct CandleRead {
 }
 
 pub struct Okx {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    closed: closed::ClosedState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
@@ -129,6 +159,7 @@ pub struct Okx {
 
 impl Okx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -144,13 +175,15 @@ impl Okx {
                     passphrase: passphrase.clone(),
                 })
         };
+        let login = credentials.is_some();
         Self {
             options,
             credentials,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
-            connections: std::array::from_fn(|_| Connection::default()),
+            closed: closed::ClosedState::default(),
+            connections: std::array::from_fn(|channel| Connection::new(channel != PUBLIC && login)),
             books: HashMap::new(),
             marks: HashSet::new(),
             indexes: HashSet::new(),
@@ -364,6 +397,10 @@ impl Okx {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        // Suppressed public feeds get a placeholder socket that never opens.
+        if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.connections[channel].supervisor.connecting(cx);
+        }
         let socket = cx.connect_channel(
             self.socket_url(channel),
             match channel {
@@ -376,9 +413,6 @@ impl Okx {
         c.socket = Some(socket);
         c.open = false;
         c.authenticated = false;
-        c.last_received = cx.now;
-        c.ping_at = None;
-        c.watchdog = Some(cx.set_timer(10_000.0));
     }
 
     fn channel(&self, socket: SocketId) -> Option<usize> {
@@ -690,6 +724,7 @@ impl Venue for Okx {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            closed_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -715,27 +750,21 @@ impl Venue for Okx {
         };
         let c = &mut self.connections[channel];
         c.open = true;
-        c.attempts = 0;
-        c.last_received = cx.now;
-        c.auth_deadline =
-            (channel != PUBLIC && self.credentials.is_some()).then_some(cx.now + 10_000.0);
+        c.supervisor.opened(cx);
         if channel != PUBLIC && self.credentials.is_some() {
             self.login(cx, channel);
         } else {
             self.subscribe(cx, channel);
         }
         cx.send(socket, "ping");
-        self.connections[channel].ping_at = Some(cx.now);
     }
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(channel) = self.channel(socket) else {
             return;
         };
-        let c = &mut self.connections[channel];
-        c.last_received = cx.now;
         if text == "pong" {
-            c.ping_at = None;
+            self.connections[channel].supervisor.received(cx.now);
             return;
         }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
@@ -773,12 +802,7 @@ impl Venue for Okx {
         c.socket = None;
         c.open = false;
         c.authenticated = false;
-        if let Some(timer) = c.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        c.attempts = c.attempts.saturating_add(1);
-        c.reconnect =
-            Some(cx.set_timer((500.0 * 2f64.powi(c.attempts.min(6) as i32)).min(30_000.0)));
+        c.supervisor.retry(cx);
         if channel == PUBLIC {
             for state in self.books.values_mut() {
                 state.sequence = None;
@@ -793,6 +817,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -1061,6 +1086,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
+            Pending::Closed(request) => self.closed_response(cx, request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1211,6 +1237,8 @@ impl Venue for Okx {
             self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
@@ -1233,36 +1261,48 @@ impl Venue for Okx {
             }
             return;
         }
-        if self.history_timer(cx, timer) {
+        if self.history_timer(cx, timer) || self.closed_timer(cx, timer) {
             return;
         }
         if self.account_timer(cx, timer) {
             return;
         }
-        for channel in 0..3 {
-            let c = &mut self.connections[channel];
-            if c.reconnect == Some(timer) {
-                c.reconnect = None;
-                self.connect(cx, channel);
-                return;
-            }
-            if c.watchdog == Some(timer) {
-                c.watchdog = None;
+        let Some(channel) = (0..3).find(|&c| self.connections[c].supervisor.owns_timer(timer))
+        else {
+            return;
+        };
+        let c = &mut self.connections[channel];
+        match c.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => {
                 if let Some(socket) = c.socket {
-                    if !c.open
-                        || c.auth_deadline.is_some_and(|at| cx.now >= at)
-                        || c.ping_at.is_some_and(|at| cx.now - at >= 10_000.0)
-                    {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                        return;
-                    }
                     cx.send(socket, "ping");
-                    c.ping_at = Some(cx.now);
                 }
-                c.watchdog = Some(cx.set_timer(10_000.0));
-                return;
             }
+            Tick::TimedOut(_) => match c.socket {
+                Some(socket) => {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+                None => c.supervisor.retry(cx),
+            },
+            Tick::Handled | Tick::Unhandled => {}
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 

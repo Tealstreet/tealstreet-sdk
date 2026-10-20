@@ -1,5 +1,6 @@
 use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor};
@@ -18,9 +19,9 @@ pub enum Request {
     Probe,
     Positions {
         rows: Vec<Position>,
+        skipped: SnapshotCoverage<PositionKey>,
         coins: std::collections::VecDeque<String>,
         started: f64,
-        invalid: bool,
     },
     Balance {
         row: Option<Amounts>,
@@ -31,7 +32,7 @@ pub enum Request {
     UtaBalance {
         version: u64,
     },
-    Orders(OrderSnapshot),
+    Orders(Box<OrderSnapshot>),
 }
 
 pub struct OrderSnapshot {
@@ -42,13 +43,16 @@ pub struct OrderSnapshot {
     pages: u32,
     page_count: usize,
     rows: Vec<Order>,
+    skipped: SnapshotCoverage<String>,
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
     started: f64,
     stream_revision: u64,
-    invalid: bool,
     virtual_only: bool,
 }
+
+/// Symbol and side of a position row; a `None` side covers both legs.
+type PositionKey = (String, Option<PositionSide>);
 
 #[derive(Clone)]
 pub struct InverseAsset {
@@ -398,9 +402,9 @@ impl BitgetFutures {
             Some(at),
             Request::Positions {
                 rows: vec![],
+                skipped: SnapshotCoverage::default(),
                 coins,
                 started: cx.now,
-                invalid: false,
             },
         );
     }
@@ -447,7 +451,7 @@ impl BitgetFutures {
         self.account.orders_dirty = false;
         self.order_page(
             cx,
-            OrderSnapshot {
+            Box::new(OrderSnapshot {
                 version: self.account.orders_version,
                 source: OrderSource::Normal,
                 cursor: None,
@@ -455,17 +459,17 @@ impl BitgetFutures {
                 pages: 0,
                 page_count: 0,
                 rows: vec![],
+                skipped: SnapshotCoverage::default(),
                 plans: vec![],
                 trailing: vec![],
                 started: cx.now,
                 stream_revision: self.order_revision_clock(),
-                invalid: false,
                 virtual_only,
-            },
+            }),
         );
     }
 
-    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: OrderSnapshot) {
+    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
         snapshot.page_count = 0;
         let source = snapshot.source;
         let mut path = if self.account.uta {
@@ -523,21 +527,22 @@ impl BitgetFutures {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, invalid, .. } => {
+            Request::Positions { rows, skipped, .. } => {
                 match serde_json::from_str::<PositionRow>(item)
-                    .map_err(|e| e.to_string())
+                    .map_err(|_| "malformed record".to_owned())
                     .and_then(|row| self.map_position(cx, &row))
                 {
                     Ok(p) => rows.push(p),
                     Err(error) => {
-                        // Until rows can be reconciled by captured identity, a
-                        // missing market in a partial catalogue cannot prove an
-                        // owned position absent from an authoritative snapshot.
-                        *invalid = true;
+                        let key = self.position_key(item);
                         cx.log(
                             LogLevel::Warning,
-                            format!("skipped Bitget position record: {error}"),
+                            format!(
+                                "skipped Bitget position record {}: {error}",
+                                key.as_ref().map_or("without symbol", |(s, _)| s.as_str())
+                            ),
                         );
+                        skipped.reject(key);
                     }
                 }
             }
@@ -564,7 +569,7 @@ impl BitgetFutures {
             Request::Orders(snapshot) => {
                 snapshot.page_count += 1;
                 match serde_json::from_str::<OrderRow>(item)
-                    .map_err(|e| e.to_string())
+                    .map_err(|_| "malformed record".to_owned())
                     .and_then(|mut row| {
                         if self.account.uta
                             && snapshot.source != OrderSource::Normal
@@ -600,13 +605,15 @@ impl BitgetFutures {
                     }) {
                     Ok(orders) => snapshot.rows.extend(orders),
                     Err(error) => {
-                        // One unmappable working order cannot erase another
-                        // known order or its protective legs on full replacement.
-                        snapshot.invalid = true;
+                        let id = order_row_id(item);
                         cx.log(
                             LogLevel::Warning,
-                            format!("skipped Bitget order record: {error}"),
+                            format!(
+                                "skipped Bitget order record {}: {error}",
+                                id.as_deref().unwrap_or("without id")
+                            ),
                         );
+                        snapshot.skipped.reject(id);
                     }
                 }
             }
@@ -684,9 +691,9 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
+                skipped,
                 mut coins,
                 started,
-                invalid: false,
             } => {
                 if let Some(coin) = coins.pop_front() {
                     self.account_request(
@@ -700,17 +707,26 @@ impl BitgetFutures {
                         Some(ArrayAt::Envelope(&[&["data"]])),
                         Request::Positions {
                             rows,
+                            skipped,
                             coins,
                             started,
-                            invalid: false,
                         },
                     );
                     return;
                 }
                 self.account.positions_in_flight = false;
-                let rows = self.merge_positions(cx, rows, started);
+                let mut rows = self.merge_positions(cx, rows, started);
                 for p in &rows {
                     self.position_setting(cx, p);
+                }
+                for current in cx.store.positions() {
+                    if !rows.iter().any(|p| p.id == current.id)
+                        && [Some(current.side), None]
+                            .into_iter()
+                            .any(|side| !skipped.allows_absence(&(current.symbol.clone(), side)))
+                    {
+                        rows.push(current.clone());
+                    }
                 }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
@@ -749,7 +765,7 @@ impl BitgetFutures {
                     Err(error) => cx.log(LogLevel::Error, error),
                 }
             }
-            Request::Orders(mut snapshot) if !snapshot.invalid => {
+            Request::Orders(mut snapshot) => {
                 if snapshot.version != self.account.orders_version {
                     self.account.orders_in_flight = false;
                     self.refresh_orders(cx, false);
@@ -836,6 +852,7 @@ impl BitgetFutures {
                     self.commit_orders(
                         cx,
                         snapshot.rows,
+                        &snapshot.skipped,
                         snapshot.virtual_only,
                         snapshot.started,
                         snapshot.stream_revision,
@@ -1053,6 +1070,7 @@ impl BitgetFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Order>,
+        skipped: &SnapshotCoverage<String>,
         virtual_only: bool,
         started: f64,
         stream_revision: u64,
@@ -1073,15 +1091,16 @@ impl BitgetFutures {
                 *row = current.clone();
             }
         }
-        rows.retain(|row| {
-            !self.account.terminal.contains_key(&row.id)
-                && !cx.store.order(&row.id).is_some_and(|current| {
+        let live = |id: &String| {
+            !self.account.terminal.contains_key(id)
+                && !cx.store.order(id).is_some_and(|current| {
                     matches!(
                         current.status,
                         OrderStatus::Canceling | OrderStatus::Closed | OrderStatus::Canceled
                     )
                 })
-        });
+        };
+        rows.retain(|row| live(&row.id));
         if virtual_only {
             rows.retain(|o| o.parent_id.is_some());
             rows.extend(
@@ -1109,6 +1128,16 @@ impl BitgetFutures {
                 {
                     rows.push(current.clone());
                 }
+            }
+        }
+        // Preset TP/SL children carry their rejected parent's identity.
+        for current in cx.store.orders() {
+            let protected = [Some(&current.id), current.parent_id.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|id| !skipped.allows_absence(id));
+            if protected && live(&current.id) && !rows.iter().any(|r| r.id == current.id) {
+                rows.push(current.clone());
             }
         }
         cx.store.set_orders(rows);
@@ -1752,6 +1781,31 @@ impl BitgetFutures {
         symbol.split('_').next().unwrap_or(symbol).to_owned()
     }
 
+    /// Identity of a position row that failed to map, if it has a symbol.
+    fn position_key(&self, item: &str) -> Option<PositionKey> {
+        #[derive(Deserialize)]
+        struct Row<'a> {
+            #[serde(default, borrow)]
+            symbol: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "instId", borrow)]
+            inst_id: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "holdSide", borrow)]
+            hold_side: std::borrow::Cow<'a, str>,
+            #[serde(default, rename = "posSide", borrow)]
+            pos_side: std::borrow::Cow<'a, str>,
+            #[serde(default, borrow)]
+            side: std::borrow::Cow<'a, str>,
+        }
+        let row: Row<'_> = serde_json::from_str(item).ok()?;
+        let symbol = self.normalized_symbol(first_text(&[&row.inst_id, &row.symbol]));
+        let side = match first_text(&[&row.hold_side, &row.pos_side, &row.side]) {
+            "short" | "sell" => Some(PositionSide::Short),
+            "long" | "buy" => Some(PositionSide::Long),
+            _ => None,
+        };
+        (!symbol.is_empty()).then_some((symbol, side))
+    }
+
     fn map_position(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1815,11 +1869,17 @@ impl BitgetFutures {
             raw.achieved_profits.get() + raw.total_fee.get() - raw.deducted_fee.get()
         };
         let contracts = if self.inverse() {
-            let reference = cx
-                .store
-                .ticker(&symbol)
-                .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
-                .filter(|p| *p > 0.0)
+            // The row's own mark sizes first snapshots read before tickers load.
+            let reference = [raw.mark_price, raw.market_price]
+                .into_iter()
+                .filter_map(|price| price.0)
+                .find(|p| p.is_finite() && *p > 0.0)
+                .or_else(|| {
+                    cx.store
+                        .ticker(&symbol)
+                        .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
+                        .filter(|p| *p > 0.0)
+                })
                 .unwrap_or(entry);
             if reference > 0.0 {
                 round8(native_contracts / reference)
@@ -2114,6 +2174,26 @@ pub(crate) fn order_status(value: &str) -> Option<OrderStatus> {
         }
         _ => return None,
     })
+}
+/// Native id of an order row that failed to map, chosen as `map_order` does.
+fn order_row_id(item: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(default, rename = "orderId", borrow)]
+        order_id: Identifier<'a>,
+        #[serde(default, rename = "clientOid", borrow)]
+        client_oid: Identifier<'a>,
+        #[serde(default, rename = "ordId", borrow)]
+        ord_id: Identifier<'a>,
+        #[serde(default, borrow)]
+        id: Identifier<'a>,
+    }
+    let row: Row<'_> = serde_json::from_str(item).ok()?;
+    [&row.order_id, &row.client_oid, &row.ord_id, &row.id]
+        .into_iter()
+        .map(Identifier::text)
+        .find(|s| !s.is_empty())
+        .map(std::borrow::Cow::into_owned)
 }
 fn raw_status<'a>(raw: &'a OrderRow<'_>) -> &'a str {
     first_text(&[&raw.status, &raw.state, &raw.plan_status, &raw.order_status])

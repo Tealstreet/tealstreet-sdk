@@ -10,8 +10,8 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Query, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
+    SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -92,7 +92,7 @@ struct SpotBook {
     last: f64,
 }
 pub struct KucoinSpot {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
@@ -117,6 +117,7 @@ pub struct KucoinSpot {
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = (!options.public_data_only)
             .then(|| {
                 options
@@ -238,6 +239,10 @@ impl KucoinSpot {
     fn bullet(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.sockets[channel];
         if c.token_pending || c.socket.is_some() || c.supervisor.is_waiting() {
+            return;
+        }
+        // Suppressed public feeds never open; bullets and supervision would only churn retries.
+        if channel == 0 && cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
         c.token_pending = true;
@@ -886,7 +891,13 @@ impl Venue for KucoinSpot {
         let data = match result {
             Ok(d) => d,
             Err(e) => {
-                self.on_request_failed(cx, pending, &e);
+                if let Pending::Write(job) = pending {
+                    cx.command_error(job.command, &e);
+                    let error = crate::wire::write_failure(response.status, response.body, e);
+                    self.write_failed(cx, job, error);
+                } else {
+                    self.on_request_failed(cx, pending, &e);
+                }
                 return;
             }
         };
@@ -1220,7 +1231,7 @@ impl Venue for KucoinSpot {
             }
             Pending::Write(j) => {
                 cx.command_error(j.command, error);
-                cx.done(j.command, Err(error.into()));
+                self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
             Pending::Candles { command, .. }
@@ -1469,6 +1480,54 @@ impl KucoinSpot {
                 Err("KuCoin Spot public trades are not implemented in TS".into()),
             ),
             Query::OrderHistory { .. } | Query::Income { .. } => cx.done(command, Ok("[]".into())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod security_credentials {
+    use super::*;
+    use safe_cex_crypto::secrets::EraseSecrets;
+    #[test]
+    fn spot_owns_both_credential_copies_in_scrubbing_carriers() {
+        let mut venue = KucoinSpot::new(Options {
+            key: Some("private-key".into()),
+            secret: Some("private-secret".into()),
+            passphrase: Some("private-passphrase".into()),
+            broker: Some(sign::BrokerOptions {
+                partner: "partner".into(),
+                broker_key: "private-broker-key".into(),
+                broker_name: "broker".into(),
+                verify: None,
+            }),
+            ..Options::default()
+        });
+        let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+        assert!(venue.credentials.is_some());
+        venue.options.erase_secrets();
+        venue.credentials.as_mut().unwrap().erase_secrets();
+        assert!(venue.options.secret.is_none());
+        assert!(venue.options.broker.as_ref().unwrap().broker_key.is_empty());
+        let credentials = venue.credentials.as_ref().unwrap();
+        assert!(credentials.secret.is_empty() && credentials.passphrase.is_empty());
+        assert!(credentials.broker.as_ref().unwrap().broker_key.is_empty());
+    }
+    #[test]
+    fn incomplete_and_public_only_credentials_keep_a_scrubbing_owner() {
+        for (key, public_data_only) in [
+            (None, false),
+            (Some(String::new()), false),
+            (Some("key".into()), true),
+        ] {
+            let venue = KucoinSpot::new(Options {
+                key,
+                secret: Some("private-secret".into()),
+                passphrase: Some("private-passphrase".into()),
+                public_data_only,
+                ..Options::default()
+            });
+            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+            assert!(venue.credentials.is_none());
         }
     }
 }

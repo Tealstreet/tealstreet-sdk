@@ -314,22 +314,58 @@ Fresh combined gates and exact-head CI are required before merging PR #1345.
 
 ## Security
 
-- Workers Durable Object has no client auth and serves the first client's account
-  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).
-- Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).
-- Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).
-- live-smoke: no notional cap, no post-only, testnet reads mainnet env names.
-- Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.
-- Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
+Addressed by `feat/rust-security-fixes`; regression and gate receipts are in
+[`RUST_SECURITY_FIXES.md`](RUST_SECURITY_FIXES.md). These findings were reverified
+against current code before fixing. Lifecycle differences alone are not defects.
+
+- ~~Workers Durable Object has no client auth and serves the first client's account
+  to all (`hosts/wasm/js/workers.mjs:189`); start race leaks running engines (`:206`).~~
+  **M1/M2:** deployment-owned per-account token checked before upgrade;
+  conflicting starts rejected, one startup in flight, membership/generation
+  rechecked after loading, malformed JSON handled. Options/start failures are
+  generic; actionable venue command failures remain visible. Network clients
+  cannot inject trusted-provider public feed updates into account valuation.
+- ~~Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).~~
+  **M3:** strip URLs on connection/send errors. Current reqwest body-stream
+  errors already have no URL; that path has a non-disclosure regression rather
+  than a claimed defect fix. New delegated signer callback errors
+  are generic instead of echoing arbitrary credential-bearing exception text.
+  Unstructured custom JS HTTP/body/socket exceptions are sanitized at origin;
+  structured venue responses retain actionable errors. Native direct-proxy and
+  HOW HTTP authorization-provider failures also use fixed diagnostics.
+- ~~Custom credential headers follow cross-host redirects (`transport.rs:101`, `host.mjs:352`).~~
+  **M4:** redirects disabled in native HTTP, host fetch and Workers HTTP/upgrade.
+- ~~live-smoke: no notional cap, no post-only, testnet reads mainnet env names.~~
+  **M5:** fixed $100 quote-notional cap before any write, post-only on supported
+  adapters, mode-specific credential variables without fallback. Paired TS USD-M
+  fix preserves GTX through REST/NEW mapping and cancel-replace; no relaxed oracle.
+- ~~Per-instance nonces collide across engines on one key: hyperliquid, txflow, kraken.~~
+  **M6:** atomic per-signer monotonic reservation across native engine objects or
+  one Wasm module memory, surviving engine recreation and clock regression.
+  Hyperliquid and TxFlow share their underlying signer domain. Separate
+  processes/independent Wasm memories still require deployment coordination.
+- ~~Low: `setTickInterval` unclamped; unbounded gunzip; credential `Debug`;
   partial zeroization; Paradex 24 h auth signature; Lighter non-hedged Schnorr
-  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.
+  nonce; denylist tape redaction; `set-cookie` in fixtures; broad gitleaks test exemption.~~
+  Polling is bounded to 1000–120000 ms with explicit pause; decompression is
+  capped at 16 MiB. Credential options/signing diagnostics redact Debug;
+  Polymarket credentials cannot Serialize. Internal owned options and stored
+  credentials scrub on drop, including Kraken Spot, KuCoin/Spot and Orderly. Paradex auth
+  expires in 300 seconds; shorter supported caller receive windows are honored
+  while existing TS-compatible defaults remain. Lighter production Schnorr
+  nonces hedge key/message/entropy; independent explicit-nonce vectors remain.
+  Tape fields/headers are allowlisted, unknown nested payloads scrubbed,
+  Set-Cookie removed from persisted fixtures/recordings, and scanner exemptions
+  require exact reviewed public bytes AND exact paths.
+  Owned-carrier erasure does not claim to erase caller-owned/borrowed JS strings,
+  partially failed serde allocations or upstream cryptography/allocator copies.
 - Clean: no committed secrets; native frame server auth and isolation; TLS; RNG.
 
 ## Architecture
 
 - Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.
-- Socket supervision copied per venue, no jitter, two without backoff →
-  `engine::socket::Supervisor`.
+- ~~Socket supervision copied per venue, no jitter, two without backoff →
+  `engine::socket::Supervisor`.~~ Fixed: every venue socket runs under the shared supervisor (#1385, #1406, #1423 and the final socket PR).
 - Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
   `safe-cex-venues` crate shared by both hosts.
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
@@ -663,8 +699,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
-  rejections don't emit the error toast (one-error rule); `privateOnly`/
-  `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
+  rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
+  `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
@@ -900,7 +936,7 @@ Mostly matches TS.
   real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
+- Per-coin balances missing on ~~Bybit~~ (#1379), ~~Crypto.com~~, ~~Bitrue~~;
   ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
   balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - ~~Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
@@ -908,7 +944,11 @@ Mostly matches TS.
   `engine::fence::StaleGuard` (commit after two consecutive discards, then re-read)
   on Bitrue, Backpack, BingX (balance, position mode), Kraken Spot, KuCoin Spot,
   Orderly (balance only), Polymarket and WOO; WEEX balance reads no longer fence.
-  Bybit Hyro is fixed by its owning lane.
+  - ~~Bybit Hyro: a ready session's periodic snapshot is discarded on every order/position
+    frame and three discards reconnect, so steady frames loop forever.~~ Fixed: overtaken
+    reads re-read (a ready session commits the unfenced wallet meanwhile); the third is
+    admitted with a warning instead of reconnecting, in initial recovery too, and the
+    next tick reconciles again.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.

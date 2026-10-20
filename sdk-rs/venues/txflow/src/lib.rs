@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
     TimerId, Venue,
@@ -18,7 +19,7 @@ use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -27,6 +28,14 @@ pub struct Options {
     pub application_id: Option<String>,
     pub vault: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         if !self.testnet {
@@ -59,16 +68,29 @@ pub enum Pending {
     Trade(trading::Request),
     History(Box<history::Request>),
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     subscriptions: VecDeque<String>,
     subscription_timer: Option<TimerId>,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 30_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+            subscriptions: VecDeque::new(),
+            subscription_timer: None,
+        }
+    }
 }
 #[derive(Default)]
 struct Ladder {
@@ -92,7 +114,7 @@ struct Sub<'a> {
     instrument_id: Option<u32>,
 }
 pub struct TxFlow {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::AccountState,
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
@@ -113,6 +135,7 @@ pub struct TxFlow {
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: Default::default(),
@@ -232,21 +255,31 @@ impl TxFlow {
     }
     fn open_sockets(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.node.socket.is_none() {
-            self.node.socket = Some(cx.connect_channel(
-                format!("{}/ws", REST_URL.replacen("https:", "wss:", 1)),
-                if self.options.public_data_only {
-                    SocketChannel::Public
-                } else {
-                    SocketChannel::Private
-                },
-            ));
+            self.connect(cx, false);
         }
         if self.api.socket.is_none() {
-            self.api.socket = Some(cx.connect_channel(
-                format!("{}/api-ws", REST_URL.replacen("https:", "wss:", 1)),
-                SocketChannel::Public,
-            ));
+            self.connect(cx, true);
         }
+    }
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>, api: bool) {
+        let channel = if api || self.options.public_data_only {
+            SocketChannel::Public
+        } else {
+            SocketChannel::Private
+        };
+        let conn = if api { &mut self.api } else { &mut self.node };
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            conn.supervisor.connecting(cx);
+        }
+        conn.socket = Some(cx.connect_channel(
+            format!(
+                "{}/{}",
+                REST_URL.replacen("https:", "wss:", 1),
+                if api { "api-ws" } else { "ws" }
+            ),
+            channel,
+        ));
     }
     fn subscribe(
         &mut self,
@@ -668,9 +701,7 @@ impl Venue for TxFlow {
         }
         let conn = if api { &mut self.api } else { &mut self.node };
         conn.open = true;
-        conn.attempts = 0;
-        conn.last_received = cx.now;
-        conn.ping = Some(cx.set_timer(10_000.0));
+        conn.supervisor.opened(cx);
         if let Some(timer) = conn.subscription_timer.take() {
             cx.clear_timer(timer);
         }
@@ -782,9 +813,9 @@ impl Venue for TxFlow {
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let node = self.node.socket == Some(socket);
         if node {
-            self.node.last_received = cx.now;
+            self.node.supervisor.received(cx.now);
         } else if self.api.socket == Some(socket) {
-            self.api.last_received = cx.now;
+            self.api.supervisor.received(cx.now);
         } else {
             return;
         }
@@ -811,16 +842,11 @@ impl Venue for TxFlow {
         let conn = if api { &mut self.api } else { &mut self.node };
         conn.socket = None;
         conn.open = false;
-        if let Some(timer) = conn.ping.take() {
-            cx.clear_timer(timer);
-        }
         if let Some(timer) = conn.subscription_timer.take() {
             cx.clear_timer(timer);
         }
         conn.subscriptions.clear();
-        conn.attempts = conn.attempts.saturating_add(1);
-        conn.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(conn.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        conn.supervisor.retry(cx);
         if !api {
             for (symbol, ladder) in &mut self.books {
                 ladder.book.clear();
@@ -1066,38 +1092,20 @@ impl Venue for TxFlow {
                 conn.subscription_timer = None;
                 Self::pump_subscriptions(cx, conn);
             }
-            if conn.reconnect == Some(timer) {
-                conn.reconnect = None;
-                let role = if api || self.options.public_data_only {
-                    SocketChannel::Public
-                } else {
-                    SocketChannel::Private
-                };
-                conn.socket = Some(cx.connect_channel(
-                    format!(
-                        "{}/{}",
-                        REST_URL.replacen("https:", "wss:", 1),
-                        if api { "api-ws" } else { "ws" }
-                    ),
-                    role,
-                ));
-            }
-            if conn.ping == Some(timer) {
-                conn.ping = None;
-                if let Some(socket) = conn.socket {
-                    if cx.now - conn.last_received >= 30_000.0 {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                    } else {
+            match conn.supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => self.connect(cx, api),
+                Tick::Ping => {
+                    if let Some(socket) = conn.socket {
                         cx.send(socket, "{\"method\":\"ping\"}");
-                        let next = cx.set_timer(10_000.0);
-                        if api {
-                            self.api.ping = Some(next);
-                        } else {
-                            self.node.ping = Some(next);
-                        }
                     }
                 }
+                Tick::TimedOut(_) => {
+                    if let Some(socket) = conn.socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                }
+                Tick::Handled | Tick::Unhandled => {}
             }
         }
     }

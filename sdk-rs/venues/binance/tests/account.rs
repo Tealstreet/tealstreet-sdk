@@ -549,12 +549,12 @@ fn near_the_weight_limit_background_reads_pause() {
 fn a_silent_socket_is_closed_and_reconnected() {
     let mut h = ready();
     let public = h.socket("/public/ws").unwrap();
-    h.advance(20_000.0);
+    h.advance(19_999.0);
     assert!(
         !h.closed.contains(&public),
-        "twenty seconds of silence is tolerated"
+        "under twenty seconds of silence is tolerated"
     );
-    h.advance(5_000.0);
+    h.advance(1.0);
     assert!(h.closed.contains(&public));
     h.advance(1_000.0);
     assert_ne!(h.socket("/public/ws"), Some(public), "a new public socket");
@@ -711,6 +711,75 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             OrderStatus::Open
         );
     }
+}
+
+/// Closes the user stream, waits out its retry and answers the listen-key POST.
+fn reconnect_private(h: &mut Harness) -> f64 {
+    let socket = h.socket("/private/ws").unwrap();
+    let before = h.timers.clone();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let delay = h
+        .timers
+        .iter()
+        .filter(|t| !before.contains(t))
+        .map(|(_, at)| at - h.now)
+        .fold(f64::NAN, f64::min);
+    h.advance(delay);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"fresh"}"#);
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    delay
+}
+
+#[test]
+fn a_flapping_user_stream_backs_off_although_each_attempt_opens() {
+    let mut h = ready();
+    for attempt in 0..6 {
+        let nominal = 500.0 * 2f64.powi(attempt);
+        let delay = reconnect_private(&mut h);
+        assert!(
+            (nominal * 0.75..=nominal).contains(&delay),
+            "attempt {attempt}: {delay}"
+        );
+    }
+}
+
+#[test]
+fn the_user_stream_is_probed_every_five_seconds() {
+    let mut h = ready();
+    let private = h.socket("/private/ws").unwrap();
+    let probes = |h: &Harness| {
+        h.sent
+            .iter()
+            .filter(|(s, t)| *s == private && t == r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)
+            .count()
+    };
+    h.advance(4_999.0);
+    assert_eq!(probes(&h), 0);
+    h.advance(1.0);
+    assert_eq!(probes(&h), 1);
+    h.message("/private/ws", r#"{"result":[],"id":42}"#);
+    h.advance(10_000.0);
+    assert_eq!(probes(&h), 3);
+}
+
+#[test]
+fn a_slow_listen_key_post_is_not_a_connect_timeout() {
+    let mut h = ready();
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.advance(500.0);
+    assert!(h.has_request("/fapi/v1/listenKey"));
+    h.advance(30_000.0);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"slow"}"#);
+    let pending = h.socket("/private/ws").unwrap();
+    assert_ne!(pending, socket);
+    h.advance(9_999.0);
+    assert!(!h.closed.contains(&pending));
+    h.advance(1.0);
+    assert!(h.closed.contains(&pending), "an unopened stream expires");
+    h.advance(1_000.0);
+    assert!(h.has_request("/fapi/v1/listenKey"), "and fetches a new key");
 }
 
 fn fills_over(h: &mut Harness, command: u32, days: f64) {
@@ -917,4 +986,119 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     };
     assert_eq!(error.message, "Margin is insufficient.");
     assert_eq!(error.outcome, None, "the cancel already took effect");
+}
+
+fn advance_to_position_read(h: &mut Harness, rows: &str) {
+    h.advance(75_000.0);
+    h.respond("/fapi/v3/positionRisk", 200, rows);
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+}
+
+#[test]
+fn an_unreadable_position_amount_keeps_that_leg_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let row = |side: &str, amount: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+        )
+    };
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{}]", row("LONG", "0.010"), row("SHORT", "-0.020")),
+    );
+    let short = h.engine.store().position("BTCUSDT:short").unwrap().clone();
+    assert_eq!(short.contracts, 0.02);
+
+    advance_to_position_read(
+        &mut h,
+        &format!(
+            "[{},{}]",
+            row("LONG", "0.030"),
+            row("SHORT", "garbled-amount")
+        ),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.03);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance positionRisk row BTCUSDT has an unreadable positionAmt")
+    );
+    assert!(!h.logs.iter().any(|m| m.contains("garbled-amount")));
+
+    advance_to_position_read(&mut h, &format!("[{}]", row("LONG", "0.030")));
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.engine.store().positions().len(), 1);
+}
+
+#[test]
+fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let order = |id: u64, kind: &str, price: &str| {
+        format!(
+            r#"{{"orderId":{id},"clientOrderId":"c{id}","executedQty":"0","origQty":"0.004","price":"{price}","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}"#
+        )
+    };
+    let algo = |id: u64, kind: &str, trigger: &str| {
+        format!(
+            r#"{{"algoId":{id},"orderType":"{kind}","symbol":"BTCUSDT","side":"SELL","quantity":"0.004","triggerPrice":"{trigger}","workingType":"MARK_PRICE","reduceOnly":true,"closePosition":false}}"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &[String], algos: &[String]| {
+        // Any private order event schedules the debounced REST order snapshot.
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
+        h.advance(10_000.0);
+        h.respond(
+            "/fapi/v1/openOrders",
+            200,
+            &format!("[{}]", orders.join(",")),
+        );
+        h.respond(
+            "/fapi/v1/openAlgoOrders",
+            200,
+            &format!("[{}]", algos.join(",")),
+        );
+    };
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90000"), order(2, "LIMIT", "89000")],
+        &[
+            algo(3, "STOP_MARKET", "85000"),
+            algo(4, "STOP_MARKET", "84000"),
+        ],
+    );
+    let stored = ["2", "4"].map(|id| h.engine.store().order(id).unwrap().clone());
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500"), order(2, "FUTURE_KIND", "1")],
+        &[algo(3, "STOP_MARKET", "85500"), algo(4, "FUTURE_KIND", "1")],
+    );
+    let store = h.engine.store();
+    assert_eq!(store.order("1").unwrap().price, 90500.0);
+    assert_eq!(store.order("3").unwrap().price, 85500.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    for id in ["2", "4"] {
+        let expected = format!("Binance open order {id} has an unsupported type");
+        assert!(h.logs.contains(&expected), "{expected}");
+    }
+    assert!(!h.logs.iter().any(|m| m.contains("FUTURE_KIND")));
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500")],
+        &[algo(3, "STOP_MARKET", "85500")],
+    );
+    let ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["1", "3"]);
 }

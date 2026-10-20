@@ -3,6 +3,7 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
     OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
@@ -31,6 +32,9 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 /// Retain execution identities across reconnects without an unbounded event log.
 const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
 const SPOT_EXECUTION_WINDOW: usize = 16_384;
+/// After the ticker seed, a tradable pair that still has no quote stops holding
+/// the wallet's USD total after this long; the asset is then valued at 0.
+const VALUATION_WAIT_MS: f64 = 30_000.0;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
 
 pub enum Request {
@@ -43,6 +47,7 @@ pub enum Request {
         generation: u32,
         rows: Vec<Position>,
         marks: Vec<(String, f64)>,
+        skipped: SnapshotCoverage<String>,
     },
     SymbolConfig {
         generation: u32,
@@ -65,6 +70,7 @@ struct PositionsJoin {
     /// event makes the snapshot stale.
     version: u32,
     rows: Option<Vec<Position>>,
+    skipped: SnapshotCoverage<String>,
     configs: Option<Vec<(String, MarketSetting)>>,
     failed: bool,
 }
@@ -76,6 +82,7 @@ struct OrdersJoin {
     native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
+    skipped: SnapshotCoverage<String>,
     failed: bool,
 }
 
@@ -157,6 +164,9 @@ pub struct AccountState {
     valuation_refresh_required: bool,
     valuation_warned: bool,
     valuation_repair_pending: bool,
+    valuation_wait_since: Option<f64>,
+    /// Funded assets valued at 0 for want of a price; each is warned about once.
+    zero_valued_assets: HashSet<String>,
     native_asset_marks: HashMap<String, f64>,
 }
 
@@ -336,6 +346,7 @@ impl BinanceFutures {
             generation,
             version: self.account.position_version,
             rows: None,
+            skipped: SnapshotCoverage::default(),
             // Without a symbol config endpoint, settings come from the rows.
             configs: symbol_config.is_none().then(Vec::new),
             failed: false,
@@ -349,6 +360,7 @@ impl BinanceFutures {
                 generation,
                 rows: Vec::new(),
                 marks: Vec::new(),
+                skipped: SnapshotCoverage::default(),
             }),
         );
         if let Some(path) = symbol_config {
@@ -393,6 +405,7 @@ impl BinanceFutures {
             native_strategies: Vec::new(),
             regular: None,
             algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
+            skipped: SnapshotCoverage::default(),
             failed: false,
         });
         self.signed(
@@ -468,7 +481,7 @@ impl BinanceFutures {
         let account = &mut self.account;
         if account.listen_key_timer == Some(timer) {
             account.listen_key_timer = None;
-            if self.private.socket.is_none() && self.private.reconnect.is_none() {
+            if self.private.socket.is_none() && !self.private.supervisor.is_waiting() {
                 self.request_listen_key(cx);
             }
         } else if account.keepalive_timer == Some(timer) {
@@ -495,6 +508,7 @@ impl BinanceFutures {
     fn tick(&mut self, cx: &mut Cx<'_, Pending>) {
         let now = cx.now;
         self.account.tick_timer = Some(cx.set_timer(HEALTH_CHECK_MS));
+        self.revalue_pending_wallet(cx);
         if self.account.orders_stale && now - self.account.last_orders_retry_at >= ORDERS_RETRY_MS {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);
@@ -613,6 +627,7 @@ impl BinanceFutures {
                 rows,
                 generation,
                 marks,
+                skipped,
             } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
                     if let Some(join) = &mut self.account.positions
@@ -665,7 +680,24 @@ impl BinanceFutures {
                 {
                     marks.push((market.base.clone(), mark));
                 }
-                let signed = num::parse(&p.position_amt);
+                // An unreadable size is not flat: keep this leg's last known state.
+                let Some(signed) = num::parse_decimal(&p.position_amt) else {
+                    let key = match p.position_side.as_ref() {
+                        "BOTH" => Some(PositionMode::Oneway),
+                        "LONG" | "SHORT" => Some(PositionMode::Hedged),
+                        _ => None,
+                    }
+                    .map(|mode| position_id(&p.symbol, position_side(&p.position_side, 0.0), mode));
+                    _cx.log(
+                        LogLevel::Warning,
+                        format!(
+                            "Binance positionRisk row {} has an unreadable positionAmt",
+                            p.symbol
+                        ),
+                    );
+                    skipped.reject(key);
+                    return;
+                };
                 if signed == 0.0 && !self.is_inverse() {
                     return;
                 }
@@ -801,6 +833,7 @@ impl BinanceFutures {
                 generation,
                 rows,
                 marks,
+                skipped,
             } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
@@ -809,6 +842,7 @@ impl BinanceFutures {
                         self.account.native_asset_marks.extend(marks);
                     }
                     join.rows = Some(rows);
+                    join.skipped = skipped;
                 }
                 self.revalue_pending_wallet(cx);
                 self.finish_positions(cx);
@@ -897,12 +931,15 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
                 let mut invalid: Option<String> = None;
+                let mut skipped = Vec::new();
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
                         if self.options.portfolio_margin || self.is_spot() {
                             invalid.get_or_insert_with(|| {
                                 format!("order {} has unsupported type {}", o.order_id, o.kind)
                             });
+                        } else {
+                            skipped.push(o.order_id.to_string());
                         }
                         return;
                     };
@@ -981,6 +1018,7 @@ impl BinanceFutures {
                         Ok(()) if invalid.is_none() => {
                             join.regular = Some(orders);
                             join.native_orders = native_orders;
+                            self.skip_unsupported_orders(cx, generation, skipped);
                         }
                         _ => join.failed = true,
                     }
@@ -1069,8 +1107,10 @@ impl BinanceFutures {
             Request::OpenAlgoOrders { generation } => {
                 let now = cx.now;
                 let mut orders = Vec::new();
+                let mut skipped = Vec::new();
                 let parsed = json::each::<OpenAlgoOrder>(body, |o| {
                     let Some(kind) = order_type(&o.order_type) else {
+                        skipped.push(o.algo_id.to_string());
                         return;
                     };
                     let amount = opt(&o.quantity);
@@ -1100,7 +1140,10 @@ impl BinanceFutures {
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) => join.algo = Some(orders),
+                        Ok(()) => {
+                            join.algo = Some(orders);
+                            self.skip_unsupported_orders(cx, generation, skipped);
+                        }
                         Err(_) => join.failed = true,
                     }
                 }
@@ -1123,7 +1166,7 @@ impl BinanceFutures {
             let settings: std::collections::HashMap<&str, MarketSetting> =
                 configs.iter().map(|(s, c)| (s.as_str(), *c)).collect();
             if join.version == self.account.position_version {
-                let positions = join
+                let mut positions: Vec<Position> = join
                     .rows
                     .unwrap_or_default()
                     .into_iter()
@@ -1149,6 +1192,13 @@ impl BinanceFutures {
                         p
                     })
                     .collect();
+                for current in cx.store.positions() {
+                    if !join.skipped.allows_absence(&current.id)
+                        && !positions.iter().any(|p| p.id == current.id)
+                    {
+                        positions.push(current.clone());
+                    }
+                }
                 cx.store.set_positions(positions);
             } else {
                 // A stream event landed after these reads were issued.
@@ -1305,7 +1355,47 @@ impl BinanceFutures {
         for (symbol, client, native) in join.native_strategies {
             self.bind_strategy_native(&symbol, &client, native);
         }
+        for current in cx.store.orders() {
+            let terminal = self.account.terminal_algo_ids.contains(&current.id)
+                || current.id.parse().is_ok_and(|native: u64| {
+                    self.account
+                        .native_executed
+                        .get(&(current.symbol.clone(), native))
+                        .is_some_and(|(_, terminal)| *terminal)
+                });
+            if current.status == OrderStatus::Open
+                && !terminal
+                && !join.skipped.allows_absence(&current.id)
+                && !orders.iter().any(|o| o.id == current.id)
+            {
+                orders.push(current.clone());
+            }
+        }
         cx.store.set_orders(orders);
+    }
+
+    /// Keeps the last known state of listed orders whose type is unsupported.
+    fn skip_unsupported_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        generation: u32,
+        ids: Vec<String>,
+    ) {
+        let Some(join) = self
+            .account
+            .orders
+            .as_mut()
+            .filter(|j| j.generation == generation)
+        else {
+            return;
+        };
+        for id in ids {
+            cx.log(
+                LogLevel::Warning,
+                format!("Binance open order {id} has an unsupported type"),
+            );
+            join.skipped.reject(Some(id));
+        }
     }
 
     /// USD totals over every asset: stablecoins at par, others priced by their
@@ -1333,6 +1423,7 @@ impl BinanceFutures {
             return;
         };
         let mut missing_price = false;
+        let mut zero_valued = Vec::new();
         let mut native_price_used = false;
         let mut balance = Balance::default();
         let mut details = Vec::new();
@@ -1367,12 +1458,11 @@ impl BinanceFutures {
                 balance.free += available * price;
                 balance.used += initial * price;
                 balance.upnl += unrealized * price;
-            } else if self.asset_has_valuation_market(cx.store, &asset.asset) {
+            } else if self.awaits_valuation_price(cx.store, cx.now, &asset.asset) {
                 missing_price = true;
                 cx.store.want_ticker_for_base(&asset.asset);
-            } else if !self.account.valuation_warned {
-                cx.log(LogLevel::Warning, "Binance wallet asset has no supported valuation market; native amount retained");
-                self.account.valuation_warned = true;
+            } else {
+                zero_valued.push(asset.asset.clone());
             }
             if self.is_inverse() {
                 coins.push(CoinBalance {
@@ -1395,6 +1485,7 @@ impl BinanceFutures {
         if self.is_inverse() {
             cx.store.set_coin_balances(coins);
         }
+        self.note_valuation_wait(cx, missing_price, zero_valued);
         if missing_price {
             if !self.account.valuation_warned {
                 cx.log(
@@ -2109,11 +2200,61 @@ impl BinanceFutures {
             .filter(|p| *p > 0.0)
             .unwrap_or(fallback)
     }
+    /// An unpriced funded asset holds the USD total only while a quote is
+    /// plausible: a tradable route exists and its bounded wait has not run out.
+    fn awaits_valuation_price(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+        asset: &str,
+    ) -> bool {
+        if self.catalogue_partial {
+            return true;
+        }
+        let expired = self
+            .account
+            .valuation_wait_since
+            .is_some_and(|since| now - since >= VALUATION_WAIT_MS);
+        !expired
+            && !self.account.zero_valued_assets.contains(asset)
+            && self.asset_has_valuation_market(store, asset)
+    }
+    fn note_valuation_wait(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        missing_price: bool,
+        zero_valued: Vec<String>,
+    ) {
+        if !missing_price {
+            self.account.valuation_wait_since = None;
+        } else if cx.store.loaded().tickers && self.account.valuation_wait_since.is_none() {
+            self.account.valuation_wait_since = Some(cx.now);
+        }
+        // An asset that regained a price gets a fresh wait if it loses it again.
+        self.account
+            .zero_valued_assets
+            .retain(|asset| zero_valued.contains(asset));
+        for asset in zero_valued {
+            if !STABLECOINS.contains(&asset.as_str())
+                && self.account.zero_valued_assets.insert(asset.clone())
+            {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Binance wallet asset {asset} has no supported valuation market; valued at 0, native amount retained"),
+                );
+            }
+        }
+    }
+    /// Before the ticker seed any catalogued route may still be quoted; after
+    /// it, only a TRADING market can produce a price (BREAK/settling cannot).
     fn asset_has_valuation_market(&self, store: &safe_cex_engine::Store, asset: &str) -> bool {
         if self.catalogue_partial {
             return true;
         }
-        let current = |market: &&Market| self.catalogue_symbols.contains(&market.symbol);
+        let seeded = store.loaded().tickers;
+        let current = |market: &&Market| {
+            (market.active || !seeded) && self.catalogue_symbols.contains(&market.symbol)
+        };
         if self.is_spot() {
             return store.markets().iter().filter(current).any(|market| {
                 market.base == asset && matches!(market.quote.as_str(), "USD" | "USDT" | "USDC")
@@ -2383,19 +2524,21 @@ impl BinanceFutures {
     }
     fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         let mut missing_price = false;
+        let mut zero_valued = Vec::new();
         let mut balance = Balance::default();
         let mut coins = Vec::with_capacity(self.account.spot_balances.len());
         let mut currencies = Vec::with_capacity(self.account.spot_balances.len());
         for (asset, &(free, used)) in &self.account.spot_balances {
             let price = self.asset_usd_price(cx.store, asset);
             let total = free + used;
-            let unpriced = (free != 0.0 || used != 0.0)
-                && !(price.is_finite() && price > 0.0)
-                && self.asset_has_valuation_market(cx.store, asset);
-            if unpriced {
-                cx.store.want_ticker_for_base(asset);
+            if (free != 0.0 || used != 0.0) && !(price.is_finite() && price > 0.0) {
+                if self.awaits_valuation_price(cx.store, cx.now, asset) {
+                    cx.store.want_ticker_for_base(asset);
+                    missing_price = true;
+                } else {
+                    zero_valued.push(asset.clone());
+                }
             }
-            missing_price |= unpriced;
             balance.free += free * price;
             balance.used += used * price;
             balance.total += total * price;
@@ -2425,6 +2568,7 @@ impl BinanceFutures {
         currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
         cx.store.set_coin_balances(coins);
         cx.store.set_currency_balances(currencies);
+        self.note_valuation_wait(cx, missing_price, zero_valued);
         self.account.valuation_pending = missing_price;
         if missing_price {
             if !self.account.valuation_warned {

@@ -14,6 +14,7 @@ struct Harness {
     e: Engine<Bitrue>,
     requests: Vec<HttpRequest>,
     notices: Vec<Notice>,
+    failures: Vec<safe_cex_engine::VenueError>,
     trace: Vec<Trace>,
     timers: Vec<(TimerId, f64)>,
     sockets: Vec<(SocketId, String)>,
@@ -30,6 +31,7 @@ impl Harness {
             e,
             requests: vec![],
             notices: vec![],
+            failures: vec![],
             trace: vec![],
             timers: vec![],
             sockets: vec![],
@@ -64,6 +66,14 @@ impl Harness {
             }
             match action {
                 Action::Http(r) => self.requests.push(r),
+                // Failures as the plain text the host renders.
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.notices.push(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    });
+                    self.failures.push(error);
+                }
                 Action::Notice(n) => self.notices.push(n),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
@@ -1540,7 +1550,13 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
     let error = h
         .notices
         .iter()
-        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message.contains("census transport failed")));
+        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message == "Bitrue order read for E-BTC-USDT failed"));
+    // Transport text stays behind the private diagnostic boundary.
+    assert!(
+        !format!("{:?}", h.notices).contains("census transport failed"),
+        "{:?}",
+        h.notices
+    );
     let done = h.notices.iter().position(|n| {
         matches!(
             n,
@@ -1559,4 +1575,71 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
             ..
         }
     )));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome, Response};
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (
+            200,
+            r#"{"code":"-2017","msg":"insufficient balance","data":null}"#,
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        // An undocumented code does not prove a refusal.
+        (200, r#"{"code":"-9999","msg":"new"}"#, (None, None)),
+        (
+            429,
+            r#"{"code":"-1003","msg":"too many"}"#,
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        ),
+        (503, "busy", unknown),
+        (200, r#"{"code":"0","data":{}}"#, unknown),
+    ] {
+        let mut h = Harness::new();
+        h.place(
+            r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#,
+        );
+        let request = h.take(Method::Post, "/fapi/v2/order");
+        h.e.handle(
+            110.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        h.collect();
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            (error.kind, error.outcome),
+            classified,
+            "{status} {body}: {}",
+            error.message
+        );
+        assert!(h.notices.iter().any(|n| matches!(
+            n,
+            Notice::CommandDone { result: Err(text), .. } if *text == error.legacy_text()
+        )));
+    }
+    // Transport loss on a write is Unknown.
+    let mut h = Harness::new();
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#);
+    let request = h.take(Method::Post, "/fapi/v2/order");
+    h.e.handle(
+        110.0,
+        Event::HttpFailed {
+            request: request.id,
+            error: "reset",
+        },
+    );
+    h.collect();
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
 }

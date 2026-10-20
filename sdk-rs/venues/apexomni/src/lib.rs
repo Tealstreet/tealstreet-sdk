@@ -10,12 +10,10 @@ mod trading;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, RequestId, Response, SocketId, TimerId, Venue,
-};
+use safe_cex_engine::{Command, Cx, Method, RequestId, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -24,6 +22,15 @@ pub struct Options {
     pub passphrase: Option<String>,
     pub omni_key_seed: Option<String>,
     pub tick_interval_ms: Option<f64>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        safe_cex_crypto::secrets::erase(&mut self.omni_key_seed);
+    }
 }
 
 pub enum Pending {
@@ -41,7 +48,7 @@ pub enum Pending {
 }
 
 pub struct ApexOmni {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     contracts: HashMap<String, public::ContractConfig>,
     public: public::Public,
@@ -76,6 +83,7 @@ struct Envelope<'a> {
 
 impl ApexOmni {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             rest: if options.testnet {
                 "https://testnet.omni.apex.exchange/api"
@@ -98,6 +106,7 @@ impl ApexOmni {
         at: Option<ArrayAt>,
     ) -> Result<RequestId, String> {
         self.send_signed(cx, request, pending, at, false, 0)
+            .map_err(|(error, _)| error)
     }
 
     fn send_signed(
@@ -108,8 +117,12 @@ impl ApexOmni {
         at: Option<ArrayAt>,
         legacy: bool,
         retries: u8,
-    ) -> Result<RequestId, String> {
-        let signed = sign::request(&self.options, cx.now, &request, legacy)?;
+    ) -> Result<RequestId, (String, Box<Pending>)> {
+        // A signing failure hands the pending request back so its caller can complete it.
+        let signed = match sign::request(&self.options, cx.now, &request, legacy) {
+            Ok(signed) => signed,
+            Err(error) => return Err((error, Box::new(pending))),
+        };
         let url = format!("{}{}", self.rest, signed.path);
         let stream = at;
         let method = request.method;
@@ -141,7 +154,7 @@ impl ApexOmni {
                     self.failed(
                         cx,
                         *pending,
-                        "ApeX Omni response contains malformed error metadata",
+                        trading::unknown("ApeX Omni response contains malformed error metadata"),
                     );
                     return;
                 }
@@ -156,8 +169,13 @@ impl ApexOmni {
                 });
                 if !legacy && rejected {
                     Self::reset_request(&mut pending);
-                    if let Err(error) = self.send_signed(cx, request, *pending, at, true, retries) {
-                        cx.log(LogLevel::Error, &error);
+                    if let Err((error, pending)) =
+                        self.send_signed(cx, request, *pending, at, true, retries)
+                    {
+                        // The venue refused the first signature; the resend never left.
+                        let error = safe_cex_engine::VenueError::new(error)
+                            .outcome(safe_cex_engine::Outcome::Rejected);
+                        self.failed(cx, *pending, error);
                     }
                     return;
                 }
@@ -170,7 +188,8 @@ impl ApexOmni {
                             .map(|e| e.msg.as_ref())
                             .unwrap_or("invalid response")
                     );
-                    self.failed(cx, *pending, &error);
+                    let error = trading::failure(code, response.status, error);
+                    self.failed(cx, *pending, error);
                 } else {
                     self.response(cx, *pending, response);
                 }
@@ -215,22 +234,33 @@ impl ApexOmni {
                 && !matches!(&*pending, Pending::Public(public::Request::Markets { .. })) =>
             {
                 Self::reset_request(&mut pending);
-                if let Err(error) = self.send_signed(cx, request, *pending, at, legacy, retries + 1)
+                if let Err((error, pending)) =
+                    self.send_signed(cx, request, *pending, at, legacy, retries + 1)
                 {
-                    cx.log(LogLevel::Error, error);
+                    let error = safe_cex_engine::VenueError::new(error)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.failed(cx, *pending, error);
                 }
             }
-            pending => self.failed(cx, pending, error),
+            pending => {
+                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
+                self.failed(cx, pending, error)
+            }
         }
     }
 
-    fn failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    fn failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
         match pending {
             Pending::SignedAuth { pending, .. } => self.failed(cx, *pending, error),
-            Pending::Public(pending) => self.public_failed(cx, pending, error),
-            Pending::Account(pending) => self.account_failed(cx, pending, error),
+            Pending::Public(pending) => self.public_failed(cx, pending, &error.message),
+            Pending::Account(pending) => self.account_failed(cx, pending, &error.message),
             Pending::Trade(pending) => self.trading_failed(cx, pending, error),
-            Pending::History(pending) => self.history_failed(cx, pending, error),
+            Pending::History(pending) => self.history_failed(cx, pending, &error.message),
         }
     }
 }
@@ -293,7 +323,7 @@ impl Venue for ApexOmni {
             self.failed(
                 cx,
                 pending,
-                "ApeX Omni response did not contain the expected list",
+                trading::unknown("ApeX Omni response did not contain the expected list"),
             );
         }
     }

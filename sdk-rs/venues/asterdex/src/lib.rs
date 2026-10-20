@@ -11,7 +11,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
+    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue, json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -20,7 +21,7 @@ use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -36,6 +37,16 @@ pub struct Options {
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_secret);
+    }
 }
 
 struct Urls {
@@ -128,7 +139,7 @@ struct BookState {
 }
 
 pub struct AsterDex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     version: Version,
     credentials: Option<Credentials>,
     read_credentials: Option<Credentials>,
@@ -153,6 +164,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let user = nonempty(options.auth_user_address.as_deref())
             .or_else(|| nonempty(options.application_id.as_deref()));
         let signer = nonempty(options.auth_signer_address.as_deref())
@@ -288,7 +300,10 @@ impl AsterDex {
         if self.public.socket.is_some() {
             return;
         }
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
         self.public.open = false;
     }

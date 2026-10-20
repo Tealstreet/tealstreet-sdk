@@ -1,5 +1,6 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod hyro;
 mod options;
@@ -16,22 +17,27 @@ use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
-const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
-/// Every socket is checked this often. One quiet for `PING_AFTER_MS` is
-/// pinged (Bybit answers on public and private sockets alike); one silent for
-/// `SILENCE_LIMIT_MS` is treated as dead, since a half-open socket never closes.
-const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
-const PING_AFTER_MS: f64 = 10_000.0;
-const SILENCE_LIMIT_MS: f64 = 20_000.0;
+/// Bybit answers pings on public and private sockets alike; a socket silent
+/// for the idle timeout is treated as dead, since a half-open socket never closes.
+const SOCKET: Config = Config {
+    connect_timeout_ms: 10_000.0,
+    auth_timeout_ms: None,
+    idle_timeout_ms: 20_000.0,
+    ping_interval_ms: Some(10_000.0),
+    backoff_base_ms: 500.0,
+    backoff_cap_ms: 30_000.0,
+    stable_ms: 30_000.0,
+};
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
@@ -43,8 +49,10 @@ const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
@@ -55,6 +63,16 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 /// One REST request as sent, kept so a rejected signature can be resent.
@@ -125,6 +143,7 @@ pub enum Then {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Closed(closed::Request),
 }
 
 pub struct Pending {
@@ -142,11 +161,7 @@ enum Channel {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    attempts: u32,
-    reconnect: Option<TimerId>,
-    watchdog: Option<TimerId>,
-    last_received: f64,
-    last_ping: f64,
+    supervisor: Supervisor,
     /// Subscribe messages paced out one per `SUBSCRIBE_PACE_MS`.
     outbox: VecDeque<String>,
     outbox_timer: Option<TimerId>,
@@ -157,11 +172,7 @@ impl Connection {
         Self {
             socket: None,
             open: false,
-            attempts: 0,
-            reconnect: None,
-            watchdog: None,
-            last_received: 0.0,
-            last_ping: 0.0,
+            supervisor: Supervisor::new(SOCKET),
             outbox: VecDeque::new(),
             outbox_timer: None,
         }
@@ -216,6 +227,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
     products: Vec<ProductState>,
@@ -254,6 +266,8 @@ pub struct BybitLinear {
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    /// The raw first account of the last good REST wallet read: TS `balance.info`.
+    balance_info: Option<String>,
 }
 
 /// Bybit kline interval codes.
@@ -315,13 +329,25 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
                 .and_then(|s| s.ret_msg.map(|m| m.into_owned()))
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("retCode {code}"));
-            Some((code, message))
+            // Signature diagnostics can contain the complete signed origin string.
+            Some((code, signing_rejection(code, &message).unwrap_or(message)))
         }
         None => Some((
             i64::from(response.status),
-            format!("HTTP {}: {}", response.status, response.body),
+            format!("HTTP {}", response.status),
         )),
     }
+}
+
+fn signing_rejection(code: i64, message: &str) -> Option<String> {
+    let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
+        "request signature rejected"
+    } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
+        "request timestamp outside receive window"
+    } else {
+        return None;
+    };
+    Some(format!("Bybit {reason} (retCode {code})"))
 }
 
 /// A rejection that is safe to resend once, re-signed: a bad signature
@@ -345,6 +371,7 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let category = match options.variant {
             Variant::Inverse => Category::Inverse,
             Variant::Spot => Category::Spot,
@@ -400,8 +427,9 @@ impl BybitLinear {
             variant: options.variant,
             paths,
             config_error,
+            recv_window: options.recv_window,
             credentials,
-            read_credentials: options.read_credentials,
+            read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
@@ -419,6 +447,7 @@ impl BybitLinear {
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            balance_info: None,
         }
     }
 
@@ -551,9 +580,11 @@ impl BybitLinear {
             });
         let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
         let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => {
-                credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
-            }
+            (Some(credentials), true) => credentials.headers_window(
+                cx.now + self.clock_offset_ms,
+                &rest.payload,
+                self.recv_window,
+            ),
             (None, true) => return,
             _ => vec![("X-Referer", sign::BROKER_ID.into())],
         };
@@ -590,7 +621,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit rejected a signed request; resending it once: {text}"),
+            "Bybit rejected a signed request; resending it once",
         );
         taken.rest.resent = true;
         self.send(cx, taken.rest, taken.then);
@@ -609,52 +640,46 @@ impl BybitLinear {
                 Channel::Private => safe_cex_engine::SocketChannel::Private,
             },
         );
+        let supervise =
+            channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;
         let connection = self.connection(channel);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if supervise {
+            connection.supervisor.connecting(cx);
+        }
         connection.socket = Some(socket);
         connection.open = false;
     }
 
-    fn watch(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let timer = cx.set_timer(WATCHDOG_INTERVAL_MS);
-        if let Some(previous) = self.connection(channel).watchdog.replace(timer) {
-            cx.clear_timer(previous);
-        }
-    }
-
-    /// Ping a quiet socket; close and reconnect a silent one.
-    fn on_watchdog(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let now = cx.now;
+    fn on_socket_timer(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, timer: TimerId) {
         let connection = self.connection(channel);
-        connection.watchdog = None;
-        let (Some(socket), true) = (connection.socket, connection.open) else {
-            return;
-        };
-        let quiet = now - connection.last_received;
-        if quiet > SILENCE_LIMIT_MS {
-            cx.close(socket);
-            self.on_socket_closed(cx, channel, 4000);
-            return;
+        let socket = connection.socket;
+        match connection.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => {
+                if let Some(socket) = socket {
+                    cx.send(socket, r#"{"op":"ping"}"#);
+                }
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = socket {
+                    cx.close(socket);
+                }
+                self.on_socket_closed(cx, channel, 4000);
+            }
+            Tick::Handled | Tick::Unhandled => {}
         }
-        if quiet >= PING_AFTER_MS && now - connection.last_ping >= PING_AFTER_MS {
-            connection.last_ping = now;
-            cx.send(socket, r#"{"op":"ping"}"#);
-        }
-        self.watch(cx, channel);
     }
 
     fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
         let connection = self.connection(channel);
         connection.socket = None;
         connection.open = false;
-        connection.attempts += 1;
         connection.outbox.clear();
-        let timers = [connection.watchdog.take(), connection.outbox_timer.take()];
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
-        for timer in timers.into_iter().flatten() {
+        if let Some(timer) = connection.outbox_timer.take() {
             cx.clear_timer(timer);
         }
-        let timer = cx.set_timer(delay);
-        self.connection(channel).reconnect = Some(timer);
+        connection.supervisor.retry(cx);
         if channel == Channel::Private {
             let category = self.category;
             for other in self.categories() {
@@ -665,7 +690,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Bybit socket closed ({code}); reconnecting"),
         );
     }
 
@@ -1628,6 +1653,7 @@ impl BybitLinear {
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             Then::History(request) => self.on_history_response(cx, request, response),
+            Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
     }
 }
@@ -1863,13 +1889,7 @@ impl BybitLinear {
             if channel == Channel::Private && self.category != self.primary_category {
                 continue;
             }
-            if self.connection(channel).reconnect == Some(timer) {
-                self.connection(channel).reconnect = None;
-                self.connect(cx, channel);
-            }
-            if self.connection(channel).watchdog == Some(timer) {
-                self.on_watchdog(cx, channel);
-            }
+            self.on_socket_timer(cx, channel, timer);
         }
         self.on_account_timer(cx, timer);
         if self.category == self.primary_category {
@@ -1884,6 +1904,8 @@ impl Venue for BybitLinear {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             options: self.category_enabled(Category::Option),
+            closed_positions: !self.variant.is_spot(),
+            balance_info: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1918,13 +1940,9 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        let now = cx.now;
         let connection = self.connection(channel);
         connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = now;
-        connection.last_ping = now;
-        self.watch(cx, channel);
+        connection.supervisor.opened(cx);
         match channel {
             Channel::Public => {
                 let mut topics: Vec<String> = cx
@@ -1970,7 +1988,7 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        self.connection(channel).last_received = cx.now;
+        self.connection(channel).supervisor.received(cx.now);
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {
@@ -2065,16 +2083,39 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { then, .. }) = pending else {
+        let Some(Pending { rest, then, .. }) = pending else {
             return;
         };
-        self.on_public_response(cx, then, Err(error));
+        // A rejected retry may arrive as a host error containing the signed origin URL.
+        let safe_error = (rest.signed && rest.resent)
+            .then_some("Bybit signed request failed after its signature retry");
+        self.on_public_response(cx, then, Err(safe_error.unwrap_or(error)));
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::FetchBalanceInfo => {
+                let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
+                cx.done(command, Ok(info));
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 
@@ -2317,6 +2358,14 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for BybitLinear {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 #[cfg(test)]
 mod candle_start_tests {

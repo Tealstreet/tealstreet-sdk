@@ -14,8 +14,8 @@ use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
-    Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    Store, TimerId, Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -25,7 +25,7 @@ use wire::*;
 const REST: &str = "https://api-futures.kucoin.com";
 const SNAPSHOT_SHARD: usize = 380;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -34,6 +34,20 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub broker: Option<sign::BrokerOptions>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+        if let Some(broker) = self.broker.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(broker);
+        }
+    }
 }
 
 pub enum Pending {
@@ -124,7 +138,7 @@ struct BookState {
 }
 
 pub struct Kucoin {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
     trading: trading::Trading,
@@ -196,6 +210,7 @@ fn success(status: u16, body: &str) -> Result<Envelope<'_>, String> {
 
 impl Kucoin {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -318,6 +333,10 @@ impl Kucoin {
     fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.connections[channel];
         if c.token_pending || c.socket.is_some() {
+            return;
+        }
+        // Suppressed public feeds never open; bullets and supervision would only churn retries.
+        if !matches!(c.role, Role::Private) && cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
         c.token_pending = true;
