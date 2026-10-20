@@ -1,4 +1,4 @@
-import type { Position } from '../../types';
+import type { ExchangeName, Market, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +9,37 @@ import { PositionSide } from '../../types';
 describe('Rust leverage command side boundary', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
+
+  const independentVenues: ExchangeName[] = [
+    'bitget',
+    'bitgetinverse',
+    'bitgetusdc',
+    'bingx',
+    'mexc',
+    'phemex',
+    'weex',
+  ];
+  it.each(independentVenues)('keeps confirmed %s leg settings when leverage is read', async (name) => {
+    const store = new DefaultStore();
+    const market: Market = {
+      id: 'BTCUSDT',
+      symbol: 'BTCUSDT',
+      base: 'BTC',
+      quote: 'USDT',
+      active: true,
+      precision: { amount: 0.001, price: 0.1 },
+      limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+      info: {},
+    };
+    store.update({ markets: [market], fetchedLeverage: { BTCUSDT: { buyLeverage: 5, sellLeverage: 7 } } });
+    const exchange = new RustEngineExchange(name, { key: '', secret: '' }, store);
+    exchanges.push(exchange);
+    await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
+      buyLeverage: 5,
+      sellLeverage: 7,
+    });
+    expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 5, sellLeverage: 7 });
+  });
 
   it.each([undefined, PositionSide.Long, PositionSide.Short, '' as PositionSide])(
     'forwards the requested side %s unchanged',

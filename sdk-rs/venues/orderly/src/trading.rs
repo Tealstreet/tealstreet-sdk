@@ -1366,7 +1366,7 @@ impl Orderly {
                                 Ok(effective) => effective,
                                 Err(_) => {
                                     // The account write succeeded independently of market metadata.
-                                    cx.log(LogLevel::Warning, &format!("Orderly invalid leverage limits for {s}; using confirmed account leverage"));
+                                    cx.log(LogLevel::Warning, format!("Orderly invalid leverage limits for {s}; using confirmed account leverage"));
                                     *value
                                 }
                             };

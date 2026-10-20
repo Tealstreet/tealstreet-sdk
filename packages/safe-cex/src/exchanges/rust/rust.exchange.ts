@@ -952,6 +952,11 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
+      this.host?.flush();
+      const known = this.store.fetchedLeverage[symbol];
+      if (['bitget', 'bitgetinverse', 'bitgetusdc', 'bingx', 'mexc', 'phemex', 'weex'].includes(this.name)
+        && known && Number.isFinite(known.buyLeverage) && known.buyLeverage > 0
+        && Number.isFinite(known.sellLeverage) && known.sellLeverage > 0) return known;
       let leverage: FetchedLeverage;
       if (['asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });

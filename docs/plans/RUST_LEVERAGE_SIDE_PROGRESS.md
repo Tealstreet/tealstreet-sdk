@@ -138,6 +138,10 @@ Reference-only TS for deleted families is inspected in
 - `setAllLeverage` forwards each open position's side, preserving both hedge
   legs and avoiding BingX's now-correct required-side rejection. Independent
   source review PASS; SDK regression passes.
+- Bridge follow-up: when the engine has already supplied both leg settings,
+  `fetchLeverageForSymbol` flushes and returns them for all seven side-aware
+  profiles instead of overwriting them with the market maximum. New regression
+  per profile; fresh uncached discovery remains a separate audit item.
 
 ### Implementation verification checkpoint
 

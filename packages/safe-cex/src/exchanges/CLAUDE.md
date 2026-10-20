@@ -1577,3 +1577,6 @@ Phemex requires a symbol for its market-scoped mode setter; WEEX accepts an
 optional symbol. Native JSON uses `setPositionMode` with that same scope.
 Successful side writes update only the selected rail and matching positions;
 failed writes preserve both. Venue metadata cannot make leverage clamping panic.
+For the five side-aware families, reading already known leverage flushes the
+engine and returns its confirmed leg settings instead of replacing them with
+the market maximum. Fresh uncached leverage discovery is a separate contract.
