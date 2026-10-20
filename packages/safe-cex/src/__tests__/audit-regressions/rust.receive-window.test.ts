@@ -4,6 +4,7 @@ import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const running: RustEngineExchange[] = [];
 afterEach(() => {
@@ -18,6 +19,7 @@ it.each(['binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'bybi
     const construct = vi.fn();
     class Engine {
       constructor(venue: string, options: string) { construct(venue, JSON.parse(options)); }
+      capabilities() { return engineCapabilities(name); }
       free() {}
     }
     setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
