@@ -53,3 +53,29 @@ for the fixes. TS differences are documented in `KNOWN_TS_FIXES` and the PR.
   read landing audit and brief before creating the requested fresh branch.
 - Reverification underway against current implementations; H1, H2 and H4
   confirmed. Existing inverse/spot safety state does not cover USD-M/PM.
+
+### Bybit phase review checkpoint
+
+- M5 confirmed for Demo (removed rows lack timestamp fences) and Hyro (a REST
+  reconciliation can start during a cancel, after dispatch but before its ACK).
+  Order revisions now fence accepted cancels and terminal stream events, with
+  regression cases at an identical engine timestamp, cancel-all, already-gone,
+  partial batch rejection and full rejection controls.
+- `execId` previously unused: bounded 4,096-ID per-product dedupe now survives
+  reconnect and preserves distinct executions with equal economics. Invalid
+  quantity/price packets do not consume identity. Legacy packets without IDs
+  and duplicates older than the retained window cannot be guaranteed deduped.
+- **M10 dropped after reverification.** The cited local amend assignment is
+  reachable only for Demo/Hyro. Those variants cannot enable inverse products;
+  standalone inverse and combined linear/inverse wait for authoritative stream
+  updates. The new regression passed before production edits and preserves
+  coin `remaining` plus native `remainingNative` across amend/stream updates.
+- Verification: 147 native tests, strict all-target Clippy and format pass.
+  Pre-fix Demo/Hyro snapshot, repeated execution and same-clock terminal failures
+  were captured locally before the corresponding fixes.
+- Independent Binance trading author reviewed the entire Bybit phase: no open
+  correctness findings. Root additionally required malformed-first/valid-retry
+  execution coverage; implemented and passing. TS differences documented beside
+  `KNOWN_TS_FIXES`, with no new comparison normalization.
+- Public live capture succeeded: 19,981 WS frames, 3 HTTP responses, both books;
+  existing committed public and documented private variant gates are running.

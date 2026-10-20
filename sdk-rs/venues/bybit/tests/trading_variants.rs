@@ -939,3 +939,186 @@ fn hyro_invalid_nonfinite_option_cannot_alias_pending_intent() {
     assert_eq!(h.result(1), Some(&Ok("[\"first\"]".into())));
     assert!(h.requests.is_empty());
 }
+
+// V5 acknowledgement and realtime shapes:
+// https://bybit-exchange.github.io/docs/v5/order/cancel-order
+// https://bybit-exchange.github.io/docs/v5/order/open-order
+#[test]
+fn demo_cancel_ack_fences_in_flight_order_snapshot_at_same_clock() {
+    for mode in [
+        "accepted",
+        "already-gone",
+        "cancel-all",
+        "partial",
+        "rejected",
+    ] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+        let failed = row.replace("canceled", "rejected");
+        let rows = if mode == "partial" {
+            format!("{row},{failed}")
+        } else {
+            row.to_owned()
+        };
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{rows}]}}"#),
+        );
+        let command = if mode == "cancel-all" {
+            Command::CancelSymbolOrders {
+                command: 91,
+                symbol: "BTCUSDT".into(),
+            }
+        } else {
+            Command::CancelOrders {
+                command: 91,
+                ids: if mode == "partial" {
+                    vec!["canceled".into(), "rejected".into()]
+                } else {
+                    vec!["canceled".into()]
+                },
+            }
+        };
+        h.command(command);
+        let cancel = h.take(if mode == "cancel-all" {
+            "/v5/order/cancel-all"
+        } else {
+            "/v5/order/cancel-batch"
+        });
+        // Subscription reconciliation starts while cancellation is in flight.
+        h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+        h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+        let stale = h.take("settleCoin=USDT&limit=50");
+        let reply = match mode {
+            "already-gone" => {
+                r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel"}"#
+            }
+            "cancel-all" => r#"{"retCode":0,"result":{"success":"1"}}"#,
+            "partial" => {
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"permission denied"}]}}"#
+            }
+            "rejected" => {
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":110001,"msg":"permission denied"}]}}"#
+            }
+            _ => r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        };
+        h.reply(cancel.id, 200, reply);
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}"
+        );
+        h.reply(
+            stale.id,
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{rows}],"nextPageCursor":""}}}}"#),
+        );
+        h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}: old snapshot reopened canceled order"
+        );
+        assert_eq!(
+            h.has_request("/v5/order/realtime"),
+            mode != "rejected",
+            "{mode}: accepted cancellation invalidates read; rejection does not"
+        );
+        if mode == "partial" {
+            assert_eq!(
+                h.engine.store().order("rejected").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            assert!(h.result(91).unwrap().is_err());
+        }
+        while h.has_request("/v5/order/realtime") {
+            h.respond("/v5/order/realtime", 200, EMPTY);
+        }
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn hyro_cancel_ack_fences_snapshot_started_after_dispatch() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 90, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "canceled");
+    h.command(Command::CancelOrders {
+        command: 91,
+        ids: vec!["canceled".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.advance(5000.0);
+    let stale = h.take("/v5/order/realtime");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"canceled"}}"#,
+    );
+    assert!(h.engine.store().order("canceled").is_none());
+    h.reply(stale.id, 200, r#"{"retCode":0,"result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}],"nextPageCursor":""}}"#);
+    h.respond("/v5/position/list", 200, EMPTY);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(
+        h.engine.store().order("canceled").is_none(),
+        "atomic snapshot reopened canceled order"
+    );
+    assert!(h.has_request("/v5/order/realtime"));
+    finish_hyro_snapshot(&mut h);
+    assert!(h.engine.store().order("canceled").is_none());
+}
+
+// https://bybit-exchange.github.io/docs/v5/order/amend-order
+#[test]
+fn inverse_amend_ack_keeps_native_and_coin_units_until_stream_confirmation() {
+    let mut h = ready(Variant::Inverse);
+    h.message("/v5/private", r#"{"topic":"order.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"inverse-amend","orderStatus":"PartiallyFilled","orderType":"Limit","side":"Buy","price":"50000","qty":"1000","cumExecQty":"250","leavesQty":"750"}]}"#);
+    h.command(Command::AmendOrder {
+        command: 92,
+        id: "inverse-amend".into(),
+        price: Some(40000.0),
+        amount: Some(1500.0),
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSD");
+    }
+    let request = h.take("/v5/order/amend");
+    assert!(body(&request).contains(r#""qty":"1500""#));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"inverse-amend"}}"#,
+    );
+    let before = h.engine.store().order("inverse-amend").unwrap();
+    assert_eq!(
+        (before.amount, before.filled, before.remaining),
+        (1000.0, 250.0, 0.015)
+    );
+    assert_eq!(before.extra.as_ref().unwrap().remaining_native, Some(750.0));
+    h.message("/v5/private", r#"{"topic":"order.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"inverse-amend","orderStatus":"PartiallyFilled","orderType":"Limit","side":"Buy","price":"40000","qty":"1500","cumExecQty":"250","leavesQty":"1250"}]}"#);
+    let after = h.engine.store().order("inverse-amend").unwrap();
+    assert_eq!(
+        (after.amount, after.filled, after.remaining),
+        (1500.0, 250.0, 0.03125)
+    );
+    assert_eq!(after.extra.as_ref().unwrap().remaining_native, Some(1250.0));
+}
+
+#[test]
+fn demo_terminal_stream_at_snapshot_issue_time_cannot_be_reopened() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"stream-canceled","orderStatus":"Cancelled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"0"}]}"#);
+    h.respond("settleCoin=USDT&limit=50", 200, r#"{"retCode":0,"result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"stream-canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}],"nextPageCursor":""}}"#);
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    assert_eq!(
+        h.engine.store().order("stream-canceled").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert!(h.has_request("/v5/order/realtime"));
+}

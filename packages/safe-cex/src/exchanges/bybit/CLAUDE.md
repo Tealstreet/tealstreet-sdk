@@ -1935,6 +1935,16 @@ position stops. Hyro keeps its order/position-only private subscription and
 emits incremental fills from cumulative order executions; ordinary Bybit variants
 use individual execution events.
 
+Rust execution topics deduplicate the latest 4,096 `(symbol, execId)` pairs
+per product, including repeated rows within one frame and across reconnects.
+Invalid quantity/price packets do not consume identity. Older evicted IDs and
+legacy packets without `execId` have no exactly-once guarantee. Demo/Hyro
+accepted cancels and terminal stream rows advance reconciliation revisions,
+so an in-flight REST snapshot cannot restore a retired order even at the same
+engine timestamp. The inverse variant waits for authoritative order updates
+after amend; coin-unit `remaining` and native `extra.remainingNative` stay
+separate throughout that path.
+
 Linear Rust accounts now honor `enableInverseMarkets` and
 `enableOptionMarkets` together. Other variants keep their TS product eligibility
 and do not enable these combined modes. Independent category startup, public
