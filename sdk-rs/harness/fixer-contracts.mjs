@@ -17,6 +17,7 @@ const orderRemovalFields = [
   'takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'amount',
   'filled', 'remainingNative', 'timeInForce', 'remaining', 'reduceOnly', 'close',
   'trigger', 'rejectReason',
+  'takeProfitTrigger', 'stopLossTrigger',
 ];
 const fills = rowFields('account.fills', fillFields);
 const queryLeaves = rowFields('commands[].ok', queryFields);
@@ -34,7 +35,7 @@ const bookArrays = ['bids', 'asks'].flatMap((side) => [
   { path: `books.{symbol}.${side}`, add: true, remove: true, reorder: true },
   { path: `books.{symbol}.${side}[]`, add: true, remove: true },
 ]);
-const contract = (fields = [], arrays = [], nulls = []) => ({ fields, arrays, nulls });
+const contract = (fields = [], arrays = [], nulls = [], nullObjects = []) => ({ fields, arrays, nulls, nullObjects });
 const bybit = [
   'account.positions[].marginSize', 'account.orders[].rejectReason',
   'requests[]', 'subscriptions[]',
@@ -55,7 +56,7 @@ const orderly = contract([
 ], [
   ...requestArrays, ...fillArrays, ...queryArrays,
   { path: 'account.orders', remove: true, key: 'id', removedFields: orderRemovalFields },
-]);
+], [], [{ path: 'commands[].ok', fields: ['buyLeverage', 'sellLeverage'] }]);
 const lighter = contract([...fills, 'commands[].error'], fillArrays, ['commands[].ok']);
 const deepFreeze = (value) => {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -190,6 +191,13 @@ export function auditFixerChanges(venue, before, after) {
     if (!allowed) errors.push(`${venue}: fixer changed undeclared field ${label}`);
   };
   const arrayRule = (path) => permission.arrays.find((rule) => matches(rule.path, path));
+  // Orderly's documented leverage-query fallback initializes exactly this
+  // positive numeric pair from null. It cannot initialize arbitrary responses,
+  // arrays, extra fields, or replace an existing non-null result.
+  const allowedNullObject = (path, value) => value !== null && !Array.isArray(value) && plain(value)
+    && permission.nullObjects.some((rule) => matches(rule.path, path)
+      && ownKeys(value).length === rule.fields.length
+      && rule.fields.every((field) => Object.hasOwn(value, field) && Number.isFinite(value[field]) && value[field] > 0));
   const allowedFillMetadata = (path) => {
     if (!fillMatches || path.length !== 4 || path[0] !== 'account' || path[1] !== 'fills'
       || typeof path[2] !== 'number' || !fillRule.addedFields.includes(path[3])) return false;
@@ -244,7 +252,7 @@ export function auditFixerChanges(venue, before, after) {
     if (leftKind !== rightKind) {
       const container = rightContainer ? right : left;
       const scalarAllowed = rightContainer
-        ? (!leftPresent || (left === null && permission.nulls.some((pattern) => matches(pattern, path))))
+        ? (!leftPresent || (left === null && (permission.nulls.some((pattern) => matches(pattern, path)) || allowedNullObject(path, right))))
         : (!rightPresent || (right === null && permission.nulls.some((pattern) => matches(pattern, path))));
       const rule = Array.isArray(container) ? arrayRule(path) : undefined;
       const directionAllowed = !Array.isArray(container) || Boolean(rightContainer ? rule?.add : rule?.remove);
@@ -287,13 +295,22 @@ export function auditFixerChanges(venue, before, after) {
           return;
         }
         // Rows without a stable key still cannot evade reorder permissions.
-        // Match unchanged rows with multiplicity, including when other rows
-        // were added/removed; reordered common rows must be declared explicitly.
+        // Keep unchanged rows at their original indices first. Otherwise an
+        // updated duplicate (for example a command's empty query result) can
+        // greedily take a later unchanged row's slot and invent a permutation.
+        // Match remaining common rows with multiplicity; actual swaps and
+        // reorders mixed with additions/removals still require permission.
         if (!isDeepStrictEqual(left, right)) {
-          const matched = new Set();
+          const matched = new Set(), fixed = new Map();
+          for (let index = 0; index < Math.min(left.length, right.length); index++) {
+            if (isDeepStrictEqual(left[index], right[index])) {
+              fixed.set(index, index);
+              matched.add(index);
+            }
+          }
           let lastMatch = -1, reordered = false;
-          for (const row of left) {
-            const index = right.findIndex((candidate, next) => !matched.has(next) && isDeepStrictEqual(row, candidate));
+          for (const [previous, row] of left.entries()) {
+            const index = fixed.get(previous) ?? right.findIndex((candidate, next) => !matched.has(next) && isDeepStrictEqual(row, candidate));
             if (index < 0) continue;
             matched.add(index);
             if (index < lastMatch) reordered = true;

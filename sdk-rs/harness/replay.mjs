@@ -13,8 +13,8 @@ import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'nod
 import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
-import { deterministicReplay, replayTransportReady } from './polling.mjs';
-import { normalizeAccount, comparesField, captureCheckpoint, duplicateSymbolErrors } from './comparison-policy.mjs';
+import { deterministicReplay, frozenReplayStartup, replayTransportReady } from './polling.mjs';
+import { normalizeAccount, comparesField, captureCheckpoint, captureTsFill, duplicateSymbolErrors, flatPositionPnl } from './comparison-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -216,7 +216,7 @@ async function runRust() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate)) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -694,7 +694,7 @@ async function runTs() {
   });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
-  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
+  const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate)) : undefined;
   clock?.install();
 
   const store = new DefaultStore();
@@ -771,6 +771,7 @@ async function runTs() {
           orders: receiver.orders.map((o) => ({ ...o })),
           // Zero-size placeholders carry each market's leverage and margin type.
           positions: receiver.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
+          flatPositionPnl: flatPositionPnl(receiver.positions),
           settings: venue.tsSettings?.(exchange, store) ?? [
             ...new Map(
               receiver.positions
@@ -778,16 +779,7 @@ async function runTs() {
                 .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
             ).values(),
           ],
-          fills: executions.map((f) => ({
-            id: f.orderId ?? f.id,
-            symbol: f.symbol,
-            side: f.side,
-            amount: f.amount,
-            price: f.price,
-            executionId: f.executionId ?? null,
-            fee: f.fee ?? null,
-            timestamp: f.timestamp ?? null,
-          })),
+          fills: executions.map(captureTsFill),
         }
       : undefined;
     return {

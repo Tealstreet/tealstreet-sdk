@@ -63,7 +63,7 @@ test('invalid baselines or incomplete workloads cannot become known exceptions',
   assert.ok(assessGateReport(value, declared).errors.length);
   const invalid = report(); invalid.samples.ts[0].heapBeforeBytes = -1;
   assert.ok(assessGateReport(invalid, manifest()).errors.length);
-  for (const failure of ['fixer modified Rust candidate output', 'example: fixer changed undeclared field account.balance.total']) {
+  for (const failure of ['fixer modified Rust candidate output', 'example: fixer changed undeclared field account.balance.total', 'checkpoint coverage rust: missing checkpoint 2']) {
     const candidate = report(); candidate.failures = [failure];
     const exceptions = manifest(); exceptions.failures[0].diagnostics = [{ key: diagnosticKey(failure), divergence: 'An integrity failure cannot be exempted.' }];
     assert.ok(assessGateReport(candidate, exceptions).errors.length);

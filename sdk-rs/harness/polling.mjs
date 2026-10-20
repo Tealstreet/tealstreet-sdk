@@ -4,6 +4,11 @@ import { isWriteRequest } from './requests.mjs';
 export const replayTransportReady = (venue, openSockets, loaded = true) =>
   loaded && (venue.polling === true || openSockets > 0);
 export const deterministicReplay = (venue, isPrivate) => venue.polling === true || venue.virtualPrivateClock === true || !isPrivate;
+// Public/polling startup can finish at a different wall time when protocol
+// auditing is enabled. Keep its pending poll deadlines anchored to tape epoch,
+// just like an explicitly virtual private replay, instead of carrying that
+// startup wall-time jitter into the measured transport workload.
+export const frozenReplayStartup = (venue, isPrivate) => !isPrivate || venue.polling === true || venue.virtualPrivateClock === true;
 export const recordingReady = (venue, { frames, httpResponses, loaded, books, requestedBooks }) =>
   (venue.polling === true ? httpResponses > 0 && loaded : frames > 0) && books >= requestedBooks;
 

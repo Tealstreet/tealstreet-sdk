@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { sameCommandResults } from './tape.mjs';
+import { sameCommandResults, expectedCheckpointPlan } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
@@ -17,7 +17,7 @@ import { requestKey, callerIdsOf } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
-import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences } from './snapshot-compare.mjs';
+import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
@@ -111,6 +111,7 @@ const isPrivate =
     : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)));
 const runs = replayRunCount(values.runs, isPrivate);
 const correctnessRuns = isPrivate ? runs : 1;
+const checkpointPlans = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
 const results = { ts: [], rust: [] };
 const performanceResults = { ts: [], rust: [] };
 try {
@@ -206,6 +207,8 @@ for (let run = 0; run < correctnessRuns; run++) {
   // Inspect original arrays before a fixer or Map can erase duplicate rows.
   for (const [impl, output] of [['ts', ts], ['rust', rust]])
     {
+      differences.push(...snapshotCoverageErrors(output, `${impl} final`, { isPrivate }));
+      differences.push(...checkpointCoverageErrors(output.checkpoints, checkpointPlans[impl], impl, { isPrivate }));
       for (const field of ['markets', 'tickers']) differences.push(...duplicateSymbols(output[field], `${impl} ${field}`));
       differences.push(...(output.duplicateSymbols ?? []).map((error) => `${impl}: ${error}`));
     }
@@ -245,12 +248,11 @@ for (let run = 0; run < correctnessRuns; run++) {
   console.log(`fixer ${values.venue}: ${overwritten.total} overwritten field(s)`);
   if (!isDeepStrictEqual(candidateBefore, rust)) differences.push('fixer modified Rust candidate output');
   if (isPrivate && ts.account && rust.account) {
-    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'flatPositionPnl', 'settings', 'fills']) {
       differences.push(...valueDifferences(ts.account[field], rust.account[field], `account ${field}`));
     }
   }
-  if (!sameCommandResults(ts.commands, rust.commands))
-    differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
+  differences.push(...valueDifferences(ts.commands, rust.commands, 'command results'));
   const selectedOnly = (impl) =>
     new Set(
       tapeRecords

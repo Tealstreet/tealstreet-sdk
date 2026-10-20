@@ -44,6 +44,58 @@ export function compareSnapshots(left, right, label = 'snapshot') {
   return errors;
 }
 
+// Check the public/private snapshot contract even when both producers erase
+// the same section. Schema failures share the non-exempt coverage prefix.
+export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate } = {}) {
+  const prefix = `checkpoint coverage ${label}:`;
+  const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!object(snapshot)) return [`${prefix} snapshot object missing`];
+  const errors = [];
+  for (const field of ['markets', 'tickers']) if (!Array.isArray(snapshot[field]))
+    errors.push(`${prefix} ${field} rows missing`);
+  if (!object(snapshot.books)) errors.push(`${prefix} books object missing`);
+  if (isPrivate === true && !object(snapshot.account)) errors.push(`${prefix} private account object missing`);
+  if (isPrivate === false && snapshot.account !== undefined) errors.push(`${prefix} public snapshot contains account`);
+  return errors;
+}
+
+// Equality between runners cannot establish coverage: both could omit the
+// same quarter or command snapshot. Validate each stream against the original
+// tape-derived plan before inspecting financial values or applying fixers.
+export function checkpointCoverageErrors(actual, expected, label = 'replay', scope = {}) {
+  const prefix = `checkpoint coverage ${label}:`;
+  if (!Array.isArray(expected) || expected.length === 0) return [`${prefix} expected tape plan missing`];
+  if (!Array.isArray(actual)) return [`${prefix} snapshots missing`];
+  const errors = [];
+  const seen = new Map();
+  if (actual.length !== expected.length) errors.push(`${prefix} count ${actual.length}; expected ${expected.length}`);
+  for (let index = 0; index < Math.max(actual.length, expected.length); index++) {
+    const point = actual[index];
+    const planned = expected[index];
+    if (!point) {
+      errors.push(`${prefix} missing point ${index} (${JSON.stringify(planned)})`);
+      continue;
+    }
+    errors.push(...snapshotCoverageErrors(point, `${label} point ${index}`, scope));
+    const valid = Number.isInteger(point.ordinal) && point.ordinal >= 0 && Number.isInteger(point.recordIndex) && point.recordIndex >= -1 && Number.isFinite(point.t);
+    if (!valid) errors.push(`${prefix} invalid tape boundary at point ${index}`);
+    else {
+      const key = JSON.stringify([point.ordinal, point.recordIndex, point.t]);
+      if (seen.has(key)) errors.push(`${prefix} duplicate points ${seen.get(key)} and ${index} (${key})`);
+      else seen.set(key, index);
+    }
+    if (!planned) {
+      errors.push(`${prefix} unexpected point ${index}`);
+      continue;
+    }
+    if (!Number.isInteger(planned.ordinal) || !Number.isInteger(planned.recordIndex) || !Number.isFinite(planned.t))
+      errors.push(`${prefix} invalid expected tape boundary at point ${index}`);
+    for (const field of ['ordinal', 'recordIndex', 't']) if (point[field] !== planned[field])
+      errors.push(`${prefix} point ${index} ${field}=${JSON.stringify(point[field])}; expected ${JSON.stringify(planned[field])}`);
+  }
+  return errors;
+}
+
 export function compareCheckpoints(left, right) {
   if (!Array.isArray(left) || !Array.isArray(right) || left.length === 0 || right.length === 0)
     return ['checkpoint snapshots missing'];

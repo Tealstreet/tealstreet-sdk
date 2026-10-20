@@ -99,8 +99,10 @@ export const krakenspot = {
   requestBody: krakenSpotRequestBody,
   commandResult: krakenSpotCommandResult,
   isWrite: (method, url) => method !== 'GET' && !/\/(Balance|OpenOrders|GetWebSocketsToken)$/.test(new URL(url).pathname),
-  // start() creates its final public socket only after the ticker seed. Earlier
-  // book listeners would attach to the lazy socket that startup replaces.
-  tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),
+  // start() creates its final public socket only after the ticker seed. Wait
+  // for that socket's open event too: registering before open queues a 100 ms
+  // retry as well as onOpen's resubscribe, making workload depend on auditing
+  // startup time. Both replay modes register after the same open boundary.
+  tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) => Object.values(exchange.publicWebsocket?.orderBookHandlers ?? {}).filter((v) => v.length).length >= count,
 };

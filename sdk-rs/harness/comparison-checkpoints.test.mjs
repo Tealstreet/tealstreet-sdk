@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { captureCheckpoint, comparesField, COMPARISON_EXCLUSIONS, duplicateSymbolErrors, normalizeAccount, projectFill } from './comparison-policy.mjs';
-import { checkpointOrdinals, Tape } from './tape.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { captureCheckpoint, captureTsFill, comparesField, COMPARISON_EXCLUSIONS, duplicateSymbolErrors, normalizeAccount, projectFill } from './comparison-policy.mjs';
+import { checkpointOrdinals, expectedCheckpointPlan, Tape } from './tape.mjs';
 
 const venue = { rust: 'example' };
 const account = () => ({
@@ -71,6 +73,78 @@ test('missing fill metadata stays null and order identity is never an execution 
   const result = normalize(missing);
   for (const key of ['takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId']) assert.equal(result.orders[0][key], null);
   assert.equal(result.positions[0].realizedPnl, null);
+});
+
+test('native TS execution identities survive capture and normalization without promoting Rust order IDs', () => {
+  const event = { id: 'native-trade', orderId: 'native-order', symbol: 'BTCUSDT', side: 'buy', amount: 1, price: '100.25', fee: '-0.01', timestamp: '123' };
+  const captured = captureTsFill(event);
+  assert.equal(captured.id, 'native-trade');
+  assert.equal(captured.orderId, 'native-order');
+  for (const name of ['hyperliquid', 'hyperliquidspot', 'grvt', 'woo', 'weex', 'mexc']) {
+    const value = account();
+    value.fills = [captured];
+    const actual = normalizeAccount(value, { rust: name }, 'ts');
+    assert.equal(actual.fills[0].id, 'native-order', name);
+    assert.equal(actual.fills[0].executionId, 'native-trade', name);
+    assert.equal(actual.fills[0].fee, -0.01, name);
+    assert.equal(actual.fills[0].timestamp, 123, name);
+    const checkpoint = captureCheckpoint({ ordinal: 1 }, () => actual);
+    const mutated = structuredClone(value);
+    mutated.fills[0].id = 'wrong-trade';
+    assert.notDeepEqual(checkpoint.fills, normalizeAccount(mutated, { rust: name }, 'ts').fills, name);
+    assert.equal(projectFill(captured, name, 'rust').executionId, null, name);
+    assert.equal(projectFill({ id: 'native-order' }, name, 'rust').executionId, null, name);
+    assert.equal(projectFill({ ...captured, executionId: 'explicit-trade' }, name, 'rust').executionId, 'explicit-trade', name);
+  }
+  // GRVT emits a trade id even when no client order id is available.
+  assert.equal(projectFill({ id: 'grvt-trade' }, 'grvt', 'ts').executionId, 'grvt-trade');
+  for (const name of ['hyperliquid', 'hyperliquidspot', 'grvt'])
+    for (const id of [undefined, null, '', ' ']) assert.equal(projectFill({ id }, name, 'ts').executionId, null);
+  for (const name of ['woo', 'weex', 'mexc']) {
+    for (const fill of [{ id: 'order', orderId: 'order' }, { id: 'notification' }, { id: '', orderId: 'order' }, { orderId: 'order' }])
+      assert.equal(projectFill(fill, name, 'ts').executionId, null, `${name}: ${JSON.stringify(fill)}`);
+  }
+  for (const name of ['blofin', 'asterdex', 'backpack', 'unknown'])
+    assert.equal(projectFill(captured, name, 'ts').executionId, null, name);
+});
+
+test('real Hyperliquid perp and spot fill events retain transaction IDs through the replay capture path', () => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { HyperliquidPrivateWebSocket } from './packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.ws-private.ts';
+    import { HyperliquidSpotPrivateWebSocket } from './packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.ws-private.ts';
+    import { captureTsFill, captureCheckpoint, normalizeAccount } from './sdk-rs/harness/comparison-policy.mjs';
+    for (const [name, Socket] of [['hyperliquid', HyperliquidPrivateWebSocket], ['hyperliquidspot', HyperliquidSpotPrivateWebSocket]]) {
+      const executions = [];
+      const parent = {
+        store: { marketsById: { BTC: { id: 'BTC', symbol: 'BTC', info: {} } } },
+        emitter: { emit: (event, fill) => { assert.equal(event, 'fill'); executions.push(fill); } },
+        requestSpotBalanceRefresh() {},
+      };
+      const socket = new Socket(parent);
+      // Two production transaction ids on the same order, amount and price.
+      socket.handleFills({ fills: [9912350101, 9912350102].map(tid => ({
+        tid, oid: 9001, coin: 'BTC', side: 'B', px: '100', sz: '1',
+      })), isSnapshot: false, user: 'test' });
+      assert.equal(executions.length, 2);
+      const account = { hedged: false, balance: {}, orders: [], positions: [], settings: [], fills: executions.map(captureTsFill) };
+      const checkpoint = captureCheckpoint({ ordinal: 1 }, () => normalizeAccount(account, { rust: name }, 'ts'));
+      assert.deepEqual(checkpoint.fills.map(fill => fill.id), ['9001', '9001']);
+      assert.deepEqual(checkpoint.fills.map(fill => fill.executionId), ['9912350101', '9912350102']);
+      const candidate = { ...account, fills: account.fills.map(fill => ({ ...fill, id: '9001', orderId: undefined })) };
+      const projectedCandidate = normalizeAccount(candidate, { rust: name }, 'rust');
+      assert.deepEqual(projectedCandidate.fills.map(fill => fill.executionId), [null, null]);
+      assert.notDeepEqual(checkpoint.fills, projectedCandidate.fills);
+      account.fills[1].id = account.fills[0].id;
+      assert.notDeepEqual(checkpoint.fills, normalizeAccount(account, { rust: name }, 'ts').fills);
+    }
+    process.exit(0);
+  `;
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module'], {
+    cwd: fileURLToPath(new URL('../../', import.meta.url)),
+    input: script, encoding: 'utf8', timeout: 30_000,
+  });
+  assert.equal(result.status, 0, result.error?.stack ?? result.stderr ?? result.stdout);
 });
 
 test('duplicate public symbols fail even for otherwise equal rows before Map collapse', () => {
@@ -148,4 +222,39 @@ test('checkpoint capture failure rejects replay instead of silently losing audit
   await assert.rejects(new Tape([]).play(undefined, undefined, undefined, undefined, undefined, () => {
     throw new Error('checkpoint capture failed');
   }), /checkpoint capture failed/);
+});
+
+
+test('expected checkpoint plans use original input ordinals across aliases, implementation plans and bootstrap filters', () => {
+  const records = [
+    { type: 'meta', liveSmoke: true },
+    { type: 'http', impl: 'ts', t: 1, method: 'GET', url: 'https://example.test/seed', requestBody: 'original', tsRequestBody: 'skip', body: '{}', status: 200 },
+    { type: 'http', impl: 'rust', t: 2, method: 'GET', url: 'https://example.test/seed', body: '{}', status: 200 },
+    { type: 'ws', t: 3, bootstrap: true, url: 'wss://example.test/stream', text: 'bootstrap' },
+    { type: 'wait', t: 4, skip: true },
+    { type: 'wait', t: 5 },
+    { type: 'command', t: 6, op: 'example' },
+    { type: 'wait', t: 7 },
+  ];
+  const venue = { polling: true, skipFrame: (record) => record.skip || record.requestBody === 'skip' };
+  assert.deepEqual(expectedCheckpointPlan(records, venue, 'ts'), [
+    { ordinal: 0, recordIndex: -1, t: 0 }, { ordinal: 1, recordIndex: 5, t: 5 },
+    { ordinal: 2, recordIndex: 6, t: 6 }, { ordinal: 3, recordIndex: 7, t: 7 },
+  ]);
+  assert.deepEqual(expectedCheckpointPlan(records, venue, 'rust'), [
+    { ordinal: 0, recordIndex: -1, t: 0 }, { ordinal: 1, recordIndex: 2, t: 2 },
+    { ordinal: 2, recordIndex: 5, t: 5 }, { ordinal: 3, recordIndex: 6, t: 6 }, { ordinal: 4, recordIndex: 7, t: 7 },
+  ]);
+  assert.deepEqual(expectedCheckpointPlan([], {}, 'rust'), [{ ordinal: 0, recordIndex: -1, t: 0 }]);
+  assert.throws(() => expectedCheckpointPlan(records, venue), /Tagged tape records require/);
+  assert.throws(() => expectedCheckpointPlan(records, venue, 'unknown'), /Unknown replay implementation/);
+});
+
+test('real Tape captures exactly the independently derived complete schedule including a nonquarter command', async () => {
+  const records = [{ type: 'meta' }, ...Array.from({ length: 8 }, (_, index) => ({ type: index === 2 ? 'command' : 'wait', t: index * 10, ...(index === 2 ? { op: 'example' } : {}) }))];
+  const expected = expectedCheckpointPlan(records, {}, 'rust');
+  assert.deepEqual(expected.map(({ ordinal }) => ordinal), [0, 2, 3, 4, 6, 8]);
+  const actual = [];
+  await new Tape(records, {}, false, 30000, 'rust').play(undefined, undefined, async () => [], undefined, undefined, (point) => actual.push(point));
+  assert.deepEqual(actual, expected);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compareCheckpoints, compareSnapshots, duplicateSymbols } from './snapshot-compare.mjs';
+import { compareCheckpoints, compareSnapshots, duplicateSymbols, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
 
 const snapshot = () => ({
   markets: [{ symbol: 'BTC' }], tickers: [{ symbol: 'BTC', last: 100 }], books: {},
@@ -47,4 +47,69 @@ test('intermediate snapshots detect transient defects despite final convergence'
   assert.deepEqual(compareCheckpoints(checkpoints, structuredClone(checkpoints)), []);
   assert.match(compareCheckpoints([], []).join('\n'), /missing/);
   assert.match(compareCheckpoints([snapshot()], [snapshot()]).join('\n'), /invalid tape boundary/);
+});
+
+
+test('checkpoint coverage rejects identical omissions, duplication, reordering and retiming against tape plan', () => {
+  const plan = [
+    { ordinal: 0, recordIndex: -1, t: 0 },
+    { ordinal: 2, recordIndex: 3, t: 20 },
+    { ordinal: 3, recordIndex: 4, t: 30 }, // command boundary outside quarters
+    { ordinal: 4, recordIndex: 5, t: 40 },
+    { ordinal: 6, recordIndex: 7, t: 60 },
+    { ordinal: 8, recordIndex: 9, t: 80 },
+  ];
+  const complete = plan.map((point) => ({ ...point, ...snapshot() }));
+  assert.deepEqual(checkpointCoverageErrors(complete, plan, 'ts'), []);
+  const mutations = [
+    (rows) => rows.splice(1, 1),
+    (rows) => rows.splice(2, 1),
+    (rows) => rows.splice(1),
+    (rows) => { rows[1] = structuredClone(rows[0]); },
+    (rows) => { [rows[1], rows[2]] = [rows[2], rows[1]]; },
+    (rows) => { rows[1].t++; },
+    (rows) => { rows[1].recordIndex++; },
+    (rows) => rows.push(structuredClone(rows[1])),
+  ];
+  for (const mutate of mutations) {
+    const rows = structuredClone(complete);
+    mutate(rows);
+    // Pairwise equality used to accept each of these broken capture streams.
+    assert.deepEqual(compareCheckpoints(rows, structuredClone(rows)), []);
+    const errors = checkpointCoverageErrors(rows, plan, 'rust');
+    assert(errors.length, String(mutate));
+    assert(errors.every((error) => error.startsWith('checkpoint coverage rust:')), String(mutate));
+  }
+});
+
+test('checkpoint coverage requires startup on empty tapes and rejects missing or malformed boundaries', () => {
+  const plan = [{ ordinal: 0, recordIndex: -1, t: 0 }];
+  assert.deepEqual(checkpointCoverageErrors(plan.map((point) => ({ ...point, ...snapshot() })), plan), []);
+  for (const rows of [undefined, [], [null], [{ ordinal: 0, recordIndex: -1, t: NaN }], [{ ordinal: 0, recordIndex: -1 }]])
+    assert(checkpointCoverageErrors(rows, plan).length);
+  assert(checkpointCoverageErrors(plan, []).length);
+});
+
+
+test('coverage rejects identical financial-section erasure and public/private scope substitution', () => {
+  const plan = [{ ordinal: 0, recordIndex: -1, t: 0 }];
+  const point = { ...plan[0], ...snapshot() };
+  assert.deepEqual(checkpointCoverageErrors([point], plan, 'ts', { isPrivate: true }), []);
+  for (const mutate of [
+    (value) => { delete value.account; },
+    (value) => { value.account = null; },
+    (value) => { value.account = []; },
+    (value) => { delete value.books; },
+    (value) => { value.books = []; },
+  ]) {
+    const erased = structuredClone(point);
+    mutate(erased);
+    const errors = checkpointCoverageErrors([erased], plan, 'rust', { isPrivate: true });
+    assert(errors.length, String(mutate));
+    assert(errors.every((error) => error.startsWith('checkpoint coverage ')));
+  }
+  const publicSnapshot = { markets: [], tickers: [], books: {} };
+  assert.deepEqual(snapshotCoverageErrors(publicSnapshot, 'ts final', { isPrivate: false }), []);
+  assert(snapshotCoverageErrors({ ...publicSnapshot, account: {} }, 'ts final', { isPrivate: false }).length);
+  assert(snapshotCoverageErrors(publicSnapshot, 'rust final', { isPrivate: true }).length);
 });

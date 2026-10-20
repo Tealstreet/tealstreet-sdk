@@ -128,3 +128,35 @@ never retry an unchanged failed performance measurement to obtain a pass.
   final-only error introduced after checkpoints. CLI/policy controls 21/21 PASS
   (`/tmp/gate-honesty-leaf-review-tests.log`). Findings and corrections posted
   on PR #1346; phase and PR reviews are distinct evidence.
+- Adversarial round 1 corrections preserve actual TS execution identity for
+  Hyperliquid/Spot, GRVT and fallback-aware WOO/WEEX/MEXC events; missing native
+  wire identity stays null. Actual Hyperliquid handler/checkpoint controls and
+  89 scoped tests PASS; real TS replay retains execution 9001 on order 1002.
+  Flat-position realized PnL and independent bracket trigger sources now survive
+  projection. Coverage checks independently require every tape boundary and
+  account/book sections, including identical-producer omissions; schema and
+  coverage errors cannot be declared as venue exceptions.
+- Initial isolated CI matrix run `39417011625` collected genuine strict FAILs,
+  including raw TS defects previously hidden by terminal fixers. Its own-audit
+  receipt controls exposed startup timer jitter and a Kraken Spot subscription
+  race. Fixing deterministic startup scheduling, never exempting those checks.
+  KuCoin's repeated empty command results falsely looked reordered to the audit;
+  reserve unchanged positional rows before matching displaced common rows.
+  Orderly's existing null leverage fallback now declares exactly its two
+  finite-positive keys; extra fields/types remain forbidden. Contract controls
+  53/53 PASS; re-auditing captured CI raw KuCoin/Orderly output has zero integrity
+  errors. No unchanged quantitative replay was retried for a pass.
+- The current host now rejects unsupported `getAccount` explicitly: Bitget USDC
+  canonical replay completes but its account query differs from TS. The older
+  timeout observation above remains historical evidence from the older artifact.
+- Integrated round-1 harness checks: 749/749 PASS before the final timer control;
+  startup/polling/KuCoin controls then pass 38/38 including an actual EngineHost
+  deadline test reproducing the old 2-versus-3 OKX EU pings at a 19,953ms horizon.
+  Frozen startup now keeps the same exact receipts under startup wall jitter.
+  The first measured CI run completed 98 canonical cases (20 PASS / 78 FAIL);
+  Binance's pre-gate lifecycle integration blocked its eight canonical cases
+  because client-ID/TIF differences are now visible. Preserve that generated
+  lifecycle transport proof and add a frozen sanitized strict lifecycle case
+  to the mandatory matrix rather than ignoring its financial gate failures.
+  CI combined web/Node artifacts: 12,172,412 bytes each, SHA256
+  `9c36fc12f77b9766641b37ebf3599c1ee91b8c32ad6c274e99874cd7cbbaaede`.

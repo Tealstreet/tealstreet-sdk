@@ -58,6 +58,8 @@ const gate = (venue, isPrivate = false, defect) => {
       { type: 'live-smoke-verification', ok: true },
       { type: 'live-smoke-result', ok: true, cleanupComplete: true, authoritative: true, stage: 'complete', symbol: 'BTCUSDT', commands });
   }
+  if (defect?.startsWith('checkpoint-coverage-'))
+    records.push(...Array.from({ length: 8 }, (_, index) => ({ type: index === 2 ? 'command' : 'wait', t: index * 10, ...(index === 2 ? { op: 'getAccount' } : {}) })));
   if (['orderly-missing-result', 'coinbase-missing-result'].includes(defect))
     records.push({ type: 'command', op: 'fetchFills' });
   if (['command-timeout', 'runner-crash'].includes(defect)) records.push({ type: 'command', op: 'getAccount' });
@@ -84,6 +86,9 @@ const gate = (venue, isPrivate = false, defect) => {
     import childProcess from 'node:child_process';
     import { writeFileSync } from 'node:fs';
     import { syncBuiltinESMExports } from 'node:module';
+    import { expectedCheckpointPlan } from ${JSON.stringify(new URL('./tape.mjs', import.meta.url).href)};
+    import { venueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
+    const records = ${JSON.stringify(records)};
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
     const strictCommandCount = ${JSON.stringify(['orderly', 'coinbase'].includes(VENUES[venue].family))};
@@ -129,7 +134,7 @@ const gate = (venue, isPrivate = false, defect) => {
         // Orderly and Coinbase require exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
-        checkpoints: [{ ordinal: 0, recordIndex: -1, t: 0, markets: [], tickers: [], books: {} }],
+        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, venueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: {} } : {}) })),
         transportReceipt: {},
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
@@ -152,7 +157,18 @@ const gate = (venue, isPrivate = false, defect) => {
       }
       if (defect === 'duplicate-symbols') output.markets.push({ ...output.markets[0] });
       if (defect === 'filtered-duplicates') output.duplicateSymbols = ['duplicate markets symbol SPOT at rows 0 and 1'];
-      if (rust && defect === 'checkpoint-transient') output.checkpoints[0].tickers.push({ symbol: 'BTCUSDT', last: 999 });
+      if (rust && !args.includes('--performance') && defect === 'checkpoint-transient') output.checkpoints[0].tickers.push({ symbol: 'BTCUSDT', last: 999 });
+      if (defect?.startsWith('checkpoint-coverage-') && !args.includes('--performance')) {
+        if (defect === 'checkpoint-coverage-drop') output.checkpoints.splice(1, 1);
+        if (defect === 'checkpoint-coverage-drop-command') output.checkpoints = output.checkpoints.filter((point) => point.ordinal !== 3);
+        if (defect === 'checkpoint-coverage-startup-only') output.checkpoints.splice(1);
+        if (defect === 'checkpoint-coverage-duplicate') output.checkpoints[1] = structuredClone(output.checkpoints[0]);
+        if (defect === 'checkpoint-coverage-reorder') [output.checkpoints[1], output.checkpoints[2]] = [output.checkpoints[2], output.checkpoints[1]];
+        if (defect === 'checkpoint-coverage-retime') output.checkpoints[1].t++;
+        if (defect === 'checkpoint-coverage-erase-account') for (const point of output.checkpoints) delete point.account;
+        if (defect === 'checkpoint-coverage-erase-books') for (const point of output.checkpoints) delete point.books;
+        if (defect === 'checkpoint-coverage-erase-final-books') delete output.books;
+      }
       if (defect?.startsWith('impl-plans')) {
         output.writes = (rust ? ['Order', 'StopOrder', 'tpslOrder'] : [undefined]).map((orderFilter) =>
           'POST https://api.bybit.com/v5/order/cancel-all? ' + JSON.stringify({ category: 'spot', ...(orderFilter && { orderFilter }) }));
@@ -221,7 +237,7 @@ test('gate CLI compares populated outputs and calls every venue oracle in public
 test('gate CLI rejects independent market, ticker, book and ordered command mismatches', () => {
   const result = gate('bybitinverse', false, 'comparisons');
   assert.equal(result.status, 1, result.stderr);
-  for (const difference of ['market BTCUSDT.precision.price:', 'ticker BTCUSDT.last:', 'ticker BTCUSDT.ask:', 'book BTCUSDT.bids[0][1]:', 'command results:'])
+  for (const difference of ['market BTCUSDT.precision.price:', 'ticker BTCUSDT.last:', 'ticker BTCUSDT.ask:', 'book BTCUSDT.bids[0][1]:', 'command results[0].ok.ids[0]:'])
     assert.ok(result.stdout.includes(difference), `${difference}\n${result.stdout}`);
   assert.doesNotMatch(result.stderr, /ReferenceError/);
 });
@@ -315,5 +331,15 @@ test('live smoke gates every replay command success even when both engines fail 
     const result = gate('binance', true, defect);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /did not successfully complete every lifecycle command/);
+  }
+});
+
+
+test('gate CLI independently enforces checkpoint coverage when both implementations omit or alter the same evidence', () => {
+  for (const defect of ['drop', 'drop-command', 'startup-only', 'duplicate', 'reorder', 'retime', 'erase-account', 'erase-books']) {
+    const result = gate('binance', true, `checkpoint-coverage-${defect}`);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /checkpoint coverage ts(?: point \d+| final)?:/, result.stderr);
+    assert.match(result.stdout, /checkpoint coverage rust(?: point \d+| final)?:/);
   }
 });

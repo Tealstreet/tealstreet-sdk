@@ -187,6 +187,36 @@ export const checkpointOrdinals = (frames) => new Set([
   ...frames.flatMap((frame, index) => frame.type === 'command' ? [index + 1] : []),
 ]);
 
+// Derive the complete required capture schedule from the input tape, never
+// from either replay output. Retain original record identities across selected
+// implementation plans, TS request-body aliases and bootstrap/venue filters.
+export const expectedCheckpointPlan = (records, venue = {}, impl) => {
+  if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
+  const selected = records.flatMap((record, recordIndex) => {
+    if (record.impl !== undefined) {
+      if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown tape record implementation');
+      if (impl === undefined) throw new Error('Tagged tape records require a replay implementation');
+      if (record.impl !== impl) return [];
+    }
+    let row = record;
+    if (record.effectiveAt !== undefined && record.availableAfter === undefined) row = { ...row, availableAfter: record.effectiveAt };
+    if (impl === 'ts' && record.tsRequestBody !== undefined) row = { ...row, requestBody: record.tsRequestBody };
+    return [{ record: row, recordIndex }];
+  });
+  const liveSmoke = selected.some(({ record }) => record.type === 'meta' && record.liveSmoke === true);
+  const frames = selected.filter(({ record }) => (
+    ['ws', 'command', 'close', 'open', 'wait'].includes(record.type) || (venue.polling === true && record.type === 'http')
+  ) && !venue.skipFrame?.(record)).filter(({ record }) => !(
+    venue.bootstrapFrame?.(record) || (liveSmoke && ['open', 'close', 'ws'].includes(record.type) && record.bootstrap === true)
+  ));
+  const required = checkpointOrdinals(frames.map(({ record }) => record));
+  return [
+    { ordinal: 0, recordIndex: -1, t: 0 },
+    ...frames.flatMap(({ record, recordIndex }, index) => required.has(index + 1)
+      ? [{ ordinal: index + 1, recordIndex, t: record.t ?? 0 }] : []),
+  ];
+};
+
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options, settings = {}) {
     this.auditEnabled = settings.performance !== true;

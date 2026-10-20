@@ -14,15 +14,42 @@ const finiteOrNull = (value) => {
   return Number.isFinite(number) ? number : null;
 };
 
-// OrderFillEvent.id is an ORDER id, not an execution id. Missing production
-// metadata stays null: replay must never reconstruct candidate fields from tape.
-export const projectFill = (fill, venue) => ({
+// Preserve both production identities until normalization. Some TS venues emit
+// a native trade id in `id`, while the Rust frame's `id` is an order id.
+export const captureTsFill = (fill) => ({
+  id: fill.id,
+  orderId: fill.orderId,
+  symbol: fill.symbol,
+  side: fill.side,
+  amount: fill.amount,
+  price: fill.price,
+  executionId: fill.executionId ?? null,
+  fee: fill.fee ?? null,
+  timestamp: fill.timestamp ?? null,
+});
+
+const tsExecutionId = (fill, venue) => {
+  if (fill.id === undefined || fill.id === null || String(fill.id).trim() === '') return null;
+  // These handlers emit the native transaction/trade id unconditionally.
+  if (['hyperliquid', 'hyperliquidspot', 'grvt'].includes(venue)) return fill.id;
+  // These handlers fall back to an order id (or a synthetic notification id)
+  // when no trade id exists. Only a distinct id alongside an order id proves
+  // native execution identity; unknown/ambiguous absence remains null.
+  if (['woo', 'weex', 'mexc'].includes(venue)
+    && fill.orderId !== undefined && fill.orderId !== null && String(fill.orderId).trim() !== ''
+    && String(fill.id) !== String(fill.orderId)) return fill.id;
+  return null;
+};
+
+// Missing production metadata stays null: replay never reconstructs either
+// implementation's evidence from the tape or promotes a Rust order id.
+export const projectFill = (fill, venue, impl = 'ts') => ({
   id: fill.orderId ?? fill.id ?? null,
   symbol: fill.symbol,
   side: fill.side,
   amount: fill.amount,
   ...(comparesField(venue, 'fillPrice') ? { price: finiteOrNull(fill.price) } : {}),
-  executionId: fill.executionId ?? null,
+  executionId: fill.executionId ?? (impl === 'ts' ? tsExecutionId(fill, venue) : null),
   fee: finiteOrNull(fill.fee),
   timestamp: finiteOrNull(fill.timestamp),
 });
@@ -44,6 +71,14 @@ export const duplicateSymbolErrors = (snapshot, label = 'snapshot') => {
 // A detached checkpoint is immutable evidence of the state at that tape
 // boundary, even while the live consumer mutates typed arrays or nested rows.
 export const captureCheckpoint = (point, capture) => structuredClone({ ...point, ...capture() });
+
+// Flat rows also carry economic state. Preserve actual reported PnL even when
+// the ordinary position view represents zero-size rows through settings.
+export const flatPositionPnl = (positions) => positions
+  .filter((position) => position.contracts === 0 && position.realizedPnl != null)
+  .map((position) => ({ symbol: position.symbol, side: position.side,
+    positionMode: position.positionMode ?? null, realizedPnl: finiteOrNull(position.realizedPnl) }))
+  .sort((a, b) => a.symbol.localeCompare(b.symbol) || String(a.side).localeCompare(String(b.side)) || String(a.positionMode).localeCompare(String(b.positionMode)));
 
 /** The fields both implementations carry, in one shape. */
 export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
@@ -67,6 +102,8 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
+    takeProfitTrigger: o.tpTriggerType ?? (o.type === 'take_profit_market' ? o.triggerType ?? null : null),
+    stopLossTrigger: o.slTriggerType ?? (['stop_market', 'trailing_stop_market'].includes(o.type) ? o.triggerType ?? null : null),
     rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
   });
   const position = (p) => ({
@@ -92,6 +129,7 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     orders: account.orders.map(order).sort(bySymbol),
     // Binance zero-size rows are compared through settings, as in its TS view.
     positions: (venue.rust.startsWith('binance') ? account.positions.filter((p) => p.contracts > 0) : account.positions).map(position).sort(bySymbol),
+    flatPositionPnl: account.flatPositionPnl ?? flatPositionPnl(account.positions),
     settings: account.settings
       .map((s) => ({
         symbol: s.symbol,
@@ -101,7 +139,7 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
           : { leverage: s.leverage }),
       }))
       .sort(bySymbol),
-    fills: account.fills.map((fill) => projectFill(fill, venueName)),
+    fills: account.fills.map((fill) => projectFill(fill, venueName, impl)),
   };
 }
 
