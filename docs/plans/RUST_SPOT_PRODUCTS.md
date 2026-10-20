@@ -132,7 +132,7 @@ requests, authentication, token rotation and command/query results are exact.
 Selected browser and Node WASM are both 1,051,446 bytes, below 1,258,291.
 The TS book-readiness predicate waits for the startup-created socket after
 ticker seeding, preserving listeners across startup; the live replay exercises
-this lifecycle. Hyperliquid and Binance final gates remain pending.
+this lifecycle. Accepted Hyperliquid gates follow below; Binance final gates remain pending.
 
 - Final auth review: Hyperliquid spot rejects malformed or mismatched local
   API-wallet credentials before I/O; missing credentials keep public mode and
@@ -150,3 +150,43 @@ this lifecycle. Hyperliquid and Binance final gates remain pending.
   122 Kraken). Secret-scan preflight identified only the two fixed public
   replay-vector declarations; exact historical fingerprints document their
   synthetic provenance, with production and future changes still scanned.
+
+
+## Accepted Hyperliquid gates
+
+The final selected artifact integrates landing commit `f5d60003af` and the
+paired TS spot protocol/identity fixes. A fresh live 20-second capture contains
+69 records: one public metadata response, one open and 66 websocket frames.
+Both native book identities are verified against metadata: `PURR/USDC` and
+`@107` (`HYPE/USDC`). No error frames or rejected subscriptions occur. All 69
+records are preserved in the committed fixture. Capture metadata is
+`source: live`, `private: false`, epoch `1792479120698`; the gzip SHA-256 is
+`f77d2f497741baa047d2ae2cf272107f201109bf51415011c4fd9a152295c712`. Three compiled spot
+host tests pass, including native cancellation identity, failed-cancel amendment
+safety and unsupported-protection preflight.
+
+| Gate | Frames | TS / Rust main CPU ms | TS / Rust steady CPU ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Hyperliquid spot public, three runs | 67 | 61.2 / 46.5 | 23.9 / 17.8 | 18.6 / 6.0 |
+| Hyperliquid spot private, one run | 10 | 85.0 / 52.2 | 33.3 / 38.0 | 18.0 / 5.1 |
+| Hyperliquid perpetual public, three runs | 285 | 310.5 / 46.7 | 22.4 / 13.9 | 24.1 / 2.6 |
+| Hyperliquid perpetual private, one run | 26 | 197.9 / 49.2 | 50.0 / 30.9 | 20.4 / 1.1 |
+
+All four gates PASS. Private performance is informational; account economics,
+requests, native fill identity, signatures, subscriptions and command/query
+results compare exactly. TS preserves execution `tid` as the fill `id` and
+exposes order `oid` as `orderId`, matching the global native fill contract.
+Both implementations subscribe to the current four spot account feeds;
+ignored feeds and perpetual-only asset subscriptions are removed from TS.
+No economic output or subscription normalization hides these fixes.
+
+Selected browser and Node WASM are both 1,050,258 bytes, below 1,258,291.
+All four gates use this unchanged selected artifact (SHA-256
+`b5c39c39c5bc54788d22f59b9a5d5b836b7139930a718a382905be88273a0905`).
+The paired TS private protocol fixes do not change native runtime source;
+private generators contain 16 spot and 53 perpetual records.
+Rust linear memory is 1.2 MB for spot public, 1.6 MB for perpetual public and
+0.3 MB for both private fixtures. The native author additionally verifies
+88 crate tests (30 spot), including distinct executions sharing one order ID,
+plus strict Clippy and formatting. Binance final gates, combined-host checks,
+PR correctness review and green-CI landing remain pending.

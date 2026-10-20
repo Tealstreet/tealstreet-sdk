@@ -31,7 +31,6 @@ export class HyperliquidSpotPrivateWebSocket extends BaseWebSocket<HyperliquidSp
 
   subscribe = () => {
     this.subscribeSystemTopics();
-    this.subscribeCoins();
   };
 
   ping = () => {
@@ -49,21 +48,6 @@ export class HyperliquidSpotPrivateWebSocket extends BaseWebSocket<HyperliquidSp
           subscription: {
             type,
             user: this.parent.options.vault || this.parent.options.applicationId,
-          },
-        }),
-      );
-    }
-  };
-
-  subscribeCoins = () => {
-    for (const market of this.parent.store.markets) {
-      this.send(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'activeAssetData',
-            user: this.parent.options.vault || this.parent.options.applicationId,
-            coin: market.id,
           },
         }),
       );
@@ -152,6 +136,7 @@ export class HyperliquidSpotPrivateWebSocket extends BaseWebSocket<HyperliquidSp
       const fill = fills[i] as any;
       this.parent.emitter.emit('fill', {
         id: `${fill.tid}`,
+        orderId: `${fill.oid}`,
         side: fill.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
         symbol: marketsById[fill.coin]?.symbol || fill.coin,
         price: parseFloat(fill.px),

@@ -81,7 +81,26 @@ fn spot_subscriptions_exclude_perpetual_channels() {
             }
         })
         .collect::<Vec<_>>();
-    assert!(messages.iter().any(|s| s.contains("spotState")));
+    let mut types = messages
+        .iter()
+        .map(|message| {
+            serde_json::from_str::<serde_json::Value>(message).unwrap()["subscription"]["type"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    types.sort();
+    assert_eq!(
+        types,
+        [
+            "allMids",
+            "notification",
+            "spotState",
+            "userFills",
+            "userNonFundingLedgerUpdates"
+        ]
+    );
     for excluded in ["fastAssetCtxs", "clearinghouseState", "activeAssetData"] {
         assert!(!messages.iter().any(|s| s.contains(excluded)));
     }
@@ -983,4 +1002,50 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
         )));
         assert!(e.store().loaded().balance);
     }
+}
+
+#[test]
+fn spot_fill_frames_keep_native_order_identity_and_each_distinct_execution() {
+    let (mut e, s) = ready(true);
+    e.take_frame(1000.0);
+    let fills = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"PURR/USDC","side":"B","px":"0.2","sz":"0.5","time":2000,"tid":12345,"oid":900},{"coin":"PURR/USDC","side":"B","px":"0.2","sz":"0.25","time":2001,"tid":12346,"oid":900}]}}"#;
+    support::message(&mut e, s, 2001.0, fills);
+    support::message(&mut e, s, 2001.0, fills);
+    let frame = e.take_frame(2001.0).unwrap();
+    let read =
+        |offset: usize| u32::from_le_bytes(frame[offset..offset + 4].try_into().unwrap()) as usize;
+    let mut offset = 16;
+    let mut fills_payload = None;
+    let mut strings_payload = None;
+    while offset + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[offset..offset + 2].try_into().unwrap());
+        let size = read(offset + 4);
+        match kind {
+            11 => fills_payload = Some(offset + 8),
+            1 => strings_payload = Some(offset + 8),
+            _ => {}
+        }
+        offset += 8 + size;
+    }
+    let fills = fills_payload.unwrap();
+    assert_eq!(read(fills), 2);
+    let strings = strings_payload.unwrap();
+    let text = strings + 4 + (read(strings) + 1) * 4;
+    for i in 0..2 {
+        let index = read(fills + 4 + i * 4);
+        let start = read(strings + 4 + index * 4);
+        let end = read(strings + 8 + index * 4);
+        assert_eq!(&frame[text + start..text + end], b"900");
+    }
+    // Three u32 columns follow count; the numeric rows begin at the next 8-byte boundary.
+    let numbers = (fills + 4 + 2 * 3 * 4).next_multiple_of(8);
+    let amount = |i: usize| {
+        f64::from_le_bytes(
+            frame[numbers + i * 16 + 8..numbers + i * 16 + 16]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    assert_eq!(amount(0), 0.5);
+    assert_eq!(amount(1), 0.25);
 }

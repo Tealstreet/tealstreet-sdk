@@ -179,6 +179,8 @@ const KNOWN_TS_FIXES = {
       'Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.',
       'Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).',
       'Return the SDK string-array contract for resting and immediately filled orders.',
+      'Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.',
+      'Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.',
       'Keep absent spot oracle/funding fields finite instead of emitting NaN.',
       'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
       'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',

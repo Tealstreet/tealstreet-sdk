@@ -53,6 +53,11 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquidspot.ws-public.ts`   | Spot public WebSocket.                                                                 |
 | `hyperliquidspot.ws-private.ts`  | Spot private WebSocket.                                                                |
 
+Spot private subscriptions use current `spotState`, `userFills`, notifications
+and non-funding ledger updates. `activeAssetData` supports perpetuals only;
+legacy balance response parsing remains for compatibility. Spot fill callbacks
+preserve execution `tid` as `id` and native `oid` as `orderId` for chasers.
+
 ### Other
 
 | File                                   | Description                                                                                           |

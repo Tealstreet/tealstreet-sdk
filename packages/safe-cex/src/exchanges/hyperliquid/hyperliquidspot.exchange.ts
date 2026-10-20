@@ -185,7 +185,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
     }
 
     // Prime spot balances via REST to avoid blank spot margin module while
-    // waiting for websocket delivery of spotClearinghouseState.
+    // waiting for websocket delivery of spotState.
     await this.refreshSpotBalance(true);
 
     this.log(`Ready to watch public data on Hyperliquid Spot`);
