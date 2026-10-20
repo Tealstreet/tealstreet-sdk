@@ -125,8 +125,11 @@ struct OrderTime<'a> {
     created_time: Cow<'a, str>,
     #[serde(default, borrow)]
     last_fill_time: Cow<'a, str>,
-    #[serde(default, deserialize_with = "crate::account_wire::optional_decimal")]
-    average_filled_price: Option<Decimal>,
+    #[serde(
+        default,
+        deserialize_with = "safe_cex_engine::de::optional_number_or_blank"
+    )]
+    average_filled_price: Option<f64>,
 }
 #[derive(Deserialize)]
 struct TradeRow<'a> {
@@ -553,7 +556,7 @@ impl Coinbase {
                         kind: o.kind,
                         status: o.status,
                         price: (o.price > 0.0).then_some(o.price),
-                        average_price: time.average_filled_price.map(|v| v.0).filter(|n| *n > 0.0),
+                        average_price: time.average_filled_price.filter(|n| *n > 0.0),
                         amount: o.amount / scale,
                         filled: o.filled / scale,
                         reduce_only: o.reduce_only,

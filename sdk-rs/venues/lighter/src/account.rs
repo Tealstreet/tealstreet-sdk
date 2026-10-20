@@ -1,5 +1,6 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::de::number;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
@@ -89,23 +90,6 @@ pub struct Snapshot {
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Num(#[serde(deserialize_with = "number")] f64);
-fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Atom<'a>(#[serde(borrow, deserialize_with = "atom")] Cow<'a, str>);

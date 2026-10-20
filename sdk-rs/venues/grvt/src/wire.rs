@@ -2,38 +2,7 @@
 use serde::{Deserialize, Deserializer, de};
 use std::{borrow::Cow, fmt, ops::Deref};
 pub type Str<'a> = Cow<'a, str>;
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(transparent)]
-pub struct Number(#[serde(deserialize_with = "number")] pub f64);
-fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    struct Visitor;
-    impl de::Visitor<'_> for Visitor {
-        type Value = f64;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("finite number or numeric string")
-        }
-        fn visit_f64<E: de::Error>(self, v: f64) -> Result<f64, E> {
-            if v.is_finite() {
-                Ok(v)
-            } else {
-                Err(E::custom("nonfinite number"))
-            }
-        }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<f64, E> {
-            Ok(v as f64)
-        }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<f64, E> {
-            Ok(v as f64)
-        }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<f64, E> {
-            v.parse::<f64>()
-                .ok()
-                .filter(|v| v.is_finite())
-                .ok_or_else(|| E::custom("invalid number"))
-        }
-    }
-    d.deserialize_any(Visitor)
-}
+pub use safe_cex_engine::de::Number;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Text<'a>(pub Cow<'a, str>);
 impl Deref for Text<'_> {
@@ -221,24 +190,10 @@ pub struct SubscriptionResult<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DeltaNumber(pub f64);
+// Ticker deltas send "" for a cleared value; absent fields stay `None`.
 impl<'de> Deserialize<'de> for DeltaNumber {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Input<'a> {
-            Text(#[serde(borrow)] &'a str),
-            Numeric(Number),
-        }
-        match Input::deserialize(d)? {
-            Input::Text("") => Ok(Self(0.)),
-            Input::Text(s) => s
-                .parse::<f64>()
-                .ok()
-                .filter(|v| v.is_finite())
-                .map(Self)
-                .ok_or_else(|| de::Error::custom("Invalid ticker number")),
-            Input::Numeric(n) => Ok(Self(n.0)),
-        }
+        safe_cex_engine::de::number_or_zero(d).map(Self)
     }
 }
 

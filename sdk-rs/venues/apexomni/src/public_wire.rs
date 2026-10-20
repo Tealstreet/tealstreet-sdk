@@ -3,44 +3,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Text(Cow<'a, str>),
-        Number(f64),
-    }
-    let n = match N::deserialize(d)? {
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-        N::Number(n) => n,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Text(Cow<'a, str>),
-        Number(f64),
-    }
-    let Some(value) = Option::<N<'_>>::deserialize(d)? else {
-        return Ok(None);
-    };
-    let value = match value {
-        N::Text(text) if text.is_empty() => return Ok(None),
-        N::Text(text) => text.parse().map_err(serde::de::Error::custom)?,
-        N::Number(n) => n,
-    };
-    if value.is_finite() {
-        Ok(Some(value))
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
+pub use safe_cex_engine::de::{number, optional_number_or_blank};
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Contract<'a> {
@@ -76,7 +39,7 @@ pub struct Contract<'a> {
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub code: Option<f64>,
     #[serde(default, borrow)]
     pub data: Option<&'a RawValue>,
@@ -96,21 +59,21 @@ pub struct Message<'a> {
 pub struct Tick<'a> {
     #[serde(borrow)]
     pub s: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub p: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub mp: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub xp: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub pr: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub o: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub fr: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub v: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number", rename = "to")]
+    #[serde(default, deserialize_with = "optional_number_or_blank", rename = "to")]
     pub turnover: Option<f64>,
 }
 #[derive(Deserialize)]

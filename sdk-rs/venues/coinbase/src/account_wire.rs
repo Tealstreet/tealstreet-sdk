@@ -1,65 +1,9 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Decimal(pub f64);
-impl<'de> Deserialize<'de> for Decimal {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Number<'a> {
-            Text(#[serde(borrow)] Cow<'a, str>),
-            Bare(f64),
-        }
-        let value = match Number::deserialize(d)? {
-            Number::Bare(v) => v,
-            Number::Text(s) => {
-                let digits = s.strip_prefix('-').unwrap_or(&s);
-                if digits.is_empty()
-                    || digits.bytes().filter(|b| *b == b'.').count() > 1
-                    || !digits.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-                    || !digits.bytes().any(|b| b.is_ascii_digit())
-                {
-                    return Err(serde::de::Error::custom("invalid decimal"));
-                }
-                s.parse().map_err(serde::de::Error::custom)?
-            }
-        };
-        if !value.is_finite() {
-            return Err(serde::de::Error::custom("nonfinite decimal"));
-        }
-        Ok(Self(value))
-    }
-}
-pub fn optional_decimal<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Decimal>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Field<'a> {
-        Text(#[serde(borrow)] Cow<'a, str>),
-        Number(f64),
-        Null,
-    }
-    match Field::deserialize(d)? {
-        Field::Null => Ok(None),
-        Field::Text(s) if s.is_empty() => Ok(None),
-        Field::Text(s) => {
-            let value = s.parse::<f64>().map_err(serde::de::Error::custom)?;
-            if value.is_finite() {
-                Ok(Some(Decimal(value)))
-            } else {
-                Err(serde::de::Error::custom("nonfinite decimal"))
-            }
-        }
-        Field::Number(value) => {
-            if value.is_finite() {
-                Ok(Some(Decimal(value)))
-            } else {
-                Err(serde::de::Error::custom("nonfinite decimal"))
-            }
-        }
-    }
-}
+pub use safe_cex_engine::de::Number as Decimal;
+use safe_cex_engine::de::optional_number_or_blank;
 #[derive(Clone, Deserialize)]
 pub struct Portfolio {
     pub uuid: String,
@@ -169,10 +113,10 @@ pub struct OrderRow<'a> {
     pub limit_price: Cow<'a, str>,
     #[serde(default, borrow)]
     pub stop_price: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub average_filled_price: Option<Decimal>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub avg_price: Option<Decimal>,
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
+    pub average_filled_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
+    pub avg_price: Option<f64>,
     #[serde(default, borrow)]
     pub order_configuration: Option<Configuration<'a>>,
     #[serde(default)]

@@ -1,28 +1,7 @@
 //! Borrowed public rows; numeric strings are decoded directly.
-use serde::{Deserialize, Deserializer};
+pub use safe_cex_engine::de::{number, optional_number};
+use serde::Deserialize;
 use std::borrow::Cow;
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(t) => t.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|v| v.0))
-}
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(default, borrow)]

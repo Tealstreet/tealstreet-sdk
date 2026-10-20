@@ -2,6 +2,7 @@
 pub mod book;
 pub mod command;
 pub mod credentials;
+pub mod de;
 pub mod engine;
 pub mod json;
 pub mod model;

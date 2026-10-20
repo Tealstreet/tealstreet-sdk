@@ -138,9 +138,7 @@ impl Account {
     }
 }
 fn decimal(s: &str) -> Result<f64, String> {
-    let parsed: wire::Decimal = serde_json::from_str(&serde_json::to_string(s).unwrap())
-        .map_err(|_| "Coinbase invalid decimal")?;
-    Ok(parsed.0)
+    safe_cex_engine::num::parse_decimal(s).ok_or_else(|| "Coinbase invalid decimal".into())
 }
 fn unsigned(s: &str) -> Result<f64, String> {
     let n = decimal(s)?;
@@ -353,14 +351,14 @@ fn map_order_with_unit(
             price = unsigned(&config.limit_price)?;
         }
         if kind == OrderType::Market {
-            price = r.average_filled_price.map_or(0.0, |n| n.0);
+            price = r.average_filled_price.unwrap_or(0.0);
         }
         unit = configuration_unit(c)?;
         amount = if !config.base_size.is_empty() {
             unsigned(&config.base_size)?
         } else {
             let average = if kind == OrderType::Market {
-                r.average_filled_price.map_or(0.0, |n| n.0)
+                r.average_filled_price.unwrap_or(0.0)
             } else {
                 price
             };
@@ -426,7 +424,7 @@ fn map_order_with_unit(
             SizeUnit::Unknown => return Err("Coinbase user order sizing provenance missing".into()),
             SizeUnit::Quote => {
                 let conversion = if kind == OrderType::Market {
-                    r.avg_price.or(r.average_filled_price).map_or(0.0, |n| n.0)
+                    r.avg_price.or(r.average_filled_price).unwrap_or(0.0)
                 } else {
                     unsigned(&r.limit_price)?
                 };
@@ -476,7 +474,7 @@ fn map_order_with_unit(
     {
         return Err("Coinbase invalid order economics".into());
     }
-    let average = r.avg_price.or(r.average_filled_price).map_or(0.0, |n| n.0);
+    let average = r.avg_price.or(r.average_filled_price).unwrap_or(0.0);
     if average < 0.0 || (filled > 0.0 && average <= 0.0) || !(average * filled * scale).is_finite()
     {
         return Err("Coinbase filled order lacks valid cumulative execution price".into());
@@ -1390,7 +1388,7 @@ impl Coinbase {
                                 original
                                     .avg_price
                                     .or(original.average_filled_price)
-                                    .map_or(0.0, |n| n.0),
+                                    .unwrap_or(0.0),
                             )
                             .ok();
                             map_order_with_unit(cx.store, &pending.text, cx.now, Some(unit), amount)

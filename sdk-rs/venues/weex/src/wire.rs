@@ -4,29 +4,7 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse::<f64>().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
+pub use safe_cex_engine::de::{number, optional_number};
 
 pub fn timestamp(n: f64) -> f64 {
     if n >= 1e18 {
@@ -263,12 +241,10 @@ impl<'de> Deserialize<'de> for CandleRow {
                 self,
                 mut seq: A,
             ) -> Result<Self::Value, A::Error> {
-                #[derive(Deserialize)]
-                struct N(#[serde(deserialize_with = "number")] f64);
                 let mut n = [0.0; 6];
                 for slot in &mut n {
                     *slot = seq
-                        .next_element::<N>()?
+                        .next_element::<safe_cex_engine::de::Number>()?
                         .ok_or_else(|| serde::de::Error::custom("short candle"))?
                         .0;
                 }

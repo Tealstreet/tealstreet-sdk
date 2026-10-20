@@ -2,28 +2,7 @@
 use serde::Deserialize;
 use std::borrow::Cow;
 
-pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => Ok(n),
-        N::Text(s) => s.trim().parse().map_err(serde::de::Error::custom),
-    }?;
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
-pub fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
+pub use safe_cex_engine::de::{number, optional_number};
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(borrow)]

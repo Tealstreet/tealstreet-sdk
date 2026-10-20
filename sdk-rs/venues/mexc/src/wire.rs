@@ -4,23 +4,7 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(n) => n.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
+pub use safe_cex_engine::de::{number, optional_number};
 
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
@@ -328,11 +312,6 @@ pub struct DealRow<'a> {
     pub vol: f64,
 }
 
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeverageRow {
