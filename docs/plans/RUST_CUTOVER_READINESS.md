@@ -103,3 +103,11 @@ consumer adoption remain explicit blockers.
   introduce no venue protocol divergence or new `KNOWN_TS_FIXES` entry.
   Push/open the PR into `feat/rust-rewrite`, publish review findings/fixes,
   verify its exact-head CI, merge on green and cut the follow-up branch.
+- Opened [PR #1330](https://github.com/Tealstreet/tealstreet-sdk/pull/1330)
+  into `feat/rust-rewrite` and posted phase/pre-PR findings and fixes. Final
+  production code-correctness review is clear; its documentation clarification
+  now states Polymarket's development-only status, disabled chasers and native
+  1x rails explicitly. Generic algorithm cases do not enable venue features.
+  The native proof/inventory review is also clear after adding the metadata
+  conformance file to the caller inventory. Remaining independent PR review and
+  exact-head CI are in progress.

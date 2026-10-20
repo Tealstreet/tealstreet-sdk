@@ -385,8 +385,11 @@ registries remains a separate cutover decision.
   are deliberately reopenable unless explicitly marked final.
 
 These tests do not certify private live connectivity, optional account modes,
-or downstream tealstreet-next deployment. Native venue/private replay and
-performance matrices remain required alongside consumer conformance.
+or downstream tealstreet-next deployment. Generic per-alias algorithm fixtures
+prove the shared frame/store contract; they do not enable venue capabilities.
+Polymarket remains development-only (`enabled: false`, `enabledInDev: true`),
+with `supportsChaser: false` and native 1x leverage rails. Native venue/private
+replay and performance matrices remain required alongside consumer conformance.
 
 #### Per-venue deletion readiness
 
@@ -418,7 +421,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `phemex` | Opt-in; retain account identity/native protocol and broker helper. |
 | `weex` | Opt-in; preserve host/header/routing evidence. |
 | `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
-| `polymarket` | Opt-in prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
+| `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `grvt`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
