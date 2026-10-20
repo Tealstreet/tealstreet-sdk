@@ -1063,7 +1063,7 @@ impl AsterDex {
             }
         }
         // REST progress describes order state, not executions already delivered to the caller.
-        if let (Some((price, qty)), Some(filled)) = (fill, finite(&o.z)) {
+        if let (Some((price, qty)), Some(filled)) = (fill, parse_decimal(&o.z)) {
             let execution_previous = self.account.execution_progress(&id, filled);
             if execution.is_none() && filled > execution_previous {
                 cx.fill(Fill {
