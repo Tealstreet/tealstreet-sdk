@@ -3,6 +3,7 @@ pub mod book;
 pub mod command;
 pub mod credentials;
 pub mod engine;
+pub mod error;
 pub mod json;
 pub mod model;
 pub mod num;
@@ -21,6 +22,7 @@ pub use engine::{
     PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
     SocketContext, SocketId, TimerId, Venue,
 };
+pub use error::{ErrorKind, Outcome, Partial, VenueError};
 pub use store::Store;
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
