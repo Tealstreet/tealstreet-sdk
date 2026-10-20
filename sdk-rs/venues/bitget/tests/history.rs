@@ -373,3 +373,49 @@ fn inverse_fill_without_fee_coin_uses_the_symbol_collateral() {
     assert_eq!(result(&h)[0]["commissionAsset"], "ETH");
     assert_eq!(result(&h)[0]["commission"], 0.0001);
 }
+
+/// Pins the exact request sequence of a windowed, cursor-paged read: 30-day
+/// windows oldest first, the first walked over two cursor pages. Paging
+/// refactors keep it.
+#[test]
+fn windowed_fill_request_sequence_is_pinned() {
+    let mut h = Harness::classic();
+    let day = 86_400_000.0;
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: Some(45.0 * day),
+            limit: Some(100),
+        },
+    );
+    let mut sent = Vec::new();
+    for (i, cursor) in [("1", "c1"), ("2", ""), ("3", "")] {
+        if !sent.is_empty() {
+            h.timer_after(100.0);
+        }
+        let r = h.take("/order/fills");
+        sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+        let rows = if cursor.is_empty() {
+            json!([])
+        } else {
+            json!([fill(i, "buy", "buy_single")])
+        };
+        h.reply(
+            r.id,
+            200,
+            &json!({"code":"00000","data":{"fillList":rows,"endId":cursor}}).to_string(),
+        );
+    }
+    assert!(h.done.iter().any(|(id, r)| *id == 42 && r.is_ok()));
+    assert_eq!(
+        sent,
+        [
+            "v2/mix/order/fills?productType=usdt-futures&limit=100&startTime=0&endTime=2591999999",
+            "v2/mix/order/fills?productType=usdt-futures&limit=100&startTime=0&endTime=2591999999&idLessThan=c1",
+            "v2/mix/order/fills?productType=usdt-futures&limit=100&startTime=2592000000&endTime=3888000000",
+        ]
+    );
+}

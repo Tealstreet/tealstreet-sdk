@@ -50,6 +50,9 @@ impl KrakenSpot {
         if o.client_order_id.is_some() {
             return Err("Kraken Spot does not support caller client order IDs".into());
         }
+        if o.trigger_price.is_some() && !o.redundant_protective_trigger() {
+            return Err("Kraken Spot triggerPrice must match the stop price".into());
+        }
         let m = cx
             .store
             .market(&o.symbol)

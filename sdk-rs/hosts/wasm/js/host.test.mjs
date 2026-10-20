@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
+import { EngineHost, ExchangeError, nativeTransport, socketMessages } from './host.mjs';
 
 test('account identity is read from the live engine and unavailable after disposal', () => {
   let account;
@@ -707,4 +707,27 @@ test('delegated header names and CR/LF fail before encoding or making HTTP reque
     assert.equal(host.signings.size, 0);
     host.dispose();
   }
+});
+
+test('a classified failure settles as an ExchangeError with its detail and the legacy message', async () => {
+  const detail = {
+    message: 'leg 2 rejected', kind: 'rejected', outcome: 'rejected', venueCode: '40015',
+    partial: { orderIds: ['a'], total: 2, failedIndex: 1 },
+  };
+  const legacy = JSON.stringify({ message: 'leg 2 rejected', partialOrderIds: ['a'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1 });
+  const host = new EngineHost({
+    start() { return '[]'; },
+    command(json) { const { command } = JSON.parse(json); return JSON.stringify([{ op: 'done', command, error: legacy, detail }]); },
+  }, { now: () => 1, setTimeout: () => 0, clearTimeout() {} });
+  const error = await host.command({ op: 'placeOrders', orders: [] }).catch((e) => e);
+  assert.ok(error instanceof ExchangeError);
+  assert.equal(error.name, 'Error');
+  assert.equal(error.message, 'leg 2 rejected');
+  assert.equal(error.kind, 'rejected');
+  assert.equal(error.outcome, 'rejected');
+  assert.equal(error.venueCode, '40015');
+  assert.deepEqual(error.partialOrderIds, ['a']);
+  assert.equal(error.partialOrderCount, 1);
+  assert.equal(error.totalOrderCount, 2);
+  assert.equal(error.failedOrderIndex, 1);
 });

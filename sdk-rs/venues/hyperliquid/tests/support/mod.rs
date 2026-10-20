@@ -2,6 +2,7 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 pub const META: &str = r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100","prevDayPx":"90"},{"midPx":"200","markPx":"200","oraclePx":"200"}]]"#;
+pub const HIP3_META: &str = r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10,"marginMode":"strictIsolated"}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#;
 pub const STATE: &str = r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","liquidationPx":"50","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20"},"time":1000}"#;
 pub fn reply(e: &mut Engine<Hyperliquid>, r: &HttpRequest, status: u16, body: &str) {
     e.handle(
@@ -50,6 +51,7 @@ pub fn ready_identity(
         approval,
         vault,
         safe_cex_engine::PublicFeedPolicy::Direct,
+        HIP3_META,
     );
     (engine, socket)
 }
@@ -57,7 +59,19 @@ pub fn ready_with_policy(
     mode: &str,
     policy: safe_cex_engine::PublicFeedPolicy,
 ) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
-    ready_identity_policy(mode, true, None, "30", None, policy)
+    ready_identity_policy(mode, true, None, "30", None, policy, HIP3_META)
+}
+pub fn ready_with_hip3_meta(hip_meta: &str) -> (Engine<Hyperliquid>, SocketId) {
+    let (engine, socket, _) = ready_identity_policy(
+        "disabled",
+        true,
+        None,
+        "30",
+        None,
+        safe_cex_engine::PublicFeedPolicy::Direct,
+        hip_meta,
+    );
+    (engine, socket)
 }
 fn ready_identity_policy(
     mode: &str,
@@ -66,6 +80,7 @@ fn ready_identity_policy(
     approval: &str,
     vault: Option<String>,
     policy: safe_cex_engine::PublicFeedPolicy,
+    hip_meta: &str,
 ) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
     let mut e = Engine::new(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
@@ -91,7 +106,7 @@ fn ready_identity_policy(
                         .unwrap()["dex"]
                         .as_str()
                         .map(str::to_owned);
-                    let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10,"marginMode":"strictIsolated"}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>approval.into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
+                    let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>hip_meta.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>approval.into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
                     reply(&mut e, &r, 200, &body);
                 }
                 Action::WsConnect { socket: s, .. } => {

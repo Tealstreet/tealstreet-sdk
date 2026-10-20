@@ -72,6 +72,36 @@ function interruptedCommand(error, command, interrupted) {
   commandReceiptSnapshot(error, command);
 }
 
+const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'authInvalid', 'authExpired', 'authPermission',
+  'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
+const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
+const text = (value) => (typeof value === 'string' && value ? value : undefined);
+const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
+
+/** A classified venue failure (`engine/src/error.rs`). `message` is the text
+ * hosts have always shown; `name` stays `Error` so displayed text is unchanged. */
+export class ExchangeError extends Error {
+  constructor(message, detail = {}) {
+    super(message);
+    if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
+    if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
+    const venueCode = text(detail.venueCode);
+    if (venueCode) this.venueCode = venueCode;
+    const venueMessage = text(detail.venueMessage);
+    if (venueMessage) this.venueMessage = venueMessage;
+    if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
+    const ids = detail.partial?.orderIds;
+    if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
+      this.partialOrderIds = [...ids];
+      this.partialOrderCount = ids.length;
+      const total = count(detail.partial.total);
+      if (total !== undefined) this.totalOrderCount = total;
+      const failedIndex = count(detail.partial.failedIndex);
+      if (failedIndex !== undefined) this.failedOrderIndex = failedIndex;
+    }
+  }
+}
+
 export class CommandTimeoutError extends Error {
   constructor(timeoutMs, command) {
     super(`Engine command timed out after ${timeoutMs} ms`);
@@ -601,7 +631,12 @@ export class EngineHost {
           this.commandProgress(action.command, [], true, true);
           break;
         }
-        if (action.error !== undefined) {
+        if (action.error !== undefined && action.detail && typeof action.detail.message === 'string') {
+          const error = new ExchangeError(action.detail.message, action.detail);
+          commandReceiptSnapshot(error, pending.identity);
+          this.settleCommand(action.command, error, true);
+        }
+        else if (action.error !== undefined) {
           const error = new Error(action.error);
           try {
             const details = JSON.parse(action.error);
