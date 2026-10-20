@@ -61,7 +61,7 @@ export interface VenueErrorDetail {
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
-  partial?: { orderIds: string[]; total: number; failedIndex: number };
+  partial?: { orderIds: string[]; total?: number; failedIndex?: number };
 }
 
 export interface EngineHandlers {
@@ -121,6 +121,25 @@ export interface CommandIdentity {
   receiptKey?: string;
   commandId?: number;
   orderIdentities?: readonly OrderIdentityReceipt[];
+}
+
+/** A classified venue failure built from the engine's `detail`; `message` is unchanged venue text. */
+export class ExchangeError extends Error {
+  constructor(message: string, detail?: VenueErrorDetail);
+  readonly kind?: NonNullable<VenueErrorDetail['kind']>;
+  /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
+  readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
+  readonly venueCode?: string;
+  readonly venueMessage?: string;
+  readonly retryAfterMs?: number;
+  readonly partialOrderIds?: string[];
+  readonly partialOrderCount?: number;
+  readonly totalOrderCount?: number;
+  readonly failedOrderIndex?: number;
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 export class CommandTimeoutError extends Error {

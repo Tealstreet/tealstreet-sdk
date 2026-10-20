@@ -368,7 +368,7 @@ fn partial_batch_success_and_cancel_failures_preserve_known_venue_state() {
         .expect("partial batch failure");
     let partial = failure.partial.as_deref().expect("accepted ids");
     assert_eq!(partial.order_ids, ["one"]);
-    assert_eq!((partial.total, partial.failed_index), (2, 1));
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
     assert!(failure.message.contains("bad volume"), "{failure:?}");
     assert!(
         failure
