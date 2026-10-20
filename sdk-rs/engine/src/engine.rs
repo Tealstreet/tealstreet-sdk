@@ -884,17 +884,12 @@ impl<P> Cx<'_, P> {
 
     /// Unstructured shim kept until venues emit [`Cx::event`].
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        let enabled = match level {
-            LogLevel::Info => Level::Info,
-            LogLevel::Warning => Level::Warn,
-            LogLevel::Error => Level::Error,
-        };
-        if self.logs(enabled) {
-            self.io.actions.push(Action::Notice(Notice::Log {
-                level,
-                message: crate::log::cap(message.into()),
-            }));
-        }
+        push_log(
+            &mut self.io.actions,
+            self.io.min_level,
+            level,
+            message.into(),
+        );
     }
 
     /// Whether an event at `level` reaches the host; check before formatting
@@ -909,25 +904,20 @@ impl<P> Cx<'_, P> {
         level: Level,
         code: &'static str,
         message: impl Into<String>,
-        fields: impl IntoIterator<Item = (&'static str, Value)>,
+        fields: Vec<(&'static str, Value)>,
     ) {
-        self.io.health.count(code);
-        if !self.logs(level) {
-            return;
-        }
-        let fields = fields
-            .into_iter()
-            .map(|(key, value)| match value {
-                Value::Str(text) => (key, Value::Str(crate::log::cap(text))),
-                value => (key, value),
-            })
-            .collect();
-        self.io.actions.push(Action::Notice(Notice::Event(LogEvent {
-            level,
-            code,
-            message: crate::log::cap(message.into()),
-            fields,
-        })));
+        let io = &mut *self.io;
+        push_event(
+            &mut io.actions,
+            &mut io.health,
+            io.min_level,
+            LogEvent {
+                level,
+                code,
+                message: message.into(),
+                fields,
+            },
+        );
     }
 
     pub fn deactivate(&mut self) {
@@ -1427,7 +1417,7 @@ impl<V: Venue> Engine<V> {
                     Level::Debug,
                     log_code::WS_CLOSED,
                     "WebSocket closed",
-                    [("socket", socket.0.into()), ("code", code.into())],
+                    vec![("socket", socket.0.into()), ("code", code.into())],
                 );
                 self.venue.on_close(&mut cx, socket, code)
             }
@@ -1494,7 +1484,7 @@ impl<V: Venue> Engine<V> {
                         Level::Debug,
                         log_code::HTTP_FAILED,
                         "HTTP request failed",
-                        [],
+                        Vec::new(),
                     );
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
@@ -1667,14 +1657,14 @@ impl<V: Venue> Engine<V> {
                 Level::Debug,
                 log_code::RATE_LIMITED,
                 "HTTP rate limited",
-                [],
+                Vec::new(),
             );
         } else if status >= 500 {
             cx.event(
                 Level::Debug,
                 log_code::HTTP_FAILED,
                 "HTTP server error",
-                [("status", status.into())],
+                vec![("status", status.into())],
             );
         }
         // A 2xx without the expected array (an error envelope, a truncated
@@ -2002,6 +1992,43 @@ fn apply_signature(
         }
     }
     Ok(())
+}
+
+// Out of line and free of `Cx`'s type parameter: hundreds of venue call sites
+// would otherwise each inline a copy (the per-venue wasm budget is tight).
+#[inline(never)]
+fn push_log(actions: &mut Vec<Action>, min_level: Level, level: LogLevel, message: String) {
+    let enabled = match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warn,
+        LogLevel::Error => Level::Error,
+    };
+    if enabled >= min_level {
+        actions.push(Action::Notice(Notice::Log {
+            level,
+            message: crate::log::cap(message),
+        }));
+    }
+}
+
+#[inline(never)]
+fn push_event(
+    actions: &mut Vec<Action>,
+    health: &mut Health,
+    min_level: Level,
+    mut event: LogEvent,
+) {
+    health.count(event.code);
+    if event.level < min_level {
+        return;
+    }
+    event.message = crate::log::cap(event.message);
+    for (_, value) in &mut event.fields {
+        if let Value::Str(text) = value {
+            *text = crate::log::cap(std::mem::take(text));
+        }
+    }
+    actions.push(Action::Notice(Notice::Event(event)));
 }
 
 #[cfg(test)]

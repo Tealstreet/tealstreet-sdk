@@ -133,8 +133,7 @@ pub mod code {
 }
 
 /// Counters since engine construction, read by hosts through `getHealth()`.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Health {
     pub ws_opened: u32,
     pub ws_closed: u32,

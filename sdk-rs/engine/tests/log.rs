@@ -32,7 +32,7 @@ impl Venue for Logger {
                     level,
                     code::SNAPSHOT_DISCARDED,
                     message,
-                    [
+                    vec![
                         ("body", Value::from(message)),
                         ("secret", Redacted("api-secret").into()),
                         ("count", 3u32.into()),
