@@ -1,4 +1,5 @@
 import { isWriteRequest } from './requests.mjs';
+import { tapeHeaders } from './tape-fields.mjs';
 
 // Polling transports have HTTP activity and loaded state, without a socket.
 export const replayTransportReady = (venue, openSockets, loaded = true) =>
@@ -70,7 +71,8 @@ export const createRecordingPolicy = (venue, options, credentialed = false) => {
   return {
     replayOptions,
     sanitize(record) {
-      if (!session) return record;
+      if (!session) return Object.hasOwn(record, 'headers') ? { ...record,
+        headers: tapeHeaders(record.headers).map(([name, value]) => `${name}: ${value}`).join('\n') } : record;
       for (const field of ['body', 'requestBody']) {
         try { collectSecrets(JSON.parse(record[field]), secrets); } catch { /* Not JSON. */ }
       }

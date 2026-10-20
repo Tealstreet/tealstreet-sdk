@@ -144,7 +144,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   const secrets = {};
   const credentialEnv = {};
   const read = (path, suffix, required) => {
-    const variable = `RUST_LIVE_SMOKE_${profile.family}_${suffix}`;
+    const variable = `RUST_LIVE_SMOKE_${profile.family}_${mode.toUpperCase()}_${suffix}`;
     credentialEnv[path] = variable;
     const value = env[variable];
     if (value === undefined || value === '') {
@@ -243,6 +243,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   return {
     venue: name, mode, availableModes, options, secrets,
+    // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
+    postOnly: !['bitrue', 'polymarket'].includes(name),
     leverage: ['bybitspot', 'coinbasespot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },

@@ -1159,3 +1159,13 @@ Rust secondary GET parity includes Spot and COIN-M. Spot uses the selected GET
 client for unsigned catalog/ticker/candle reads, stripping credentials while
 retaining its egress. USD-M/PM/COIN-M separate public clients bypass account
 egress; signed GETs use read credentials and writes/WS auth stay primary.
+
+
+## Security audit: post-only amendments
+
+USD-M REST open-order and private-stream NEW mappers retain native time-in-force.
+Cancel-and-replace `updateOrder` copies that value onto the replacement, so a
+GTX maker order stays post-only when repriced instead of silently becoming GTC.
+The security live-smoke runner checks both writes on its scripted transport; its
+TS/Rust replay keeps time-in-force in strict write identity. This paired TS fix
+changes no order size, identity, cancellation or retry contract.

@@ -922,6 +922,7 @@ export class BinanceExchange extends BaseExchange {
           status: OrderStatus.Open,
           symbol: o.symbol,
           type: ORDER_TYPE[o.type],
+          timeInForce: TIME_IN_FORCE[o.timeInForce],
           side: ORDER_SIDE[o.side],
           price: parseFloat(o.price) || parseFloat(v(o, 'stopPrice')),
           amount: parseFloat(v(o, 'origQty')),
@@ -1608,6 +1609,7 @@ export class BinanceExchange extends BaseExchange {
       side: order.side,
       price: order.price,
       amount: order.amount,
+      timeInForce: order.timeInForce,
       reduceOnly: order.reduceOnly || false,
       close: order.close || false,
     };

@@ -13,6 +13,7 @@ import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
 import { replayStoreReady } from './tape.mjs';
+import { tapeHeaders } from './tape-fields.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -122,7 +123,7 @@ const recording = {
         url: request.url,
         ...(request.body === undefined ? {} : { requestBody: request.body }),
         status: response.status,
-        headers: response.headers ?? '',
+        headers: tapeHeaders(response.headers).map(([name, value]) => `${name}: ${value}`).join('\n'),
         body,
       });
       if (response.status >= 200 && response.status < 300) httpResponses++;

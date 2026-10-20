@@ -546,3 +546,46 @@ test('unrecordable UTF8 response bytes latch failure for both buffered and strea
     assert.equal(recorder.records.length, 2);
   }
 });
+
+
+test('unknown response extensions and header names cannot persist newly introduced credentials', () => {
+  const scrub = createSmokeRedactor();
+  const safe = scrub.redact({ price: '12.5', orderId: 'order-123',
+    unexpectedExtension: { price: 'previously-unknown-credential' },
+    data: { futureSessionMaterial: 'another-unknown-credential', amount: '2' },
+    note: 'previously-unknown-credential another-unknown-credential' });
+  assert.deepEqual(Object.keys(safe), ['price', 'orderId', 'data', 'note']);
+  assert.deepEqual(safe.data, { amount: '2' });
+  const wire = JSON.stringify(safe);
+  assert.ok(!wire.includes('previously-unknown-credential'));
+  assert.ok(!wire.includes('another-unknown-credential'));
+  assert.equal(safe.price, '12.5');
+  assert.equal(safe.orderId, 'order-123');
+  const headers = scrub.headers('X-Future-Credential: unknown-header-material\nSet-Cookie: session=private-cookie-credential; HttpOnly\nx-request-id: request-1');
+  assert.equal(headers, 'x-request-id: request-1');
+  assert.ok(!scrub.redact('unknown-header-material private-cookie-credential').includes('credential'));
+  const url = scrub.url('https://example.com/account?futurePrivateValue=unknown-query-material&symbol=BTCUSDT');
+  assert.equal(url, 'https://example.com/account?symbol=BTCUSDT');
+  assert.ok(!scrub.redact('unknown-query-material').includes('unknown-query-material'));
+});
+
+
+test('nested form strings and URL strings apply the same positive schema as objects', () => {
+  const scrub = createSmokeRedactor();
+  const safe = scrub.redact({ body: 'unlistedCredential=unknown-form-secret&symbol=BTCUSDT',
+    message: 'https://venue.test/path?unlistedCredential=unknown-url-secret&symbol=BTCUSDT',
+    note: 'unknown-form-secret unknown-url-secret' });
+  assert.equal(safe.body, 'symbol=BTCUSDT');
+  assert.equal(safe.message, 'https://venue.test/path?symbol=BTCUSDT');
+  assert.ok(!JSON.stringify(safe).includes('unknown-form-secret'));
+  assert.ok(!JSON.stringify(safe).includes('unknown-url-secret'));
+  const nested = new URLSearchParams({ tx_info: JSON.stringify({ Price: 100, unlistedCredential: 'nested-json-form-secret' }) });
+  assert.deepEqual(JSON.parse(new URLSearchParams(scrub.redact(nested.toString())).get('tx_info')), { Price: 100 });
+});
+
+
+test('compressed recording bombs fail before an expanded secret-bearing message can be persisted', () => {
+  const scrub = createSmokeRedactor();
+  const oversized = gzipSync(Buffer.alloc(16 * 1024 * 1024 + 1, 'x'));
+  assert.throws(() => scrub.binary(oversized), /cannot safely redact/);
+});

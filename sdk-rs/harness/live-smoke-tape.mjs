@@ -2,12 +2,13 @@
 // enter the tape; the engine and the real transport keep the original bytes.
 import { gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync } from 'node:zlib';
 import { canonicalUrl, isWriteRequest } from './requests.mjs';
+import { TAPE_FIELDS, tapeHeaders } from './tape-fields.mjs';
 import { POLYMARKET_REPLAY } from './polymarket.mjs';
 import { ASTER_PRIVATE_KEY, ASTER_USER, ASTER_SIGNER } from './asterdex-requests.mjs';
 
 const normalized = (name) => String(name).split('.').at(-1).toLowerCase().replace(/[-_]/g, '');
 const credentialNames = new Set(['key', 'apikey', 'secret', 'apisecret', 'privatekey', 'passphrase', 'password', 'authorization', 'cookie', 'setcookie']);
-const sessionNames = new Set(['token', 'accesstoken', 'refreshtoken', 'authtoken', 'sessiontoken', 'sessionkey', 'listenkey', 'jwt', 'jwttoken', 'auth', 'bearer']);
+const sessionNames = new Set(['session', 'sessionid', 'token', 'accesstoken', 'refreshtoken', 'authtoken', 'sessiontoken', 'sessionkey', 'listenkey', 'jwt', 'jwttoken', 'auth', 'bearer']);
 const signatureNames = new Set(['signature', 'sig', 'sign', 'signedchallenge', 'authent']);
 // Header signatures conventionally end in a delimited SIGN (ACCESS-SIGN,
 // KC-API-PARTNER-SIGN, X-CH-SIGN); matching only SIGNATURE misses these.
@@ -60,20 +61,36 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
             : `live-smoke-${sessionNames.has(key) ? 'session' : 'secret'}-${++next}`;
     aliases.set(value, alias);
   };
+  const allowed = (name) => TAPE_FIELDS.has(name) || sensitive(name) || configuredNames.has(normalized(name));
+  const unknown = (value) => {
+    if (typeof value === 'string') remember('secret', value);
+    else if (value && typeof value === 'object') for (const item of Object.values(value)) unknown(item);
+  };
   const discover = (value, name = '') => {
     if (typeof value === 'string') {
-      if (sensitive(name)) remember(name, value);
+      if (sensitive(name) || configuredNames.has(normalized(name))) { remember(name, value); return; }
+      if (['binary', 'base64'].includes(name)) return;
       try {
         const url = new URL(value);
         if (url.username) remember('key', decodeURIComponent(url.username));
         if (url.password) remember('password', decodeURIComponent(url.password));
-        for (const [key, item] of url.searchParams) if (sensitive(key)) remember(key, item);
+        if (!['https:', 'http:', 'wss:', 'ws:'].includes(url.protocol)) throw new Error('not a protocol URL');
+        for (const [key, item] of url.searchParams) {
+          if (sensitive(key)) remember(key, item);
+          else if (!allowed(key)) { remember('secret', key); unknown(item); }
+        }
+        return;
       } catch (error) { if (error instanceof UnrecordableSecret) throw error; /* Plain strings and non-URL payloads. */ }
       if (/^[\s]*[\[{\"]/.test(value)) {
         try { discover(parseJson(value)); } catch (error) { if (error instanceof UnrecordableSecret) throw error; /* Plain text. */ }
       } else if (/(?:^|&)[A-Za-z_%-][^=&]*=/.test(value)) {
-        for (const [key, item] of new URLSearchParams(value)) discover(item, key);
+        for (const [key, item] of new URLSearchParams(value)) {
+          if (allowed(key)) discover(item, key);
+          else { remember('secret', key); unknown(item); }
+        }
       }
+    } else if (Array.isArray(value)) {
+      for (const item of value) discover(item);
     } else if (value && typeof value === 'object' && !JSON.isRawJSON(value)) {
       const method = String(value.method ?? value.op ?? '').toLowerCase();
       if (method === 'auth' && Array.isArray(value.args) && value.args.length === 3) {
@@ -87,7 +104,10 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
       } else if (value.signature && typeof value.signature === 'object') {
         for (const item of Object.values(value.signature)) remember('signature', item);
       }
-      for (const [key, item] of Object.entries(value)) discover(item, key);
+      for (const [key, item] of Object.entries(value)) {
+        if (allowed(key)) discover(item, key);
+        else { remember('secret', key); unknown(item); }
+      }
     }
   };
   // Extra secret labels need not themselves be standard option names.
@@ -131,17 +151,23 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
     value = identity(value, name, path);
     if (typeof value === 'string') {
       if (sensitive(name) || configuredNames.has(normalized(name))) return aliases.get(value) ?? replace(value);
+      if (['binary', 'base64'].includes(name)) return replace(value);
       if (/^[\s]*[\[{\"]/.test(value)) {
         try { return JSON.stringify(visit(parseJson(value))); } catch { /* Plain text. */ }
       }
+      try {
+        const parsed = new URL(value);
+        if (['https:', 'http:', 'wss:', 'ws:'].includes(parsed.protocol)) return url(value, undefined, undefined, false);
+      } catch { /* Plain protocol strings. */ }
       if (/^[A-Za-z_%][\w%.-]*=/.test(value)) {
-        return new URLSearchParams([...new URLSearchParams(value)].map(([key, item]) => [key, visit(item, key, [...path, key])])).toString();
+        return new URLSearchParams([...new URLSearchParams(value)].filter(([key]) => allowed(key)).map(([key, item]) => [key, visit(item, key, [...path, key])])).toString();
       }
       return replace(value);
     }
     if (JSON.isRawJSON(value)) return value;
     if (Array.isArray(value)) return value.map((item) => visit(item, '', path));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [replace(key), visit(item, key, [...path, key])]));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => allowed(key)).map(([key, item]) => [replace(key), visit(item, key, [...path, key])]));
     return value;
   };
   const redact = (value) => { discover(value); return visit(value); };
@@ -149,12 +175,20 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
     const entries = typeof value === 'string'
       ? value.split(/\r?\n/).filter(Boolean).map((line) => { const at = line.indexOf(':'); return [line.slice(0, at), line.slice(at + 1).trim()]; })
       : value instanceof Headers ? [...value] : Array.isArray(value) ? value : Object.entries(value);
-    for (const [name, item] of entries) if (sensitive(name)) remember(name, String(item));
-    return entries.map(([name, item]) => `${name}: ${sensitive(name) ? aliases.get(String(item)) : replace(String(item))}`).join('\n');
+    const safe = (name) => /^(?:content-type|content-encoding|date|retry-after|x-request-id|x-ratelimit-[a-z-]+|ratelimit-[a-z-]+|x-mbx-used-weight(?:-\d+[smhd])?)$/i.test(name);
+    for (const [name, item] of entries) {
+      if (sensitive(name)) remember(name, String(item));
+      else if (!safe(name)) unknown(String(item));
+    }
+    return tapeHeaders(entries).filter(([name]) => safe(name) || sensitive(name))
+      .map(([name, item]) => `${name}: ${sensitive(name) ? aliases.get(String(item)) : replace(String(item))}`).join('\n');
   };
-  const url = (value, callerIds = new Set(), requestVenue = {}) => {
+  const url = (value, callerIds = new Set(), requestVenue = {}, canonicalize = true) => {
     discover(value);
     const parsed = new URL(value);
+    for (const [name, item] of [...parsed.searchParams]) if (!allowed(name)) {
+      remember('secret', name); unknown(item); parsed.searchParams.delete(name);
+    }
     parsed.username = '';
     parsed.password = '';
     if (venue === 'lighter') {
@@ -164,15 +198,17 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
         if (mapped !== item) parsed.searchParams.set(name, mapped);
       }
     }
-    return replace(canonicalUrl(requestVenue.requestUrl?.(parsed.href) ?? parsed.href, callerIds, requestVenue));
+    return replace(canonicalize ? canonicalUrl(requestVenue.requestUrl?.(parsed.href) ?? parsed.href, callerIds, requestVenue) : parsed.href);
   };
   const binary = (bytes) => {
     const input = Buffer.from(bytes);
+    const limit = 16 * 1024 * 1024;
+    if (input.byteLength > limit) throw new Error('Live-smoke binary frame exceeds limit');
     const formats = input[0] === 0x1f && input[1] === 0x8b
       ? [[gunzipSync, gzipSync]] : [[(value) => value, (value) => value], [inflateSync, deflateSync], [inflateRawSync, deflateRawSync]];
     for (const [decode, encode] of formats) {
       try {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(decode(input));
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(decode(input, { maxOutputLength: limit }));
         if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) continue;
         return Buffer.from(encode(Buffer.from(redact(text)))).toString('base64');
       } catch { /* Try a supported compressed text frame. */ }

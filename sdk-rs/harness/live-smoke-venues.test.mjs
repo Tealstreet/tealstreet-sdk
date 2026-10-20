@@ -88,19 +88,19 @@ test('Bitget socket guards reject production subscriptions and unsupported UTA s
 });
 
 test('credential errors reveal names only', () => {
-  assert.throws(() => liveSmokeProfile('binance', 'testnet', {}), /^Error: Missing environment variable RUST_LIVE_SMOKE_BINANCE_KEY$/);
+  assert.throws(() => liveSmokeProfile('binance', 'testnet', {}), /^Error: Missing environment variable RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY$/);
   assert.throws(() => liveSmokeProfile('polymarket', 'mainnet', {
-    RUST_LIVE_SMOKE_POLYMARKET_PRIVATE_KEY: 'private-key-must-not-appear',
-    RUST_LIVE_SMOKE_POLYMARKET_SIGNER_TYPE: 'bad-private-config-must-not-appear',
-  }), /^Error: Invalid environment variable RUST_LIVE_SMOKE_POLYMARKET_SIGNER_TYPE$/);
+    RUST_LIVE_SMOKE_POLYMARKET_MAINNET_PRIVATE_KEY: 'private-key-must-not-appear',
+    RUST_LIVE_SMOKE_POLYMARKET_MAINNET_SIGNER_TYPE: 'bad-private-config-must-not-appear',
+  }), /^Error: Invalid environment variable RUST_LIVE_SMOKE_POLYMARKET_MAINNET_SIGNER_TYPE$/);
 });
 
 test('short credential material refuses before I/O while numeric public indices remain valid', () => {
   assert.throws(() => liveSmokeProfile('binance', 'testnet', {
-    RUST_LIVE_SMOKE_BINANCE_KEY: 'fake-key', RUST_LIVE_SMOKE_BINANCE_SECRET: 'abc',
+    RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY: 'fake-key', RUST_LIVE_SMOKE_BINANCE_TESTNET_SECRET: 'abc',
   }), (error) => error.message.includes('at least four') && !error.message.includes('abc'));
   const lighter = liveSmokeProfile('lighter', 'testnet', {
-    RUST_LIVE_SMOKE_LIGHTER_PRIVATE_KEY: 'fake-signing-key', RUST_LIVE_SMOKE_LIGHTER_ACCOUNT_INDEX: '1', RUST_LIVE_SMOKE_LIGHTER_API_KEY_INDEX: '2',
+    RUST_LIVE_SMOKE_LIGHTER_TESTNET_PRIVATE_KEY: 'fake-signing-key', RUST_LIVE_SMOKE_LIGHTER_TESTNET_ACCOUNT_INDEX: '1', RUST_LIVE_SMOKE_LIGHTER_TESTNET_API_KEY_INDEX: '2',
   });
   assert.equal(lighter.options.applicationId, '1');
   assert.equal(lighter.options.apiKeyIndex, '2');
@@ -121,7 +121,7 @@ test('profiles accept no URL credentials, fragments, insecure schemes, host suff
 });
 
 test('aliases share env names and nested configuration is typed', () => {
-  assert.equal(liveSmokeProfile('bybitinverse', 'testnet', env).credentialEnv.key, 'RUST_LIVE_SMOKE_BYBIT_KEY');
+  assert.equal(liveSmokeProfile('bybitinverse', 'testnet', env).credentialEnv.key, 'RUST_LIVE_SMOKE_BYBIT_TESTNET_KEY');
   const polymarket = liveSmokeProfile('polymarket', 'mainnet', env);
   assert.equal(polymarket.options.polymarket.signerType, 0);
   assert.equal(polymarket.secrets['polymarket.signerType'], undefined);
@@ -147,10 +147,36 @@ test('fresh profile mutation cannot change another profile allowlist or options'
 });
 
 test('Polymarket discovery can be scoped to a bounded public market selection', () => {
-  const env = { RUST_LIVE_SMOKE_POLYMARKET_PRIVATE_KEY: 'fake-private-key',
-    RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS: 'first-market,second-market' };
+  const env = { RUST_LIVE_SMOKE_POLYMARKET_MAINNET_PRIVATE_KEY: 'fake-private-key',
+    RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS: 'first-market,second-market' };
   const profile = liveSmokeProfile('polymarket', 'mainnet', env);
   assert.deepEqual(profile.options.polymarket.marketSlugs, ['first-market', 'second-market']);
   assert.equal(profile.secrets['polymarket.marketSlugs'], undefined);
-  assert.throws(() => liveSmokeProfile('polymarket', 'mainnet', { ...env, RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS: 'first-market,first-market' }), /Invalid environment variable/);
+  assert.throws(() => liveSmokeProfile('polymarket', 'mainnet', { ...env, RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS: 'first-market,first-market' }), /Invalid environment variable/);
+});
+
+
+test('each mode reads its own credentials and never falls back to legacy or mainnet keys', () => {
+  const mainnet = { RUST_LIVE_SMOKE_BINANCE_MAINNET_KEY: 'mainnet-key', RUST_LIVE_SMOKE_BINANCE_MAINNET_SECRET: 'mainnet-secret',
+    RUST_LIVE_SMOKE_BINANCE_KEY: 'legacy-mainnet-key', RUST_LIVE_SMOKE_BINANCE_SECRET: 'legacy-mainnet-secret' };
+  assert.throws(() => liveSmokeProfile('binance', 'testnet', mainnet), /BINANCE_TESTNET_KEY/);
+  const supplied = { ...mainnet, RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY: 'testnet-key', RUST_LIVE_SMOKE_BINANCE_TESTNET_SECRET: 'testnet-secret' };
+  assert.equal(liveSmokeProfile('binance', 'testnet', supplied).options.key, 'testnet-key');
+  assert.equal(liveSmokeProfile('binance', 'mainnet', supplied).options.key, 'mainnet-key');
+  const accessed = [];
+  for (const mode of ['testnet', 'demo']) {
+    const profile = liveSmokeProfile('bybitdemo', mode, new Proxy({}, { get(_target, key) { accessed.push(key); return 'fake-secret'; } }));
+    assert.equal(profile.credentialEnv.key, `RUST_LIVE_SMOKE_BYBIT_${mode.toUpperCase()}_KEY`);
+  }
+  assert.deepEqual(accessed, ['RUST_LIVE_SMOKE_BYBIT_TESTNET_KEY', 'RUST_LIVE_SMOKE_BYBIT_TESTNET_SECRET',
+    'RUST_LIVE_SMOKE_BYBIT_DEMO_KEY', 'RUST_LIVE_SMOKE_BYBIT_DEMO_SECRET']);
+});
+
+test('reviewed venue profiles enable post-only whenever the engine supports it', () => {
+  for (const venue of LIVE_SMOKE_VENUES) {
+    let profile;
+    try { profile = liveSmokeProfile(venue, undefined, env); }
+    catch { try { profile = liveSmokeProfile(venue, 'mainnet', env); } catch { continue; } }
+    assert.equal(profile.postOnly, !['bitrue', 'polymarket'].includes(venue), venue);
+  }
 });

@@ -319,6 +319,9 @@ const KNOWN_TS_FIXES = {
   // Rust also fences lagging order-repair rows with native timestamps/exact fill
   // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
   // adversarial native tests cover this without rewriting TS replay output.
+  // Security audit: Rust auth signatures expire after 300 seconds; TS keeps
+  // 86400. The protocol audit binds the lifetime separately per implementation
+  // and verifies both signed preimages; no output normalization is needed.
   paradex() {},
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping
@@ -644,6 +647,9 @@ const KNOWN_TS_FIXES = {
   ],
 
   binance: (ts, rust) => {
+    // KNOWN_TS_FIXES (security M5): USD-M REST/WS mappers retain native TIF,
+    // and cancel-replace copies it so GTX stays post-only. The paired TS fix
+    // keeps strict write identity; no TIF or economic output is normalized.
     // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
     // stale and skipping restoration; rejected writes were swallowed. Reference
     // setter and deterministic regression are fixed, so no output adjustment.

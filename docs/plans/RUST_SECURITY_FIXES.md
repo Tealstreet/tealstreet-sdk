@@ -73,3 +73,48 @@ live trading, weakened parity oracle, or performance threshold changes.
   64 tests, JS host 34 tests, TS account transport 257 tests pass. Full JS had
   78 passing before the new generic Wasm parse-error assertion; that assertion
   is deliberately committed with its rebuilt Wasm implementation later.
+
+### Signer and credential checkpoint
+
+- Independent signer review accepted process/module-wide nonce reservation,
+  shared Hyperliquid/TxFlow identity, Kraken decoded-key fingerprinting,
+  hedged Lighter nonce derivation, redacted options and retained credential
+  cleanup. Review found a Phemex clone-before-validation secret copy; fixed
+  by validating borrowed fields before creating credential copies.
+- Explicit nonce vectors remain unchanged. Production Lighter derives a
+  domain-separated HMAC-SHA512 nonce from the canonical key, signed message
+  hash and fresh entropy, with rejection sampling; entropy failure refuses.
+  Independent nonce tests 3/3 and hedge boundary tests 2/2 pass.
+- Paradex signs a 300-second auth lifetime rather than TS's 86400 seconds.
+  Original independent signatures remain unchanged in the vector file;
+  additional StarknetJS vectors bind the shorter lifetime. Replay verifies
+  both preimages and separately enforces the chosen implementation's lifetime.
+- Binance/Bybit/MEXC keep TS's 20-second default and now forward a caller's
+  shorter receive window. Existing Bitrue and Backpack controls were already
+  present; Aster's fixed 20 seconds matches its explicit TS policy. No
+  unsupported blanket shortening of venue defaults was applied.
+- Internal owned Options and stored credential copies scrub on drop, including
+  KuCoin broker credentials and Orderly's retained options/decoded seed. Public
+  caller-owned Strings, borrowed JS input, partially failed serde allocations
+  and transient copies inside upstream cryptography/allocators are outside
+  this ownership guarantee; no universal memory-erasure claim is made.
+- All-target workspace check and strict native Clippy passed. Final workspace
+  tests and Wasm compilation are running after the last regression additions.
+
+### Smoke and recording checkpoint
+
+- Independent host reviewer accepted the fixed $100 placement/amend cap,
+  native-unit sizing, per-mode environment names, post-only support policy,
+  protocol field/header allowlisting, cookie stripping and narrow scanner
+  exemptions. Review found nested URL/form bypasses; both now have regressions.
+- Existing public fixtures changed only to remove Set-Cookie headers: records,
+  timestamps and protocol bodies are preserved. No public capture is refreshed
+  in response to a performance result.
+- A real TS USD-M defect surfaced through the strict scripted smoke roundtrip:
+  REST/NEW order mapping and cancel-replace dropped native GTX/PostOnly.
+  The paired TS fix preserves TIF through mapping and replacement; two actual
+  mapper-to-wire regressions pass. Strict write identity is unchanged.
+- Harness 589/589 pass; root quality before the paired TS change passed all
+  44 typecheck, 28 lint and 27 test tasks (7679 safe-cex tests in each run).
+  An actual scanner export of all 130 changed files found zero leaks; exact
+  known public vectors use both a path AND byte-match exemption.

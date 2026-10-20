@@ -49,8 +49,14 @@ export function accountSnapshot(buffer) {
 // selected minimum is never increased after a venue rejection.
 export const marketRules = (records, market, venue = 'binance') => venueMarketRules(venue, records, market);
 
-export function smokeOrder(market, book, rules = {}) {
+// A venue minimum never authorizes an unbounded live write. This is deliberately
+// fixed in code: neither environment variables nor CLI sizing flags raise it.
+export const LIVE_SMOKE_MAX_NOTIONAL = 100;
+const dollarQuotes = new Set(['USDT', 'USDC', 'USD', 'pUSD', 'SUSDT', 'SUSDC']);
+
+export function smokeOrder(market, book, rules = {}, postOnly = true) {
   if (rules.notionalKnown !== true) fail('unknown-minimum-notional');
+  if (!dollarQuotes.has(market.quote)) fail('unknown-notional-currency');
   if (!(market.flags & MARKET_FLAG.ACTIVE) || market.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING)) fail('market-unavailable');
   const tick = market.precisionPrice;
   const step = rules.amountStep ?? market.precisionAmount;
@@ -67,14 +73,19 @@ export function smokeOrder(market, book, rules = {}) {
   const scale = rules.notionalPerAmount ?? (quoteQuantity && positive(market.contractSize) ? market.contractSize : 1);
   if (!positive(scale)) fail('unknown-placement-units');
   const perUnit = quoteQuantity ? scale : amendPrice * scale;
-  const amount = units(Math.max(minAmount, (rules.minNotional ?? 0) / perUnit), step, true);
+  const minimumNotional = rules.minNotional ?? 0;
+  if (!Number.isFinite(minimumNotional) || minimumNotional < 0) fail('unknown-minimum-notional');
+  const amount = units(Math.max(minAmount, minimumNotional / perUnit), step, true);
   if (!positive(amount) || amount > maxAmount) fail('minimum-exceeds-market-limit');
-  return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice };
+  const notional = amount * scale * (quoteQuantity ? 1 : Math.max(price, amendPrice));
+  if (!positive(notional) || notional > LIVE_SMOKE_MAX_NOTIONAL) fail('notional-cap-exceeded');
+  return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice,
+    ...(postOnly ? { timeInForce: 'PostOnly' } : {}) };
 }
 
-export const selectSmokeMarket = (markets, symbol) => markets.find((market) => symbol ? market.symbol === symbol :
-  (market.flags & MARKET_FLAG.ACTIVE) && !(market.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING)) &&
-  ['USDT', 'USDC', 'USD', 'pUSD', 'SUSDT', 'SUSDC'].includes(market.quote));
+export const selectSmokeMarket = (markets, symbol) => markets.find((market) =>
+  dollarQuotes.has(market.quote) && (symbol ? market.symbol === symbol :
+    (market.flags & MARKET_FLAG.ACTIVE) && !(market.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING))));
 
 export function smokeArgs(args) {
   const { values } = parseArgs({ args, options: {
@@ -188,7 +199,7 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     await host.command({ op: 'subscribeOrderBook', symbol: selected.symbol });
     await wait(() => books.has(selected.symbol));
     const rules = marketRules(recorder.records, selected, venue);
-    const { amendPrice, ...order } = smokeOrder(selected, currentBook(), rules);
+    const { amendPrice, ...order } = smokeOrder(selected, currentBook(), rules, profile.postOnly !== false);
     if (snapshot().orders.length || snapshot().positions) fail('account-changed-before-placement');
     healthy();
     stage = 'place';

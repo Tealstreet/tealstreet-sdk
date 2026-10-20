@@ -37,11 +37,36 @@ paths = [
 
 [[rules]]
 id = "generic-api-key"
-[rules.allowlist]
-description = "Synthetic signing vectors in crate test fixtures."
+[[rules.allowlists]]
+description = "Public synthetic Ethereum key and its independently derived Paradex test keys."
+condition = "AND"
+regexTarget = "secret"
+regexes = [
+  "^1111111111111111111111111111111111111111111111111111111111111111$",
+  "^0x4b66a9d883cd6dd0ada419c06467b69124fd6e06c7ebed6c391314fea35ddcd$",
+  "^0x30aa092002d2810ad48c006709502638b83f7552f0a6ba69968d05d2c19d0cf$",
+]
 paths = [
-  "sdk-rs/[^/]+/tests/",
   # Independently generated StarkNet derivation vectors from the public,
   # synthetic Ethereum key consisting of 32 repeated 0x11 bytes.
   "^sdk-rs/venues/paradex/tests/sign-vectors\\.json$",
 ]
+
+# SHA-256 of the checked-in TS API client in an independent-vector
+# provenance manifest. Require both this exact fixture and this public hash; a
+# new credential in the same fixture or in any test source must still fail.
+[[rules.allowlists]]
+description = "Public api-client.ts provenance hash, not a credential."
+condition = "AND"
+paths = ["^sdk-rs/crypto/tests/fixtures/lighter/venue-signing-preimages\\.json$"]
+regexTarget = "secret"
+regexes = ["^99291b039f7ecd9952d7fc8fda105c5ca631b597cfbc5a4de4a7f95d435e4470$"]
+
+# This public documentation vector was already recorded in .gitleaksignore for
+# the original first-port path. Scope it to the exact current source and bytes.
+[[rules.allowlists]]
+description = "Binance published SIGNED Endpoint Examples HMAC secret."
+condition = "AND"
+paths = ["^sdk-rs/venues/binance/src/sign\\.rs$"]
+regexTarget = "secret"
+regexes = ["^2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9$"]

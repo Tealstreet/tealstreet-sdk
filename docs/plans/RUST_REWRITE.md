@@ -614,7 +614,11 @@ of mutation acknowledgements. These redacted reads are retained under
 `live-smoke-verify-*`; their success marker is an operational check by the runner,
 while the TS/Rust replay compares the primary lifecycle. A scripted Binance run
 round-trips through that gate; other profiles still need credentialed proof on
-their actual products. The runner never silently upgrades size after rejection
+their actual products. The runner applies a fixed $100 quote-notional cap to both the initial and amended
+order, including inverse face value and native contract multipliers; rounding a
+minimum above the cap refuses before any account mutation. No CLI or environment
+option raises the cap. Limit orders request post-only on engine-supported profiles
+(all currently reviewed profiles except Bitrue and Polymarket). The runner never silently upgrades size after rejection
 or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
 and cleanup; incomplete cleanup remains a failure.
 After cancel-all, mutable leverage is lowered by one (bounded by the market
@@ -622,7 +626,9 @@ minimum) and restored to its captured value, exercising both writes. Fixed or
 already-minimum leverage is set to its original value without increasing risk.
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
-family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read
+family, selected mode (`TESTNET`, `DEMO`, or `MAINNET`) and suffix, for example
+`RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY`. Every optional field uses the same mode
+prefix. Legacy names and another mode's values are never used as a fallback. Credentials are read
 only from the process environment, never command-line arguments or committed
 configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
@@ -671,7 +677,7 @@ The environment table and credential option mapping live in
 `sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling
 another venue or endpoint. A supported endpoint profile does not itself prove
 that every lifecycle command is available for every product/account type.
-Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS` is a comma-separated
+Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS` is a comma-separated
 list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
 for the desired outcome. It is public selection metadata, not a credential.
 Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks
