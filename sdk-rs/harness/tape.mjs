@@ -107,6 +107,10 @@ export class ReplayClock {
   }
   fire(timer) {
     if (!this.timers.has(timer)) return;
+    // Frozen startup still has timed prerequisites (rate limits, paced request
+    // queues). Advance on their scheduled logical deadline, never the wall
+    // time at which auditing allowed the callback to run.
+    if (this.freezeStartup && !this.active) this.time = Math.max(this.time, timer.at);
     if (timer.repeat) {
       timer.at = Date.now() + timer.delay;
       if (!this.active) timer.handle = this.original.setTimeout(() => this.fire(timer), timer.delay);
@@ -114,7 +118,7 @@ export class ReplayClock {
     timer.fn(...timer.args);
   }
   start() {
-    const wall = this.freezeStartup ? this.epoch : this.original.now();
+    const wall = this.freezeStartup ? this.time : this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
       timer.at = this.epoch + Math.max(0, timer.at - wall);

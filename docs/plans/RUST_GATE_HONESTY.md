@@ -176,3 +176,13 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Compatibility audit of 714 historical replay artifacts / 2,884 snapshots found
   only the intentionally new flat-PnL and leg-trigger fields absent, no unrelated
   schema gaps. No values were inferred or existing scope normalized away.
+- Corrected-head CI exposed a startup-clock regression before any Hyperliquid
+  output and before Breakout private startup: frozen Date prevented paced
+  bootstrap request budgets from advancing. Logical startup now advances only
+  to declared timer deadlines, then pending timers are rebased from that logical
+  ready time. Both actual correctness CLI failures reproduced before the fix
+  and complete afterward; startup controls 39/39 PASS. Strict receipt equality
+  remains unchanged; no quantitative retry was used to mask these failures.
+- Round-2 integrated harness: 754/754 PASS before the final base-row/clock follow-up.
+  Verifier logging now distinguishes unexpected/invalid results from genuinely
+  declared known FAILs; invalid PASS reports are never counted as certified.

@@ -183,6 +183,9 @@ Remaining evidence limitations:
 - The harness measures implementation loading/runtime plus replay routing and
   minimal receipt recording. Common harness imports precede those intervals;
   this is not a browser cold-start or pure venue-handler benchmark.
+- CI performance replays use the selected standalone venue build. The combined
+  shipping build has a separate size budget; these standalone measurements do
+  not establish combined-artifact cold-load or browser performance.
 
 Before cutover: live-smoke private captures on every venue (mainnet minimum size
 for coinbase, backpack, mexc with approval), a 3–7 day read-only production

@@ -43,6 +43,45 @@ test('ordinary private replay retains its real-time startup and no virtual clock
   assert.equal(frozenReplayStartup({ virtualPrivateClock: false }, true), false);
 });
 
+test('frozen startup timers advance paced prerequisites by logical deadlines and rebase remaining timers without wall jitter', async () => {
+  const epoch = 1700000000000;
+  const traces = [];
+  for (const jitter of [0, 99, 5000]) {
+    const originalNow = Date.now;
+    let wall = epoch;
+    const clock = new ReplayClock(epoch, true);
+    clock.original.now = () => wall;
+    clock.install();
+    try {
+      const events = [];
+      // Model a native 5-request window or TS token queue: the callback must
+      // observe that its required startup delay has actually elapsed.
+      setTimeout(() => {
+        events.push(Date.now());
+        setTimeout(() => events.push(Date.now()), 1000);
+      }, 1000);
+      for (let index = 0; index < 2; index++) {
+        const next = [...clock.timers.values()].sort((a, b) => a.at - b.at)[0];
+        clock.original.clearTimeout(next.handle);
+        wall += 1000 + jitter;
+        clock.fire(next);
+      }
+      assert.deepEqual(events, [epoch + 1000, epoch + 2000]);
+      setTimeout(() => events.push(Date.now()), 10_000);
+      wall += jitter;
+      clock.start();
+      await clock.advance(9999);
+      assert.equal(events.length, 2);
+      await clock.advance(10_000);
+      traces.push(events);
+    } finally {
+      clock.restore();
+      Date.now = originalNow;
+    }
+  }
+  for (const trace of traces) assert.deepEqual(trace, [epoch + 1000, epoch + 2000, epoch + 10_000]);
+});
+
 test('native watchdog heartbeat counts do not shift across the OKX EU tape horizon with startup audit cost', async () => {
   const epoch = 1700000000000;
   const replay = async (jitter, frozen) => {

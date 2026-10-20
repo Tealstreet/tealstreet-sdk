@@ -9,7 +9,7 @@ const manifest = JSON.parse(readFileSync(new URL('./known-gate-failures.json', i
 const errors = [];
 const cases = [];
 const seen = new Set();
-let passes = 0, knownFailures = 0;
+let passes = 0, strictFailures = 0, knownFailures = 0;
 for (const { reportPath, exitCode } of ledger) {
   const report = JSON.parse(readFileSync(reportPath, 'utf8'));
   const identity = `${report.venue}:${report.tapeSha256}`;
@@ -19,15 +19,20 @@ for (const { reportPath, exitCode } of ledger) {
   if ((exitCode === 0) !== (report.status === 'PASS')) errors.push(`Invalid ledger exit code: ${identity}`);
   const assessment = assessGateReport(report, manifest);
   errors.push(...assessment.errors);
-  if (report.status === 'PASS') passes++;
-  else knownFailures++;
-  console.log(`${report.status === 'PASS' ? 'PASS' : 'KNOWN FAILURE (not parity)'} ${report.venue} ${report.tape}: ${assessment.known.length} declared diagnostics`);
+  if (report.status === 'PASS' && !assessment.errors.length) passes++;
+  if (report.status === 'FAIL') {
+    strictFailures++;
+    if (!assessment.errors.length) knownFailures++;
+  }
+  const label = assessment.errors.length ? 'UNEXPECTED / INVALID RESULT'
+    : report.status === 'PASS' ? 'PASS' : 'KNOWN FAILURE (not parity)';
+  console.log(`${label} ${report.venue} ${report.tape}: ${assessment.known.length} declared diagnostics`);
   for (const diagnostic of new Map(assessment.known.map((item) => [item.key, item])).values())
     console.log(`  ${diagnostic.key}: ${diagnostic.divergence}`);
   if (assessment.resolved.length) console.log(`  ${assessment.resolved.length} declared diagnostics not observed in this run`);
 }
 errors.push(...validateGateCoverage(values.suite, cases));
-console.log(`${passes} strict passes, ${knownFailures} known-failure gates, ${errors.length} unexpected failures`);
+console.log(`${passes} strict passes, ${strictFailures} strict failures (${knownFailures} declared known-failure gates), ${errors.length} unexpected failures`);
 if (errors.length) {
   for (const error of errors) console.error(error);
   process.exit(1);
