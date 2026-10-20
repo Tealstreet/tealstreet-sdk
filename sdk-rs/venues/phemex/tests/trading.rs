@@ -1394,3 +1394,315 @@ fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
         )));
     }
 }
+
+fn rejection_engine(rows: Vec<Value>) -> Engine<PhemexPerpetuals> {
+    let (mut e, socket) = authenticated("OneWay");
+    let text = json!({"type":"snapshot","orders_p":rows}).to_string();
+    e.handle(
+        1000.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    assert!(e.store().loaded().orders);
+    e
+}
+
+fn cancel_all_after_create_result(value: impl FnOnce(&HttpRequest) -> Value) -> Vec<Action> {
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 71,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = respond(&mut e, &create, value(&create));
+    assert!(done(&a).is_err());
+    assert!(writes(&a).is_empty(), "never retry a rejected placement");
+    assert!(e.store().order("old-live").is_some());
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 72,
+            symbol: "BTCUSDT".into(),
+        },
+    )
+}
+
+#[test]
+fn definitive_create_rejection_does_not_fence_cancel_all_of_existing_orders() {
+    for biz_error in [0, 11001] {
+        let a = cancel_all_after_create_result(|create| {
+            let mut value = ack(create, "rejected-native");
+            value["data"]["ordStatus"] = json!("Rejected");
+            value["data"]["execStatus"] = json!("Rejected");
+            value["data"]["bizError"] = json!(biz_error);
+            value
+        });
+        let cancel = writes(&a)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .expect("a rejected placement must not block canceling the prior live order");
+        assert_eq!(p(&cancel, "orderID").as_deref(), Some("old-live"));
+    }
+}
+
+#[test]
+fn documented_create_business_errors_do_not_fence_cancel_all() {
+    // Official business-rejection definitions, never duplicate/routing/internal errors:
+    // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
+    for code in [
+        11001, 11027, 11034, 11035, 11036, 11053, 11055, 11056, 11058, 11081, 11082,
+    ] {
+        for null in [false, true] {
+            let a = cancel_all_after_create_result(|_| {
+                if null {
+                    json!({"code":code,"msg":"explicit business rejection","data":null})
+                } else {
+                    json!({"code":code,"msg":"explicit business rejection"})
+                }
+            });
+            assert!(
+                writes(&a).iter().any(|r| r.method == Method::Delete),
+                "code {code}: {a:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unproven_create_results_remain_fenced() {
+    for case in [
+        "missing-client",
+        "wrong-client",
+        "wrong-symbol",
+        "wrong-side",
+        "wrong-qty",
+        "missing-qty",
+        "wrong-position",
+        "missing-position",
+        "wrong-type",
+        "suspended",
+        "malformed",
+        "duplicate",
+        "routing",
+        "unknown",
+        "contradictory",
+        "error-success",
+        "error-business",
+    ] {
+        let a = cancel_all_after_create_result(|create| {
+            let mut value = ack(create, "rejected-native");
+            value["data"]["ordStatus"] = json!("Rejected");
+            match case {
+                "missing-client" => {
+                    value["data"].as_object_mut().unwrap().remove("clOrdID");
+                }
+                "wrong-client" => value["data"]["clOrdID"] = json!("other-caller"),
+                "wrong-symbol" => value["data"]["symbol"] = json!("ETHUSDT"),
+                "wrong-side" => value["data"]["side"] = json!("Sell"),
+                "wrong-qty" => value["data"]["orderQtyRq"] = json!("0.02"),
+                "missing-qty" => {
+                    value["data"].as_object_mut().unwrap().remove("orderQtyRq");
+                }
+                "wrong-position" => value["data"]["posSide"] = json!("Long"),
+                "missing-position" => {
+                    value["data"].as_object_mut().unwrap().remove("posSide");
+                }
+                "wrong-type" => value["data"]["orderType"] = json!("Market"),
+                "suspended" => {
+                    value["data"]["ordStatus"] = json!("Suspended");
+                    value["data"]["execStatus"] = json!("PendingAllocate");
+                }
+                "malformed" => value = json!({"code":0,"data":{}}),
+                "duplicate" => value = json!({"code":11085,"msg":"duplicate client ID"}),
+                "routing" => value = json!({"code":11107,"msg":"cross engine connection failed"}),
+                "unknown" => value = json!({"code":100,"msg":"unknown"}),
+                "contradictory" => {
+                    value = ack(create, "accepted-native");
+                    value["code"] = json!(11001);
+                }
+                "error-success" => {
+                    value = ack(create, "accepted-native");
+                    value["error"] = json!({"code":500,"message":"unknown outcome"});
+                }
+                "error-business" => {
+                    value = json!({"code":11001,"msg":"balance","data":null,"error":{"code":500,"message":"unknown outcome"}})
+                }
+                _ => unreachable!(),
+            }
+            value
+        });
+        assert!(writes(&a).is_empty(), "case {case}");
+        assert!(done(&a).is_err(), "case {case}: {a:?}");
+    }
+}
+
+#[test]
+fn partial_batch_rejection_preserves_prior_ack_routing() {
+    let mut e = rejection_engine(vec![]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 81,
+            orders: vec![opts("accepted-caller"), opts("rejected-caller")],
+        },
+    );
+    let first = writes(&a)[0].clone();
+    let mut value = ack(&first, "first-accepted");
+    value["data"]["ordStatus"] = json!("Init");
+    let a = respond(&mut e, &first, value);
+    let second = writes(&a)[0].clone();
+    let mut value = ack(&second, "second-rejected");
+    value["data"]["ordStatus"] = json!("Rejected");
+    let a = respond(&mut e, &second, value);
+    assert!(done(&a).is_err());
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 82,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    let cancel = writes(&a)
+        .into_iter()
+        .find(|r| r.method == Method::Delete)
+        .expect("earlier accepted batch order remains cancelable");
+    assert_eq!(p(&cancel, "orderID").as_deref(), Some("first-accepted"));
+    assert_eq!(p(&cancel, "posSide").as_deref(), Some("Merged"));
+}
+
+#[test]
+fn proven_rejection_cannot_clear_older_transport_uncertainty() {
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("unknown-caller")],
+        },
+    );
+    e.handle(
+        1001.,
+        Event::HttpFailed {
+            request: writes(&a)[0].id,
+            error: "transport outcome unknown",
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(done(&a).is_err());
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 92,
+            orders: vec![opts("rejected-caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let mut value = ack(&create, "rejected-native");
+    value["data"]["ordStatus"] = json!("Rejected");
+    assert!(done(&respond(&mut e, &create, value)).is_err());
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 93,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err(), "{a:?}");
+}
+
+#[test]
+fn non_success_http_cannot_prove_create_rejection() {
+    for status in [400, 408, 500] {
+        let mut e = rejection_engine(vec![live_row("old-live")]);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 101,
+                orders: vec![opts("caller")],
+            },
+        );
+        let body = json!({"code":11001,"msg":"insufficient balance","data":null}).to_string();
+        e.handle(
+            1001.,
+            Event::HttpResponse {
+                request: writes(&a)[0].id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        assert!(done(&a).is_err());
+        assert!(writes(&a).is_empty());
+        let a = command(
+            &mut e,
+            Command::CancelSymbolOrders {
+                command: 102,
+                symbol: "BTCUSDT".into(),
+            },
+        );
+        assert!(writes(&a).is_empty(), "HTTP {status}");
+        assert!(done(&a).is_err(), "HTTP {status}");
+    }
+}
+
+#[test]
+fn queued_cancel_all_continues_after_proven_rejection() {
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 111,
+            orders: vec![opts("caller")],
+        },
+    );
+    let create = writes(&a)[0].clone();
+    let a = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 112,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 112, .. })))
+    );
+    let mut reply = ack(&create, "rejected-native");
+    reply["data"]["ordStatus"] = json!("Rejected");
+    let a = respond(&mut e, &create, reply);
+    assert!(a.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 111,
+            result: Err(_)
+        })
+    )));
+    let cancel = writes(&a)
+        .into_iter()
+        .find(|r| r.method == Method::Delete)
+        .expect("queued cancel proceeds after known rejection");
+    assert_eq!(p(&cancel, "orderID").as_deref(), Some("old-live"));
+    let a = respond(
+        &mut e,
+        &cancel,
+        json!({"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}),
+    );
+    assert!(a.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 112,
+            result: Ok(_)
+        })
+    )));
+}

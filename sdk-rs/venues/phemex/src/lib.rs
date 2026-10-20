@@ -558,7 +558,10 @@ impl Venue for PhemexPerpetuals {
         if let Ok(e) = serde_json::from_str::<Envelope<'_>>(r.body)
             && (e.error.is_some() || e.code.is_some_and(|n| n != 0))
         {
-            self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg));
+            match p {
+                Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
+                p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
+            }
             return;
         }
         match p {

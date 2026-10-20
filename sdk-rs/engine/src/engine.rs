@@ -1379,12 +1379,17 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(command) = cx.io.order_locks.acquire(&command, cx.store)
+                        && let Err(id) = cx.io.order_locks.acquire(&command, cx.store)
                     {
-                        cx.done(
-                            command,
-                            Err("Order amendment or cancellation is already in flight".into()),
-                        );
+                        let error = match &command {
+                            Command::CancelSymbolOrders { symbol, .. }
+                                if cx.io.order_locks.uncertain(symbol) =>
+                            {
+                                "Placement outcome is uncertain; reconcile before cancel-all"
+                            }
+                            _ => "Order amendment or cancellation is already in flight",
+                        };
+                        cx.done(id, Err(error.into()));
                         return;
                     }
                 }
@@ -2171,7 +2176,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, result: Err(_) }) if *id == command)));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, result: Err(error) }) if *id == command && error == "Placement outcome is uncertain; reconcile before cancel-all")));
         }
         engine
             .io

@@ -1035,11 +1035,29 @@ impl PhemexPerpetuals {
             let env: Envelope = serde_json::from_str(response.body)
                 .map_err(|_| "Phemex malformed write acknowledgement")?;
             if env.code != 0 {
-                return Err(if env.msg.is_empty() {
-                    format!("Phemex error {}", env.code)
-                } else {
-                    env.msg
-                });
+                // Only documented balance/parameter/risk rejects with no order data
+                // prove no placement. Duplicate/routing/internal errors stay unknown.
+                // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
+                if matches!(request.call, Call::Place { .. })
+                    && env.data.as_ref().is_none_or(|data| data.get() == "null")
+                    && matches!(
+                        env.code,
+                        11001
+                            | 11027
+                            | 11034
+                            | 11035
+                            | 11036
+                            | 11053
+                            | 11055
+                            | 11056
+                            | 11058
+                            | 11081
+                            | 11082
+                    )
+                {
+                    cx.placement_resolved(request.command);
+                }
+                return Err(format!("Phemex {} {}", env.code, env.msg));
             }
             match &request.call {
                 Call::Place {
@@ -1055,7 +1073,6 @@ impl PhemexPerpetuals {
                         .client_id
                         .as_ref()
                         .is_some_and(|id| Some(id) != order.client_order_id.as_ref())
-                        || identity.biz_error != 0
                         || identity.code != 0
                     {
                         return Err(
@@ -1081,9 +1098,33 @@ impl PhemexPerpetuals {
                             row.kind.as_ref(),
                             "Market" | "Limit" | "Stop" | "MarketIfTouched"
                         )
-                        || row.status.eq_ignore_ascii_case("Rejected")
                     {
                         return Err("Phemex create response does not match submitted order".into());
+                    }
+                    if row.status.eq_ignore_ascii_case("Rejected") {
+                        let kind = match order.kind {
+                            OrderType::Market => "Market",
+                            OrderType::Limit => "Limit",
+                            OrderType::TakeProfit => "MarketIfTouched",
+                            _ => "Stop",
+                        };
+                        // Missing correlation is not evidence that our write failed.
+                        if identity.client_id.as_ref() == order.client_order_id.as_ref()
+                            && identity.client_id.is_some()
+                            && row.pos_side == pos_side.as_str()
+                            && row.order_qty.or(row.order_qty_rq) == Some(order.amount)
+                            && row.kind == kind
+                            && native(&identity.order_id)? == identity.order_id
+                        {
+                            cx.placement_resolved(request.command);
+                        }
+                        return Err(format!(
+                            "Phemex order rejected: bizError {}",
+                            identity.biz_error
+                        ));
+                    }
+                    if identity.biz_error != 0 {
+                        return Err("Phemex create acknowledgement rejection mismatch".into());
                     }
                     let pending = identity.ord_status == "Init";
                     if !pending {
