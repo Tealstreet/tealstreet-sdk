@@ -3048,3 +3048,18 @@ remain running, and all replay jobs remain stopped until they finish. Static
 review deduped37finding drafts against45currentPRcomments/zero reviews/threads;
 clarify historical receipts and diagnostic claims before posting, retain
 separate metadata/terminal/REST causes without repeating the same finding.
+
+702 integration validation COMPLETE:2,968native tests/232groups/zero failed or
+ignored,81Bitunix tests, globalfmt/bans/strict native and WASMClippy PASS.
+Independent audit confirms the3KuCoin helper replacements exactly inline the
+incoming predicate without weakening any assertion. Refreshed852helpers,
+44typecheck/28lint/27testtasks,7,803SDKsourcecases/528files per runner,
+453freshcompiledSDKcases/16files,97hosttests,16productchecks,wire/nativeadapter,
+20server/MCP/CLI/mobileloadercases, packagedMCPbuild+isolatedsmoke and all9
+scriptedlifecyclecases PASS. No live private account was contacted.
+
+All root test/build jobs have finished. Start /tmp/bitunix-702-gates.sh as the
+only root performance/build batch. Each profile waits independently for2hostCPU
+readings below50percent aggregatehardwarecapacity,15sapart; no constructors or
+replay samples run while waiting. All original limits/equality/tapes/timers stay
+unchanged. Preserve stopped publication batch (no finalpublic attempt started).
