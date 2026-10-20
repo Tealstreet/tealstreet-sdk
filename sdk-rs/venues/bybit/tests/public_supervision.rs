@@ -224,6 +224,10 @@ fn suppressed_public_feed_is_not_supervised() {
         timers: vec![],
         done: vec![],
         logs: vec![],
+        command_errors: vec![],
+        command_notices: vec![],
+        progress: vec![],
+        progress_at_request: vec![],
         startup_failures: vec![],
         deactivated: false,
     };
