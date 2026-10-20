@@ -606,12 +606,14 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
-- High: one bad market/ticker row or failed funding read keeps the private side
+- High: ~~one bad market/ticker row or failed funding read keeps the private side
   from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
-  freezes that list (`account.rs:491,557`). (startup/row-tolerance lane)
-- Medium: `TRIGGER_MARKET` stops (attached brackets) can't be moved
-  (`trading.rs:842`); no one-shot resend on signature error 100001; multi-order
-  cancel sends nothing if any id is unknown (`trading.rs:780`).
+  freezes that list (`account.rs:491,557`).~~ Bad rows skipped (placeholder
+  tickers, stored copies kept); funding retried separately.
+- Medium: ~~`TRIGGER_MARKET` stops (attached brackets) can't be moved
+  (`trading.rs:842`); no one-shot resend on signature error 100001;~~ multi-order
+  cancel sends nothing if any id is unknown (`trading.rs:780`) — intended per
+  [the unknown-cancel audit](RUST_UNKNOWN_CANCEL.md) (error before any write).
 - Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
   per-symbol leverage/margin not read; trigger move requires trigger_type;
   bracket `workingType`; history fails on one bad row; WS message with one bad
