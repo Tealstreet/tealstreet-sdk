@@ -1055,3 +1055,53 @@ fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
     let (e, socket) = ready();
     socket_checks::flaps(e, socket, 1100.);
 }
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
+        .unwrap();
+    e.start(1000.);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, INSTRUMENTS);
+    let mut timers = std::collections::HashMap::new();
+    let mut fired = 0;
+    let mut now = 1000.;
+    loop {
+        let actions: Vec<_> = e.drain_actions().collect();
+        for action in actions {
+            match action {
+                Action::SetTimer { timer, at_ms } => {
+                    timers.insert(timer, at_ms);
+                }
+                Action::ClearTimer { timer } => {
+                    timers.remove(&timer);
+                }
+                Action::Http(r) => reply(&mut e, &r, 200, INSTRUMENTS),
+                Action::WsConnect { .. } | Action::WsClose { .. } => {
+                    panic!("suppressed public feed reached the host")
+                }
+                _ => {}
+            }
+        }
+        let Some((&timer, &at)) = timers
+            .iter()
+            .filter(|(_, at)| **at <= 601_000.)
+            .min_by(|a, b| a.1.total_cmp(b.1))
+        else {
+            break;
+        };
+        timers.remove(&timer);
+        now = at.max(now);
+        fired += 1;
+        e.handle(now, Event::TimerFired { timer });
+    }
+    // One startup timer is venue-owned; an unopened supervised feed fires >100.
+    assert!(fired <= 1, "suppressed feed fired {fired} timers");
+}
