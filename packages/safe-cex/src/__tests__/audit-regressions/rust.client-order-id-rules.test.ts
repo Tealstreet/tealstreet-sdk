@@ -2,7 +2,8 @@ import type { ExchangeName, Market, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { isInertCapability } from '../../exchanges/base';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
@@ -112,4 +113,40 @@ it('continues rejecting Lighter caller IDs through both placement entry points b
   await expect(exchange.placeOrders([order(), order({ clientOrderId: 'caller' })])).rejects.toThrow(/cannot honor a caller clientOrderId/);
   expect(exchange.mintClientOrderId(order())).toBeUndefined();
   expect(command).not.toHaveBeenCalled();
+});
+
+describe('Rust spot product selection and inherited capabilities', () => {
+  it.each(['hyperliquidspot', 'krakenspot'] as const)('%s retains spot identity and branded history fallbacks', async (name) => {
+    const { exchange, command } = setup(name);
+    expect(isRustVenue(name)).toBe(true);
+    expect(exchange.isSpot).toBe(true);
+    expect(isInertCapability(exchange.fetchHistoricalFills, 'fetchHistoricalFills')).toBe(true);
+    expect(isInertCapability(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')).toBe(true);
+    expect(isInertCapability(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
+    expect(isInertCapability(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+    await expect(exchange.fetchHistoricalFills({})).resolves.toEqual([]);
+    await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
+    await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);
+    await expect(exchange.fetchIncomeHistoryRange(0, 1000)).resolves.toEqual([]);
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it('honors the Hyperliquid spot bracket entry cloid and rejects duplicate batch IDs atomically', async () => {
+    const { exchange, command } = setup('hyperliquidspot');
+    const clientOrderId = `0x${'12'.repeat(16)}`;
+    const bracket = order({ clientOrderId, stopLoss: 60_000, takeProfit: 80_000 });
+    await expect(exchange.placeOrder(bracket)).resolves.toEqual(['native-order']);
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'placeOrders', orders: [bracket] });
+    command.mockClear();
+    await expect(exchange.placeOrders([order({ clientOrderId }), order({ clientOrderId })])).rejects.toThrow(/duplicated/);
+    await expect(exchange.placeOrder(order({ clientOrderId: clientOrderId.toUpperCase() }))).rejects.toThrow(/clientOrderId/);
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Kraken spot caller ID in a later batch row before the engine receives any write', async () => {
+    const { exchange, command } = setup('krakenspot');
+    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'caller' })])).rejects.toThrow(/cannot honor a caller clientOrderId/);
+    expect(exchange.mintClientOrderId(order())).toBeUndefined();
+    expect(command).not.toHaveBeenCalled();
+  });
 });

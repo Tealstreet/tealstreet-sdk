@@ -16,6 +16,8 @@ if [[ $# -gt 0 ]]; then
   fi
   case "$2" in
     lighter-robinhood) set -- --venue lighter ;;
+    hyperliquidspot) set -- --venue hyperliquid ;;
+    krakenspot) set -- --venue kraken ;;
     coinbasespot) set -- --venue coinbase ;;
     tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) set -- --venue orderly ;;
   esac

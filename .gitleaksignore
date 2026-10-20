@@ -36,3 +36,10 @@ a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/s
 # "safe-fake-secret", paired with "documented-fake-api-key"; never an account.
 # Exact historical fingerprint only; production and future credential changes stay scanned.
 d2db97a4af1ad06a0b92f3bb4b8db4915ee01821:packages/safe-cex/src/__tests__/audit-regressions/polymarket.rust-boundary.wasm.test.ts:generic-api-key:23
+
+# Spot replay oracles only: Hyperliquid uses the public synthetic 0x012345...0123
+# Ethereum test vector; Kraken is base64 of the literal "replay-secret", paired
+# with "replay-key". Neither is an account credential. Exact historical
+# fingerprints only; future changes and production credentials remain scanned.
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/hyperliquidspot.mjs:generic-api-key:5
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/krakenspot.mjs:generic-api-key:3

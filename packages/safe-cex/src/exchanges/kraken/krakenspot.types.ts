@@ -97,6 +97,8 @@ export const TIME_IN_FORCE: Record<string, OrderTimeInForce> = {
 export const ASSET_ALIASES: Record<string, string> = {
   XBT: 'BTC',
   XXBT: 'BTC',
+  XDG: 'DOGE',
+  XXDG: 'DOGE',
   XETH: 'ETH',
   XXRP: 'XRP',
   XLTC: 'LTC',

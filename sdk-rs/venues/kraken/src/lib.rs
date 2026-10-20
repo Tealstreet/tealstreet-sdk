@@ -1,5 +1,7 @@
 //! Kraken futures: typed state machines driven entirely by engine events.
 mod account;
+mod spot;
+pub use spot::KrakenSpot;
 mod history;
 pub mod sign;
 mod trading;

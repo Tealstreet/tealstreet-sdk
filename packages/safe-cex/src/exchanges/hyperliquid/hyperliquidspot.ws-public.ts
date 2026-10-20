@@ -384,7 +384,7 @@ export class HyperliquidSpotPublicWebSocket extends BaseWebSocket<HyperliquidSpo
         this.topics[topic] = (this.topics[topic] || 0) + 1;
 
         if (shouldSubscribe) {
-          const payloads = groupingLevels.map((n) => ({
+          const payloads = [0, 2, 3, 4, 5].map((n) => ({
             method: 'subscribe',
             subscription: {
               type: 'l2Book',
@@ -423,7 +423,7 @@ export class HyperliquidSpotPublicWebSocket extends BaseWebSocket<HyperliquidSpo
       this.topics[topic]--;
 
       if (this.isConnected && !this.messageHandlers[handler].length) {
-        const payloads = groupingLevels.map((n) => ({
+        const payloads = [0, 2, 3, 4, 5].map((n) => ({
           method: 'unsubscribe',
           subscription: {
             type: 'l2Book',

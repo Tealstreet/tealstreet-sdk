@@ -192,3 +192,54 @@ proofs. Check each remaining 37 private profiles once diagnostically to identify
 any additional correctness integration failures before the final clean fixed
 61-private/34-public run. Keep every diagnostic result. No public sampling,
 Rust changes, rebuild, numerical retry or tuning occurred in this repair phase.
+
+
+## Spot-product integration before the final collection
+
+The bounded remaining-private diagnostic passed all 37 profiles without retries.
+Together with the preceding 23 passes and repaired TxFlow gate, all existing
+61 profiles have correctness evidence. No public performance sample was taken.
+The diagnostic report is `/tmp/perf-delivery26-private-remaining-diagnostic/report.json`
+(SHA-256 `4e188a5a6a0911e0bf09a2eaf1baeca0820675024be9efb31efbb2b822f824e1`).
+
+Merge landing `f4ea9e06ab11321c0509bd75d05c0486c7820e0f` (Spot products)
+before freezing measurements. Preserve both Spot constructors and normalize
+`krakenspot`/`hyperliquidspot` to their existing Kraken/Hyperliquid packages in
+build CLI, host/SDK loaders and CI. The roster expands to 36 public profiles
+and 63 private variants, still 26 families. One newly added SDK mock needed the
+required `wsMessages` method; the initial typecheck failure is retained. The two
+new alias checks initially fail against the previous release, also retained;
+rebuild all families before their actual WASM validation.
+
+Repeat affected workspace/repository checks, archive the current 234 bindings
+and original nine aggregate bindings, then build and validate all 26 families.
+Record any existing size-budget breach before considering a scope-based change.
+Run actual SDK/host WASM checks, existing parity/lifecycle integrations, both new
+Spot parity suites and native wire/session checks. Independent merge and release
+reviews remain required. These checks do not establish performance margins.
+
+Use the independently audited physical original `f4ea9e06ab` control at
+`/tmp/rust-perf-baseline26spot`: 409 Rust/config and 33 protected files match Git,
+29 archive compile paths are recorded, and its original browser/Node aggregate
+WASM is 11,398,568 bytes (SHA-256
+`fc1cbdbe820146671f17dcdce066ad79f011614d922ef6a5b30d551b37fa6163`).
+Its unbatched host, original loader/build and nine physical artifacts stay fixed.
+Share final helper/fixture/TS/dependency bytes only after the candidate is checked.
+Retain all earlier controls and failures under their original source labels.
+
+The final protocol supersedes the earlier 34/61 roster: run all 63 candidate
+private gates once, then one official three-run gate per arm for each of 36
+public profiles, alternating AB/BA by CI order (18 each). Reuse the immutable
+61 private tapes and generate only the two new Spot tapes. Retain every numerical
+failure and narrower margin; stop on operational/parity/invalid-metric failures.
+No directional retries, extra warmups or profiling occur during the collection.
+Freeze source, dependencies, tools, helpers and artifacts before/after the cohort,
+with smaller per-gate guards. Report exact before/after CPU and memory numbers;
+all requested final performance gates remain pending.
+
+The integration checkpoint passes 2,569 Rust tests/204 groups (zero failures or
+ignored), fmt/bans and strict native/WASM workspace Clippy. Repository checks
+pass 44 typecheck, 28 lint and 27 test tasks; serialized harness passes 644.
+Independent merge review passes against both parents. The retained check and
+control/diagnostic evidence is `RUST_PERF_DELIVERY26_SPOT_INTEGRATION.json.gz`.
+The main Cargo target is free for the declared release pass.

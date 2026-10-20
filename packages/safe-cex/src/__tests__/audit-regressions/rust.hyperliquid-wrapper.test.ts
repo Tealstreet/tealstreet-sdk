@@ -118,7 +118,7 @@ describe('Rust Hyperliquid wrapper', () => {
 
   it('registers perps and forwards wallet, vault and builder settings together', async () => {
     expect(isRustVenue('hyperliquid')).toBe(true);
-    expect(isRustVenue('hyperliquidspot')).toBe(false);
+    expect(isRustVenue('hyperliquidspot')).toBe(true);
     const hyperliquidBuilder = { address: '0xbuilder', feeTenthsBps: 30 };
     const { exchange, construct } = setup({
       applicationId: 'master-wallet',

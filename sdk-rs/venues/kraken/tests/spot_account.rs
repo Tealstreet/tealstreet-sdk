@@ -1,0 +1,513 @@
+mod spot_support;
+use safe_cex_engine::{
+    Action, Command, Event, Notice,
+    model::{MarginType, OrderStatus},
+};
+use safe_cex_venue_kraken::sign::Signer;
+use spot_support::*;
+#[test]
+fn official_spot_auth_vector_and_form_nonce_are_exact() {
+    let signer = Signer::new(
+        "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg==",
+    )
+    .unwrap();
+    assert_eq!(
+        signer
+            .spot_signature(
+                "nonce=1616492376594&ordertype=limit&pair=XBTUSD&price=37500&type=buy&volume=1.25",
+                "1616492376594",
+                "/0/private/AddOrder"
+            )
+            .unwrap(),
+        "4/dpxb3iT4tp/ZCVEwSnEsLxx0bqyhLpdfOpc6fn7OR8+UClSV5n9E6aSS8MPtnRfp32bAb0nmbRn6H8ndwLUQ=="
+    );
+    assert!(
+        signer
+            .spot_signature("", "1", "/derivatives/api/v3/sendorder")
+            .is_err()
+    );
+}
+#[test]
+fn multi_asset_balance_open_order_aliases_and_spot_settings() {
+    let (e, _, _) = ready(false);
+    let b = e.store().balance();
+    assert_eq!((b.total, b.free, b.used), (1355., 1355., 0.));
+    assert_eq!(e.store().currency_balances().unwrap().len(), 4);
+    assert!(e.store().positions().is_empty());
+    assert!(e.store().loaded().positions);
+    for symbol in ["XBT/USD", "ETH/USD"] {
+        let setting = e.store().setting(symbol).unwrap();
+        assert_eq!(setting.leverage, 1.);
+        assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    }
+    let o = e.store().order("O-100").unwrap();
+    assert_eq!(o.symbol, "XBT/USD");
+    assert_eq!((o.amount, o.filled, o.remaining), (2., 0.5, 1.5));
+    assert!(!o.reduce_only);
+}
+#[test]
+fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
+    let (mut e, _, private) = ready(false);
+    let old = private.unwrap();
+    e.handle(NOW, Event::WsOpened { socket: old });
+    let request = requests(&mut e).pop().unwrap();
+    assert!(request.url.ends_with("/GetWebSocketsToken"));
+    e.handle(
+        NOW,
+        Event::WsClosed {
+            socket: old,
+            code: 1006,
+        },
+    );
+    let reconnect = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1000. => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 1000., Event::TimerFired { timer: reconnect });
+    let new = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 1000., Event::WsOpened { socket: new });
+    let request2 = requests(&mut e).pop().unwrap();
+    assert_ne!(request.body, request2.body);
+    reply_at(
+        &mut e,
+        NOW + 1000.,
+        &request,
+        r#"{"error":[],"result":{"token":"stale"}}"#,
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    reply_at(
+        &mut e,
+        NOW + 1000.,
+        &request2,
+        r#"{"error":[],"result":{"token":"fresh"}}"#,
+    );
+    let messages = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { socket, text } => Some((socket, text)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 2);
+    assert!(
+        messages
+            .iter()
+            .all(|(s, t)| *s == new && t.contains("fresh") && !t.contains("stale"))
+    );
+}
+#[test]
+fn malformed_snapshots_preserve_state_and_ws_fences_rest() {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
+    let balance = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &balance,
+        r#"{"error":[],"result":{"ZUSD":"invalid"}}"#,
+    );
+    assert_eq!(e.store().balance().total, 1355.);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"bad","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"invalid"}]}"#,
+    );
+    assert!(e.store().order("O-100").is_some());
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","exec_type":"trade","cum_qty":1.5,"order_qty":2,"last_qty":1,"avg_price":99,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().filled, 1.5);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"new","cum_qty":0.5,"order_qty":2,"timestamp":"2023-11-14T22:13:20Z"}]}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().filled, 1.5);
+}
+#[test]
+fn snapshot_history_never_emits_and_live_execution_reconnect_duplicates_dedupe() {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    let frame = r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"trade","order_qty":2,"cum_qty":0.5,"last_qty":0.5,"avg_price":99,"exec_id":"history","timestamp":"2023-11-14T22:13:20Z"}]}"#;
+    message(&mut e, s, frame);
+    let _ = e.take_frame(NOW).unwrap_or(&[]).to_vec();
+    let live = r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","exec_type":"trade","order_qty":2,"cum_qty":1,"last_qty":0.5,"avg_price":99,"exec_id":"live-1","timestamp":"2023-11-14T22:13:21Z"}]}"#;
+    message(&mut e, s, live);
+    let frame = e.take_frame(NOW).unwrap_or(&[]).to_vec();
+    assert_eq!(support_fill_count(&frame), 1);
+    message(&mut e, s, live);
+    let frame = e.take_frame(NOW).unwrap_or(&[]).to_vec();
+    assert_eq!(support_fill_count(&frame), 0);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"canceled","timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+fn support_fill_count(frame: &[u8]) -> u32 {
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            return u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap());
+        }
+        at += 8 + size;
+    }
+    0
+}
+#[test]
+fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 10 }));
+    let first = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let second = requests(&mut e).pop().unwrap();
+    assert_ne!(first.body, second.body);
+    assert_ne!(first.headers, second.headers);
+    reply(
+        &mut e,
+        &second,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 10,
+            result: Err(_)
+        })
+    )));
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 11 }));
+    let request = requests(&mut e).pop().unwrap();
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: request.id,
+            error: "timeout",
+        },
+    );
+    let t = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 400., Event::TimerFired { timer: t });
+    assert_eq!(requests(&mut e).len(), 1);
+}
+
+#[test]
+fn parallel_balance_reads_cannot_rollback_newer_response() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 20 }));
+    let old = requests(&mut e).pop().unwrap();
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 21 }));
+    let new = requests(&mut e).pop().unwrap();
+    reply(&mut e, &new, r#"{"error":[],"result":{"ZUSD":"2222"}}"#);
+    e.drain_actions().for_each(drop);
+    reply(&mut e, &old, r#"{"error":[],"result":{"ZUSD":"1111"}}"#);
+    assert_eq!(e.store().balance().total, 2222.);
+}
+#[test]
+fn posted_read_network_retry_stops_after_three_resends() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 22 }));
+    let mut request = requests(&mut e).pop().unwrap();
+    let mut lastnonce = 0u64;
+    for attempt in 0..4 {
+        let nonce = request
+            .body
+            .as_ref()
+            .unwrap()
+            .split('&')
+            .find_map(|p| p.strip_prefix("nonce="))
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert!(nonce > lastnonce);
+        lastnonce = nonce;
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if attempt < 3 {
+            let timer = actions
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if at_ms == NOW => Some(timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(NOW, Event::TimerFired { timer });
+            request = requests(&mut e).pop().unwrap();
+        } else {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            );
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 22,
+                    result: Err(_)
+                })
+            )));
+        }
+    }
+}
+
+#[test]
+fn documented_native_trigger_object_maps_effective_price_without_treating_relative_offset_as_absolute()
+ {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"STOP","symbol":"BTC/USD","side":"sell","order_type":"stop-loss","order_qty":2,"cum_qty":0,"triggers":{"price":90,"price_type":"static","actual_price":91}},{"order_id":"TP","symbol":"ETH/USD","side":"sell","order_type":"take-profit","order_qty":1,"cum_qty":0,"triggers":{"price":60,"price_type":"static"}},{"order_id":"TRAIL","symbol":"BTC/USD","side":"sell","order_type":"trailing-stop","order_qty":1,"cum_qty":0,"triggers":{"price":5,"price_type":"pct","actual_price":95}}]}"#,
+    );
+    assert_eq!(e.store().order("STOP").unwrap().price, 91.);
+    assert_eq!(e.store().order("TP").unwrap().price, 60.);
+    assert_eq!(e.store().order("TRAIL").unwrap().price, 95.);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"TRAIL","symbol":"BTC/USD","order_type":"trailing-stop","order_qty":1,"cum_qty":0,"triggers":{"price":5,"price_type":"pct"}}]}"#,
+    );
+    assert_eq!(e.store().order("TRAIL").unwrap().price, 95.);
+}
+
+#[test]
+fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"LIMIT","symbol":"BTC/USD","side":"buy","order_type":"limit","order_qty":1,"cum_qty":0,"limit_price":99},{"order_id":"ICEBERG","symbol":"ETH/USD","side":"buy","order_type":"iceberg","order_qty":2,"cum_qty":0,"limit_price":49,"display_qty":0.5},{"order_id":"EXTERNAL-EUR","symbol":"ETH/EUR","side":"buy","order_type":"limit","order_qty":1,"cum_qty":0,"limit_price":40}]}"#,
+    );
+    assert_eq!(e.store().orders().len(), 2);
+    assert_eq!(e.store().order("ICEBERG").unwrap().price, 49.);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 50,
+            id: "ICEBERG".into(),
+            price: Some(48.),
+            amount: None,
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 50,
+            result: Err(_)
+        })
+    )));
+}
+
+#[test]
+fn both_legacy_dogecoin_balance_codes_value_against_the_canonical_market_asset() {
+    for asset in ["XDG", "XXDG"] {
+        let balance = format!(r#"{{"error":[],"result":{{"ZUSD":"50","{asset}":"100"}}}}"#);
+        let (e, _, _) = ready_with_payloads(false, DOGE_META, DOGE_TICKERS, &balance);
+        assert_eq!(e.store().balance().total, 65.);
+        let currency = e
+            .store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == "DOGE")
+            .unwrap();
+        assert_eq!(currency.balance.total, 100.);
+        assert_eq!(currency.balance.free, 100.);
+        assert_eq!(e.store().market("XDG/USD").unwrap().base, "DOGE");
+    }
+}
+
+// WS v2 executions reports trade execution fields separately from order-status transitions.
+// https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/executions
+#[test]
+fn final_trade_and_filled_lifecycle_in_one_batch_emit_one_execution() {
+    let trade = r#"{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":2,"last_qty":1.5,"last_price":100,"exec_id":"T-final","timestamp":"2023-11-14T22:13:21Z"}"#;
+    let filled = r#"{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"filled","order_qty":2,"cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"}"#;
+    for (first, last) in [(trade, filled), (filled, trade)] {
+        let (mut e, _, private) = ready(false);
+        e.take_frame(NOW);
+        let frame =
+            format!(r#"{{"channel":"executions","type":"update","data":[{first},{last}]}}"#);
+        message(&mut e, private.unwrap(), &frame);
+        let o = e.store().order("O-100").unwrap();
+        assert_eq!(
+            (o.filled, o.remaining, o.status),
+            (2., 0., OrderStatus::Closed)
+        );
+        assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 1);
+        message(&mut e, private.unwrap(), &frame);
+        assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+    }
+}
+#[test]
+fn cumulative_fallback_progress_uses_the_previous_row_in_the_same_batch() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"trade","cum_qty":1,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"},{"order_id":"O-100","exec_type":"trade","cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    let frame = e.take_frame(NOW).unwrap();
+    assert_eq!(support_fill_count(frame), 2);
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            let payload = &frame[at + 8..at + 8 + size];
+            let n = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+            let offset = (4 + 12 * n + 7) & !7;
+            let amounts = (0..n)
+                .map(|i| {
+                    f64::from_le_bytes(
+                        payload[offset + i * 16 + 8..offset + i * 16 + 16]
+                            .try_into()
+                            .unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(amounts, vec![0.5, 1.]);
+            return;
+        }
+        at += 8 + size;
+    }
+    panic!("missing fills");
+}
+#[test]
+fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 901 }));
+    let first = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    let retry = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(first.body, retry.body);
+    reply(
+        &mut e,
+        &retry,
+        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("Invalid signature"))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 901,
+            result: Err(_)
+        })
+    )));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+#[test]
+fn malformed_nonempty_private_secret_fails_locally_before_io() {
+    let mut opts = options();
+    opts.secret = Some("invalid base64!".into());
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(opts));
+    e.start(NOW);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("invalid secret"))));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
+}
+
+#[test]
+fn distinct_same_order_native_trades_in_a_batch_remain_separate_fills() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":1,"last_qty":0.5,"last_price":99,"exec_id":"T-first","timestamp":"2023-11-14T22:13:21Z"},{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"trade","order_qty":2,"cum_qty":2,"last_qty":1,"last_price":100,"exec_id":"T-second","timestamp":"2023-11-14T22:13:22Z"}]}"#,
+    );
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 2);
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Closed
+    );
+}
+#[test]
+fn filled_lifecycle_without_trade_does_not_invent_an_execution() {
+    let (mut e, _, private) = ready(false);
+    e.take_frame(NOW);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"limit","exec_type":"filled","order_qty":2,"cum_qty":2,"avg_price":100,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("O-100").unwrap().status,
+        OrderStatus::Closed
+    );
+    assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+}
