@@ -28,6 +28,10 @@ pub mod section {
     pub const FILLS: u16 = 11;
     /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
     pub const SETTINGS: u16 = 12;
+    /// Optional typed prediction outcome identity and signing metadata.
+    pub const PREDICTION_MARKETS: u16 = 13;
+    /// Optional typed prediction holding settlement flags.
+    pub const PREDICTION_HOLDINGS: u16 = 14;
 }
 
 pub mod status_flag {

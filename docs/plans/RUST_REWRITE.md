@@ -101,6 +101,18 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
+| 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
+| 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
+
+Prediction venues map each outcome token to one ordinary market, with shares
+as base size and collateral as quote. Optional typed metadata sections preserve
+condition/outcome identity, display text and signing constraints without generic
+JSON blobs or fields on every venue's market/position record. They accompany
+MARKETS/POSITIONS replacements; missing sections clear that replacement's old
+metadata, while unrelated updates leave it intact. A new market table invalidates
+both indexed metadata tables. Holding flags survive updates for the same outcome,
+and are removed when its holding closes; authoritative holdings snapshots replace
+them explicitly. Other venues retain every existing section's byte layout.
 
 Venues with independent hedge leverage append f64 `buyLeverage[n]` and
 `sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this

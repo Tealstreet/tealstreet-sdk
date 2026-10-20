@@ -114,6 +114,29 @@ pub struct Limits {
     pub price: Option<Min>,
 }
 
+/// Typed outcome metadata for prediction markets; ordinary venues allocate none.
+/// `market` is an index in the store's current market table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PredictionMarket {
+    pub market: u32,
+    pub condition_id: String,
+    pub outcome: String,
+    pub question: String,
+    pub description: String,
+    pub end_date: String,
+    pub slug: String,
+    pub tick_size: f64,
+    pub neg_risk: bool,
+}
+
+/// Settlement capabilities of one prediction outcome holding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PredictionHolding {
+    pub market: u32,
+    pub redeemable: bool,
+    pub mergeable: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Market {

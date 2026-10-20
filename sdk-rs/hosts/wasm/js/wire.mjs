@@ -16,6 +16,8 @@ export const SECTION = {
   STATUS: 10,
   FILLS: 11,
   SETTINGS: 12,
+  PREDICTION_MARKETS: 13,
+  PREDICTION_HOLDINGS: 14,
 };
 
 export const NONE = 0xffffffff;
@@ -154,6 +156,37 @@ export class Frame {
       symbol: (i) => frame.string(refs[i * 4 + 1]),
       base: (i) => frame.string(refs[i * 4 + 2]),
       quote: (i) => frame.string(refs[i * 4 + 3]),
+    };
+  }
+
+  /** Optional outcome identity/signing metadata, keyed by current market index. */
+  predictionMarkets() {
+    const section = this.first(SECTION.PREDICTION_MARKETS);
+    if (!section) return undefined;
+    const { buffer } = this;
+    const count = this.view.getUint32(section.offset, true);
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const refs = new Uint32Array(buffer, section.offset + 4 + count * 4, count * 6);
+    const flags = new Uint32Array(buffer, section.offset + 4 + count * 28, count);
+    const tickSize = new Float64Array(buffer, align8(section.offset + 4 + count * 32), count);
+    return { count, market, flags, tickSize,
+      conditionId: (i) => this.string(refs[i * 6]),
+      outcome: (i) => this.string(refs[i * 6 + 1]),
+      question: (i) => this.string(refs[i * 6 + 2]),
+      description: (i) => this.string(refs[i * 6 + 3]),
+      endDate: (i) => this.string(refs[i * 6 + 4]),
+      slug: (i) => this.string(refs[i * 6 + 5]),
+    };
+  }
+
+  /** Optional holding settlement flags; an empty table clears previous flags. */
+  predictionHoldings() {
+    const section = this.first(SECTION.PREDICTION_HOLDINGS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    return { count,
+      market: new Uint32Array(this.buffer, section.offset + 4, count),
+      flags: new Uint32Array(this.buffer, section.offset + 4 + count * 4, count),
     };
   }
 

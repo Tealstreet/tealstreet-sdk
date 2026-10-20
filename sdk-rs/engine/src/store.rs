@@ -2,7 +2,8 @@
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
 use crate::model::{
-    Balance, CoinBalance, Loaded, MarginType, Market, Order, OrderStatus, Position, Ticker,
+    Balance, CoinBalance, Loaded, MarginType, Market, Order, OrderStatus, Position,
+    PredictionHolding, PredictionMarket, Ticker,
 };
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
@@ -10,6 +11,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
+    prediction_markets: Option<Vec<PredictionMarket>>,
+    prediction_holdings: Option<Vec<PredictionHolding>>,
     market_by_symbol: HashMap<Box<str>, u32>,
     market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
@@ -141,8 +144,40 @@ impl Store {
             .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
+        let had_prediction_markets = self.prediction_markets.take().is_some();
+        if self.prediction_holdings.take().is_some() || had_prediction_markets {
+            self.changes.positions = true;
+        }
         self.changes.markets = true;
         self.set_loaded(|loaded| loaded.markets = true);
+    }
+
+    pub fn prediction_markets(&self) -> Option<&[PredictionMarket]> {
+        self.prediction_markets.as_deref()
+    }
+
+    /// Replace metadata after `set_markets`; table indices belong to that snapshot.
+    pub fn set_prediction_markets(&mut self, markets: Vec<PredictionMarket>) {
+        if self.prediction_markets.as_ref() != Some(&markets) {
+            self.prediction_markets = Some(markets);
+            self.changes.markets = true;
+            // Existing holdings derive condition identity from their market metadata.
+            if !self.positions.is_empty() {
+                self.changes.positions = true;
+            }
+        }
+    }
+
+    pub fn prediction_holdings(&self) -> Option<&[PredictionHolding]> {
+        self.prediction_holdings.as_deref()
+    }
+
+    /// Replace settlement flags after an authoritative position snapshot.
+    pub fn set_prediction_holdings(&mut self, holdings: Vec<PredictionHolding>) {
+        if self.prediction_holdings.as_ref() != Some(&holdings) {
+            self.prediction_holdings = Some(holdings);
+            self.changes.positions = true;
+        }
     }
 
     pub fn tickers(&self) -> &[Ticker] {
@@ -275,8 +310,23 @@ impl Store {
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
         self.positions = positions;
+        self.prune_prediction_holdings();
         self.changes.positions = true;
         self.set_loaded(|loaded| loaded.positions = true);
+    }
+
+    fn prune_prediction_holdings(&mut self) {
+        if let Some(holdings) = &mut self.prediction_holdings {
+            holdings.retain(|holding| {
+                self.markets
+                    .get(holding.market as usize)
+                    .is_some_and(|market| {
+                        self.positions
+                            .iter()
+                            .any(|position| position.symbol == market.symbol)
+                    })
+            });
+        }
     }
 
     pub fn position(&self, id: &str) -> Option<&Position> {
@@ -294,6 +344,7 @@ impl Store {
             (None, true) => return,
             (None, false) => self.positions.push(position),
         }
+        self.prune_prediction_holdings();
         self.changes.positions = true;
     }
 
@@ -303,6 +354,7 @@ impl Store {
             update(position);
         }
         self.positions.retain(|p| p.contracts != 0.0);
+        self.prune_prediction_holdings();
         self.changes.positions = true;
     }
 
@@ -470,6 +522,7 @@ impl Store {
         }
         if changes.markets {
             self.write_markets(w);
+            self.write_prediction_markets(w);
         }
         if changes.tickers_replaced {
             self.write_tickers(w);
@@ -491,6 +544,7 @@ impl Store {
         }
         if changes.positions {
             self.write_positions(w);
+            self.write_prediction_holdings(w);
         }
         if changes.balance {
             let b = &self.balance;
@@ -537,6 +591,45 @@ impl Store {
 
     fn market_ref(&self, symbol: &str) -> u32 {
         self.market_index(symbol).unwrap_or(wire::NONE)
+    }
+
+    fn write_prediction_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(markets) = &self.prediction_markets else {
+            return;
+        };
+        w.begin(section::PREDICTION_MARKETS);
+        w.u32(markets.len() as u32);
+        w.u32s(markets.iter().map(|market| market.market));
+        for market in markets {
+            let refs = [
+                w.string(&market.condition_id),
+                w.string(&market.outcome),
+                w.string(&market.question),
+                w.string(&market.description),
+                w.string(&market.end_date),
+                w.string(&market.slug),
+            ];
+            w.u32s(refs);
+        }
+        w.u32s(markets.iter().map(|market| u32::from(market.neg_risk)));
+        w.pad();
+        w.f64s(markets.iter().map(|market| market.tick_size));
+        w.end();
+    }
+
+    fn write_prediction_holdings<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let Some(holdings) = &self.prediction_holdings else {
+            return;
+        };
+        w.begin(section::PREDICTION_HOLDINGS);
+        w.u32(holdings.len() as u32);
+        w.u32s(holdings.iter().map(|holding| holding.market));
+        w.u32s(
+            holdings
+                .iter()
+                .map(|holding| u32::from(holding.redeemable) | (u32::from(holding.mergeable) << 1)),
+        );
+        w.end();
     }
 
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
@@ -944,6 +1037,166 @@ mod tests {
         assert_eq!(
             f64::from_le_bytes(payload[64..72].try_into().unwrap()),
             12_501.0
+        );
+    }
+    fn prediction_store() -> Store {
+        use crate::model::{Limits, MinMax, PositionSide, Precision};
+        let mut store = Store::default();
+        store.set_markets(vec![Market {
+            id: "1234567890123456789012345678901234567890".into(),
+            symbol: "1234567890123456789012345678901234567890".into(),
+            pretty_symbol: None,
+            base: "Yes".into(),
+            quote: "pUSD".into(),
+            active: true,
+            precision: Precision {
+                amount: 0.01,
+                price: 0.001,
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: 5.0,
+                    max: f64::INFINITY,
+                },
+                leverage: MinMax { min: 1.0, max: 1.0 },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: Some(true),
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }]);
+        store.set_positions(vec![Position {
+            id: "outcome-holding".into(),
+            symbol: store.markets[0].symbol.clone(),
+            side: PositionSide::Long,
+            entry_price: 0.4,
+            notional: 6.0,
+            leverage: 1.0,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: 2.0,
+            realized_pnl: None,
+            contracts: 10.0,
+            liquidation_price: 0.0,
+            margin_size: None,
+            last_update: None,
+        }]);
+        store
+    }
+
+    fn prediction_metadata() -> PredictionMarket {
+        PredictionMarket {
+            market: 0,
+            condition_id: "0xcondition".into(),
+            outcome: "Yes".into(),
+            question: "Will café open?".into(),
+            description: "An exact description".into(),
+            end_date: "2026-12-31T00:00:00Z".into(),
+            slug: "cafe-open".into(),
+            tick_size: 0.001,
+            neg_risk: true,
+        }
+    }
+
+    #[test]
+    fn prediction_columns_preserve_ordinary_layout_and_full_snapshot_identity() {
+        let mut store = prediction_store();
+        let legacy = balance_frame(&mut store);
+        let metadata = prediction_metadata();
+        store.set_prediction_markets(vec![metadata.clone()]);
+        store.set_prediction_holdings(vec![PredictionHolding {
+            market: 0,
+            redeemable: true,
+            mergeable: false,
+        }]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write(&store.everything(), &mut writer);
+        let frame = writer.finish();
+        for kind in [section::MARKETS, section::POSITIONS] {
+            let old = wire::sections(&legacy).find(|(k, _)| *k == kind).unwrap().1;
+            let new = wire::sections(&frame).find(|(k, _)| *k == kind).unwrap().1;
+            assert_eq!(old, new, "prediction metadata cannot shift legacy columns");
+        }
+        assert_eq!(store.prediction_markets(), Some([metadata].as_slice()));
+        let payload = wire::sections(&frame)
+            .find(|(k, _)| *k == section::PREDICTION_MARKETS)
+            .unwrap()
+            .1;
+        let word = |at| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
+        assert_eq!(payload.len(), 48);
+        assert_eq!((word(0), word(4), word(32)), (1, 0, 1));
+        assert_eq!(
+            f64::from_le_bytes(payload[40..48].try_into().unwrap()),
+            0.001
+        );
+        let strings = wire::sections(&frame)
+            .find(|(k, _)| *k == section::STRINGS)
+            .unwrap()
+            .1;
+        let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+        let text = |index: usize| {
+            let offset =
+                |i| u32::from_le_bytes(strings[4 + i * 4..8 + i * 4].try_into().unwrap()) as usize;
+            std::str::from_utf8(
+                &strings[8 + count * 4 + offset(index)..8 + count * 4 + offset(index + 1)],
+            )
+            .unwrap()
+        };
+        assert_eq!(text(word(8) as usize), "0xcondition");
+        assert_eq!(text(word(16) as usize), "Will café open?");
+        let holdings = wire::sections(&frame)
+            .find(|(k, _)| *k == section::PREDICTION_HOLDINGS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(holdings[8..12].try_into().unwrap()), 1);
+    }
+
+    #[test]
+    fn prediction_flags_survive_position_changes_but_never_resurrect_on_reopen() {
+        let mut store = prediction_store();
+        store.set_prediction_markets(vec![prediction_metadata()]);
+        let holding = PredictionHolding {
+            market: 0,
+            redeemable: false,
+            mergeable: true,
+        };
+        store.set_prediction_holdings(vec![holding]);
+        store.take_pending();
+        store.set_prediction_markets(vec![prediction_metadata()]);
+        store.set_prediction_holdings(vec![holding]);
+        let unchanged = store.take_pending();
+        assert!(!unchanged.changes.markets && !unchanged.changes.positions);
+        let positions = store.positions.clone();
+        store.set_positions(positions.clone());
+        assert_eq!(store.prediction_holdings(), Some([holding].as_slice()));
+        store.update_positions(|position| position.contracts = 0.0);
+        assert_eq!(store.prediction_holdings(), Some([].as_slice()));
+        store.set_positions(positions);
+        assert_eq!(store.prediction_holdings(), Some([].as_slice()));
+        store.set_prediction_holdings(vec![holding]);
+        let mut closed = store.positions[0].clone();
+        closed.contracts = 0.0;
+        store.upsert_position(closed);
+        assert_eq!(store.prediction_holdings(), Some([].as_slice()));
+        store.set_prediction_markets(vec![]);
+        let cleared = balance_frame(&mut store);
+        let payload = wire::sections(&cleared)
+            .find(|(k, _)| *k == section::PREDICTION_MARKETS)
+            .unwrap()
+            .1;
+        assert_eq!(&payload[..4], &[0, 0, 0, 0]);
+        store.set_markets(store.markets.clone());
+        assert_eq!(store.prediction_markets(), None);
+        assert_eq!(store.prediction_holdings(), None);
+        let reset = balance_frame(&mut store);
+        assert!(
+            wire::sections(&reset).all(|(kind, _)| kind != section::PREDICTION_MARKETS
+                && kind != section::PREDICTION_HOLDINGS)
         );
     }
 }

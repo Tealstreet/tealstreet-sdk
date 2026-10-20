@@ -3780,6 +3780,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-polymarket"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [

@@ -28,8 +28,9 @@ export class FrameApplier {
     const update: Writable<StoreUpdate> = {};
 
     const markets = frame.markets();
+    const predictionMarkets = frame.predictionMarkets?.();
     if (markets) {
-      const rows: Market[] = [];
+      const rows: Writable<Market>[] = [];
       this.marketSymbols = new Array(markets.count);
       this.contractSizes = Array.from(markets.contractSize, (size) => size > 0 ? size : 1);
       for (let i = 0; i < markets.count; i++) {
@@ -58,6 +59,23 @@ export class FrameApplier {
           makerFee: finite(markets.makerFee[i]),
         });
         this.marketSymbols[i] = rows[i].symbol;
+      }
+      if (predictionMarkets) {
+        for (let i = 0; i < predictionMarkets.count; i++) {
+          const market = rows[predictionMarkets.market[i]];
+          if (!market) continue;
+          market.info = {
+            conditionId: predictionMarkets.conditionId(i),
+            tokenId: market.id,
+            outcome: predictionMarkets.outcome(i),
+            tickSize: predictionMarkets.tickSize[i],
+            negRisk: (predictionMarkets.flags[i] & 1) !== 0,
+            question: predictionMarkets.question(i),
+            description: predictionMarkets.description(i),
+            endDate: predictionMarkets.endDate(i),
+            slug: predictionMarkets.slug(i),
+          };
+        }
       }
       update.markets = rows;
     }
@@ -143,6 +161,11 @@ export class FrameApplier {
     const positions = frame.positions();
     if (positions) {
       const rows: Position[] = [];
+      const predictionHoldings = frame.predictionHoldings?.();
+      const holdingFlags = predictionHoldings && new Map<number, number>();
+      if (predictionHoldings) {
+        for (let i = 0; i < predictionHoldings.count; i++) holdingFlags!.set(predictionHoldings.market[i], predictionHoldings.flags[i]);
+      }
       for (let i = 0; i < positions.count; i++) {
         const enums = positionEnums(positions.enums[i]);
         const symbol = this.symbol(positions.market[i]);
@@ -152,6 +175,14 @@ export class FrameApplier {
           id: positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol),
           symbol,
           side: enums.side as Position['side'],
+          ...(market?.info?.conditionId && {
+            info: {
+              tokenId: market.id,
+              conditionId: market.info.conditionId,
+              redeemable: ((holdingFlags?.get(positions.market[i]) ?? 0) & 1) !== 0,
+              mergeable: ((holdingFlags?.get(positions.market[i]) ?? 0) & 2) !== 0,
+            },
+          }),
           entryPrice: positions.entryPrice[i],
           notional: positions.notional[i],
           leverage: positions.leverage[i],

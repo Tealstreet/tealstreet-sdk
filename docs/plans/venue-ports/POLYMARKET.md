@@ -99,3 +99,27 @@ used by the pinned TS integration, never legacy V1 orders.
 
 * Plan: source audit complete; fresh branch created; signing and narrow frame
   implementation delegated to disjoint scopes. Public implementation next.
+
+### Public phase checkpoint
+
+Implemented typed outcome markets with atomic streamed Gamma discovery, staged
+REST midpoint seeding, lazy public socket, full sorted depth and every absolute
+change, reconnect snapshot requirement, raw PING/PONG watchdog, dynamic tick
+updates, and bounded sampled candles. Optional typed prediction metadata passes
+through native frames and both SDK consumers; legacy numeric payloads unchanged.
+Signing primitives are prepared and independently checked against official
+client v1.1.0 (eight V2/1271 vectors and 72 amount-rounding cases).
+
+Independent public phase review found four P2s: stale ticker/tick rollback,
+missing snapshot arrays interpreted empty, unfiltered returned candle bounds,
+and fidelity units. All repaired with focused regressions. Startup reads have
+bounded retries; midpoint snapshots commit only once complete. Verification:
+14 venue tests (6 signing, 8 public), 56 engine tests, 10 wire tests, 12 SDK
+frame regressions, safe-cex typecheck and frame lint; crate native clippy passes.
+Full host suite needs default Wasm rebuild (cached feature binary lacks Binance).
+
+Known TS fixes to register in the gate: raw initial book arrays were ignored;
+price_change updated tickers without depth and throttled away intermediate
+updates; unsorted snapshot levels; stale quote/tick rollback; missing tick size
+updates; fidelity60 misread as1minute. The Rust behavior follows official raw
+CLOB protocol and retains all full-depth changes. Private implementation next.

@@ -264,3 +264,44 @@ test('optional collateral columns survive buffer transfer and distinguish absent
   assert.equal(buffer.byteLength, 0);
   assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
 });
+
+test('prediction metadata is optional, lossless and isolated from following sections', () => {
+  const strings = stringFrame(['0xcondition', 'Yes', 'Will café open?', 'Exact description', '2026-12-31T00:00:00Z', 'cafe-open']);
+  const data = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 48, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      view.setUint32(offset + 4, 7, true);
+      for (let i = 0; i < 6; i++) view.setUint32(offset + 8 + i * 4, i, true);
+      view.setUint32(offset + 32, 1, true);
+      view.setFloat64(offset + 40, 0.001, true);
+    } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 24, write(view, offset) {
+      view.setUint32(offset, 2, true);
+      view.setUint32(offset + 4, 7, true);
+      view.setUint32(offset + 8, 9, true);
+      view.setUint32(offset + 12, 1, true);
+      view.setUint32(offset + 16, 2, true);
+    } },
+  ]);
+  data.strings = strings.strings;
+  const markets = data.predictionMarkets();
+  assert.deepEqual([...markets.market], [7]);
+  assert.deepEqual([...markets.flags], [1]);
+  assert.deepEqual([...markets.tickSize], [0.001]);
+  assert.equal(markets.conditionId(0), '0xcondition');
+  assert.equal(markets.outcome(0), 'Yes');
+  assert.equal(markets.question(0), 'Will café open?');
+  assert.equal(markets.description(0), 'Exact description');
+  assert.equal(markets.endDate(0), '2026-12-31T00:00:00Z');
+  assert.equal(markets.slug(0), 'cafe-open');
+  assert.deepEqual([...data.predictionHoldings().market], [7, 9]);
+  assert.deepEqual([...data.predictionHoldings().flags], [1, 2]);
+  assert.equal(strings.predictionMarkets(), undefined);
+  assert.equal(strings.predictionHoldings(), undefined);
+  const empty = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+  ]);
+  assert.equal(empty.predictionMarkets().count, 0);
+  assert.equal(empty.predictionHoldings().count, 0);
+});
