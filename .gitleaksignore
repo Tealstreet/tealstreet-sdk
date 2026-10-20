@@ -48,3 +48,8 @@ c58afe1514d38ddbd90e45261f078721a9db03c6:sdk-rs/harness/kucoinspot.test.mjs:gene
 # fingerprints only; future changes and production credentials remain scanned.
 3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/hyperliquidspot.mjs:generic-api-key:5
 3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/krakenspot.mjs:generic-api-key:3
+# Coinbase read-only key tests: literal non-credential key names
+# organizations/test/apiKeys/{test,read} and placeholder secrets.
+070fd851dd0377bb63c4c4235c3bb58db0fd0307:packages/safe-cex/src/__tests__/audit-regressions/coinbase.secondary-read-key.test.ts:generic-api-key:10
+070fd851dd0377bb63c4c4235c3bb58db0fd0307:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1693
+b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1757
