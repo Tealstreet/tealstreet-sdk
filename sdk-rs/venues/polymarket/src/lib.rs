@@ -1042,7 +1042,9 @@ impl Venue for Polymarket {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
-            Command::Venue { command, .. } => safe_cex_engine::unsupported_venue_action(cx, command),
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(state) = self.books.get_mut(&symbol) {

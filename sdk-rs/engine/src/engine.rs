@@ -189,7 +189,10 @@ pub enum VenueAction {
 
 /// The shared rejection for a venue action the venue does not implement.
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.done(command, Err("This action is not supported on this venue".into()));
+    cx.done(
+        command,
+        Err("This action is not supported on this venue".into()),
+    );
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2523,6 +2526,26 @@ mod streaming_tests {
             symbol_amend: false,
             commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn venue_actions_default_to_one_shared_rejection() {
+        let mut engine = frame_engine();
+        engine.handle(
+            0.0,
+            Event::Command(Command::Venue {
+                command: 9,
+                action: VenueAction::FetchAccountTier,
+            }),
+        );
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+            _ => None,
+        });
+        assert_eq!(
+            result,
+            Some(Err("This action is not supported on this venue".into()))
+        );
     }
 
     #[test]

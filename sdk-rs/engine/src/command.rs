@@ -525,6 +525,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn account_tier_ops_decode_to_venue_actions() {
+        assert_eq!(
+            decode_command(r#"{"op":"setAccountTier","command":5,"tier":"plus"}"#).unwrap(),
+            Command::Venue {
+                command: 5,
+                action: crate::VenueAction::SetAccountTier {
+                    tier: "plus".into()
+                },
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountTier","command":6}"#).unwrap(),
+            Command::Venue {
+                command: 6,
+                action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
+    #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
         let account = decode_command(r#"{"op":"getAccount","command":77}"#);
         assert_eq!(
