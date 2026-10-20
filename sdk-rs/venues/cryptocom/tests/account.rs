@@ -1,5 +1,6 @@
 mod support;
-use safe_cex_engine::{Action, Event, Notice};
+use safe_cex_engine::model::TimeInForce;
+use safe_cex_engine::{Action, Event, LogLevel, Notice};
 use support::*;
 
 #[test]
@@ -323,4 +324,189 @@ fn cached_rest_after_reopen_keeps_newer_live_exposure() {
         "cached closed row must not erase newer reopened exposure"
     );
     assert_eq!(h.engine.store().positions()[0].last_update, Some(11.0));
+}
+
+fn warned(h: &Harness, needle: &str) -> bool {
+    h.actions.iter().any(|a| {
+        matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message })
+            if message.contains(needle))
+    })
+}
+#[test]
+fn unmappable_snapshot_rows_are_skipped_and_keep_known_state() {
+    let mut h = Harness::new();
+    let short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","open_position_pnl":null,"isolation_type":null,"liquidation_price":null,"update_timestamp_ms":1}"#;
+    h.reply(
+        "get-positions",
+        &format!(r#"{{"code":0,"result":{{"data":[{short}]}}}}"#),
+    );
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+    );
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+    let bad_short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":null}"#;
+    let foreign = r#"{"instrument_name":"ETHUSD-PERP","quantity":null}"#;
+    let mut orders_read = false;
+    // Orders are re-read on every fourth reconcile.
+    for _ in 0..4 {
+        next_tick(&mut h);
+        h.reply(
+            "get-positions",
+            &format!(r#"{{"code":0,"result":{{"data":[{bad_short},{foreign}]}}}}"#),
+        );
+        assert!(warned(
+            &h,
+            "skipped 1 unmappable position rows (first: BTCUSD-PERP)"
+        ));
+        assert!(!warned(&h, "ETHUSD-PERP"), "foreign rows stay quiet");
+        h.reply("user-balance", BALANCE);
+        orders_read = h
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("private/get-open-orders")));
+        if orders_read {
+            break;
+        }
+    }
+    assert!(orders_read, "orders were never re-read");
+    let bad = r#"{"order_id":"9007199254740993","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"BUY","quantity":null}"#;
+    let fresh = r#"{"order_id":"77","instrument_name":"BTCUSD-PERP","order_type":"LIMIT","side":"SELL","quantity":"1","limit_price":"110","cumulative_quantity":null,"time_in_force":null,"exec_inst":null}"#;
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{bad},{fresh}]}}}}"#),
+    );
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert!(warned(
+        &h,
+        "skipped 1 unmappable order rows (first: 9007199254740993)"
+    ));
+    let mut ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.as_str())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["77", "9007199254740993"]);
+    let fresh = h.engine.store().order("77").unwrap();
+    assert_eq!(
+        (fresh.filled, fresh.remaining, fresh.time_in_force),
+        (0.0, 1.0, Some(TimeInForce::GoodTillCancel))
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!((positions.len(), positions[0].contracts), (1, 2.0));
+}
+#[test]
+fn balance_snapshot_ignores_bad_rows_after_the_summary() {
+    let mut h = Harness::new();
+    h.reply("get-positions", EMPTY);
+    h.reply(
+        "user-balance",
+        r#"{"code":0,"result":{"data":[{"total_margin_balance":"1000","total_available_balance":"950","total_initial_margin":"50","total_session_unrealized_pnl":"10"},{"total_margin_balance":null}]}}"#,
+    );
+    h.reply("private/get-open-orders", EMPTY);
+    assert_eq!(h.engine.store().balance().total, 1000.0);
+    assert!(warned(&h, "skipped 1 unmappable balance rows"));
+}
+#[test]
+fn pushed_order_with_null_fill_keeps_the_stored_fill() {
+    let mut h = Harness::new();
+    h.load();
+    h.ws(
+        "user.order",
+        &ORDER
+            .replace(
+                r#""cumulative_quantity":"0""#,
+                r#""cumulative_quantity":"0.4""#,
+            )
+            .replace(
+                r#""time_in_force":"GOOD_TILL_CANCEL""#,
+                r#""time_in_force":"IMMEDIATE_OR_CANCEL""#,
+            ),
+    );
+    h.ws(
+        "user.order",
+        &ORDER
+            .replace(
+                r#""cumulative_quantity":"0""#,
+                r#""cumulative_quantity":null"#,
+            )
+            .replace(
+                r#""time_in_force":"GOOD_TILL_CANCEL""#,
+                r#""time_in_force":null"#,
+            )
+            .replace(r#""update_time":1"#, r#""update_time":2"#),
+    );
+    let order = &h.engine.store().orders()[0];
+    assert_eq!(
+        (order.filled, order.remaining, order.time_in_force),
+        (0.4, 0.6, Some(TimeInForce::ImmediateOrCancel))
+    );
+}
+fn push(h: &mut Harness, channel: &str, rows: &str) {
+    let socket = h.socket(true);
+    let text = format!(r#"{{"code":0,"result":{{"channel":"{channel}","data":[{rows}]}}}}"#);
+    h.event(Event::WsMessage {
+        socket,
+        text: &text,
+    });
+}
+#[test]
+fn bad_rows_in_pushed_frames_do_not_drop_their_neighbours() {
+    let mut h = Harness::new();
+    h.load();
+    push(
+        &mut h,
+        "user.order",
+        &format!(
+            r#"{{"order_id":"5","instrument_name":"BTCUSD-PERP","quantity":null}},{{"order_id":"6","instrument_name":"BTCUSD-PERP"}},{ORDER}"#
+        ),
+    );
+    assert_eq!(h.engine.store().orders().len(), 1);
+    assert!(warned(&h, "skipped 2 unmappable order rows (first: 5)"));
+
+    push(
+        &mut h,
+        "user.positions",
+        r#"{"instrument_name":"BTCUSD-PERP","quantity":"1","cost":null},{"instrument_name":"ETHUSD-PERP","quantity":null},{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","update_timestamp_ms":5}"#,
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+    assert!(warned(
+        &h,
+        "skipped 1 unmappable position rows (first: BTCUSD-PERP)"
+    ));
+    assert!(!warned(&h, "ETHUSD-PERP"));
+
+    push(
+        &mut h,
+        "user.balance",
+        r#"{"total_margin_balance":null},{"total_margin_balance":"2000","total_available_balance":"1900","total_initial_margin":"100","total_session_unrealized_pnl":"0"}"#,
+    );
+    assert_eq!(h.engine.store().balance().total, 2000.0);
+    assert!(warned(&h, "skipped 1 unmappable balance rows"));
+
+    h.engine.take_frame(h.now);
+    push(
+        &mut h,
+        "user.trade",
+        r#"{"trade_id":9,"order_id":5,"instrument_name":"BTCUSD-PERP","traded_price":null},{"trade_id":10,"order_id":6,"instrument_name":"BTCUSD-PERP","side":"BUY","traded_price":"100","traded_quantity":"0.1"}"#,
+    );
+    assert!(warned(&h, "skipped 1 unmappable execution rows (first: 9)"));
+    assert_eq!(fill_count(h.engine.take_frame(h.now).unwrap()), 1);
+}
+fn fill_count(bytes: &[u8]) -> u32 {
+    let mut at = 16;
+    while at < bytes.len() {
+        let kind = u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap());
+        let len = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            return u32::from_le_bytes(bytes[at + 8..at + 12].try_into().unwrap());
+        }
+        at += 8 + len;
+    }
+    0
 }
