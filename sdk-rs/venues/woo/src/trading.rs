@@ -667,6 +667,7 @@ impl Woo {
                 stp_mode: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
             };
             self.validate_places(cx, std::slice::from_ref(&opts))?;
             let mut steps = VecDeque::from([write(

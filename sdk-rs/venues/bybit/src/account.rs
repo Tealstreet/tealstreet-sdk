@@ -3,10 +3,10 @@
 //! honest against the stream.
 use crate::sign::Query;
 use crate::wire::*;
-use crate::{BybitLinear, Channel, Pending, Rest, Then, venue_error};
+use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
-    PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
+    PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce, OptionGreeks, PositionGreeks,
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketId, Store, TimerId, num};
@@ -61,7 +61,7 @@ struct FillCursor {
 
 pub struct MappedPosition {
     pub position: Position,
-    /// Placeholder rows repeat a symbol; the most informative one wins.
+    greeks: Option<OptionGreeks>,    /// Placeholder rows repeat a symbol; the most informative one wins.
     score: u32,
     updated: f64,
 }
@@ -312,7 +312,7 @@ fn time_in_force(text: Option<&str>) -> Option<TimeInForce> {
 }
 
 /// `BTCUSD`, `ETHUSDZ26`: coin-settled contracts this connection does not trade.
-fn is_inverse_symbol(symbol: &str) -> bool {
+pub(crate) fn is_inverse_symbol(symbol: &str) -> bool {
     let Some(at) = symbol.find("USD") else {
         return false;
     };
@@ -550,6 +550,7 @@ pub fn map_position(
         .map_or(0.0, float);
     let native = or_zero(&p.size);
     let inverse = is_inverse_symbol(&p.symbol);
+    let option = Category::for_symbol(&p.symbol) == Category::Option;
     let reference = store
         .ticker(&p.symbol)
         .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
@@ -575,7 +576,7 @@ pub fn map_position(
     });
     let mut unrealized = or_zero(&p.unrealised_pnl);
     // USDC contracts report PnL settled differently; TS values them at mark.
-    if !p.symbol.ends_with("USDT")
+    if !option && !p.symbol.ends_with("USDT")
         && store.market(&p.symbol).is_some_and(|m| m.quote == "USDC")
         && let Some(ticker) = store.ticker(&p.symbol)
     {
@@ -605,6 +606,7 @@ pub fn map_position(
         score += 5;
     }
     MappedPosition {
+        greeks: option.then(|| crate::options::greeks(&p.delta, &p.gamma, &p.vega, &p.theta)).flatten(),
         position: Position {
             id: position_id(&p.symbol, side, mode),
             symbol: p.symbol.to_string(),
@@ -615,13 +617,13 @@ pub fn map_position(
             } else {
                 or_zero(&p.position_value)
             },
-            leverage: float_of(&p.leverage),
+            leverage: if option { 1.0 } else { float_of(&p.leverage) },
             margin_type: Some(margin_type),
             position_mode: mode,
             unrealized_pnl: unrealized,
             realized_pnl: Some(or_zero(&p.cur_realised_pnl)),
             contracts,
-            liquidation_price: or_zero(&p.liq_price),
+            liquidation_price: if option { 0.0 } else { or_zero(&p.liq_price) },
             margin_size: (margin > 0.0).then_some(margin),
             last_update: Some(now),
         },
@@ -835,10 +837,9 @@ impl BybitLinear {
             return category == self.paths.category
                 && (!self.variant.is_hyro() || symbol.ends_with("USDT"));
         }
-        if self.variant.is_spot() {
-            return false;
-        }
-        if self.variant.is_inverse() {
+        if self.variant.is_spot() { return false; }
+        if self.category == Category::Option { return Category::for_symbol(symbol) == Category::Option; }
+        if self.category == Category::Inverse {
             return is_inverse_symbol(symbol);
         }
         is_linear(category, symbol) && (!self.variant.is_hyro() || symbol.ends_with("USDT"))
@@ -1017,7 +1018,7 @@ impl BybitLinear {
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
-        if self.variant.is_spot() || self.variant.is_inverse() {
+        if self.variant.is_spot() || matches!(self.category, Category::Inverse | Category::Option) {
             &[""]
         } else if self.account.classic || self.variant.is_hyro() {
             &["USDT"]
@@ -1044,13 +1045,13 @@ impl BybitLinear {
     }
 
     pub(crate) fn try_start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.startup.tickers_loaded
+        if !self.tickers_ready
             || !self.startup.account_info
             || std::mem::replace(&mut self.account.started, true)
         {
             return;
         }
-        self.connect(cx, Channel::Private);
+        if self.category == self.primary_category { self.connect(cx, Channel::Private); }
         if self.variant.is_hyro() {
             return;
         }
@@ -1164,6 +1165,7 @@ impl BybitLinear {
     }
 
     fn fetch_wallet(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.category != self.primary_category { return; }
         if std::mem::replace(&mut self.account.wallet_in_flight, true) {
             return;
         }
@@ -1333,7 +1335,7 @@ impl BybitLinear {
                 if let Some(socket) = self.private.socket {
                     cx.send(
                         socket,
-                        if self.variant.is_spot() { r#"{"op":"subscribe","args":["order.spot","execution.spot","wallet"]}"# } else if self.variant.is_inverse() { r#"{"op":"subscribe","args":["order.inverse","execution.inverse","position.inverse","wallet"]}"# } else { r#"{"op":"subscribe","args":["order","execution","position","wallet"]}"# },
+                        if self.variant.is_spot() { r#"{"op":"subscribe","args":["order.spot","execution.spot","wallet"]}"# } else if self.category == Category::Inverse { r#"{"op":"subscribe","args":["order.inverse","execution.inverse","position.inverse","wallet"]}"# } else { r#"{"op":"subscribe","args":["order","execution","position","wallet"]}"# },
                     );
                 }
             }
@@ -1428,6 +1430,10 @@ impl BybitLinear {
         for row in rows {
             let mapped = self.map_account_position(row, cx.store, cx.now);
             let position = mapped.position;
+            let mut greek_rows = cx.store.position_greeks().unwrap_or_default().to_vec();
+            greek_rows.retain(|row| row.position_id != position.id);
+            if position.contracts != 0.0 && let Some(greeks) = mapped.greeks { greek_rows.push(PositionGreeks { position_id: position.id.clone(), greeks }); }
+            if self.category == Category::Option { cx.store.set_position_greeks(greek_rows); }
             if let Some(mode) = position.position_mode {
                 self.account
                     .position_modes
@@ -1460,7 +1466,8 @@ impl BybitLinear {
     }
 
     fn commit_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(wallet) = self.account.wallet {
+        if self.category == self.primary_category { self.wallet = self.account.wallet; }
+        if let Some(wallet) = self.wallet {
             cx.store.set_balance(wallet.balance(open_upnl(cx.store)));
         }
     }
@@ -1476,6 +1483,7 @@ impl BybitLinear {
                 let row = serde_json::from_str::<OrderRow>(item).ok();
                 let mapped = row
                     .as_ref()
+                    .filter(|row| self.trades_row(&row.category, &row.symbol))
                     .and_then(|row| map_order(row, cx.store, cx.now));
                 if self.variant.is_hyro()
                     && (row.as_ref().is_none_or(|row| !valid_hyro_order(row))
@@ -1490,6 +1498,7 @@ impl BybitLinear {
             }
             Request::Positions { rows, invalid, .. } => {
                 if let Ok(row) = serde_json::from_str::<PositionRow>(item) {
+                    if !self.trades_row(&row.category, &row.symbol) { return; }
                     if self.variant.is_hyro() && !valid_hyro_position(&row) {
                         *invalid = true;
                     } else {
@@ -1539,7 +1548,16 @@ impl BybitLinear {
                     ),
                 }
                 self.startup.account_info = true;
-                self.try_start_account(cx);
+                let classic = self.account.classic;
+                let margin_type = self.account.margin_type;
+                for state in &mut self.products {
+                    state.account.classic = classic;
+                    state.account.margin_type = margin_type;
+                    state.startup.account_info = true;
+                }
+                let category = self.category;
+                for other in self.categories() { self.select_category(other); self.try_start_account(cx); }
+                self.select_category(category);
             }
             Request::Orders {
                 generation,
@@ -1727,7 +1745,7 @@ impl BybitLinear {
             .store
             .orders()
             .iter()
-            .filter(|o| o.last_update > join.issued_at)
+            .filter(|o| self.owns_symbol(&o.symbol) && o.last_update > join.issued_at)
             .map(|o| (o.id.as_str(), o))
             .collect();
         let mut merged: Vec<Order> = orders
@@ -1742,13 +1760,18 @@ impl BybitLinear {
                 merged.push((*order).clone());
             }
         }
-        cx.store.set_orders(merged);
+        let old: Vec<String> = cx.store.orders().iter().filter(|order| self.owns_symbol(&order.symbol)).map(|order| order.id.clone()).collect();
+        let old_refs: Vec<&str> = old.iter().map(String::as_str).collect();
+        cx.store.remove_orders(&old_refs);
+        for order in merged.drain(..) { cx.store.upsert_order(order); }
+        self.orders_loaded.insert(self.category);
+        if self.orders_loaded.len() == self.products.len() + 1 { cx.store.set_orders(cx.store.orders().to_vec()); }
     }
 
     pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
         // A response issued before the switch cannot restore the old mode.
         self.account.position_version += 1;
-        if self.variant.is_inverse() {
+        if self.category == Category::Inverse {
             self.account.position_modes.clear();
         }
         self.account.positions_follow_up |= self.account.positions.is_some();
@@ -1816,12 +1839,17 @@ impl BybitLinear {
             })
             .collect();
         cx.store.set_settings(settings);
-        cx.store.set_positions(
-            best.into_iter()
-                .map(|r| r.position)
-                .filter(|p| p.contracts != 0.0)
-                .collect(),
-        );
+        let mut greek_rows = cx.store.position_greeks().unwrap_or_default().iter().filter(|row| cx.store.position(&row.position_id).is_some_and(|position| !self.owns_symbol(&position.symbol))).cloned().collect::<Vec<_>>();
+        for row in &best { if row.position.contracts != 0.0 && let Some(greeks) = &row.greeks { greek_rows.push(PositionGreeks { position_id: row.position.id.clone(), greeks: greeks.clone() }); } }
+        let category = self.category;
+        let spot = self.variant.is_spot();
+        cx.store.update_positions(|position| {
+            if spot || Category::for_symbol(&position.symbol) == category { position.contracts = 0.0; }
+        });
+        for row in best { cx.store.upsert_position(row.position); }
+        if self.category_enabled(Category::Option) { cx.store.set_position_greeks(greek_rows); }
+        self.positions_loaded.insert(self.category);
+        if self.positions_loaded.len() == self.products.len() + 1 { cx.store.set_positions(cx.store.positions().to_vec()); }
         self.commit_balance(cx);
     }
 }

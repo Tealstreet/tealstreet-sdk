@@ -1,6 +1,6 @@
 //! Private streams and atomic REST reconciliation, guarded against newer pushes.
 use crate::wire::*;
-use crate::{Okx, Pending, Topic, scaled, usd};
+use crate::{Okx, Pending, Topic, contracts_to_base, scaled, usd};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use std::collections::{HashMap, HashSet};
@@ -125,7 +125,11 @@ impl Okx {
             });
             self.list(
                 cx,
-                "/api/v5/account/account-position-risk?instType=SWAP",
+                if self.options.eea {
+                    "/api/v5/account/account-position-risk"
+                } else {
+                    "/api/v5/account/account-position-risk?instType=SWAP"
+                },
                 true,
                 Pending::Account(Request::Balance {
                     generation,
@@ -137,7 +141,11 @@ impl Okx {
             );
             self.list(
                 cx,
-                "/api/v5/account/positions?instType=SWAP",
+                if self.options.eea {
+                    "/api/v5/account/positions"
+                } else {
+                    "/api/v5/account/positions?instType=SWAP"
+                },
                 true,
                 Pending::Account(Request::Positions {
                     generation,
@@ -180,8 +188,19 @@ impl Okx {
                 ORDER_KINDS[*kind]
             )
         };
+        if self.options.eea {
+            path = path
+                .replace("?instType=SWAP&", "?")
+                .replace("?instType=SWAP", "?");
+            if path.ends_with('?') {
+                path.pop();
+            }
+        }
         if !cursor.is_empty() {
-            path.push_str(&format!("&after={cursor}"));
+            path.push_str(&format!(
+                "{}after={cursor}",
+                if path.contains('?') { "&" } else { "?" }
+            ));
         }
         self.list(cx, &path, true, Pending::Account(request));
     }
@@ -217,7 +236,7 @@ impl Okx {
     }
 
     pub(crate) fn subscribe_private(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        let args = if channel == PRIVATE {
+        let mut args = if channel == PRIVATE {
             vec![
                 Topic {
                     channel: "account",
@@ -249,6 +268,20 @@ impl Okx {
                 },
             ]
         };
+        if self.options.eea {
+            let channels: &[&str] = if channel == PRIVATE {
+                &["positions", "orders"]
+            } else {
+                &["orders-algo", "algo-advance"]
+            };
+            for &channel in channels {
+                args.push(Topic {
+                    channel,
+                    inst_id: None,
+                    inst_type: Some("FUTURES"),
+                });
+            }
+        }
         self.topics(cx, channel, "subscribe", &args);
     }
 
@@ -678,7 +711,7 @@ impl Okx {
         let Some(m) = cx.store.market_by_id(row.inst_id) else {
             return;
         };
-        let amount = scaled(size, m.contract_size.unwrap_or(1.0));
+        let amount = contracts_to_base(m, size, price);
         if !amount.is_finite() || amount <= 0.0 {
             return;
         }
@@ -895,7 +928,30 @@ impl Okx {
             m.symbol.clone()
         };
         let mark = cx.store.ticker(&m.symbol).map_or(0.0, |t| t.mark);
-        let contracts = scaled(pos.abs(), m.contract_size.unwrap_or(1.0));
+        let reference = if mark > 0.0 {
+            mark
+        } else if num::parse(p.mark_px) > 0.0 {
+            num::parse(p.mark_px)
+        } else {
+            num::parse(p.avg_px)
+        };
+        let contracts = contracts_to_base(m, pos.abs(), reference);
+        if pos != 0.0 && contracts <= 0.0 {
+            return None;
+        }
+        let margin_currency = if p.ccy.is_empty() {
+            self.instruments
+                .get(&m.id)
+                .map_or("", |i| i.settle_ccy.as_str())
+        } else {
+            p.ccy
+        };
+        let margin_factor =
+            if m.is_inverse == Some(true) && margin_currency.eq_ignore_ascii_case(&m.base) {
+                reference
+            } else {
+                1.0
+            };
         let leverage = if p.lever.is_empty() {
             cx.store.setting(&m.symbol).map_or(0.0, |s| s.leverage)
         } else {
@@ -911,7 +967,11 @@ impl Okx {
                 } else {
                     num::parse(p.avg_px)
                 },
-                notional: pos.abs() * mark * m.contract_size.unwrap_or(1.0),
+                notional: if m.is_inverse == Some(true) {
+                    scaled(pos.abs(), m.contract_size.unwrap_or(1.0))
+                } else {
+                    pos.abs() * mark * m.contract_size.unwrap_or(1.0)
+                },
                 leverage,
                 margin_type: Some(if p.mgn_mode == "cross" {
                     MarginType::Cross
@@ -926,7 +986,7 @@ impl Okx {
                 unrealized_pnl: if pos == 0.0 {
                     0.0
                 } else {
-                    num::adjust(num::parse(p.upl), m.precision.price)
+                    num::adjust(num::parse(p.upl) * margin_factor, m.precision.price)
                 },
                 realized_pnl: None,
                 contracts,
@@ -935,9 +995,9 @@ impl Okx {
                 last_update: None,
             },
             RiskValues {
-                imr: num::parse(p.imr),
-                mmr: num::parse(p.mmr),
-                upl: num::parse(p.upl),
+                imr: num::parse(p.imr) * margin_factor,
+                mmr: num::parse(p.mmr) * margin_factor,
+                upl: num::parse(p.upl) * margin_factor,
             },
         ))
     }
@@ -948,7 +1008,30 @@ impl Okx {
         };
         let native = num::parse(o.sz).abs();
         let filled = num::parse(o.acc_fill_sz);
-        let factor = m.contract_size.unwrap_or(1.0);
+        let reference = if matches!(
+            o.ord_type,
+            "trigger" | "oco" | "conditional" | "move_order_stop"
+        ) {
+            [
+                o.last,
+                o.px,
+                o.ord_px,
+                o.order_px,
+                o.trigger_px,
+                o.sl_trigger_px,
+                o.tp_trigger_px,
+            ]
+        } else {
+            [o.px, o.avg_px, o.fill_px, o.last, "", "", ""]
+        }
+        .into_iter()
+        .map(num::parse)
+        .find(|p| *p > 0.0)
+        .unwrap_or_else(|| {
+            cx.store
+                .ticker(&m.symbol)
+                .map_or(0.0, |t| if t.mark > 0.0 { t.mark } else { t.last })
+        });
         let mut legs = Vec::new();
         match o.ord_type {
             "trigger" => {
@@ -1058,8 +1141,12 @@ impl Okx {
                     side: side(o.side),
                     price,
                     amount: if trailing { 0.0 } else { native },
-                    filled: if algo { 0.0 } else { scaled(filled, factor) },
-                    remaining: scaled(remaining_native, factor),
+                    filled: if algo {
+                        0.0
+                    } else {
+                        contracts_to_base(m, filled, reference)
+                    },
+                    remaining: contracts_to_base(m, remaining_native, reference),
                     reduce_only: trailing || o.reduce_only,
                     close: None,
                     client_order_id: if algo {

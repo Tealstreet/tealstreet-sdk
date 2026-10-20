@@ -2,6 +2,7 @@ import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@t
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
+  AccountGreeks,
   ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
@@ -12,6 +13,8 @@ import type {
   IncomeHistoryOptions,
   IncomeRecord,
   OHLCVOptions,
+  OptionChainQuery,
+  OptionChainRow,
   Order,
   OrderBook,
   OrderHistoryOptions,
@@ -484,6 +487,10 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name) ? {
+          enableInverseMarkets: Boolean(this.options.enableInverseMarkets),
+          enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
+        } : {}),
         ...(this.name === 'grvt' ? {
           grvtTradingAccountId: this.options.grvtTradingAccountId,
           grvtSignerAddress: this.options.grvtSignerAddress,
@@ -800,6 +807,27 @@ export class RustEngineExchange extends BaseExchange {
   fetchMarkets = async () => this.store.markets;
 
   fetchTickers = async () => this.store.tickers;
+
+  fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
+    this.assertOptionQueries();
+    return this.command({ op: 'fetchOptionChain', query });
+  };
+
+  fetchOptionExpiries = (underlying: string): Promise<number[]> => {
+    this.assertOptionQueries();
+    return this.command({ op: 'fetchOptionExpiries', underlying });
+  };
+
+  fetchAccountGreeks = (): Promise<AccountGreeks[]> => {
+    this.assertOptionQueries();
+    return this.command({ op: 'fetchAccountGreeks' });
+  };
+
+  private assertOptionQueries = (): void => {
+    if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
+      this.rejectPreflight('Options are not enabled on this account');
+    }
+  };
 
   fetchOrders = async (symbols?: string[]) =>
     symbols ? this.store.orders.filter((order) => symbols.includes(order.symbol)) : this.store.orders;

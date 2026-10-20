@@ -477,12 +477,7 @@ const okx = (name) => ({
     name,
   },
   options: { testnet: name.endsWith('demo') },
-  configureTs: (exchange) => {
-    // The Rust lane covers linear stablecoin swaps, including on the EEA class.
-    exchange.getInstrumentTypes = () => ['SWAP'];
-    exchange.isSupportedMarketInstrument = (m) =>
-      m.instType === 'SWAP' && m.ctType === 'linear' && ['USDT', 'USDC'].includes(m.settleCcy);
-  },
+
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
   isPrivateRecord: (record) => {
@@ -594,6 +589,9 @@ export const VENUES = {
     const instruments = {
       BTC_USDT_Perp: { hash: '0x030501', decimals: 9 },
       ETH_USDT_Perp: { hash: '0x030502', decimals: 9 },
+      BTC_USDT_Fut_20Oct23: { hash: '0x030503', decimals: 3 },
+      BTC_USDT_Call_20Oct23_2800: { hash: '0x030504', decimals: 3 },
+      BTC_USDT_Put_20Oct23_2800: { hash: '0x030505', decimals: 3 },
     };
     // This schema is independent of the venue encoder and the GRVT SDK signer.
     const types = {
@@ -619,7 +617,6 @@ export const VENUES = {
       tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
       replayCredentials: { key: 'grvt-replay-key', secret },
-      marketFilter: (row) => row.symbol.endsWith('_PERP'),
       requestBodies: true,
       generatedId: () => false,
       compareClientIds: true,
@@ -633,6 +630,19 @@ export const VENUES = {
         // The production private stream requires a proxy-selected host. Supply
         // only that host boundary, using the recorded real upstream identity;
         // leave its first-frame auth, subscriptions and handlers untouched.
+        const cancelSymbolOrders = exchange.cancelSymbolOrders.bind(exchange);
+        exchange.cancelSymbolOrders = async (symbol) => {
+          const market = exchange.store.marketsBySymbol[symbol];
+          if (market?.isPerpetual !== false) return cancelSymbolOrders(symbol);
+          // KNOWN_TS_FIXES: PERPETUAL kind/base/quote cannot cancel an exact
+          // dated expiry/strike. Use the real fresh-order parser and cancel path.
+          const orders = await exchange.fetchOrders([symbol]);
+          if (!Array.isArray(orders)) throw new Error('Incomplete GRVT scoped open orders');
+          const selected = orders.filter((order) => order.symbol === symbol);
+          if (new Set(selected.map((order) => order.id)).size !== selected.length)
+            throw new Error('Duplicate GRVT scoped open order');
+          await exchange.cancelOrders(selected);
+        };
         exchange.options = { ...exchange.options, transport: {
           name: 'grvt-tape-routing',
           rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }),

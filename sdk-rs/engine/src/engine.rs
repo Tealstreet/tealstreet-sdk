@@ -146,6 +146,17 @@ pub enum Action {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    FetchOptionChain {
+        command: CommandId,
+        query: crate::model::OptionChainQuery,
+    },
+    FetchOptionExpiries {
+        command: CommandId,
+        underlying: String,
+    },
+    FetchAccountGreeks {
+        command: CommandId,
+    },
     SetTickerSymbols {
         symbols: Vec<String>,
     },
@@ -672,6 +683,10 @@ impl<P> Cx<'_, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Opt in to typed option queries and IV-priced orders at the command boundary.
+    fn supports_options(&self) -> bool {
+        false
+    }
     /// Per-request continuation: what to do with the response.
     type Pending;
 
@@ -888,7 +903,23 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_timer(&mut cx, timer);
                 }
             }
-            Event::Command(command) => self.venue.on_command(&mut cx, command),
+            Event::Command(command) => {
+                if !self.venue.supports_options() {
+                    let unsupported = match &command {
+                        Command::FetchOptionChain { command, .. }
+                        | Command::FetchOptionExpiries { command, .. }
+                        | Command::FetchAccountGreeks { command } => Some(*command),
+                        Command::PlaceOrders { command, orders }
+                            if orders.iter().any(|order| order.implied_volatility.is_some()) => Some(*command),
+                        _ => None,
+                    };
+                    if let Some(command) = unsupported {
+                        cx.done(command, Err("Options are not enabled on this account".into()));
+                        return;
+                    }
+                }
+                self.venue.on_command(&mut cx, command);
+            }
         }
     }
 

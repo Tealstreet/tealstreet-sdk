@@ -195,6 +195,11 @@ const KNOWN_TS_FIXES = {
   // The private server ping receives pong rather than being ignored.
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
+  // Dated discovery now retains Future/Call/Put; TS catalog already did.
+  // TS scoped cancellation hardcodes PERPETUAL; corrected reference uses real
+  // fresh fetchOrders and exact cancelOrders so sibling expiries/strikes survive.
+  // Generic TS histories remain inert; native Rust documented-query tests pin
+  // retained product filters without claiming independent replay parity.
   grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,
@@ -551,6 +556,11 @@ const KNOWN_TS_FIXES = {
     'standalone cancellation continues remaining batches after per-row failures',
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
+    // Phase-9: inverse contracts convert at native mark/execution reference;
+    // EEA history scopes by native product rather than hardcoded SWAP.
+    'EEA historical orders and income query retained FUTURES X-Perps as well as SWAP',
+    'composite income limits apply after joining newest whole native bill groups',
+    'composite capped or stalled product histories fail explicitly as incomplete',
   ],
 
   binance: (ts, rust) => {

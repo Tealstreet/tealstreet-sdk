@@ -173,6 +173,12 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    enable_inverse_markets: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    enable_option_markets: bool,
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     spot_only: bool,
@@ -768,6 +774,8 @@ impl WasmEngine {
             #[cfg(feature = "bybit")]
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
                 let options = BybitOptions {
+                    enable_inverse_markets: options.enable_inverse_markets,
+                    enable_option_markets: options.enable_option_markets,
                     variant: match venue {
                         "bybitinverse" => BybitVariant::Inverse,
                         "bybitspot" => BybitVariant::Spot,

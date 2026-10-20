@@ -670,6 +670,7 @@ impl MexcFutures {
                         max_slippage_pct: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
                     };
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {

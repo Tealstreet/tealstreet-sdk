@@ -129,6 +129,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         stp_mode: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
     }
 }
 fn params(r: &HttpRequest) -> Vec<(String, String)> {

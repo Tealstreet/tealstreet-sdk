@@ -1,4 +1,4 @@
-//! OKX USDT/USDC linear swaps on the sans-I/O engine.
+//! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
 mod history;
 mod sign;
@@ -48,15 +48,24 @@ struct BookState {
     book: Book,
 }
 
+#[derive(Clone)]
+struct Instrument {
+    inst_type: &'static str,
+    index_id: String,
+    settle_ccy: String,
+}
+
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
     Trade(trading::Request),
     Markets {
+        stage: usize,
         rows: Vec<Market>,
         invalid: bool,
     },
     Tickers {
+        stage: usize,
         rows: Vec<Ticker>,
         invalid: bool,
     },
@@ -80,6 +89,7 @@ pub struct CandleRead {
 
 pub struct Okx {
     options: Options,
+    instruments: HashMap<String, Instrument>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
@@ -110,6 +120,7 @@ impl Okx {
         };
         Self {
             options,
+            instruments: HashMap::new(),
             credentials,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
@@ -229,11 +240,23 @@ impl Okx {
                 "open-interest",
                 "funding-rate",
             ] {
+                let mut seen = HashSet::new();
                 for m in cx.store.markets() {
+                    if name == "index-tickers"
+                        && !seen.insert(
+                            self.instruments
+                                .get(&m.id)
+                                .map_or(m.id.as_str(), |i| i.index_id.as_str()),
+                        )
+                    {
+                        continue;
+                    }
                     args.push(Topic {
                         channel: name,
                         inst_id: Some(if name == "index-tickers" {
-                            m.id.strip_suffix("-SWAP").unwrap_or(&m.id)
+                            self.instruments
+                                .get(&m.id)
+                                .map_or(m.id.as_str(), |i| i.index_id.as_str())
                         } else {
                             &m.id
                         }),
@@ -376,11 +399,26 @@ impl Okx {
             return;
         }
         let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
-            let id = if channel == "index-tickers" {
-                format!("{}-SWAP", p.inst_id)
-            } else {
-                p.inst_id.to_owned()
-            };
+            if channel == "index-tickers" {
+                let symbols: Vec<_> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .filter(|m| {
+                        self.instruments
+                            .get(&m.id)
+                            .is_some_and(|i| i.index_id == p.inst_id)
+                    })
+                    .map(|m| (m.id.clone(), m.symbol.clone()))
+                    .collect();
+                for (id, symbol) in symbols {
+                    self.indexes.insert(id);
+                    cx.store
+                        .update_ticker(&symbol, |t| t.index = num::parse(p.idx_px));
+                }
+                return;
+            }
+            let id = p.inst_id.to_owned();
             let Some(m) = cx.store.market_by_id(&id) else {
                 return;
             };
@@ -427,6 +465,7 @@ impl Venue for Okx {
             path,
             private,
             Pending::Markets {
+                stage: 0,
                 rows: Vec::new(),
                 invalid: false,
             },
@@ -517,18 +556,50 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Markets { rows, invalid } => {
+            Pending::Markets { rows, invalid, .. } => {
                 match serde_json::from_str::<wire::Instrument<'_>>(item) {
                     Ok(m) => {
-                        if m.ct_type != "linear" || !matches!(m.settle_ccy, "USDT" | "USDC") {
+                        let inst_type = if m.inst_type == "FUTURES" {
+                            "FUTURES"
+                        } else {
+                            "SWAP"
+                        };
+                        if !matches!(m.ct_type, "linear" | "inverse")
+                            || (m.inst_type == "FUTURES"
+                                && (!self.options.eea || m.rule_type != "xperp"))
+                            || (!m.inst_type.is_empty()
+                                && !matches!(m.inst_type, "SWAP" | "FUTURES"))
+                        {
                             return;
                         }
+                        let inverse = m.ct_type == "inverse";
+                        let base = if !m.base_ccy.is_empty() {
+                            m.base_ccy
+                        } else if inverse {
+                            m.settle_ccy
+                        } else {
+                            m.ct_val_ccy
+                        };
+                        let quote = if !m.quote_ccy.is_empty() {
+                            m.quote_ccy
+                        } else if inverse {
+                            m.ct_val_ccy
+                        } else {
+                            m.settle_ccy
+                        };
                         if m.inst_id.is_empty()
                             || m.ct_val_ccy.is_empty()
-                            || !m.inst_id.ends_with("-SWAP")
+                            || rows.iter().any(|row| row.id == m.inst_id)
+                            || base.is_empty()
+                            || quote.is_empty()
+                            || (inst_type == "SWAP" && !m.inst_id.ends_with("-SWAP"))
                             || [m.ct_val, m.lot_sz, m.tick_sz, m.min_sz, m.lever]
                                 .iter()
-                                .any(|n| n.parse::<f64>().is_err() || num::parse(n) <= 0.0)
+                                .any(|n| {
+                                    n.parse::<f64>()
+                                        .ok()
+                                        .is_none_or(|v| !v.is_finite() || v <= 0.0)
+                                })
                         {
                             *invalid = true;
                             return;
@@ -549,6 +620,20 @@ impl Venue for Okx {
                             *invalid = true;
                             return;
                         }
+                        self.instruments.insert(
+                            m.inst_id.into(),
+                            Instrument {
+                                inst_type,
+                                index_id: if !m.inst_family.is_empty() && m.uly.is_empty() {
+                                    m.inst_family.into()
+                                } else if m.uly.is_empty() {
+                                    m.inst_id.strip_suffix("-SWAP").unwrap_or(m.inst_id).into()
+                                } else {
+                                    m.uly.into()
+                                },
+                                settle_ccy: m.settle_ccy.into(),
+                            },
+                        );
                         rows.push(Market {
                             id: m.inst_id.into(),
                             symbol: m
@@ -556,9 +641,10 @@ impl Venue for Okx {
                                 .strip_suffix("-SWAP")
                                 .unwrap_or(m.inst_id)
                                 .replace('-', ""),
-                            pretty_symbol: None,
-                            base: m.ct_val_ccy.into(),
-                            quote: m.settle_ccy.into(),
+                            pretty_symbol: (inst_type == "FUTURES")
+                                .then(|| format!("{base}/{quote} XPERP")),
+                            base: base.to_uppercase(),
+                            quote: quote.to_uppercase(),
                             active: m.state == "live",
                             precision: Precision {
                                 amount: num::parse(m.lot_sz),
@@ -576,7 +662,7 @@ impl Venue for Okx {
                                 price: None,
                             },
                             contract_size: Some(contract_size),
-                            is_inverse: Some(false),
+                            is_inverse: Some(inverse),
                             is_expiring: None,
                             is_spot: None,
                             is_perpetual: None,
@@ -588,7 +674,7 @@ impl Venue for Okx {
                     Err(_) => *invalid = true,
                 }
             }
-            Pending::Tickers { rows, invalid } => {
+            Pending::Tickers { rows, invalid, .. } => {
                 match serde_json::from_str::<wire::Prices<'_>>(item) {
                     Ok(p) => {
                         if let Some(m) = cx.store.market_by_id(p.inst_id) {
@@ -654,24 +740,59 @@ impl Venue for Okx {
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
             Pending::Markets {
+                stage,
                 rows,
                 invalid: false,
             } => {
+                if self.options.eea && stage == 0 {
+                    let private = self.credentials.is_some();
+                    let path = if private {
+                        "/api/v5/account/instruments?instType=FUTURES"
+                    } else {
+                        "/api/v5/public/instruments?instType=FUTURES"
+                    };
+                    self.list(
+                        cx,
+                        path,
+                        private,
+                        Pending::Markets {
+                            stage: 1,
+                            rows,
+                            invalid: false,
+                        },
+                    );
+                    return;
+                }
                 cx.store.set_markets(rows);
                 self.list(
                     cx,
                     "/api/v5/market/tickers?instType=SWAP",
                     false,
                     Pending::Tickers {
+                        stage: 0,
                         rows: Vec::new(),
                         invalid: false,
                     },
                 );
             }
             Pending::Tickers {
+                stage,
                 rows,
                 invalid: false,
             } => {
+                if self.options.eea && stage == 0 {
+                    self.list(
+                        cx,
+                        "/api/v5/market/tickers?instType=FUTURES",
+                        false,
+                        Pending::Tickers {
+                            stage: 1,
+                            rows,
+                            invalid: false,
+                        },
+                    );
+                    return;
+                }
                 cx.store.set_tickers(rows);
                 self.connect(cx, PUBLIC);
                 self.connect(cx, BUSINESS);
@@ -1029,4 +1150,13 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
         _ => return None,
     };
     Some(end - duration * f64::from(count))
+}
+
+fn contracts_to_base(m: &Market, native: f64, price: f64) -> f64 {
+    let value = scaled(native, m.contract_size.unwrap_or(1.0));
+    if m.is_inverse == Some(true) {
+        if price > 0.0 { value / price } else { 0.0 }
+    } else {
+        value
+    }
 }

@@ -182,6 +182,7 @@ fn opts(symbol: &str, kind: OrderType, side: OrderSide, amount: f64) -> PlaceOrd
         close: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
         stp_mode: None,
     }
 }

@@ -2,7 +2,7 @@
 use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET, BuilderState, decode_order};
 use crate::sign;
 use crate::wire::{Number, Str, Text};
-use crate::{Grvt, Job, Pending};
+use crate::{Grvt, Job, Pending, ProductKind};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, CommandId, Cx, Response};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ const CREATE: &str = "/lite/v1/create_order";
 const CANCEL: &str = "/lite/v1/cancel_order";
 const CANCEL_ALL: &str = "/lite/v1/cancel_all_orders";
 const GET: &str = "/lite/v1/order";
+const OPEN: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
 
 #[derive(Default)]
@@ -26,7 +27,10 @@ pub struct Request {
 }
 impl Request {
     pub(crate) fn is_read(&self) -> bool {
-        matches!(self.step.effect, Effect::Inspect(_) | Effect::Verify(_))
+        matches!(
+            self.step.effect,
+            Effect::Inspect(_) | Effect::Verify(_) | Effect::ListSymbol(_)
+        )
     }
 }
 struct Plan {
@@ -56,6 +60,7 @@ enum Effect {
     Place(Box<Order>),
     Cancel(String),
     CancelSymbol(String),
+    ListSymbol(String),
     Inspect(Box<Amend>),
     Verify(Target),
     Leverage { symbol: String, leverage: f64 },
@@ -357,6 +362,9 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, String> {
+        if opts.implied_volatility.is_some() {
+            return Err("Implied-volatility order pricing is unsupported on GRVT".into());
+        }
         if opts.stp_mode.is_some() {
             return Err("Per-order self-trade prevention is unsupported on GRVT".into());
         }
@@ -669,6 +677,7 @@ impl Grvt {
                                 stp_mode: None,
                                 bybit_bbo: None,
                                 bybit_slippage_tolerance_ticks: None,
+                                implied_volatility: None,
                             };
                             plan.steps.push_back(self.placement(
                                 cx,
@@ -710,6 +719,14 @@ impl Grvt {
                             .ok_or("Unknown GRVT cancellation market")?,
                     )
                 };
+                let product = market
+                    .map(|m| {
+                        self.metadata
+                            .get(&m.id)
+                            .map(|info| info.kind)
+                            .ok_or("GRVT cancellation product metadata is unavailable")
+                    })
+                    .transpose()?;
                 #[derive(Serialize)]
                 struct Filter<'a> {
                     sa: &'a str,
@@ -722,7 +739,7 @@ impl Grvt {
                 }
                 let body = serde_json::to_string(&Filter {
                     sa: self.trade_account()?,
-                    k: market.map(|_| ["PERPETUAL"]),
+                    k: product.map(|kind| [kind.native()]),
                     b: market.map(|m| [m.base.as_str()]),
                     q: market.map(|m| [m.quote.as_str()]),
                 })
@@ -736,10 +753,16 @@ impl Grvt {
                         })
                         .map(|o| o.id.clone()),
                 );
+                // Kind/base/quote cannot distinguish expiry or option strike.
+                let scoped = product.is_some_and(|kind| kind != ProductKind::Perpetual);
                 plan.steps.push_back(Step {
-                    path: CANCEL_ALL,
+                    path: if scoped { OPEN } else { CANCEL_ALL },
                     body,
-                    effect: Effect::CancelSymbol(symbol),
+                    effect: if scoped {
+                        Effect::ListSymbol(symbol)
+                    } else {
+                        Effect::CancelSymbol(symbol)
+                    },
                 });
             }
             Command::AmendOrder {
@@ -1009,6 +1032,44 @@ impl Grvt {
                 Effect::CancelSymbol(_) => {
                     require_ack(response.body)?;
                 }
+                Effect::ListSymbol(symbol) => {
+                    #[derive(Deserialize)]
+                    struct Orders<'a> {
+                        #[serde(borrow, rename = "r", alias = "result")]
+                        rows: Vec<&'a RawValue>,
+                    }
+                    let reply: Orders<'_> = serde_json::from_str(response.body)
+                        .map_err(|_| "Malformed GRVT scoped open orders")?;
+                    let mut ids = HashSet::new();
+                    let mut steps = VecDeque::new();
+                    for raw in reply.rows {
+                        let decoded = decode_order(raw.get(), cx.store, cx.now)?;
+                        let order = decoded.order;
+                        if order.symbol != *symbol || terminal(order.status) {
+                            continue;
+                        }
+                        if !ids.insert(order.id.clone()) {
+                            return Err("Duplicate GRVT scoped open order".into());
+                        }
+                        let target = Target {
+                            id: order.id.clone(),
+                            native: decoded.native_id,
+                            client: order.client_order_id.clone(),
+                            filled: order.filled,
+                            amount: order.amount,
+                            created_ns: Some(decoded.created_ns),
+                            execution_revision: self.account.execution_revision,
+                            inspected_updated_ns: decoded.updated_ns,
+                        };
+                        steps.push_back(Step {
+                            path: CANCEL,
+                            body: self.identity(&target)?,
+                            effect: Effect::Cancel(order.id),
+                        });
+                    }
+                    // Validate the complete authoritative read before any write.
+                    request.plan.steps.extend(steps);
+                }
                 Effect::Leverage { symbol, leverage } => {
                     let success: Success<'_> = serde_json::from_str(response.body)
                         .map_err(|_| "Malformed GRVT leverage response")?;
@@ -1104,6 +1165,7 @@ impl Grvt {
                         stp_mode: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+                        implied_volatility: None,
                     };
                     let replacement = self.placement(
                         cx,

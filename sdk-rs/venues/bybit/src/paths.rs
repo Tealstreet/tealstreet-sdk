@@ -1,6 +1,42 @@
 //! V5 products share routes; categories, socket depth and account capabilities differ.
 use crate::Options;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Category {
+    Linear,
+    Inverse,
+    Spot,
+    Option,
+}
+
+impl Category {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Inverse => "inverse",
+            Self::Spot => "spot",
+            Self::Option => "option",
+        }
+    }
+
+    pub(crate) fn for_symbol(symbol: &str) -> Self {
+        let mut parts = symbol.split('-');
+        if let (Some(_), Some(expiry), Some(strike), Some(right)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+            && expiry.len() >= 6
+            && matches!(right, "C" | "P")
+            && strike.replace('d', ".").parse::<f64>().is_ok()
+        {
+            return Self::Option;
+        }
+        if crate::account::is_inverse_symbol(symbol) {
+            Self::Inverse
+        } else {
+            Self::Linear
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Variant {
     #[default]

@@ -9,6 +9,17 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    FetchOptionChain {
+        command: u32,
+        query: crate::model::OptionChainQuery,
+    },
+    FetchOptionExpiries {
+        command: u32,
+        underlying: String,
+    },
+    FetchAccountGreeks {
+        command: u32,
+    },
     #[cfg(feature = "command-apexomni")]
     GetAccount {
         command: u32,
@@ -163,6 +174,17 @@ impl From<CommandIn> for Command {
     #[inline(always)]
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::FetchOptionChain { command, query } => {
+                Self::FetchOptionChain { command, query }
+            }
+            CommandIn::FetchOptionExpiries {
+                command,
+                underlying,
+            } => Self::FetchOptionExpiries {
+                command,
+                underlying,
+            },
+            CommandIn::FetchAccountGreeks { command } => Self::FetchAccountGreeks { command },
             #[cfg(feature = "command-apexomni")]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {

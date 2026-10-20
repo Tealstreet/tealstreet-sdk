@@ -218,6 +218,9 @@ jobs:
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
+      - name: Native product semantics through the real CLI preflight
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-product-semantics
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
