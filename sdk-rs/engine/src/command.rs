@@ -1,5 +1,7 @@
 //! The shared JSON command boundary for engine hosts.
-use crate::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
+use crate::model::PlaceOrderOpts;
+#[cfg(feature = "command-asterdex")]
+use crate::model::{CancelOrderRef, StpMode};
 use crate::{Command, Query};
 use serde::Deserialize;
 
@@ -7,6 +9,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    #[cfg(feature = "command-apexomni")]
     GetAccount {
         command: u32,
     },
@@ -35,6 +38,7 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    #[cfg(feature = "command-asterdex")]
     CancelOrdersWithSymbols {
         command: u32,
         orders: Vec<CancelOrderRef>,
@@ -66,18 +70,22 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    #[cfg(feature = "command-asterdex")]
     FetchStpMode {
         command: u32,
     },
+    #[cfg(feature = "command-asterdex")]
     FetchAccount {
         command: u32,
     },
+    #[cfg(feature = "command-asterdex")]
     FetchOrderBook {
         command: u32,
         symbol: String,
         #[serde(default)]
         limit: Option<u32>,
     },
+    #[cfg(feature = "command-asterdex")]
     SetStpMode {
         command: u32,
         mode: StpMode,
@@ -154,6 +162,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            #[cfg(feature = "command-apexomni")]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
@@ -177,6 +186,7 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            #[cfg(feature = "command-asterdex")]
             CommandIn::CancelOrdersWithSymbols { command, orders } => {
                 Self::CancelOrdersWithSymbols { command, orders }
             }
@@ -203,8 +213,11 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            #[cfg(feature = "command-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            #[cfg(feature = "command-asterdex")]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            #[cfg(feature = "command-asterdex")]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -214,6 +227,7 @@ impl From<CommandIn> for Command {
                 symbol,
                 limit,
             },
+            #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
@@ -304,7 +318,8 @@ impl From<CommandIn> for Command {
     }
 }
 
-/// Decode the same typed command protocol on every host.
+/// Decode the same typed command protocol on every host. Native hosts enable
+/// both command features; WASM retains the venue-specific parser size gates.
 pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
     serde_json::from_str::<CommandIn>(json).map(Command::from)
 }

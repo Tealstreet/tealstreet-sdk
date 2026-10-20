@@ -129,3 +129,14 @@ branch from origin/feat/rust-rewrite. Record actual gate numbers and limitations
 - Broad TS acceptance: root typecheck 44 tasks, lint 28 tasks, tests 27 tasks;
   both SDK runners pass 7,108 tests across 484 files, and server adapters pass
   27 tests in each runner. No dependency or lockfile additions were needed.
+
+### Landing integration — Paradex
+
+Merged origin/feat/rust-rewrite at 1f9e9a5206 before final gates. Preserved
+Paradex binary venue events, routing activity, worker/browser transport and
+all twenty venue features. Resolved native transport overlap by retaining both
+binary delivery and the frame server's cancellation/write deadlines. Shared
+JSON parser features preserve the landing's Aster/ApeX single-venue size and
+unsupported-command contracts; native enables both parser features for its
+complete command surface. Root and native agent audited the union; final
+workspace, TS, host/harness and WASM gates run again on this combined tree.

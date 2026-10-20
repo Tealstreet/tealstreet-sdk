@@ -1338,3 +1338,84 @@ async fn typed_clock_deadline_stays_active_while_native_response_body_stalls() {
     let _ = release.send(());
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn explicit_binary_protocol_preserves_non_utf8_and_text_control_frames() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::binary(vec![0x78, 0xff, 0])).await.unwrap();
+        ws.send(Message::text(r#"{"id":1,"result":{}}"#))
+            .await
+            .unwrap();
+        ws.close(None).await.unwrap();
+    });
+    let (send, mut events) = mpsc::unbounded_channel();
+    let outgoing = NetworkTransport::new().connect_encoding(
+        true,
+        SocketId(91),
+        origin.replacen("http://", "ws://", 1),
+        vec![],
+        Some(safe_cex_engine::SocketChannel::Private),
+        None,
+        send,
+    );
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::WsOpened(SocketId(91))
+    ));
+    match next(&mut events).await {
+        HostEvent::WsBinary(SocketId(91), bytes) => assert_eq!(bytes, [0x78, 0xff, 0]),
+        event => panic!("unexpected binary event {event:?}"),
+    }
+    match next(&mut events).await {
+        HostEvent::WsMessage(SocketId(91), text) => assert_eq!(text, r#"{"id":1,"result":{}}"#),
+        event => panic!("unexpected control event {event:?}"),
+    }
+    drop(outgoing);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn healthy_binary_frames_reset_the_silent_connection_streak() {
+    let (listener, origin) = listener().await;
+    let origin = origin.replacen("http:", "ws:", 1);
+    let server = tokio::spawn(async move {
+        for _ in 0..4 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), "/direct");
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.send(Message::binary(vec![0xff])).await.unwrap();
+            ws.close(None).await.unwrap();
+        }
+    });
+    let mut plan = RoutingPlan::default();
+    plan.ws.public.initial_silent_connects = Some(1);
+    plan.ws.public.fallback = Some(format!("{origin}/fallback"));
+    let transport = NetworkTransport::with_routing(plan, tokens());
+    for id in 0..4 {
+        let (send, mut events) = mpsc::unbounded_channel();
+        let outgoing = transport.connect_encoding(
+            true,
+            SocketId(id),
+            format!("{origin}/direct"),
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Public),
+            None,
+            send,
+        );
+        assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));
+        assert!(matches!(next(&mut events).await, HostEvent::WsBinary(_, bytes) if bytes==[0xff]));
+        assert!(matches!(next(&mut events).await, HostEvent::WsClosed(_, _)));
+        drop(outgoing);
+    }
+    server.await.unwrap();
+}

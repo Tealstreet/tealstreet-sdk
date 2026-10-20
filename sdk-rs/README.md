@@ -10,6 +10,10 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 | --- | --- |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |
 
+EIP-712 venues encode their fixed domain and message words locally. Shared crypto
+combines their hashes with the EIP-191 `0x1901` prefix and signs the digest; the
+dynamic ABI parser is used only by independent tests.
+
 ## Commands
 
 From `sdk-rs/`, with the toolchain pinned by `rust-toolchain.toml`:
