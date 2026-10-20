@@ -144,6 +144,7 @@ describe('Rust Hyperliquid wrapper', () => {
       hyperliquidBuilder,
       testnet: true,
       publicDataOnly: false,
+      remoteSigning: false,
       enableSpotMarkets: false,
       publicFeed: { mode: 'direct' },
     });

@@ -104,6 +104,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
       omniKeySeed: '11'.repeat(65),
       testnet: true,
       publicDataOnly: false,
+      remoteSigning: false,
       enableSpotMarkets: false,
       publicFeed: { mode: 'direct' },
     });
