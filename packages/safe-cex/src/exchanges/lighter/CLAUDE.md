@@ -827,8 +827,10 @@ currently does. Deliberate TS fixes are listed in the port plan and replay gate.
 
 ## Rust position leverage and partial amendments
 
-Position `initial_margin_fraction` accepts ratios up to 1, percentages up to
-100, and basis-point ticks above 100; `"20.00"` therefore means 20% and 5x.
+Position `initial_margin_fraction` is a percent string (`"20.00"` = 20% = 5x;
+`"1.00"` = 100x, clamped to the market max); a bare integer is 1/10,000 ticks.
+After a private reconnect, fills made during the outage are backfilled once from
+`/api/v1/trades`; fills stamped ahead of the host clock are kept.
 Public market risk fractions keep their separate tick-based interpretation.
 Margin-mode writes preserve the parsed position leverage. Invalid market
 bounds fail without panicking or replacing a known account snapshot.

@@ -59,8 +59,14 @@ fn ack(e: &mut Engine<Lighter>, request: &HttpRequest) {
 }
 
 #[test]
-fn position_fraction_accepts_ratio_percentage_and_ticks_on_rest_and_ws() {
-    for fraction in [json!("0.20"), json!("20.00"), json!("2000")] {
+fn position_fraction_reads_percent_strings_and_tick_integers_on_rest_and_ws() {
+    // "1.00" is 1% (100x, clamped to the 20x market max), never a 1x ratio.
+    for (fraction, leverage) in [
+        (json!("20.00"), 5.0),
+        (json!(2000), 5.0),
+        (json!("1.00"), 20.0),
+        (json!("0.50"), 20.0),
+    ] {
         for websocket in [false, true] {
             let (mut e, socket) = ready_unattributed();
             if websocket {
@@ -86,10 +92,10 @@ fn position_fraction_accepts_ratio_percentage_and_ticks_on_rest_and_ws() {
             }
             assert_eq!(
                 e.store().positions()[0].leverage,
-                5.0,
+                leverage,
                 "{fraction} WS={websocket}"
             );
-            assert_eq!(e.store().setting("ETH").unwrap().leverage, 5.0);
+            assert_eq!(e.store().setting("ETH").unwrap().leverage, leverage);
             // Public market risk metadata still uses fixed 1/10,000 ticks.
             assert_eq!(e.store().market("ETH").unwrap().limits.leverage.max, 20.0);
         }

@@ -563,3 +563,111 @@ fn delayed_live_execution_is_not_lost_after_five_seconds() {
     );
     assert_eq!(e.take_frame(NOW + 10_003.0).map_or(0, fill_count), 0);
 }
+#[test]
+fn fill_stamped_ahead_of_the_host_clock_is_still_emitted() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let frame = format!(
+        r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":"ahead-1","ask_id":"50","bid_id":"42","ask_account_id":"9","bid_account_id":"718895","price":"90","size":"0.25","timestamp":{}}}]}}}}"#,
+        (NOW + 65_000.0) as u64
+    );
+    message(&mut e, s, NOW + 5000.0, &frame);
+    assert_eq!(fill_count(e.take_frame(NOW + 5000.0).unwrap()), 1);
+}
+
+fn trade_row(id: &str, at: f64) -> String {
+    format!(
+        r#"{{"trade_id":"{id}","market_id":1,"ask_id":"50","bid_id":"42","ask_account_id":"9","bid_account_id":"718895","price":"90","size":"0.25","timestamp":{}}}"#,
+        at as u64
+    )
+}
+/// Drops the private socket at `NOW + 1000` and reopens it, returning the
+/// new socket and the requests the reopen issued.
+fn reconnect(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>,
+    s: safe_cex_engine::SocketId,
+) -> (safe_cex_engine::SocketId, Vec<safe_cex_engine::HttpRequest>) {
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW + 1000.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .expect("reconnect timer");
+    e.handle(NOW + 2000.0, Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("reconnect");
+    e.handle(NOW + 3000.0, Event::WsOpened { socket });
+    (socket, requests(e))
+}
+#[test]
+fn fills_made_while_the_private_socket_was_down_are_backfilled_once() {
+    let (mut e, s) = ready();
+    message(
+        &mut e,
+        s,
+        NOW + 500.0,
+        r#"{"type":"update/account_all","channel":"account_all:718895","account":{}}"#,
+    );
+    e.take_frame(NOW + 500.0);
+    let (socket, reads) = reconnect(&mut e, s);
+    let backfill = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .expect("fill backfill read");
+    assert!(backfill.url.contains("account_index=718895"));
+    assert!(backfill.headers.iter().any(|(k, _)| *k == "authorization"));
+    let body = format!(
+        r#"{{"code":200,"trades":[{},{},{}]}}"#,
+        trade_row("gap-2", NOW + 1600.0),
+        trade_row("gap-1", NOW + 1500.0),
+        trade_row("before-session", NOW - 60_000.0),
+    );
+    reply_at(&mut e, NOW + 3100.0, backfill, 200, &body);
+    assert_eq!(fill_count(e.take_frame(NOW + 3100.0).unwrap()), 2);
+    // The reconnect snapshot repeats one backfilled fill and carries one more.
+    let snapshot = format!(
+        r#"{{"type":"subscribed/account_all","channel":"account_all:718895","trades":{{"1":[{},{},{}]}}}}"#,
+        trade_row("gap-2", NOW + 1600.0),
+        trade_row("gap-3", NOW + 1700.0),
+        trade_row("older-history", NOW - 60_000.0),
+    );
+    message(&mut e, socket, NOW + 3200.0, &snapshot);
+    assert_eq!(fill_count(e.take_frame(NOW + 3200.0).unwrap()), 1);
+    reply_at(&mut e, NOW + 3300.0, backfill, 200, &body);
+    assert_eq!(e.take_frame(NOW + 3300.0).map_or(0, fill_count), 0);
+}
+#[test]
+fn a_full_backfill_page_inside_the_outage_reads_the_next_page() {
+    let (mut e, s) = ready();
+    let (_, reads) = reconnect(&mut e, s);
+    let backfill = reads
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trades?"))
+        .unwrap();
+    let rows = (0..100)
+        .map(|i| trade_row(&format!("t{i}"), NOW + 2000.0 - i as f64))
+        .collect::<Vec<_>>()
+        .join(",");
+    let body = format!(r#"{{"code":200,"next_cursor":"page-2","trades":[{rows}]}}"#);
+    reply_at(&mut e, NOW + 3100.0, backfill, 200, &body);
+    assert_eq!(fill_count(e.take_frame(NOW + 3100.0).unwrap()), 100);
+    let next = requests(&mut e);
+    assert!(
+        next.iter()
+            .any(|r| r.url.contains("/api/v1/trades?") && r.url.contains("cursor=page-2"))
+    );
+}
