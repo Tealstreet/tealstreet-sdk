@@ -63,7 +63,8 @@ Signing reuses the futures API-key-v2 signer and optional broker headers.
 
 The native suite covers public mapping, subject-based all-ticker updates,
 book replacement/refcounts, candle ordering/units, holdings valuation,
-native placement/alter/cancel payloads, batch preflight, ambiguous writes,
+native placement/alter/cancel payloads, batch preflight (including rejection of
+IV-priced orders before any write), ambiguous writes,
 late execution delivery, reconciliation failure/staleness, lookup scope,
 fixed settings, account identity, and fresh-token watchdog recovery.
 
@@ -73,13 +74,13 @@ checks signing and bullet/subscription protocol; it performs no financial
 output rewriting.
 
 Both public gates pass three runs with standard egress on fresh twenty-second
-captures at `d06809837a`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
+captures at `ee4a319061`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
 tape hashes, audit results, and median measurements:
 
 | Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
 | --- | --- | --- | --- | --- |
-| Spot | 510.892 / 453.728 | 329.012 / 295.746 | 18,434,921 / 4,235,900 | 681,398 |
-| Futures | 394.581 / 204.665 | 240.213 / 111.375 | 21,344,617 / 4,035,076 | 775,517 |
+| Spot | 540.381 / 488.503 | 340.056 / 322.642 | 18,482,537 / 4,241,092 | 682,723 |
+| Futures | 401.933 / 201.076 | 253.549 / 109.002 | 21,377,425 / 4,042,492 | 776,846 |
 
 Spot private correctness passes twenty-two frames and thirteen commands; futures
 passes thirty-two frames and seventeen commands. Every request, write,

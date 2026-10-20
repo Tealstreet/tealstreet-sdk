@@ -162,12 +162,14 @@ feature, enabled by Polymarket. Feature-off/on engine tests (67/69), exact frame
 layout/lifecycle tests and Polymarket's 87 native tests pass. Feature-enabled
 behavior is unchanged.
 
-Only the standalone Paradex host uses `opt-level=2`; ordinary/default builds
-retain their existing profiles. Standard Yarn builds reproduce the measured
-artifact exactly: web and Node each **1,257,099 bytes**, SHA-256
+At the initial packaging checkpoint, only the standalone Paradex host used
+`opt-level=2`; ordinary/default builds retained their existing profiles. The
+standard Yarn builds then reproduced web and Node artifacts of **1,257,099
+bytes**, SHA-256
 `75a8611dbcbbb0ebe6b217bbbe97baf64f85a2113c4dc451c7a5c3700be4765b`.
-Its CPU, memory, private replay and SDK tests pass; this is a measured compiler
-tradeoff with no budget or gate relaxation.
+Its CPU, memory, private replay and SDK tests passed. This checkpoint is
+historical; the product-semantics integration below adds the standalone engine
+opt-level 2 override. The fixed budget and gate criteria are unchanged.
 
 Bitrue's initial final replay missed main-thread CPU by 0.3 ms (259.623 versus
 259.853 ms) despite matching behavior and passing steady CPU/memory. Raw runs
@@ -624,3 +626,96 @@ script and its 128 KiB stack configuration. No criterion or budget increase.
 
 Refresh full integration checks and all 22 replay gates on this committed merge;
 all preceding exact-source proofs remain historical checkpoints until refreshed.
+
+### Four-artifact verification on ee4a319061
+
+Fresh standard builds at `ee4a31906146a02b1370ece46b5e0d113b30d602` pass
+these **eight replay gates** (four public three-run gates and four private
+one-run gates, 32 raw TS/Rust runs). Normal egress and the fixed
+**1,258,291-byte** budget remain unchanged. Paradex uses the standard standalone
+host and engine opt-level 2 overrides; Bitrue retains its standalone venue
+opt-level 3 override. Web and Node binaries match for each venue, and immutable
+copies, exact commands, source markers, log/output bindings and raw metrics are
+recorded in [PARITY_GATES.json](venue-ports/PARITY_GATES.json).
+
+| Venue | WASM bytes | TS/Rust main CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands/writes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,246,685 | 415.929 / 396.732 | 191.797 / 138.690 | 18,955,737 / 2,242,868 | 33 / 15 / 9 |
+| binance | 910,026 | 184.801 / 88.716 | 100.640 / 35.826 | 18,062,145 / 4,033,444 | 14 / 3 / 4 |
+| bitrue | 812,550 | 120.625 / 93.369 | 66.392 / 47.550 | 17,025,465 / 3,299,516 | 23 / 8 / 5 |
+| polymarket | 855,936 | 27.780 / 20.928 | 8.960 / 3.938 | 23,657,809 / 4,969,468 | 20 / 8 / 5 |
+
+Actual SDK/WASM tests pass: Paradex **2**, Bitrue **1**. Process CPU remains
+informational; Bitrue's TS/Rust process medians are **238.261/244.184 ms**.
+Measured CPU includes reconstruction and cloning for both implementations, and
+retained memory uses unchanged, unclamped arithmetic after endpoint detachment
+and settled async GC.
+
+Paradex's initial unchanged public comparison failed steady CPU by **0.314 ms**
+(TS/Rust medians **243.841/244.155 ms**), while parity, main CPU and memory
+passed. Its three TS main/steady rows were **949.925/558.294**,
+**563.653/205.260**, **509.680/243.841 ms**; Rust rows were
+**813.845/428.556**, **545.554/244.155**, **550.566/201.675 ms**.
+After reviewing the crossed-run variation, one controlled, explicitly authorized
+three-run repeat passed with the medians above. The canonical rebuild was
+byte-identical (`c80c8d1547d65a5253fe07376530e14732758dbed0084ab0acc7391780d22604`).
+This repeat introduced no semantic fix, fixture, egress, criterion, budget or
+run-count change. Both comparisons, raw result hashes and before/after host
+samples remain in the proof; no further Paradex retry was run. Other owners'
+remaining merged-source gates and final integration evidence are recorded
+separately.
+
+## Final product-semantics merged-source verification
+
+All **22 replay gates PASS** at exact runtime source
+`ee4a31906146a02b1370ece46b5e0d113b30d602`, including landing `5e92f93a8a`.
+This refresh supersedes prior source checkpoints: eleven public three-run gates
+and eleven private one-run gates, **88 raw TS/Rust runs**, normal egress and
+unchanged strict CPU/memory criteria. All seven standard standalone artifacts
+fit the fixed **1,258,291-byte** budget.
+
+| Venue | WASM bytes | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,246,685 | 415.929 / 396.732 | 191.797 / 138.690 | 18,955,737 / 2,242,868 | 33 / 15 |
+| bitrue | 812,550 | 120.625 / 93.369 | 66.392 / 47.550 | 17,025,465 / 3,299,516 | 23 / 8 |
+| kucoinspot | 682,723 | 540.381 / 488.503 | 340.056 / 322.642 | 18,482,537 / 4,241,092 | 22 / 13 |
+| kucoin | 776,846 | 401.933 / 201.076 | 253.549 / 109.002 | 21,377,425 / 4,042,492 | 32 / 17 |
+| binance | 910,026 | 184.801 / 88.716 | 100.640 / 35.826 | 18,062,145 / 4,033,444 | 14 / 3 |
+| polymarket | 855,936 | 27.780 / 20.928 | 8.960 / 3.938 | 23,657,809 / 4,969,468 | 20 / 8 |
+| bybit | 1,113,641 | 185.405 / 139.950 | 85.896 / 48.037 | 22,188,993 / 5,017,820 | 18 / 4 |
+| bybitinverse | 1,113,641 | 120.495 / 39.924 | 77.027 / 17.628 | 14,268,449 / 1,622,772 | 14 / 3 |
+| bybitspot | 1,113,641 | 160.532 / 118.139 | 89.353 / 51.450 | 16,297,433 / 3,114,020 | 11 / 2 |
+| bybitdemo | 1,113,641 | 211.658 / 149.807 | 104.425 / 55.248 | 21,881,257 / 5,047,396 | 14 / 3 |
+| hyrotrader | 1,113,641 | 24.234 / 19.677 | 5.758 / 3.511 | 13,419,449 / 845,844 | 13 / 3 |
+
+The Bybit family shares one artifact. Independent audits verify all three proof files: all 22 logs, 88 passing raw
+runs, seven standard artifacts and the separately retained historical failures.
+Request, write, signature and protocol audits are clean; process CPU remains
+informational, with no clamping of retained memory. The initial Paradex steady
+CPU failure and single byte-identical passing repeat are retained above and in
+the proof. The pre-commit size failure and its engine opt-level 2 resolution
+remain explicitly historical. No budget, fixture, egress or criterion changes.
+
+Fresh integration checks pass: **2,655 native workspace tests**, scoped KuCoin
+**143** including **42 Spot**, feature-off/product-semantics/prediction/both
+engine **81/81/83/83**, standalone Paradex host **7**, fmt, workspace/all-target
+and wasm32 Clippy, bans and PR-range secret scan. Repository verification passes
+**44 typecheck tasks**, **28 lint tasks**, **27 test tasks** and safe-cex
+**7,552 tests per CI/unit invocation**; harness **583** tests pass.
+
+The tested combined web/Node build is **11,825,315 bytes**, SHA256
+`0a4235a8a41966bc0b8e74babce133f985e11e1f0eb1ec48bc5362f4fd79d1fc`.
+Its **427 SDK/WASM tests in 14 files**, **74 JS host tests**,
+**16 product-semantics tests**, **9 scripted live-smoke tests**, **1 native-frame
+test** and **1 server-adapter test** pass. Standalone actual SDK tests pass:
+Paradex **2**, Bitrue **1**, Spot **1**. The default combined package was restored
+after all standalone gates, and both rebuilt artifacts are byte-identical to
+the saved tested binaries. An independent integration evidence audit passes.
+
+Capability scope and intentional TS skips remain unchanged. The actual credentialed
+Spot lifecycle profile remains unreviewed and refuses before credential access;
+the scripted lifecycle coverage above passes. All phase reviews and source merge
+reviews pass. Final published-head adversarial correctness review and exact-head
+green CI are the remaining landing requirements. Source, tape/artifact/log hashes,
+raw metrics, separate historical failures and fresh integration checks are recorded
+in the three adjacent proof files.
