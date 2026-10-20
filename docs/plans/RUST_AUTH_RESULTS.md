@@ -42,7 +42,7 @@ Keep the selected signer and read scope on the engine's existing in-flight
 request entry. `Cx::tag_account_read(request, credential, scope)` is called at
 dispatch, after signer selection; no credential/header inference or retained
 result ledger. The optional pure venue hook is
-`account_auth_outcome(&self, pending, response) -> Option<AuthOutcome>`.
+`account_auth_outcome(&self, pending, response, now) -> Option<AuthOutcome>`.
 Core emits the captured context plus verdict once before the existing callback,
 with Accepted suppressed for a missing expected streamed list. Transport and
 signature failures remove the same entry without credential evidence.
@@ -289,3 +289,17 @@ is larger, unnecessary work for this phase.
 Only after native classification, all wire boundaries and actual consumer tests
 pass can Phase 6b claim real credential backoff. This document records a plan,
 not that acceptance result.
+
+
+## Time-sensitive acquisition refinement
+
+The classifier receives the current response-event time as a final `now:f64`
+argument. Paradex discards successful acquisition replies older than its native
+five-minute admission window; reporting Accepted for such an unused token would
+incorrectly clear a credential failure. The optional hook remains pure and does
+not gain Store or transport access. Core passes the same event time already
+used by the unchanged response callback. Default/ordinary classifiers ignore it;
+venue session-age predicates share the existing admission rule. Update the
+foundation trait, its four initial WIP implementations and core/native tests,
+then re-run focused/full foundation gates and independent correctness review
+before resuming classifiers. No serialized host contract changes.
