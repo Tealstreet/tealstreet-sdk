@@ -73,17 +73,17 @@ checks signing and bullet/subscription protocol; it performs no financial
 output rewriting.
 
 Both public gates pass three runs with standard egress on fresh twenty-second
-captures. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
+captures at `e0abc9b0f1`, using the landed `finalizeReplay` measurement path. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
 tape hashes, audit results, and median measurements:
 
 | Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
 | --- | --- | --- | --- | --- |
-| Spot | 746.411 / 651.586 | 496.422 / 437.491 | 16,726,649 / 3,299,836 | 674,211 |
-| Futures | 454.303 / 246.211 | 279.948 / 142.243 | 18,940,113 / 3,330,628 | 775,517 |
+| Spot | 594.896 / 495.324 | 388.790 / 327.918 | 18,446,273 / 4,241,500 | 681,398 |
+| Futures | 537.768 / 277.517 | 335.724 / 160.907 | 21,327,505 / 3,998,852 | 775,517 |
 
 Spot private correctness passes twenty-two frames and thirteen commands; futures
 passes thirty-two frames and seventeen commands. Every request, write,
 signature and protocol audit is clean. The actual Spot SDK/WASM boundary test
-passes, and the native suite passes 138 tests, including 38 Spot tests,
+passes, and the native suite passes 143 tests, including 42 Spot tests,
 with Clippy warnings denied at the same frozen source as the artifact gates.
 The fixed 1,258,291-byte budget is unchanged.

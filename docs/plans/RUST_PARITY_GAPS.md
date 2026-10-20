@@ -303,7 +303,7 @@ bytes (578 bytes saved; 236 bytes below budget), with identical web/Node SHA256
 `d6aef4f270652d49f04d18d6d885db67775b4841ee9e48925164959309cb3cff`.
 Performance gates still require the final committed build and CPU release.
 
-## Frozen-source replay gates
+## Pre-review replay checkpoint (historical)
 
 Measured source: `41e28f774aba143e524a295b6bc58c1537751e7a`. All six standard
 artifacts and all **12 replay gates PASS**, with normal egress comparison.
@@ -400,3 +400,59 @@ merge review passes. The nearby census is now 46 Rust names (nine defaults,
 37 opt-in) and three unregistered products. Formatting and all 568 harness
 tests pass on this merge. Refreshing the six artifacts and final verification
 will use this merged source; prior exact-source evidence remains historical.
+
+## Final PR verification
+
+Final runtime source: `e0abc9b0f1ca1cb4116411d00094dc6432ee39ff`, including
+landing `02e9db0e8b`. All six standard artifacts and **12 replay gates PASS**
+after the landed finalization change: reconstruction and structured cloning are
+inside both measured CPU windows; endpoints detach before asynchronous GC.
+Normal egress and protocol audits remain enabled. Public values are medians of
+three runs; private gates use one run. The fixed byte budget is **1,258,291**.
+
+| Venue | WASM bytes | Public frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained bytes | Private frames/commands |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| paradex | 1,257,815 | 15,085 | 981.444 / 747.342 | 526.515 / 387.094 | 18,945,929 / 2,238,124 | 33 / 15 |
+| bitrue | 811,137 | 3,208 | 249.277 / 236.248 | 162.468 / 150.906 | 16,960,809 / 3,305,548 | 23 / 8 |
+| kucoinspot | 681,398 | 26,427 | 594.896 / 495.324 | 388.790 / 327.918 | 18,446,273 / 4,241,500 | 22 / 13 |
+| kucoin | 775,517 | 8,306 | 537.768 / 277.517 | 335.724 / 160.907 | 21,327,505 / 3,998,852 | 32 / 17 |
+| binance | 908,744 | 873 | 274.791 / 157.181 | 155.951 / 77.491 | 18,027,137 / 4,042,340 | 14 / 3 |
+| polymarket | 854,277 | 182 | 28.917 / 23.821 | 10.203 / 5.319 | 23,618,529 / 4,986,836 | 20 / 8 |
+
+Independent evidence audits verify all 12 PASS logs and 48 raw runs, exact
+source/artifact/tape hashes and output-directory bindings, zero request/signature/
+protocol audit failures, and unchanged retained-memory arithmetic. Every public
+gate wins main-thread CPU, steady CPU and retained memory. Process CPU remains
+informational. Standalone actual SDK tests pass: Paradex 2, Bitrue 1, Spot 1.
+Linux CI also passes Paradex at **1,258,104 bytes**, within the same budget.
+
+Three independent round-2 correctness reviews of the actual PR head pass after
+both Spot findings were fixed. The findings and closure are posted on
+[PR #1338](https://github.com/Tealstreet/tealstreet-sdk/pull/1338#issuecomment-6285680991).
+No outstanding correctness findings remain. These Rust-specific fixes do not
+add TS divergences; the earlier documented Spot TS safety corrections remain
+listed in `KNOWN_TS_FIXES` and the implementation commits.
+
+Final frozen-source integration verification passes: **2,537 native workspace
+tests**, fresh scoped KuCoin **143** (42 Spot integration tests), workspace
+all-target and wasm32 Clippy, fmt and bans; **44** typecheck tasks, **28** lint
+tasks, **568** harness tests, **27** repository test tasks (safe-cex **7,513**
+tests in each CI/unit invocation). The default combined artifact is
+**11,395,815 bytes**, with identical web/Node SHA256
+`20acd64815c43d188fb08be5a6e0ca64440fec909732c65ec88c82c1de94b665`;
+its integration checks pass **415 SDK/WASM tests in 14 files**, **74 JS host
+tests**, **9 scripted live-smoke tests**, **1 native-frame test** and
+**1 native-server-adapter test**. The standalone byte budget applies to the
+per-venue artifacts in the table, not this default integration build.
+PR-range secret scanning and both CI scanners pass. All current-head CI checks
+passed before this evidence-only update; final-commit CI is required to merge.
+Exact commands, source and hashes are recorded in
+[PARITY_GATES.json](venue-ports/PARITY_GATES.json) and
+[KUCOIN_GATES.json](venue-ports/KUCOIN_GATES.json).
+
+The intentional TS capability skips remain those in the inventory: Bitrue
+histories and hedge/margin setters, and Spot histories/income/public trades.
+Paradex remote signing alone still requires local signing or a payload signer
+for JWT acquisition. Credentialed Spot lifecycle smoke remains unavailable until
+its separate endpoint/sizing profile is reviewed; every mode refuses before
+credential access. No budget increase or transport-table duplication was needed.
