@@ -309,7 +309,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
 | WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
-| ApeX Omni perpetuals | Implemented on `feat/rust-apexomni`; native zkLink/API-key signing, phased reviews and all local gates pass; PR review and green CI next |
+| ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing and all local gates pass; code-correctness review and CI running |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |

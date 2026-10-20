@@ -241,3 +241,12 @@ generated ID and preserves both virtual siblings when editing one leg.
   `/tmp/apex-binance-public.log`, `/tmp/apex-binance-private.log`.
   Next: PR into `feat/rust-rewrite`, independent code-correctness reviews
   posted on that PR, address findings, green CI, merge and fresh branch.
+
+### PR code-correctness review
+
+- Opened [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324)
+  into `feat/rust-rewrite` at `49998f94fb` after every local gate passed.
+- Three fresh independent adversarial code-correctness reviewers cover native
+  signing/trading, native public/account/history, and TS/harness/SDK-host
+  integration. Findings will be posted on the PR and resolved/re-reviewed.
+- CI is running; merge is authorized only after green checks and review.
