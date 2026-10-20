@@ -124,7 +124,11 @@ pub fn kind(
     let Some(price) = trigger else {
         return OrderType::Market;
     };
-    let last = store.ticker(symbol).map_or(0.0, |t| t.last);
+    // A placeholder ticker has no last price yet; mark is the next best reference.
+    let last = store
+        .ticker(symbol)
+        .map(|t| if t.last > 0.0 { t.last } else { t.mark })
+        .unwrap_or(0.0);
     if last == 0.0
         || (side == OrderSide::Sell && price < last)
         || (side == OrderSide::Buy && price > last)
@@ -420,6 +424,8 @@ impl Backpack {
                             self.account.leverage,
                             cx.now,
                         ));
+                    } else if r.net_quantity != 0.0 {
+                        self.report_skipped_market(cx, &r.symbol);
                     }
                 });
                 if result.is_err() {
@@ -442,6 +448,8 @@ impl Backpack {
                             repairs.push(repair);
                         }
                         rows.push(order(r, cx.store));
+                    } else {
+                        self.report_skipped_market(cx, &r.symbol);
                     }
                 });
                 if result.is_err() {
@@ -627,6 +635,7 @@ impl Backpack {
         if envelope.stream.starts_with("account.orderUpdate") {
             let d: OrderEvent<'_> = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
             if cx.store.market(&d.s).is_none() {
+                self.report_skipped_market(cx, &d.s);
                 return Ok(());
             }
             let amount = d.trigger_quantity.map_or(d.q, |n| n.0);
@@ -710,6 +719,7 @@ impl Backpack {
             let d: PositionEvent<'_> =
                 serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
             if cx.store.market(&d.s).is_none() {
+                self.report_skipped_market(cx, &d.s);
                 return Ok(());
             }
             let now = (d.event_time / 1000.0).floor();
@@ -822,5 +832,37 @@ fn instruction(method: Method, path: &str) -> &'static str {
         (Method::Get, "/wapi/v1/history/orders") => "orderHistoryQueryAll",
         (Method::Get, "/wapi/v1/history/funding") => "fundingHistoryQueryAll",
         _ => unreachable!("unregistered Backpack instruction"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_classification_uses_mark_while_the_ticker_has_no_last_price() {
+        let mut store = safe_cex_engine::Store::default();
+        let ticker = |last: f64, mark: f64| Ticker {
+            id: "ETH_USDC_PERP".into(),
+            symbol: "ETH_USDC_PERP".into(),
+            last,
+            mark,
+            ..Default::default()
+        };
+        let classify = |store: &safe_cex_engine::Store| {
+            kind(
+                store,
+                "ETH_USDC_PERP",
+                OrderSide::Sell,
+                "Market",
+                Some(2100.0),
+            )
+        };
+        store.set_tickers(vec![ticker(0.0, 2000.0)]);
+        assert_eq!(classify(&store), OrderType::TakeProfit);
+        store.set_tickers(vec![ticker(2200.0, 2000.0)]);
+        assert_eq!(classify(&store), OrderType::StopLoss);
+        store.set_tickers(vec![ticker(0.0, 0.0)]);
+        assert_eq!(classify(&store), OrderType::StopLoss);
     }
 }

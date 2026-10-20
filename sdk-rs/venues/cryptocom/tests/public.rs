@@ -1,5 +1,7 @@
 //! Payload shapes: https://exchange-developer.crypto.com/exchange/v1/
-use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, LogLevel, Notice, RequestId, Response, SocketId,
+};
 use safe_cex_venue_cryptocom::{Cryptocom, Options};
 
 fn answer(engine: &mut Engine<Cryptocom>, body: &str) {
@@ -10,6 +12,9 @@ fn answer(engine: &mut Engine<Cryptocom>, body: &str) {
             _ => None,
         })
         .unwrap();
+    answer_request(engine, request, body);
+}
+fn answer_request(engine: &mut Engine<Cryptocom>, request: RequestId, body: &str) {
     engine.handle(
         0.0,
         Event::HttpStart {
@@ -239,4 +244,114 @@ fn malformed_streamed_array_never_commits_empty() {
         answer(&mut engine, body);
         assert!(!engine.store().loaded().markets);
     }
+}
+
+#[test]
+fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
+    let mut engine = Engine::new(Cryptocom::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    answer(
+        &mut engine,
+        r#"{"code":0,"result":{"data":[
+            {"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.0001","quote_decimals":1,"quantity_decimals":4,"max_leverage":"50"},
+            {"symbol":"ETHUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"ETH","quote_ccy":"USD","price_tick_size":null,"qty_tick_size":"0.01","quote_decimals":2,"quantity_decimals":2,"max_leverage":"50","underlying_symbol":null,"contract_size":null},
+            {"symbol":"XRPUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"XRP","quote_ccy":"USD","quote_decimals":4,"quantity_decimals":0,"max_leverage":null},
+            {"symbol":"SOLUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true},
+            {"symbol":"XRP_USD","inst_type":"CCY_PAIR","tradable":true}
+        ]}}"#,
+    );
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let tickers = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    answer_request(
+        &mut engine,
+        tickers,
+        r#"{"code":0,"result":{"data":[{"i":"BTCUSD-PERP","a":"100"},{"i":"ETHUSD-PERP","a":5}]}}"#,
+    );
+    actions.extend(engine.drain_actions());
+    let symbols: Vec<_> = engine
+        .store()
+        .markets()
+        .iter()
+        .map(|m| m.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["BTCUSD-PERP", "ETHUSD-PERP"]);
+    assert_eq!(engine.store().markets()[1].precision.price, 0.01);
+    assert_eq!(engine.store().tickers().len(), 1);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. })),
+        "startup continues past bad rows"
+    );
+    let warnings: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log {
+                level: LogLevel::Warning,
+                message,
+            }) => Some(message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert_eq!(
+        warnings,
+        [
+            "Crypto.com skipped 2 unmappable instrument rows (first: XRPUSD-PERP)",
+            "Crypto.com skipped 1 unmappable ticker rows (first: ETHUSD-PERP)"
+        ]
+    );
+}
+#[test]
+fn startup_stops_when_no_instrument_or_ticker_row_maps() {
+    let mut engine = Engine::new(Cryptocom::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    answer(
+        &mut engine,
+        r#"{"code":0,"result":{"data":[{"symbol":"XRPUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true}]}}"#,
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(!engine.store().loaded().markets);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) if message.contains("instrument")
+    )));
+
+    let mut engine = Engine::new(Cryptocom::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    answer(
+        &mut engine,
+        r#"{"code":0,"result":{"data":[{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","quote_decimals":1,"quantity_decimals":4,"max_leverage":"50"}]}}"#,
+    );
+    answer(
+        &mut engine,
+        r#"{"code":0,"result":{"data":[{"i":"BTCUSD-PERP","a":5}]}}"#,
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(!engine.store().loaded().tickers);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::Log { level: LogLevel::Error, message }) if message.contains("ticker")
+    )));
 }

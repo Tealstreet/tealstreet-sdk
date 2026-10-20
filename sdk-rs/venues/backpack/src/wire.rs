@@ -34,6 +34,16 @@ pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     Ok(n)
 }
 
+/// Names a row that failed to decode, for the skip log; never echoes the raw row.
+pub fn row_symbol(item: &str) -> String {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: Str<'a>,
+    }
+    serde_json::from_str::<Row<'_>>(item).map_or_else(|_| "unknown".into(), |r| r.symbol.into())
+}
+
 fn nullable_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     Ok(Option::<Number>::deserialize(d)?.map_or(0.0, |n| n.0))
 }
