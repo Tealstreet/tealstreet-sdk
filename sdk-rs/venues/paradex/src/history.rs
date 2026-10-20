@@ -1,7 +1,9 @@
 //! Rare cursor-paged reads never mutate the account store.
 use crate::{Pending, account::Account};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 
@@ -138,13 +140,10 @@ struct PublicTrade {
     side: OrderSide,
     timestamp: f64,
 }
-fn finite(s: &str) -> Option<f64> {
-    s.parse::<f64>().ok().filter(|v| v.is_finite())
-}
 fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
     if row.id.is_empty()
         || row.market.is_empty()
-        || !finite(&row.created_at).is_some_and(|v| v > 0.)
+        || !parse_decimal(&row.created_at).is_some_and(|v| v > 0.)
     {
         return false;
     }
@@ -157,7 +156,7 @@ fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
     ];
     if optional
         .into_iter()
-        .any(|s| !s.is_empty() && finite(s).is_none())
+        .any(|s| !s.is_empty() && parse_decimal(s).is_none())
     {
         return false;
     }
@@ -165,17 +164,18 @@ fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
         Query::Income { .. } => true,
         Query::OrderHistory { .. } => {
             side(&row.side).is_some()
-                && finite(&row.size).is_some_and(|n| n > 0.)
-                && finite(&row.remaining_size).is_some_and(|n| n >= 0. && n <= number(&row.size))
-                && (row.price.is_empty() || finite(&row.price).is_some_and(|n| n >= 0.))
+                && parse_decimal(&row.size).is_some_and(|n| n > 0.)
+                && parse_decimal(&row.remaining_size)
+                    .is_some_and(|n| n >= 0. && n <= number(&row.size))
+                && (row.price.is_empty() || parse_decimal(&row.price).is_some_and(|n| n >= 0.))
         }
         Query::Fills { .. } | Query::PublicTrades { .. } => {
             side(&row.side).is_some()
-                && finite(&row.size).is_some_and(|n| n > 0.)
-                && (finite(&row.price).is_some_and(|n| n > 0.)
-                    || (fallback && finite(&row.avg_fill_price).is_some_and(|n| n > 0.)))
+                && parse_decimal(&row.size).is_some_and(|n| n > 0.)
+                && (parse_decimal(&row.price).is_some_and(|n| n > 0.)
+                    || (fallback && parse_decimal(&row.avg_fill_price).is_some_and(|n| n > 0.)))
                 && (!fallback
-                    || finite(&row.remaining_size)
+                    || parse_decimal(&row.remaining_size)
                         .is_some_and(|n| n >= 0. && n <= number(&row.size)))
         }
         Query::OrderByClientId { .. } => true,
@@ -185,19 +185,7 @@ fn number(s: &str) -> f64 {
     safe_cex_engine::num::parse(s)
 }
 fn optional_number(s: &str) -> Option<f64> {
-    s.parse().ok().filter(|n: &f64| n.is_finite() && *n != 0.)
-}
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
+    parse_decimal(s).filter(|n| *n != 0.)
 }
 fn side(s: &str) -> Option<OrderSide> {
     match s {

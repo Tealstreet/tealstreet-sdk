@@ -1,8 +1,10 @@
 //! Cursor-owned rare reads. Failed pages never masquerade as complete history.
 use crate::{Lighter, Pending};
+use safe_cex_engine::de::number;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -153,23 +155,6 @@ fn atom<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Cow<'de, str>, D::Erro
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Num(#[serde(deserialize_with = "number")] f64);
-fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        N(f64),
-        S(#[serde(borrow)] Cow<'a, str>),
-    }
-    let value = match Number::deserialize(d)? {
-        Number::N(n) => n,
-        Number::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
 #[derive(Deserialize)]
 struct TradeWire<'a> {
     #[serde(default, borrow)]
@@ -859,16 +844,4 @@ fn millis(time: f64) -> f64 {
 }
 fn within(request: &Request, time: f64) -> bool {
     request.from.is_none_or(|from| time >= from) && request.to.is_none_or(|to| time <= to)
-}
-fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{b:02X}").unwrap();
-        }
-    }
-    out
 }

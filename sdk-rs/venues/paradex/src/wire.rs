@@ -1,28 +1,9 @@
 //! Borrowed Paradex public payloads.
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(transparent)]
-pub struct Number(#[serde(deserialize_with = "number")] pub f64);
-fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
+pub use safe_cex_engine::de::Number;
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
