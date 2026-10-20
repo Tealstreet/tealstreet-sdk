@@ -1,6 +1,6 @@
 use crate::{Coinbase, Pending, account::Editable};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -1216,7 +1216,7 @@ impl Coinbase {
                 self.trading_finish_error(
                     cx,
                     command,
-                    "Coinbase cannot enumerate an unresolved placement for cancel-all".into(),
+                    "Coinbase cannot enumerate an unresolved placement for cancel-all",
                 );
                 return;
             }
@@ -1289,7 +1289,7 @@ impl Coinbase {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
-        error: String,
+        error: impl Into<VenueError>,
     ) {
         if self
             .trading
@@ -1299,7 +1299,13 @@ impl Coinbase {
         {
             self.trading.active = None;
             self.trading.waiting = false;
-            cx.done(command, Err(error));
+            let error = error.into();
+            // Unclassified failures keep the plain path until Coinbase migrates to `fail`.
+            if error.outcome.is_some() {
+                cx.fail(command, error);
+            } else {
+                cx.done(command, Err(error.message));
+            }
             self.trading_next(cx);
         }
     }
@@ -1315,7 +1321,9 @@ impl Coinbase {
         self.trading_finish_error(
             cx,
             request.command,
-            format!("Coinbase write outcome requires reconciliation: {error}"),
+            unknown(format!(
+                "Coinbase write outcome requires reconciliation: {error}"
+            )),
         );
     }
 
@@ -1342,7 +1350,9 @@ impl Coinbase {
                 self.trading_finish_error(
                     cx,
                     request.command,
-                    format!("Coinbase write outcome requires reconciliation: {error}"),
+                    unknown(format!(
+                        "Coinbase write outcome requires reconciliation: {error}"
+                    )),
                 );
                 return;
             }
@@ -1385,18 +1395,17 @@ impl Coinbase {
         cx: &mut Cx<'_, Pending>,
         step: &Step,
         body: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, VenueError> {
         match step {
             Step::Place { payload, order, .. } => {
                 let result: CreateResponse = serde_json::from_str(body)
-                    .map_err(|_| "Malformed Coinbase placement response")?;
+                    .map_err(|_| unknown("Malformed Coinbase placement response"))?;
                 if !result.success {
                     self.trading.reductions.remove(&payload.client_order_id);
                     self.private_placement_finished(&payload.client_order_id);
-                    return Err(placement_rejection(
-                        result.error_response,
-                        result.failure_reason,
-                    ));
+                    return Err(
+                        placement_rejection(result.error_response, result.failure_reason).into(),
+                    );
                 }
                 let id = if let Some(created) = result.success_response {
                     if created
@@ -1413,16 +1422,16 @@ impl Coinbase {
                             .as_ref()
                             .is_some_and(|id| id != &created.order_id)
                     {
-                        return Err("Coinbase placement response identity mismatch".into());
+                        return Err(unknown("Coinbase placement response identity mismatch"));
                     }
                     created.order_id
                 } else {
                     result
                         .order_id
-                        .ok_or("Coinbase placement response omitted order ID")?
+                        .ok_or_else(|| unknown("Coinbase placement response omitted order ID"))?
                 };
                 if !valid_id(&id) {
-                    return Err("Coinbase placement returned invalid order ID".into());
+                    return Err(unknown("Coinbase placement returned invalid order ID"));
                 }
                 let external_key = format!("\0external:{id}");
                 if self
@@ -1431,7 +1440,9 @@ impl Coinbase {
                     .get(&external_key)
                     .is_some_and(|f| f.symbol != order.symbol || f.side != order.side)
                 {
-                    return Err("Coinbase placement outcome conflicts with stream identity".into());
+                    return Err(unknown(
+                        "Coinbase placement outcome conflicts with stream identity",
+                    ));
                 }
                 let external = self.trading.reductions.remove(&external_key);
                 if let Some(reservation) = self.trading.reductions.get_mut(&payload.client_order_id)
@@ -1462,8 +1473,8 @@ impl Coinbase {
                 Ok(Some(id))
             }
             Step::Cancel { ids } => {
-                let result: Canceled =
-                    serde_json::from_str(body).map_err(|_| "Malformed Coinbase cancel response")?;
+                let result: Canceled = serde_json::from_str(body)
+                    .map_err(|_| unknown("Malformed Coinbase cancel response"))?;
                 let expected: HashSet<_> = ids.iter().map(String::as_str).collect();
                 let mut seen = HashSet::new();
                 if result.results.len() != ids.len()
@@ -1471,7 +1482,9 @@ impl Coinbase {
                         !expected.contains(r.order_id.as_str()) || !seen.insert(r.order_id.as_str())
                     })
                 {
-                    return Err("Coinbase cancel response IDs do not match requested IDs".into());
+                    return Err(unknown(
+                        "Coinbase cancel response IDs do not match requested IDs",
+                    ));
                 }
                 let mut errors = vec![];
                 for result in result.results {
@@ -1494,7 +1507,7 @@ impl Coinbase {
                     }
                 }
                 if !errors.is_empty() {
-                    return Err(errors.join(", "));
+                    return Err(errors.join(", ").into());
                 }
                 Ok(None)
             }
@@ -1519,8 +1532,9 @@ impl Coinbase {
             }
             Step::CancelSymbol { .. } => unreachable!(),
             Step::Edit { payload, .. } => {
-                let result: Edited = serde_json::from_str(body)
-                    .map_err(|_| "Coinbase edit response omitted documented success/errors")?;
+                let result: Edited = serde_json::from_str(body).map_err(|_| {
+                    unknown("Coinbase edit response omitted documented success/errors")
+                })?;
                 if !result.success || !result.errors.is_empty() {
                     let reasons: Vec<_> = result
                         .errors
@@ -1531,7 +1545,7 @@ impl Coinbase {
                     return Err(if reasons.is_empty() {
                         "Coinbase edit rejected".into()
                     } else {
-                        reasons.join(", ")
+                        reasons.join(", ").into()
                     });
                 }
                 self.private_after_write(cx);
@@ -1539,6 +1553,11 @@ impl Coinbase {
             }
         }
     }
+}
+
+/// The write reached Coinbase but its result is unproven; reconcile before resending.
+fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
 
 fn protective(kind: OrderType) -> bool {
