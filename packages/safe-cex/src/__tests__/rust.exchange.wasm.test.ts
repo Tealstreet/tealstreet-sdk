@@ -774,36 +774,53 @@ describe('RustEngineExchange', () => {
     }
   });
 
-  it('returns no outbound action payload for ticker updates and preserves socket errors', async () => {
-    const tape = bybitTransport();
-    const { WasmEngine } = await loadNodeEngine('bybit');
-    const outputs: Array<string | undefined> = [];
-    setWasmEngineLoader(async () => ({
-      WasmEngine: class extends WasmEngine {
-        wsMessages(batch: Uint8Array) {
-          const output = super.wsMessages(batch);
-          outputs.push(output);
-          return output;
-        }
-      },
-    }));
-    setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
-    exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
-    const errors: string[] = [];
-    exchange.emitter.on('error', (message: string) => errors.push(message));
-    await exchange.start();
-    await until(() => tape.sockets.has('/v5/public/linear'));
-    const socket = tape.sockets.get('/v5/public/linear')!;
-    socket(JSON.stringify({ topic: 'tickers.BTCUSDT', type: 'delta', data: { symbol: 'BTCUSDT', lastPrice: '90001' } }));
-    await until(() => outputs.length === 1);
-    expect(outputs).toEqual(['']);
-    await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
-    socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
-    await until(() => outputs.length === 2);
-    expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
-    expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
-  });
+  it.each(['single', 'batch'] as const)(
+    'returns no outbound action payload for ticker updates and preserves socket errors (%s)',
+    async (delivery) => {
+      const tape = bybitTransport();
+      const { WasmEngine } = await loadNodeEngine('bybit');
+      const outputs: Array<string | undefined> = [];
+      const crossings: Array<'single' | 'batch'> = [];
+      setWasmEngineLoader(async () => ({
+        WasmEngine: class extends WasmEngine {
+          wsMessage(socket: number, text: string, now: number) {
+            const output = super.wsMessage(socket, text, now);
+            crossings.push('single');
+            outputs.push(output);
+            return output;
+          }
+          wsMessages(batch: Uint8Array) {
+            const output = super.wsMessages(batch);
+            crossings.push('batch');
+            outputs.push(output);
+            return output;
+          }
+        },
+      }));
+      setRustEngineTransport(() => tape.transport);
+      const store = new DefaultStore();
+      exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
+      const errors: string[] = [];
+      exchange.emitter.on('error', (message: string) => errors.push(message));
+      await exchange.start();
+      await until(() => tape.sockets.has('/v5/public/linear'));
+      const socket = tape.sockets.get('/v5/public/linear')!;
+      socket(
+        JSON.stringify({ topic: 'tickers.BTCUSDT', type: 'delta', data: { symbol: 'BTCUSDT', lastPrice: '90001' } }),
+      );
+      if (delivery === 'batch') socket('{}');
+      await until(() => outputs.length === 1);
+      expect(outputs).toEqual([delivery === 'single' ? undefined : '']);
+      expect(crossings).toEqual([delivery]);
+      await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
+      socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
+      if (delivery === 'batch') socket('{}');
+      await until(() => outputs.length === 2);
+      expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
+      expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
+      expect(crossings).toEqual([delivery, delivery]);
+    },
+  );
 
   it('honors Bybit client IDs through the inherited helpers and finds streamed orders', async () => {
     const tape = bybitTransport();

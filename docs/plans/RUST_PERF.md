@@ -17,14 +17,29 @@ OKX/Bybit diagnostic profiles also retain an OKX batch regression. These are
 recorded in `RUST_PERF_FIRST19.json.gz`; wider performance remains unproven.
 Earlier negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
 
-Current phase: KuCoin/AsterDEX integration `0a5ae08b39` and optional observer
-`82f74962b6` are reviewed and verified. Merge Kraken landing `7da56dc8a5`,
-then extend isolated builds/static loaders to18 families before collecting new
-timings. Preserve typed routing/deadlines, frame identity and all audit checks. The
-19-profile comparison was aborted, not silently resumed against changed source.
-The two bounded V8 diagnostics locate substantial audit/runtime work and do not
-establish packing or duplicate UTF8 validation as the dominant cause. Retain
-raw diagnostic provenance and negative evidence before any source experiment.
+Current production source is `c5071e2fcc`, integrated through ApeX landing
+`ecb313026f`. The19-family isolated release is built. All1700 Rust tests,
+351 harness tests, strict workspace native/wasm checks,44 typecheck and28 lint
+tasks pass. All19 isolated Clippy,38 size,118 host and81 default-timeout
+SDK tests pass. The SDK test now checks both singleton and batch crossings;
+its original stale-spy failure is retained with the separate passing audit.
+Scheduled singleton delivery is reviewed and committed; actual
+performance impact remains unmeasured. All41 private fixtures are generated.
+The23-profile protocol in `RUST_PERF_CROSSOVER23.md` has not run;41 private
+tapes are generated only. Landing has now added Phemex and Paradex, so this
+checkpoint must be integrated again before the expanded final comparison.
+The19 release and original control stay archived; no results are invented.
+
+The original19-family aggregate is8,087,846 bytes, SHA256
+045f7bee76191f75bd5301f61e043afaaea0c6b178737ffa5f4e909483dcb527.
+Two independent source/artifact audits verify exact original291 Rust/config
+files,30 protected host/build/loader files and22 fresh archive compile traces.
+A postprocessing variable-shadow bug lost the preflight cleanup-hash list and
+tool snapshot; the failed attempt and post-build-only recovery are documented,
+without inventing missing evidence. Shared-helper refresh and independent provenance checks pass.
+Exact proof snapshots are in `RUST_PERF_CHECKPOINT19.json.gz`.
+Previous17/18 control/build drafts remain unbuilt checkpoints. No new public
+or profiling replay has run after the earlier failed19 attempt.
 
 The prior predeclared protocol is `RUST_PERF_CROSSOVER19.md`. A fresh expanded
 protocol and exact landing control are required after this merge. Earlier 14-
