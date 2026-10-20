@@ -119,7 +119,7 @@ fn independent_book_subscribers_and_reconnect_restore_interest() {
         },
     );
     h.collect();
-    h.timer(h.now + 1000.);
+    h.reconnect();
     h.public = h
         .actions
         .iter()
@@ -981,4 +981,12 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         );
         assert_eq!(emitted(&mut h), expected);
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let h = Harness::new();
+    socket_checks::flaps(h.e, h.public, h.now);
 }

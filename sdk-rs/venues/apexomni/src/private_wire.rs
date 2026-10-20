@@ -318,6 +318,43 @@ pub struct Contents<'a> {
     pub orders: Option<Rows<OrderRow<'a>>>,
     #[serde(borrow)]
     pub positions: Option<Rows<PositionRow<'a>>>,
+    #[serde(borrow)]
+    pub wallets: Option<Rows<WalletRow<'a>>>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WalletRow<'a> {
+    #[serde(borrow, deserialize_with = "text")]
+    pub account_id: Cow<'a, str>,
+    #[serde(borrow, deserialize_with = "text")]
+    pub token: Cow<'a, str>,
+    #[serde(deserialize_with = "optional_number")]
+    pub balance: Option<f64>,
+    #[serde(deserialize_with = "optional_number")]
+    pub pending_deposit_amount: Option<f64>,
+    #[serde(deserialize_with = "optional_number")]
+    pub pending_withdraw_amount: Option<f64>,
+    #[serde(deserialize_with = "optional_number")]
+    pub pending_transfer_in_amount: Option<f64>,
+    #[serde(deserialize_with = "optional_number")]
+    pub pending_transfer_out_amount: Option<f64>,
+}
+
+impl WalletRow<'_> {
+    pub fn valid(&self) -> bool {
+        !self.account_id.trim().is_empty()
+            && matches!(self.token.as_ref(), "USDC" | "USDT")
+            && self.balance.is_some_and(f64::is_finite)
+            && [
+                self.pending_deposit_amount,
+                self.pending_withdraw_amount,
+                self.pending_transfer_in_amount,
+                self.pending_transfer_out_amount,
+            ]
+            .iter()
+            .all(|amount| amount.is_none_or(|amount| amount >= 0.0))
+    }
 }
 
 #[derive(Deserialize)]
