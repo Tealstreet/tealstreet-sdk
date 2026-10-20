@@ -206,7 +206,7 @@ as it does today against Rust transferring frames:
   reservation; never clamp releases to zero. Each measured run must reproduce
   its implementation's audited output and transport receipt.
 - Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
-  retain the 1,258,291-byte budget. Check browser and Node artifacts before overwrite.
+  use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
 
 Peak memory and browser cold-start remain cutover requirements; this replay
 gate measures idle-loaded retained memory rather than establishing either.

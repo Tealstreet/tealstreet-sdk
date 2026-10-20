@@ -555,3 +555,7 @@ never retry an unchanged failed performance measurement to obtain a pass.
   identical. The union of both observed path sets is declared so either outcome
   passes (overseer option a); deterministic census under replay is routed to
   the incidentals lane.
+- Landing `2319bd42ac` (#1421) raises the single-venue family budget to
+  1,310,720 bytes; ported into `WASM_BUDGETS.venue` (this PR's replacement for
+  the gate job's `WASM_BUDGET_BYTES`). Coinbase CFM ES256 checkpoint 12 shows
+  the TS-side census-timing twin (run `39469014934`); both outcomes declared.

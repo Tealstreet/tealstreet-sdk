@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { WASM_BUDGETS, wasmBudgetError } from './wasm-budget.mjs';
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
-  assert.equal(WASM_BUDGETS.venue, 1_258_291);
+  assert.equal(WASM_BUDGETS.venue, 1_310_720);
   assert.equal(WASM_BUDGETS.combined, 13 * 1024 * 1024);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
