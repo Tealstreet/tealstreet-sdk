@@ -51,6 +51,34 @@ const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const records = [{ type: 'meta', private: isPrivate }];
+  const midpoint = defect?.startsWith('midpoint:');
+  const midpointIssue = midpoint ? defect.slice('midpoint:'.length) : undefined;
+  if (midpoint) {
+    const products = ['DEEP-USD', 'DEEP-USDC'].map((product_id) => ({
+      product_id, product_type: 'SPOT', future_product_details: null,
+      base_currency_id: 'DEEP', quote_currency_id: product_id.slice(5),
+      status: 'online', is_disabled: false, trading_disabled: false,
+      base_increment: '1', price_increment: '0.00001', base_min_size: '1', base_max_size: '100000000',
+      price: '0.01875', volume_24h: '2625844', approximate_quote_24h_volume: '49234.58',
+    }));
+    records.push({ type: 'http', t: 10, requestOrdinal: 0, method: 'GET', status: 200,
+      url: 'https://api.coinbase.com/api/v3/brokerage/market/products?limit=1000',
+      body: JSON.stringify({ products, num_products: 2,
+        pagination: { has_next: false, has_prev: false, next_cursor: '', prev_cursor: '' } }),
+    });
+    if (midpointIssue === 'commands') records.push({ type: 'command', t: 20, op: 'comparisonControl' });
+    if (isPrivate && ['fills', 'fee'].includes(midpointIssue)) {
+      // The legacy oracle must independently corroborate the TS execution.
+      // Mutations below change only the candidate price/fee, never this input.
+      const url = 'wss://advanced-trade-ws-user.coinbase.com';
+      records.push({ type: 'ws', t: 20, url, text: JSON.stringify({ channel: 'user', sequence_num: 0,
+        events: [{ type: 'snapshot', orders: [] }] }) });
+      records.push({ type: 'ws', t: 30, url, text: JSON.stringify({ channel: 'user', sequence_num: 1,
+        events: [{ type: 'update', orders: [{ order_id: 'one', product_id: 'DEEP-USD', order_side: 'BUY',
+          status: 'FILLED', cumulative_quantity: '1', avg_price: '0.01875' }] }] }) });
+    }
+
+  }
   if (defect?.startsWith('live-smoke')) {
     records[0].liveSmoke = true;
     const commands = ['placeOrders', 'amendOrder', 'cancelOrders', 'cancelSymbolOrders', 'setLeverage'];
@@ -93,12 +121,16 @@ const gate = (venue, isPrivate = false, defect) => {
     const isPrivate = ${JSON.stringify(isPrivate)};
     const strictCommandCount = ${JSON.stringify(['orderly', 'coinbase'].includes(VENUES[venue].family))};
     const defect = ${JSON.stringify(defect ?? null)};
+    const midpoint = ${JSON.stringify(Boolean(midpoint))};
+    const midpointIssue = ${JSON.stringify(midpointIssue ?? null)};
+    const midpointOutputs = {};
+    const { compareCoinbaseSpotMidpoints } = await import(${JSON.stringify(new URL('./coinbase-spot-midpoints.mjs', import.meta.url).href)});
     // The gate must override an explicit parent opt-in for both implementations,
     // while retaining unrelated replay configuration in the child environment.
     process.env.ESBUILD_WORKER_THREADS = '1';
     process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
-      '--books', 'BTCUSDT', '--runs', isPrivate ? '2' : '7'];
+      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT', '--runs', isPrivate ? '2' : '7'];
     const spawned = new Set();
     const calls = [];
     childProcess.spawnSync = (_executable, args, options) => {
@@ -143,6 +175,57 @@ const gate = (venue, isPrivate = false, defect) => {
         transportReceipt: {},
         ...(isPrivate ? { account: emptyAccount() } : {}),
       };
+      if (midpoint) {
+        output.markets = ['DEEP-USD', 'DEEP-USDC'].map((symbol) => ({
+          id: symbol, symbol, base: 'DEEP', quote: symbol.slice(5), active: true,
+          isSpot: true, isInverse: false, isExpiring: false, contractSize: 1,
+          precision: { amount: 1, price: 0.00001 },
+        }));
+        output.tickers = ['DEEP-USD', 'DEEP-USDC'].map((symbol) => ({ symbol,
+          last: 0.01875, volume: 2625844, bid: 0.01875,
+          quoteVolume: rust || isPrivate || midpointIssue === 'equal' ? 49234.58 : 49234.57,
+        }));
+        output.books = { 'DEEP-USD': { bids: [[0.01874, 1]], asks: [[0.01876, 1]] } };
+        if (midpointIssue === 'commands') output.commands = [{ ok: { ids: rust ? ['two', 'one'] : ['one', 'two'] } }];
+        if (rust) {
+          if (midpointIssue === 'price') output.tickers[0].last = 0.01876;
+          if (midpointIssue === 'volume') output.tickers[0].volume--;
+          if (midpointIssue === 'bid') output.tickers[0].bid = 0.01874;
+          if (midpointIssue === 'book') output.books['DEEP-USD'].bids[0][1] = 2;
+          if (midpointIssue === 'request') output.requests = ['GET https://example.test/unexpected?'];
+          if (midpointIssue === 'subscription') output.subscriptions = ['WS public unexpected'];
+          if (midpointIssue === 'wsrequest') output.wsRequests = ['unexpected native request'];
+          if (midpointIssue === 'account') output.account = emptyAccount();
+        }
+        if (isPrivate) {
+          if (midpointIssue === 'balance' && rust) output.account.balance.total++;
+          if (midpointIssue === 'orders') output.account.orders = [{ id: 'one', clientOrderId: null, symbol: 'DEEP-USD',
+            status: 'open', type: 'limit', side: 'buy', price: rust ? 0.01876 : 0.01875, amount: 1,
+            filled: 0, remaining: 1, timeInForce: null, reduceOnly: false, close: false,
+            trigger: null, takeProfit: null, stopLoss: null, conditionalOrderPrice: null, parentId: null,
+            takeProfitTrigger: null, stopLossTrigger: null, rejectReason: null }];
+          if (midpointIssue === 'positions') output.account.positions = [{ symbol: 'DEEP-USD', side: 'long',
+            entryPrice: rust ? 0.01876 : 0.01875, contracts: 1, notional: 0.01875, leverage: 1,
+            unrealizedPnl: 0, liquidationPrice: null, marginType: 'cross', positionMode: 'oneway', marginSize: 1, realizedPnl: 0 }];
+          if (['fills', 'fee'].includes(midpointIssue)) output.account.fills = [{ id: 'one', symbol: 'DEEP-USD', side: 'buy',
+            amount: 1, price: rust && midpointIssue === 'fills' ? 0.01876 : 0.01875,
+            fee: rust && midpointIssue === 'fee' ? 0.02 : 0.01, timestamp: 1710000000000, executionId: 'exec-one' }];
+        }
+        if (midpointIssue === 'good') {
+          midpointOutputs[impl] = structuredClone(output);
+          if (midpointOutputs.ts && midpointOutputs.rust)
+            assert.equal(compareCoinbaseSpotMidpoints({ venue, records, ...midpointOutputs }).equivalent, true,
+              'control must qualify for the independent standalone midpoint proof');
+        }
+        if (rust && midpointIssue === 'later' && args.includes('--performance') && out.endsWith('-6.json'))
+          output.tickers[0].quoteVolume = 49234.59;
+        for (const point of output.checkpoints) {
+          point.markets = structuredClone(output.markets);
+          point.tickers = structuredClone(output.tickers);
+          point.books = structuredClone(output.books);
+          if (output.account) point.account = structuredClone(output.account);
+        }
+      }
       if (['orderly-extra-result', 'coinbase-extra-result'].includes(defect)) output.commands.push({ ok: [] });
       if (defect?.startsWith('live-smoke')) {
         output.commands = Array.from({ length: 5 }, () => ({ ok: [] }));
@@ -402,4 +485,58 @@ test('gate CLI rejects shared base normalized row-key erasure at checkpoints and
     assert.match(result.stdout, /checkpoint coverage ts final:/, `${section}.${field}`);
     assert.match(result.stdout, /checkpoint coverage rust final:/, `${section}.${field}`);
   }
+});
+
+
+test('Coinbase midpoint proofs cannot excuse strict raw or terminal ticker differences', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const result = gate(venue, false, 'midpoint:good');
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /checkpoint \d+ tickers\[0\]\.quoteVolume:/);
+    assert.match(result.stdout, /ticker DEEP-USD\.quoteVolume:/);
+    assert.doesNotMatch(result.stdout, /public spot decimal midpoints/);
+  }
+});
+
+test('equal Coinbase midpoint values pass the complete seven-pair CLI control', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const result = gate(venue, false, 'midpoint:equal');
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(result.stdout, /\nPASS\n/);
+  }
+});
+
+test('Coinbase midpoint inputs retain every exact ticker field', () => {
+  for (const [issue, field] of [['price', 'last'], ['volume', 'volume'], ['bid', 'bid']]) {
+    const result = gate('coinbase', false, 'midpoint:' + issue);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, new RegExp('ticker DEEP-USD\\.' + field + ':'));
+  }
+});
+
+test('Coinbase midpoint differences preserve independent book and transport failures', () => {
+  for (const [issue, diagnostic] of [
+    ['book', /book DEEP-USD/], ['request', /requests/], ['subscription', /subscriptions/], ['wsrequest', /websocket requests/],
+    ['commands', /command results/], ['account', /account presence/],
+  ]) {
+    const result = gate('coinbase', false, 'midpoint:' + issue);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, diagnostic);
+    assert.match(result.stdout, /quoteVolume:/);
+  }
+});
+
+test('Coinbase private financial controls remain exact at equal midpoint values', () => {
+  for (const issue of ['balance', 'orders', 'positions', 'fills', 'fee']) {
+    const result = gate('coinbase', true, 'midpoint:' + issue);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, new RegExp('account[ .]' + (issue === 'fee' ? 'fills' : issue)));
+    assert.doesNotMatch(result.stdout, /ticker DEEP-USD\.quoteVolume:/);
+  }
+});
+
+test('Coinbase midpoint changes in the last measured run fail own-audit validation', () => {
+  const result = gate('coinbase', false, 'midpoint:later');
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.match(result.stdout, /rust performance run 7.*quoteVolume/);
 });

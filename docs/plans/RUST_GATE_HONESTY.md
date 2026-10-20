@@ -474,3 +474,26 @@ never retry an unchanged failed performance measurement to obtain a pass.
   All 49 result rows and combined size/hash match the complete integrated run.
   Publish this stable declarations-only checkpoint; fresh full exact-head green
   CI and completed local checks are required before final merge and wind-down.
+- Landing advanced to `d17518bc5f` (socket-supervisor PR #1350) before the
+  declaration refresh could start PR CI. Authorized merge conflicts are limited
+  to gate and CLI tests. Keep the strict gate byte-identical: the incoming
+  midpoint utility remains diagnostic-only, with its standalone regressions;
+  its final-ticker comparison exception conflicts with this task's requirement
+  not to loosen comparisons. Port CLI controls to assert qualified decimal
+  midpoint differences still FAIL, equal values PASS, and other fields, books,
+  transports, private finance and own-audit work remain exact. Preserve incoming
+  auth notes in the isolated oracle and shared parser/venue repairs unchanged.
+- Resolution-plan and scoped supervisor integration reviews PASS. Supervisor
+  timing is sans-I/O and deterministic; stale timer ownership cannot revive a
+  canceled socket, pongs do not extend auth deadlines. Rebuild all venue audit
+  baselines and seven-pair measurements; earlier socket-lane reports do not
+  satisfy the strict gate. Local root validation from the unchanged TS source:
+  typecheck 44/44, lint 28/28, tests 27/27 tasks (safe-cex unit/CI 7,847 each).
+  New harness controls and staged resolution are under review before publish.
+- Strict merge controls reviewed PASS. Twenty-two original CLI tests passed;
+  the new private fill/fee fixture initially lacked native execution evidence.
+  Add an independent empty user snapshot and FILLED update; focused five-case
+  private controls now PASS without touching the existing oracle. Reviewer
+  verifies candidate-only price/fee mutations still reach financial comparison.
+  Gate remains byte-identical; no midpoint exemption is executed. Full updated
+  harness is running. Publish reviewed integration for independent full CI.
