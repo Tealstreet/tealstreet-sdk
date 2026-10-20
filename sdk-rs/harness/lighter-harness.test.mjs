@@ -10,6 +10,8 @@ import {readFileSync} from 'node:fs';
 import {initializeLighterCrypto,createLighterVerifier,decodeLighterTransactions,lighterRequestBody} from './lighter-crypto.mjs';
 import {requestKey,subscriptionKeys} from './requests.mjs';
 import {Tape} from './tape.mjs';
+import {Responses} from './responses.mjs';
+import {parseRequestJson} from './request-json.mjs';
 import {fixLighterFills,fixLighterCommands} from './known-ts-fixes.mjs';
 const corpus=JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/lighter/venue-signing-preimages.json',import.meta.url),'utf8'));
 const options={secret:corpus.secret,applicationId:'42',apiKeyIndex:'3'};
@@ -226,3 +228,151 @@ test('private tape generator preserves all deployment origins and disables absen
   }
  } finally { rmSync(directory,{recursive:true,force:true}); }
 });
+
+// Exercise the exact production constructor and outbound override, not only SharedTape.
+const productionTape = (name, records, venue) => {
+ const source=readFileSync(new URL('./replay.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('const VOLATILE =');
+ const classStart=source.indexOf('class Tape extends SharedTape {');
+ const end=source.indexOf('\nconst settle =',classStart);
+ assert(start>=0 && classStart>start && end>classStart);
+ const ProductionTape=new Function('SharedTape','values','venue','records','bookSymbols','callerIds',
+  'keyOf','Responses','sharedUrl','parseRequestJson','isRead','isPrivate',
+  `${source.slice(start,classStart)}\nreturn (${source.slice(classStart,end)});`)(
+   Tape,{venue:name},venue,records,[],new Set(),requestKey,Responses,undefined,parseRequestJson,
+   (method)=>method==='GET',true);
+ return new ProductionTape('ts');
+};
+const jsonNumbers=(value)=>JSON.stringify(value,(_key,item)=>typeof item==='bigint'?JSON.rawJSON(String(item)):item);
+const signedForm=(name,kind='create-complete',edit=()=>{})=>{
+ const item=corpus.cases.find((item)=>item.name===`${name}/livenet/${kind}`);
+ const {type,info}=decodeLighterTransactions(item.wire[0].body)[0];
+ edit(info);
+ const words=(...values)=>Buffer.concat(values.map((value)=>{const bytes=Buffer.alloc(8);bytes.writeBigUInt64LE(BigInt(value));return bytes;})).toString('hex');
+ const unwrap=(value)=>{assert.equal(typeof value,'string');return value.replace(/^0x/,'');};
+ let preimage=words(name==='lighter-robinhood'?466324:304,type,info.Nonce,info.ExpiredAt,info.AccountIndex,info.ApiKeyIndex);
+ if(type===14){
+  preimage+=words(info.MarketIndex,info.ClientOrderIndex,info.BaseAmount,info.Price,info.IsAsk,info.Type,info.TimeInForce,info.ReduceOnly,info.TriggerPrice,info.OrderExpiry);
+  if(info.L2TxAttributes){
+   const attrs=Object.entries(info.L2TxAttributes).filter(([,value])=>value!==0).flatMap(([kind,value])=>[Number(kind),value]);
+   while(attrs.length<8)attrs.push(0);
+   preimage=unwrap(oracle.poseidon2HashFp5(preimage))+unwrap(oracle.poseidon2HashFp5(words(...attrs)));
+  }
+ }else if(type===15)preimage+=words(info.MarketIndex,info.Index);
+ else throw new Error('Unsupported test transaction');
+ info.Sig=Buffer.from(unwrap(oracle.schnorrSign(preimage,options.secret)),'hex').toString('base64');
+ return new URLSearchParams({tx_type:String(type),tx_info:jsonNumbers(info)}).toString();
+};
+const ackRecord=(route,requestBody,extra={})=>({type:'http',method:'POST',url:route,requestBody,status:200,body:'{"code":200,"tx_hash":"ack"}',...extra});
+const lighterProduction=async(name,requestBody)=>{
+ const venue=venueOf(name);
+ await venue.initializeReplay('rust',options);
+ const route=name==='lighter-robinhood'?'https://api.rh.lighter.xyz/api/v1/sendTx':url;
+ return {tape:productionTape(name,[ackRecord(route,requestBody)],venue),route};
+};
+
+test('production outbound reuses each SharedTape comparison key with custom contracts and rejection audits',()=>{
+ const route='https://identity.test/write';
+ const venue={rust:'lighter-robinhood',isWrite:(method)=>method==='POST',
+  requestKey:(method,url,body,ids)=>'CUSTOM '+requestKey(method,url,body,ids),
+  verifyRequest:({headers})=>headers?.verified===true};
+ const tape=productionTape('lighter-robinhood',[
+  ackRecord(route,{quantity:1},{tsRequestBody:{quantity:'1'}}),ackRecord(route,{quantity:2}),
+  {type:'http',method:'GET',url:route,status:200,body:'{}'},
+ ],venue);
+ assert.equal(tape.respond('POST',route,{quantity:'1'},{verified:true}).status,200);
+ assert.equal(tape.outbound[0],tape.writes[0]);
+ assert.match(tape.outbound[0],/^CUSTOM /);
+ assert.equal(tape.outbound[0],venue.requestKey('POST',route,{quantity:1},new Set()));
+ assert.equal(tape.respond('GET',route,undefined,{verified:true}).status,200);
+ assert.equal(tape.outbound.length,1);
+ assert.throws(()=>tape.respond('POST',route,{quantity:2},{verified:false}),/invalid replay signature/);
+ assert.equal(tape.invalidSignatures,1);assert.equal(tape.writes.length,1);assert.equal(tape.outbound.length,1);
+ assert.equal(tape.respond('POST',route,{quantity:99},{verified:true}).status,599);
+ assert.equal(tape.missingWrites,1);
+ assert.equal(tape.outbound[1],tape.writes[1]);
+ assert.notEqual(tape.outbound[1],tape.outbound[0]);
+ assert.equal(tape.respond('POST',route,{quantity:2},{verified:true}).status,200);
+ assert.equal(tape.missingWrites,0);
+ assert.equal(tape.outbound[2],tape.writes[2]);
+ assert.notEqual(tape.outbound[2],tape.outbound[1]);
+});
+
+for(const name of ['lighter','lighter-robinhood']){
+ test(`${name} production accepts independently verified fresh expiry differences with identical outbound identity`,async()=>{
+  const oldNow=Date.now;Date.now=()=>now;
+  try{
+   const expected=signedForm(name,'cancel-large-index');
+   const {venueOf:freshVenueOf}=await import(`./venues.mjs?uninitialized-${name}`);
+   const venue=freshVenueOf(name),route=name==='lighter-robinhood'?'https://api.rh.lighter.xyz/api/v1/sendTx':url;
+   // A fresh profile closure cannot inherit another test's initialized verifier.
+   const uninitialized=productionTape(name,[ackRecord(route,expected)],venue);
+   assert.throws(()=>uninitialized.respond('POST',route,expected),/invalid replay signature/);
+   assert.equal(uninitialized.missingWrites,1);assert.deepEqual(uninitialized.outbound,[]);
+   const baseline=await lighterProduction(name,expected);
+   assert.equal(baseline.tape.respond('POST',route,expected).status,200);
+   const fresh=signedForm(name,'cancel-large-index',(info)=>{info.ExpiredAt+=293;});
+   const v=createLighterVerifier(options,oracle,name);
+   assert.equal(v.request({method:'POST',url:route,body:fresh,now}),true);
+   const {tape}=await lighterProduction(name,expected);
+   assert.equal(tape.respond('POST',route,fresh).status,200);
+   assert.deepEqual(tape.outbound,baseline.tape.outbound);
+   assert.deepEqual(tape.outbound,tape.writes);
+   assert.equal(tape.missingWrites,0);
+   assert.equal(tape.respond('POST',route,fresh).status,599,'an ACK is single use');
+   assert.equal(tape.unserved,1);
+  }finally{Date.now=oldNow;}
+ });
+ test(`${name} production rejects freshly signed economic target nonce and unknown-field mutations`,async()=>{
+  const oldNow=Date.now;Date.now=()=>now;
+  try{
+   for(const kind of ['create-complete','cancel-large-index']){
+    const expected=signedForm(name,kind);
+    const {tape,route}=await lighterProduction(name,expected);
+    const v=createLighterVerifier(options,oracle,name);
+    const edits=kind==='create-complete'?
+     [(i)=>{i.Price+=1;},(i)=>{i.BaseAmount+=1;},(i)=>{i.MarketIndex+=1;},(i)=>{i.Nonce+=1;}]:
+     [(i)=>{i.Index+=1n;},(i)=>{i.MarketIndex+=1;},(i)=>{i.Nonce+=1;}];
+    for(const edit of [...edits,(i)=>{i.unknownEconomicField=1;},(i)=>{i.signature='unknown';},(i)=>{i.clientOrderId='caller-looking';}]){
+     const changed=signedForm(name,kind,edit);
+     assert.equal(v.request({method:'POST',url:route,body:changed,now}),true,'independent crypto accepts re-signed control');
+     assert.equal(tape.respond('POST',route,changed).status,599);
+     assert.equal(tape.missingWrites,1);
+     assert.equal(tape.outbound.at(-1),tape.writes.at(-1));
+    }
+    for(const key of ['signature','timestamp','recvWindow','requestId','clientOrderId','newClientOrderId','clientAlgoId','unknownEconomicField']){
+     const changedUrl=route+'?'+new URLSearchParams({[key]:'unexpected-business-field'});
+     assert.equal(v.request({method:'POST',url:changedUrl,body:expected,now}),true);
+     assert.equal(tape.respond('POST',changedUrl,expected).status,599,key);
+     assert.equal(tape.missingWrites,1,key);
+    }
+    for(const edit of [(f)=>f.append('tx_info',f.get('tx_info')),(f)=>f.set('unknownEconomicField','1')]){
+     const changed=new URLSearchParams(expected);edit(changed);
+     assert.equal(tape.respond('POST',route,changed.toString()).status,599);
+     assert.equal(tape.missingWrites,1);
+    }
+    assert.equal(tape.respond('POST',route,expected).status,200);
+    assert.equal(tape.missingWrites,0);
+   }
+  }finally{Date.now=oldNow;}
+ });
+ test(`${name} production rejects invalid signature account key and expiry before appending or consuming`,async()=>{
+  const oldNow=Date.now;Date.now=()=>now;
+  try{
+   const expected=signedForm(name,'cancel-large-index');
+   const {tape,route}=await lighterProduction(name,expected);
+   for(const changed of [
+    rewrite(expected,(i)=>{i.Sig=Buffer.alloc(80).toString('base64');}),
+    signedForm(name,'cancel-large-index',(i)=>{i.AccountIndex+=1;}),
+    signedForm(name,'cancel-large-index',(i)=>{i.ApiKeyIndex+=1;}),
+    signedForm(name,'cancel-large-index',(i)=>{i.ExpiredAt=now-1;}),
+   ]){
+    assert.throws(()=>tape.respond('POST',route,changed),/invalid replay signature/);
+    assert.equal(tape.missingWrites,1);assert.deepEqual(tape.outbound,[]);assert.deepEqual(tape.writes,[]);
+   }
+   assert.equal(tape.invalidSignatures,4);
+   assert.equal(tape.respond('POST',route,expected).status,200);
+   assert.equal(tape.missingWrites,0);
+  }finally{Date.now=oldNow;}
+ });
+}

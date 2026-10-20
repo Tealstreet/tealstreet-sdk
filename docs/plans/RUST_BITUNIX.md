@@ -2344,3 +2344,24 @@ ACK assertions. Native source, tapes, thresholds, deadlines and metrics are
 unchanged. Independent final review and helper suite precede fresh Lighter,
 Bitunix/Binance private controls and the remaining batch. Public write-free
 behavior is unchanged; final CI still covers every declared profile.
+
+
+Shared write-identity correction frozen and independently reviewed PASS.
+Generic production outbound captures the one newly recorded SharedTape write
+key after actual-request validation/matching, uses the shared write classifier,
+and rejects missing/multiple per-call identities. Invalid signatures append
+neither array; unmatched 599 attempts remain visible and keep required ACKs
+unconsumed. Bitget/Hyperliquid custom contracts and comparison bodies remain
+selected upstream; POSTed reads still append no write. No new normalization.
+
+Lighter now preserves unsupported query names, including generic clock,
+signature and caller-ID-shaped fields; only verified auth is projected. Real
+Go-WASM controls sign both deployment domains independently, accept legitimate
+293-ms expiry differences, and reject freshly re-signed economic/target/nonce/
+unknown-field changes, invalid account/key/signature/expiry, duplicate forms
+and repeated ACK use. Four fail-before cases are retained. Focused 26/26 and
+all 818 harness helpers pass, with syntax/diff checks. Independent reviewer
+re-probes all seven prior unknown query counterexamples: each returns 599 with
+ACK retained; honest original returns 200 once. Root typecheck 44/44 and lint
+28/28 pass again. No fixture, metric, threshold, deadline or economic output
+change. Resume actual related replay controls with owned jobs quiet.

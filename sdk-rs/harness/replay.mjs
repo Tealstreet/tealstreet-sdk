@@ -266,9 +266,14 @@ class Tape extends SharedTape {
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
+    const firstWrite = this.writes.length;
     const response = super.respond(method, url, body, headers);
-    const comparisonBody = Object.hasOwn(response, 'comparisonRequestBody') ? response.comparisonRequestBody : body;
-    if (isWriteRequest(method, url)) this.outbound.push((this.bitget || this.hyperliquid) ? this.requestKey(method, url, comparisonBody) : requestKey(method, url, comparisonBody));
+    if (this.isWrite(method, url)) {
+      // SharedTape already validated and recorded this actual request using its
+      // venue contract, caller IDs and explicit comparison-body alternative.
+      if (this.writes.length !== firstWrite + 1) throw new Error('Replay write identity was not recorded exactly once');
+      this.outbound.push(this.writes[firstWrite]);
+    }
     return response;
   }
 

@@ -44,6 +44,9 @@ const lighter = (name) => {
     isWrite: (method) => method !== 'GET',
     requestBodies: true,
     requestBody: lighterRequestBody,
+    // Only independently verified auth tokens vary in Lighter query strings.
+    preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+    generatedId: () => false,
     requestUrl(url) {
       const parsed = new URL(url);
       parsed.searchParams.delete('auth');
