@@ -277,3 +277,15 @@ Final combined WASM suite passes81/81 across six files, including all five
 Binance boundary cases and worker/main native currency assertions. Host/wire
 51/51 passes. Both independent correctness and harness review closures pass;
 current-head PR CI is the remaining landing requirement.
+
+
+ApeX landing `ecb313026f` is merged in `01921c6aa5`; independent wrapper and
+harness audits pass. Binance/Bybit/engine/frame implementation is unchanged
+from the twelve-gate source above. The new global `getAccount` wire alias maps
+to Binance's explicit unsupported completion. All304 merged helpers,46 focused
+wrapper/frame cases, typecheck44/lint28 tasks, fmt/bans/default WASM Clippy and
+81 actual combined WASM cases pass. Fresh Spot private (including currencies),
+Spot public and USD-M public regression gates pass. The updated Binance-only
+artifact is919064 bytes (limit1258291), SHA-256
+`8895b0178ad8ea2d576c9c1a3a923093de6f5145652cf5fa0cddce80aa775378`.
+Current PR CI must pass before merge; no performance threshold changed.
