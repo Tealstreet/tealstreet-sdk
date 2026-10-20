@@ -882,6 +882,82 @@ fn ambiguous_placement_ack_cannot_be_followed_by_false_empty_cancel_all_success(
 }
 
 #[test]
+fn delayed_post_write_recovery_preserves_authentication_backoff_and_recovery_hint() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let (request, _) = body(&mut h, "/batch-place-order");
+    batch_success(&mut h, request, &["recovery-order"]);
+    let write_check = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == h.now + 5_000.0)
+        .unwrap()
+        .0;
+    let mut socket = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(_, url)| url.ends_with("/private"))
+        .unwrap()
+        .0;
+    let mut waiting = None;
+    for attempt in 0..4 {
+        h.now += 1.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"40009","msg":"bad key"}"#,
+        });
+        let nominal = 1000.0 * 2f64.powi(attempt);
+        let pending = *h
+            .timers
+            .iter()
+            .rev()
+            .find(|(_, at)| (nominal * 0.75..=nominal).contains(&(*at - h.now)))
+            .unwrap();
+        if attempt == 3 {
+            waiting = Some(pending);
+            break;
+        }
+        h.now = pending.1;
+        h.event(Event::TimerFired { timer: pending.0 });
+        socket = h
+            .sockets
+            .iter()
+            .rev()
+            .find(|(_, url)| url.ends_with("/private"))
+            .unwrap()
+            .0;
+        h.event(Event::WsOpened { socket });
+    }
+    let (retry, at) = waiting.unwrap();
+    assert!(at - h.now >= 6_000.0);
+    let before = h.sockets.len();
+    h.event(Event::TimerFired { timer: write_check });
+    assert_eq!(
+        h.sockets.len(),
+        before,
+        "write recovery must honor pending authentication backoff"
+    );
+    assert!(
+        h.timers.iter().any(|(timer, _)| *timer == retry),
+        "pending retry must remain armed"
+    );
+    h.now = at;
+    h.event(Event::TimerFired { timer: retry });
+    assert_eq!(h.sockets.len(), before + 1);
+    assert!(
+        h.socket_contexts
+            .last()
+            .unwrap()
+            .2
+            .as_ref()
+            .is_some_and(|c| c.feed == "private" && c.recover),
+        "deferred reconnect must retain recovery hint"
+    );
+}
+
+#[test]
 fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
     use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
     use safe_cex_engine::{Action, Notice};

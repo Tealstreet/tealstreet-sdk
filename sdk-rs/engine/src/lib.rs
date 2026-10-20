@@ -10,6 +10,7 @@ pub mod num;
 mod order_locks;
 pub mod paging;
 pub mod public_feed;
+pub mod socket;
 pub mod store;
 pub mod wire;
 

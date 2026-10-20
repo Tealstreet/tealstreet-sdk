@@ -2,6 +2,7 @@
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
@@ -15,9 +16,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub struct AccountState {
     pub socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
+    key_epoch: u64,
+    key_pending: bool,
     keepalive: Option<TimerId>,
     tick: Option<TimerId>,
     positions_timer: Option<TimerId>,
@@ -68,8 +69,12 @@ pub enum Request {
     Info {
         command: u32,
     },
-    ListenKey,
-    Keepalive,
+    ListenKey {
+        epoch: u64,
+    },
+    Keepalive {
+        epoch: u64,
+    },
     Mode {
         version: u64,
     },
@@ -301,6 +306,11 @@ impl AsterDex {
         );
     }
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.supervisor = Supervisor::new(Config {
+            idle_timeout_ms: 20_000.0,
+            ping_interval_ms: Some(5_000.0),
+            ..Config::default()
+        });
         self.refresh_balance(cx);
         self.refresh_positions(cx);
         self.request_refresh_orders(cx);
@@ -318,13 +328,20 @@ impl AsterDex {
         self.account.tick = Some(cx.set_timer(3_000.0));
     }
     fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.key_pending || self.account.socket.is_some() {
+            return;
+        }
+        self.account.key_pending = true;
+        self.account.supervisor.connecting(cx);
         let path = self.path("listenKey");
         self.signed(
             cx,
             Method::Post,
             &path,
             Query::new(),
-            Pending::Account(Request::ListenKey),
+            Pending::Account(Request::ListenKey {
+                epoch: self.account.key_epoch,
+            }),
         );
     }
     /// A completed settings write invalidates older position/settings snapshots.
@@ -551,7 +568,11 @@ impl AsterDex {
                 };
                 cx.done(command, result);
             }
-            Request::ListenKey => {
+            Request::ListenKey { epoch } => {
+                if epoch != self.account.key_epoch {
+                    return;
+                }
+                self.account.key_pending = false;
                 if valid
                     && let Ok(key) = serde_json::from_str::<ListenKey>(body)
                     && !key.listen_key.is_empty()
@@ -573,10 +594,13 @@ impl AsterDex {
                     }
                     self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
                 } else {
-                    self.account.reconnect = Some(cx.set_timer(5_000.0));
+                    self.close_private(cx);
                 }
             }
-            Request::Keepalive => {
+            Request::Keepalive { epoch } => {
+                if epoch != self.account.key_epoch {
+                    return;
+                }
                 if valid {
                     self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
                 } else {
@@ -709,9 +733,8 @@ impl AsterDex {
             return false;
         }
         self.account.open = true;
-        self.account.last_received = cx.now;
+        self.account.supervisor.opened(cx);
         cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-        self.account.watchdog = Some(cx.set_timer(5_000.0));
         self.request_refresh_orders(cx);
         true
     }
@@ -720,12 +743,12 @@ impl AsterDex {
             cx.close(socket);
         }
         self.account.open = false;
-        if let Some(t) = self.account.watchdog.take() {
-            cx.clear_timer(t);
+        self.account.key_epoch = self.account.key_epoch.wrapping_add(1);
+        self.account.key_pending = false;
+        if let Some(timer) = self.account.keepalive.take() {
+            cx.clear_timer(timer);
         }
-        if self.account.reconnect.is_none() {
-            self.account.reconnect = Some(cx.set_timer(1_000.0));
-        }
+        self.account.supervisor.retry(cx);
     }
     pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -735,10 +758,25 @@ impl AsterDex {
         true
     }
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.request_listen_key(cx);
-        } else if self.account.keepalive == Some(timer) {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => {
+                self.request_listen_key(cx);
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                self.close_private(cx);
+                return true;
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.account.socket {
+                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+                }
+                return true;
+            }
+            Tick::Handled => return true,
+            Tick::Unhandled => {}
+        }
+        if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
             let path = self.path("listenKey");
             self.signed(
@@ -746,18 +784,10 @@ impl AsterDex {
                 Method::Put,
                 &path,
                 Query::new(),
-                Pending::Account(Request::Keepalive),
+                Pending::Account(Request::Keepalive {
+                    epoch: self.account.key_epoch,
+                }),
             );
-        } else if self.account.watchdog == Some(timer) {
-            self.account.watchdog = None;
-            if cx.now - self.account.last_received > 20_000.0 {
-                self.close_private(cx);
-            } else {
-                if let Some(socket) = self.account.socket {
-                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-                }
-                self.account.watchdog = Some(cx.set_timer(5_000.0));
-            }
         } else if self.account.tick == Some(timer) {
             self.account.tick = None;
             if cx.now - self.account.last_balance >= 25_000.0 {
@@ -793,7 +823,7 @@ impl AsterDex {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Head<'a> {
             #[serde(borrow, default)]

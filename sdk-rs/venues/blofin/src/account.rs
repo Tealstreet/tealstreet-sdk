@@ -2,6 +2,7 @@
 use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -35,6 +36,8 @@ struct Execution {
 
 #[derive(Default)]
 pub(crate) struct Account {
+    pub(crate) supervisor: Supervisor,
+    authenticated: bool,
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
@@ -85,6 +88,18 @@ impl Account {
             }
         }
     }
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
+
     fn remember_terminal(&mut self, id: &str) {
         if self.terminal.insert(id.to_owned()) {
             self.terminal_order.push_back(id.to_owned());
@@ -316,14 +331,17 @@ impl Blofin {
         };
         self.account.connection.socket =
             Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Private));
-        self.account.connection.last_received = cx.now;
-        self.account.connection.watchdog = Some(cx.set_timer(5_000.0));
+        self.account.authenticated = false;
+        self.account.supervisor.connecting(cx);
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.account.supervisor.opened(cx);
         let nonce = match safe_cex_crypto::uuid::uuid() {
             Ok(n) => n,
             Err(e) => {
                 cx.log(LogLevel::Error, e);
+                cx.close(socket);
+                self.private_close(cx, socket);
                 return;
             }
         };
@@ -365,8 +383,7 @@ impl Blofin {
             .unwrap(),
         );
         self.account.connection.open = true;
-        self.account.connection.attempts = 0;
-        self.account.connection.last_received = cx.now;
+
         cx.send(socket, "ping");
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1171,7 +1188,7 @@ impl Blofin {
         socket: SocketId,
         text: &str,
     ) {
-        self.account.connection.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -1188,8 +1205,15 @@ impl Blofin {
                     LogLevel::Error,
                     format!("BloFin login rejected: {}", message.code),
                 );
+                cx.close(socket);
+                self.private_close(cx, socket);
                 return;
             }
+            if self.account.authenticated {
+                return;
+            }
+            self.account.authenticated = true;
+            self.account.supervisor.authenticated(cx);
             for channel in ["account", "positions", "orders", "orders-algo"] {
                 cx.send(
                     socket,
@@ -1540,38 +1564,29 @@ impl Blofin {
         let c = &mut self.account.connection;
         c.socket = None;
         c.open = false;
-        if let Some(timer) = c.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        c.attempts += 1;
-        c.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(c.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        self.account.supervisor.retry(cx);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.connection.reconnect == Some(timer) {
-            self.account.connection.reconnect = None;
-            self.private_connect(cx);
-            return true;
-        }
-        if self.account.connection.watchdog == Some(timer) {
-            self.account.connection.watchdog = None;
-            if cx.now - self.account.connection.last_received >= 20_000.0 {
+        match self.account.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => (),
+            SocketTick::Reconnect => {
+                self.private_connect(cx);
+                return true;
+            }
+            SocketTick::Ping => {
+                if let Some(socket) = self.account.connection.socket {
+                    cx.send(socket, "ping");
+                }
+                return true;
+            }
+            SocketTick::TimedOut(_) => {
                 if let Some(socket) = self.account.connection.socket {
                     cx.close(socket);
                     self.private_close(cx, socket);
                 }
-            } else {
-                if let Some(socket) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    cx.send(socket, "ping");
-                }
-                self.account.connection.watchdog = Some(cx.set_timer(5_000.0));
+                return true;
             }
-            return true;
+            SocketTick::Handled => return true,
         }
         if self.account.tick == Some(timer) {
             self.account.tick = None;

@@ -124,7 +124,7 @@ impl Blofin {
     pub fn new(options: Options) -> Self {
         Self {
             options,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),

@@ -15,6 +15,7 @@ struct H {
     sockets: Vec<(SocketId, String)>,
     timers: Vec<(TimerId, f64)>,
     done: Vec<(u32, Result<String, String>)>,
+    closed: Vec<SocketId>,
 }
 impl H {
     fn new() -> Self {
@@ -34,6 +35,7 @@ impl H {
             sockets: vec![],
             timers: vec![],
             done: vec![],
+            closed: vec![],
         };
         h.engine.start(h.now);
         h.collect();
@@ -66,6 +68,7 @@ impl H {
                     self.done.push((command, result))
                 }
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
+                Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 _ => {}
@@ -555,4 +558,65 @@ fn rest_ahead_of_stream_does_not_consume_no_id_execution() {
     h.ws(event);
     assert_eq!(fill_rows(&mut h), [(102.0, 0.5)]);
     assert_eq!(h.engine.store().order("123").unwrap().filled, 0.5);
+}
+
+#[test]
+fn retired_keepalive_failure_cannot_close_the_replacement_private_socket() {
+    let mut h = H::new();
+    let old = h.socket();
+    let (timer, at) = *h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 1_800_000.0)
+        .unwrap();
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    if h.requests.iter().any(|r| r.url.ends_with("/time")) {
+        h.reply("/time", &format!(r#"{{"serverTime":{}}}"#, h.now));
+    }
+    let keepalive = h.take("/listenKey");
+    h.event(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let (timer, at) = *h.timers.last().unwrap();
+    assert!((750.0..=1000.0).contains(&(at - h.now)));
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("/listenKey", r#"{"listenKey":"replacement"}"#);
+    let replacement = h.sockets.last().unwrap().0;
+    assert_ne!(replacement, old);
+    h.event(Event::WsOpened {
+        socket: replacement,
+    });
+    h.respond(
+        keepalive,
+        r#"{"code":-1125,"msg":"old listen key expired"}"#,
+    );
+    assert!(!h.closed.contains(&replacement));
+    assert!(!h.requests.iter().any(|r| r.url.ends_with("/listenKey")));
+}
+
+#[test]
+fn late_listen_key_response_after_connect_deadline_does_not_replace_the_new_session() {
+    let mut h = H::new();
+    h.event(Event::WsClosed {
+        socket: h.socket(),
+        code: 1006,
+    });
+    let (timer, at) = *h.timers.last().unwrap();
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let old = h.take("/listenKey");
+    let (timer, _) = *h.timers.last().unwrap();
+    h.now += 10_000.0;
+    h.event(Event::TimerFired { timer });
+    let count = h.sockets.len();
+    h.respond(old, r#"{"listenKey":"late-retired"}"#);
+    assert_eq!(h.sockets.len(), count);
+    let (timer, at) = *h.timers.last().unwrap();
+    assert!((1500.0..=2000.0).contains(&(at - h.now)));
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert_eq!(h.take("/listenKey").method, safe_cex_engine::Method::Post);
 }

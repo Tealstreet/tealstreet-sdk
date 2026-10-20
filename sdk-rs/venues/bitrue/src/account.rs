@@ -6,6 +6,7 @@ use safe_cex_engine::model::{
     Balance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
@@ -17,7 +18,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey";
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
-const HEALTH_MS: f64 = 20_000.0;
 const HISTORY_LIMIT: usize = 500;
 
 fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
@@ -83,10 +83,8 @@ pub struct Account {
     generation: u64,
     listen_key: Option<String>,
     listen_pending: bool,
-    listen_attempt: usize,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     keepalive: Option<TimerId>,
-    health: Option<TimerId>,
     tick: Option<TimerId>,
     fast: Option<TimerId>,
     snapshot_pending: bool,
@@ -428,6 +426,10 @@ impl Bitrue {
             return;
         }
         self.account.started = true;
+        self.account.supervisor = Supervisor::new(Config {
+            idle_timeout_ms: 20_000.0,
+            ..Config::default()
+        });
         cx.store.set_hedged(false);
         self.acquire_listen_key(cx);
         self.refresh_account(cx);
@@ -445,6 +447,7 @@ impl Bitrue {
             return;
         }
         self.account.listen_pending = true;
+        self.account.supervisor.connecting(cx);
         self.send(
             cx,
             Method::Post,
@@ -460,20 +463,13 @@ impl Bitrue {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        for timer in [
-            self.account.health.take(),
-            self.account.keepalive.take(),
-            self.account.reconnect.take(),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        if let Some(timer) = self.account.keepalive.take() {
             cx.clear_timer(timer);
         }
         self.account.generation += 1;
         self.account.listen_pending = false;
         self.account.listen_key = None;
-        self.account.reconnect = Some(cx.set_timer(1_000.0));
+        self.account.supervisor.retry(cx);
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.snapshot_pending {
@@ -655,7 +651,7 @@ impl Bitrue {
                 format!("{{\"event\":\"sub\",\"params\":{{\"channel\":\"{channel}\"}}}}"),
             );
         }
-        self.account.health = Some(cx.set_timer(HEALTH_MS));
+        self.account.supervisor.opened(cx);
         self.refresh_account(cx);
         self.refresh_orders(cx, vec![]);
         true
@@ -668,13 +664,19 @@ impl Bitrue {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.health == Some(timer) {
-            self.account.health = None;
-            self.restart_private(cx);
-        } else if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.acquire_listen_key(cx);
-        } else if self.account.keepalive == Some(timer) {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => {
+                self.acquire_listen_key(cx);
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                self.restart_private(cx);
+                return true;
+            }
+            Tick::Handled | Tick::Ping => return true,
+            Tick::Unhandled => {}
+        }
+        if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
             if let Some(key) = &self.account.listen_key {
                 self.send(
@@ -715,10 +717,7 @@ impl Bitrue {
         let Ok(message) = serde_json::from_str::<PrivateMessage<'_>>(text) else {
             return true;
         };
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.health = Some(cx.set_timer(HEALTH_MS));
+        self.account.supervisor.received(cx.now);
         let event = if message.e.is_empty() {
             &*message.event
         } else {
@@ -1375,13 +1374,11 @@ impl Bitrue {
                         return;
                     }
                     self.account.listen_key = Some(key.to_owned());
-                    self.account.listen_attempt = 0;
                     self.account.socket = Some(cx.connect_channel(
                         format!("{PRIVATE_URL}?listenKey={key}"),
                         SocketChannel::Private,
                     ));
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
-                    self.account.health = Some(cx.set_timer(HEALTH_MS));
                 } else {
                     self.listen_failed(cx, "Malformed Bitrue futures listen key response");
                 }
@@ -1551,17 +1548,11 @@ impl Bitrue {
         }
     }
     fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
-        self.account.listen_pending = false;
-        let delay = [250.0, 500.0, 1_000.0]
-            .get(self.account.listen_attempt)
-            .copied()
-            .unwrap_or(5_000.0);
-        self.account.listen_attempt += 1;
         cx.log(
             LogLevel::Error,
             format!("Bitrue futures private stream: {error}"),
         );
-        self.account.reconnect = Some(cx.set_timer(delay));
+        self.restart_private(cx);
     }
     pub(crate) fn account_failed(
         &mut self,

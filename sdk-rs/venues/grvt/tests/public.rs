@@ -560,3 +560,93 @@ fn catalog_refresh_remaps_ticker_state_sequences_and_subscriptions_by_native_id(
     );
     assert_eq!(e.store().ticker("BTC_USDT_PERP").unwrap().last, 120.);
 }
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let (e, socket) = boot();
+    socket_checks::flaps(e, socket, 1_700_000_000_100.);
+}
+
+#[test]
+fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
+    let (mut e, _) = boot();
+    let now = 1_700_000_000_100.;
+    e.handle(
+        now,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC_USDT_PERP".into(),
+            interval: "1m".into(),
+        }),
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(now, Event::WsOpened { socket });
+    socket_checks::flaps(e, socket, now);
+
+    let (mut e, _) = boot();
+    e.handle(
+        now,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC_USDT_PERP".into(),
+            interval: "1m".into(),
+        }),
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(now, Event::WsClosed { socket, code: 1006 });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        now,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "ETH_USDT_PERP".into(),
+            interval: "1m".into(),
+        }),
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. })),
+        "new interest cannot bypass backoff"
+    );
+    e.handle(
+        now,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "ETH_USDT_PERP".into(),
+            interval: "1m".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTC_USDT_PERP".into(),
+            interval: "1m".into(),
+        }),
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::ClearTimer { timer: t } if t == timer))
+    );
+    e.handle(now + 1000., Event::TimerFired { timer });
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsSend { .. }))
+    );
+}

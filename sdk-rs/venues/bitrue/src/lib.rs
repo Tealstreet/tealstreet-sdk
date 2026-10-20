@@ -7,6 +7,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -55,14 +56,24 @@ pub struct ContractInfo {
     pub min_order_money: f64,
     pub max_limit_volume: f64,
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: None,
+                backoff_base_ms: 1_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -358,9 +369,8 @@ impl Bitrue {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.public.supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(PUBLIC, SocketChannel::Public));
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5000.0));
     }
     fn subscription(
         &self,
@@ -566,8 +576,7 @@ impl Venue for Bitrue {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         let markets: Vec<_> = cx
             .store
             .markets()
@@ -600,7 +609,7 @@ impl Venue for Bitrue {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         if message.ping.is_some() || message.event == "ping" {
             cx.send(socket, "pong");
             if let Some(ping) = message.ping {
@@ -696,9 +705,6 @@ impl Venue for Bitrue {
         self.public.socket = None;
         self.public.open = false;
         self.channels.clear();
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for reads in self.reads.drain().map(|(_, v)| v) {
             for read in reads {
                 cx.clear_timer(read.timer);
@@ -716,9 +722,7 @@ impl Venue for Bitrue {
             }
             cx.book_changed(symbol);
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        let delay = (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30000.0);
-        self.public.reconnect = Some(cx.set_timer(delay));
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
@@ -882,22 +886,20 @@ impl Venue for Bitrue {
             self.markets(cx);
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 20000.0 {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => {
+                self.connect(cx);
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(socket) = self.public.socket {
                     cx.close(socket);
                     self.on_close(cx, socket, 1006);
                 }
-            } else {
-                self.public.watchdog = Some(cx.set_timer(5000.0));
+                return;
             }
-            return;
+            Tick::Handled | Tick::Ping => return,
+            Tick::Unhandled => {}
         }
         let fallback = self
             .books
