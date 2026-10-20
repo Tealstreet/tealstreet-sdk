@@ -778,7 +778,7 @@ impl Hyperliquid {
                     setting.map_or(20f64.min(market.limits.leverage.max), |s| s.leverage)
                 });
                 let isolated = isolated.unwrap_or_else(|| {
-                    setting.map_or(isolated_only, |s| {
+                    setting.map_or(isolated_only || market.id.contains(':'), |s| {
                         s.margin_type == Some(MarginType::Isolated)
                     })
                 });

@@ -298,8 +298,9 @@ impl Hyperliquid {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                // HIP-3 assets get no activeAssetData, so this seed is what writes start from.
-                let isolated = self.isolated_only.contains(&m.symbol);
+                // HIP-3 assets get no activeAssetData, so this seed is what writes start from;
+                // TS writes every HIP-3 asset isolated.
+                let isolated = self.isolated_only.contains(&m.symbol) || m.id.contains(':');
                 (
                     i as u32,
                     MarketSetting {
