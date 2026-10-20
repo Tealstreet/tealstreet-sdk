@@ -120,35 +120,37 @@ pub fn candle(row: &[&str]) -> Option<safe_cex_engine::model::Candle> {
 #[serde(rename_all = "camelCase", default)]
 pub struct Config<'a> {
     pub pos_mode: &'a str,
+    pub acct_lv: &'a str,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PositionRow<'a> {
     pub inst_type: &'a str,
-    pub mark_px: &'a str,
-    pub ccy: &'a str,
+    pub margin: &'a str,
     pub inst_id: &'a str,
     pub pos: &'a str,
     pub pos_side: &'a str,
     pub avg_px: &'a str,
+    pub mark_px: &'a str,
+    pub ccy: &'a str,
     pub lever: &'a str,
     pub upl: &'a str,
     pub liq_px: &'a str,
     pub mgn_mode: &'a str,
     pub imr: &'a str,
-    pub margin: &'a str,
+    pub mmr: &'a str,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrderRow<'a> {
     pub inst_type: &'a str,
-    pub avg_px: &'a str,
     pub inst_id: &'a str,
     pub ord_id: &'a str,
     pub algo_id: &'a str,
     pub cl_ord_id: &'a str,
+    pub ccy: &'a str,
     pub algo_cl_ord_id: &'a str,
     pub ord_type: &'a str,
     pub state: &'a str,
@@ -156,6 +158,7 @@ pub struct OrderRow<'a> {
     pub sz: &'a str,
     pub acc_fill_sz: &'a str,
     pub px: &'a str,
+    pub avg_px: &'a str,
     pub fill_px: &'a str,
     pub fill_sz: &'a str,
     pub fill_time: &'a str,
@@ -209,4 +212,6 @@ pub struct Risk<'a> {
 pub struct AccountPush<'a> {
     #[serde(default)]
     pub total_eq: &'a str,
+    #[serde(borrow, default)]
+    pub details: Vec<Equity<'a>>,
 }

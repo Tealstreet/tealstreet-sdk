@@ -102,7 +102,7 @@ fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
     cx.log(LogLevel::Error, &error);
     cx.done(command, Err(error));
 }
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
@@ -142,7 +142,7 @@ fn plain(o: &PlaceOrderOpts) -> bool {
         && o.take_profit.is_none()
         && o.trigger_price.is_none()
 }
-fn valid_client(id: &str) -> bool {
+pub(crate) fn valid_client(id: &str) -> bool {
     let len: usize = id
         .chars()
         .map(|c| if c as u32 > 0xffff { 2 } else { 1 })

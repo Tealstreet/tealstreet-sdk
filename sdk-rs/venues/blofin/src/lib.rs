@@ -16,6 +16,7 @@ use wire::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -379,6 +380,14 @@ impl Blofin {
 impl Venue for Blofin {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read
+                .validate()
+                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.read(
             cx,
             "/api/v1/market/instruments",
@@ -785,3 +794,6 @@ impl Venue for Blofin {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

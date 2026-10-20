@@ -18,6 +18,7 @@ use wire::*;
 
 #[derive(Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
@@ -126,6 +127,7 @@ pub struct WeexFutures {
     trading: trading::State,
     history: history::State,
     credentials: Option<sign::Credentials>,
+    read_credentials: Option<safe_cex_engine::ReadCredentials>,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
     candles: BTreeMap<(String, String), u32>,
@@ -137,6 +139,12 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
+        let read_credentials = options.read_credentials.map(|mut read| {
+            if read.passphrase.is_none() {
+                read.passphrase = options.passphrase.clone();
+            }
+            read
+        });
         let credentials = match (options.key, options.secret, options.passphrase) {
             (Some(key), Some(secret), Some(passphrase))
                 if !options.public_data_only
@@ -160,6 +168,7 @@ impl WeexFutures {
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
+            read_credentials,
             private_ws_headers: options.private_ws_headers,
             books: HashMap::new(),
             candles: BTreeMap::new(),
@@ -221,7 +230,20 @@ impl WeexFutures {
         task: Task,
         stream: Option<ArrayAt>,
     ) -> bool {
-        let Some(credentials) = &self.credentials else {
+        let read_credentials = self
+            .read_credentials
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| sign::Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+                passphrase: read
+                    .passphrase
+                    .clone()
+                    .or_else(|| self.credentials.as_ref().map(|c| c.passphrase.clone()))
+                    .unwrap_or_default(),
+            });
+        let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return false;
         };
         let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
@@ -467,6 +489,14 @@ fn interval(i: &str, stream: bool) -> bool {
 impl Venue for WeexFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.read_credentials
+            && let Err(error) = read.validate().and_then(|_| {
+                read.validate_passphrase(self.credentials.as_ref().map(|c| c.passphrase.as_str()))
+            })
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.get(
             cx,
             paths::INFO,
@@ -958,3 +988,6 @@ impl Venue for WeexFutures {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

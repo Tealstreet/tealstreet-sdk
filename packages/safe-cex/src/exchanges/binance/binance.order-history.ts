@@ -34,6 +34,7 @@ const ORDER_STATUS: Record<string, OrderStatus> = {
   FILLED: OrderStatus.Closed,
   CANCELED: OrderStatus.Canceled,
   EXPIRED: OrderStatus.Canceled,
+  EXPIRED_IN_MATCH: OrderStatus.Canceled,
   REJECTED: OrderStatus.Canceled,
 };
 

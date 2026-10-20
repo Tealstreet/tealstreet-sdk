@@ -1,18 +1,16 @@
 import type { OKXExchange } from './okx.exchange';
 
 import createHmac from 'create-hmac';
-import sumBy from 'lodash/sumBy';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveTransportRouting } from '../../transport/registry';
+import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { OrderStatus } from '../../types';
 import { roundUSD } from '../../utils/roundUSD';
-import { subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
-import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URLS } from './okx.types';
 
@@ -414,26 +412,6 @@ WS MESSAGE
   };
 
   handleAccountTopic = ({ data }: { data?: Array<Record<string, any>> }) => {
-    if (!Array.isArray(data)) return;
-
-    const totalEqValues = data
-      .map((b) => parseFloat(String(b.totalEq ?? '')))
-      .filter((value) => Number.isFinite(value));
-
-    // Ignore malformed account pushes instead of poisoning balance with NaN.
-    if (!totalEqValues.length) return;
-
-    const totalCollateral = roundUSD(sumBy(totalEqValues));
-    if (!Number.isFinite(totalCollateral)) return;
-    const used = Number.isFinite(this.store.balance.used) ? this.store.balance.used : 0;
-    const upnl = Number.isFinite(this.store.balance.upnl) ? this.store.balance.upnl : 0;
-
-    this.store.update({
-      balance: {
-        ...this.store.balance,
-        free: subtract(totalCollateral, used),
-        total: subtract(totalCollateral, upnl),
-      },
-    });
+    this.parent.applyAccountEquity(data);
   };
 }

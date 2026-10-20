@@ -20,6 +20,7 @@ use wire::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
@@ -72,6 +73,7 @@ struct BookState {
 }
 
 pub struct Bingx {
+    config_error: Option<&'static str>,
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
@@ -89,6 +91,10 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
+        let config_error = options
+            .read_credentials
+            .as_ref()
+            .and_then(|read| read.validate().err());
         let credentials = if options.public_data_only {
             None
         } else {
@@ -96,9 +102,14 @@ impl Bingx {
                 .key
                 .zip(options.secret)
                 .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-                .map(|(key, secret)| Credentials { key, secret })
+                .map(|(key, secret)| Credentials {
+                    key,
+                    secret,
+                    read: options.read_credentials,
+                })
         };
         Self {
+            config_error,
             account: account::Account::default(),
             trading: trading::Trading::default(),
             history: history::History::default(),
@@ -400,6 +411,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 impl Venue for Bingx {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(error) = self.config_error {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.read(
             cx,
             paths::MARKETS,

@@ -68,6 +68,7 @@ pub(crate) struct Account {
     healthy_since: Option<f64>,
     last_received: f64,
     ping_sent: bool,
+    pong_ping: Option<(TimerId, SocketId, u64)>,
     request_id: u32,
     health: Option<TimerId>,
     reconnect: Option<TimerId>,
@@ -90,6 +91,17 @@ pub(crate) struct Account {
     prior_lifecycle: HashMap<String, (u64, Option<String>)>,
 }
 impl Account {
+    pub(crate) fn cancellation_evidence(&self) -> HashMap<String, (Option<String>, Option<u64>)> {
+        self.order_created
+            .keys()
+            .map(|id| {
+                (
+                    id.clone(),
+                    (self.native_ids.get(id).cloned(), self.order_created(id)),
+                )
+            })
+            .collect()
+    }
     pub(crate) fn order_progress(&self, client: &str) -> Option<&OrderProgress> {
         self.progress.get(client)
     }
@@ -644,6 +656,7 @@ impl Grvt {
             return;
         }
         self.account.waiting.push(pending);
+        self.cancel_pong_ping(cx);
         self.account.session = None;
         self.account.authenticated = false;
         if let Some(socket) = self.account.socket.take() {
@@ -709,6 +722,7 @@ impl Grvt {
         if self.account.socket != Some(socket) {
             return false;
         }
+        self.cancel_pong_ping(cx);
         self.account.last_received = cx.now;
         self.account.healthy_since = None;
         self.account.sequences.clear();
@@ -771,7 +785,13 @@ impl Grvt {
         self.refresh_orders(cx);
         self.refresh_positions(cx);
     }
+    fn cancel_pong_ping(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some((timer, _, _)) = self.account.pong_ping.take() {
+            cx.clear_timer(timer);
+        }
+    }
     fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.cancel_pong_ping(cx);
         self.account.authentication_failed = true;
         self.account.authenticated = false;
         self.account.session = None;
@@ -806,6 +826,7 @@ impl Grvt {
             return;
         }
         self.account.refresh_attempts += 1;
+        self.cancel_pong_ping(cx);
         self.account.authenticated = false;
         self.account.session = None;
         if let Some(socket) = self.account.socket.take() {
@@ -820,6 +841,7 @@ impl Grvt {
         if self.account.socket != Some(socket) {
             return false;
         }
+        self.cancel_pong_ping(cx);
         self.account.socket = None;
         self.account.authenticated = false;
         self.account.orders_revision += 1;
@@ -1169,6 +1191,7 @@ impl Grvt {
                     self.fail_waiting(cx);
                     return;
                 };
+                self.cancel_pong_ping(cx);
                 self.account.session = Some(Session { cookie, account_id });
                 self.account.generation += 1;
                 if self.account.trading_account_id.is_none()
@@ -1462,6 +1485,7 @@ impl Grvt {
                 changed = true;
             }
             if changed {
+                self.cancel_pong_ping(cx);
                 self.account.generation += 1;
                 self.account.authenticated = false;
                 if let Some(socket) = self.account.socket.take() {
@@ -1581,6 +1605,11 @@ impl Grvt {
         self.account.last_received = cx.now;
         self.account.ping_sent = false;
         if text == "pong" {
+            self.cancel_pong_ping(cx);
+            if self.account.authenticated && !self.account.authentication_failed {
+                self.account.pong_ping =
+                    Some((cx.set_timer(5_000.), socket, self.account.generation));
+            }
             return true;
         }
         if text == "ping" {
@@ -1782,7 +1811,21 @@ impl Grvt {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.login_retry == Some(timer) {
+        if self
+            .account
+            .pong_ping
+            .is_some_and(|(pending, _, _)| pending == timer)
+        {
+            let (_, socket, generation) =
+                self.account.pong_ping.take().expect("matched pong timer");
+            if self.account.socket == Some(socket)
+                && self.account.generation == generation
+                && self.account.authenticated
+                && !self.account.authentication_failed
+            {
+                cx.send(socket, "ping");
+            }
+        } else if self.account.login_retry == Some(timer) {
             self.account.login_retry = None;
             self.login(cx);
         } else if self.account.health == Some(timer) {

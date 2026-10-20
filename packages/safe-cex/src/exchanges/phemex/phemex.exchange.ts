@@ -457,11 +457,13 @@ export class PhemexExchange extends BaseExchange {
 
         const total = parseFloat(account.accountBalanceRv);
         const used = parseFloat(account.totalUsedBalanceRv);
+        const upnl = roundUSD(sumBy(currencyPositions, (p) => parseFloat(String(p.unrealizedPnl))));
         currencyBalances[currency] = {
-          total,
+          // Keep REST and account pushes on the same normalized balance convention.
+          total: subtract(total, upnl),
           used,
           free: subtract(total, used),
-          upnl: roundUSD(sumBy(currencyPositions, (p) => parseFloat(String(p.unrealizedPnl)))),
+          upnl,
           info: account,
         };
       }
@@ -499,7 +501,7 @@ export class PhemexExchange extends BaseExchange {
 
       const balance: Balance = {
         used,
-        free: subtract(totalCollateral, used),
+        free: sumBy(Object.values(currencyBalances), 'free'),
         total: totalCollateral,
         upnl,
         info: accounts,

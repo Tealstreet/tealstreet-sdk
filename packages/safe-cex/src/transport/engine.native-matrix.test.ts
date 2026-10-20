@@ -130,6 +130,10 @@ const cases: Case[] = [
     options: { tealstreetProxy: true, tealstreetTunnel: true },
     how: true,
   },
+  { name: 'binancespot-public-private', exchange: 'binancespot', baseURL: 'https://api.binance.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
+  { name: 'binanceinverse-public-private', exchange: 'binanceinverse', baseURL: 'https://dapi.binance.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
+  { name: 'binancespot-secondary-public-private', exchange: 'binancespot', baseURL: 'https://api.binance.com', options: { tealstreetProxy: true, tealstreetTunnel: false, secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret' } },
+  { name: 'binanceinverse-secondary-public-private', exchange: 'binanceinverse', baseURL: 'https://dapi.binance.com', options: { tealstreetProxy: true, tealstreetTunnel: false, secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret' } },
   { name: 'bybit-brazil', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: { bybitSiteId: 'BRA_BTL' } },
   { name: 'okx-eea', exchange: 'okxeu', baseURL: 'https://eea.okx.com', options: { tealstreetProxy: true } },
   { name: 'okx-eea-demo', exchange: 'okxeudemo', baseURL: 'https://eea.okx.com', options: { tealstreetProxy: true } },
@@ -264,19 +268,35 @@ const buildCase = async (input: Case) => {
     const url = `${input.baseURL}/fixture?signature=a%2Fb`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(keyed ? { 'x-mbx-apikey': 'fixture-venue-key' } : {}),
+      ...(keyed ? { 'x-mbx-apikey': options.secondary_key ?? 'fixture-venue-key' } : {}),
       ...(input.exchange === 'breakoutprop' ? { Authorization: 'DXAPI documented-session' } : {}),
       ...(['coinbase', 'coinbasespot'].includes(input.exchange) ? { Authorization: 'Bearer fixture-venue-jwt' } : {}),
     };
-    const publicBinance = input.exchange.startsWith('binance') && !keyed;
+    const publicBinance = ['binance', 'binancepm', 'binanceinverse'].includes(input.exchange) && !keyed;
+    const publicRequest = input.exchange.startsWith('binance') && !keyed;
+    const read = Boolean(options.secondary_key) && !publicBinance;
+    // The dynamic TS factory selects read credentials/options before its Spot
+    // public interceptor strips the key. Ask the real provider independently.
+    const selectedOptions = read ? {
+      ...options,
+      key: options.secondary_key!,
+      secret: options.secondary_secret!,
+      passphrase: options.secondary_passphrase ?? options.passphrase,
+      secondary_key: undefined,
+      secondary_secret: undefined,
+      secondary_passphrase: undefined,
+      overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy(),
+    } : options;
     // Reproduce the TS public-client bypass; other requests go through the real
     // provider independently, without passing the engine's pre-resolved plan.
     const route = publicBinance
       ? { baseURL: url, proxied: false }
-      : provider.rest({ exchange: input.exchange, options, config: { baseURL: url, headers } });
+      : provider.rest({ exchange: input.exchange, options: selectedOptions, config: { baseURL: url, headers } });
     const target = route.baseURL ?? url;
     const prefix = target === url ? '' : target.slice(0, -url.length - 1);
-    const selected = publicBinance ? plan.publicHttp! : plan.http;
+    const selected = read
+      ? publicRequest ? plan.readPublicHttp ?? plan.readHttp! : plan.readHttp!
+      : publicRequest ? plan.publicHttp! : plan.http;
     expect(selected.prefix, input.name).toBe(prefix);
     expect(selected.authorize, input.name).toBe(route.proxied);
     expect(selected.mode, input.name).toBe(input.how ? 'how' : 'direct');
@@ -386,7 +406,7 @@ describe('TS generated native routing golden fixture', () => {
       if (process.env.UPDATE_ENGINE_NATIVE_MATRIX === '1')
         writeFileSync(fixturePath, `${JSON.stringify(matrix, null, 2)}\n`);
       expect(matrix).toEqual(JSON.parse(readFileSync(fixturePath, 'utf8')));
-      expect(JSON.stringify(matrix)).not.toMatch(/fixture-proxy-token|fixture-venue-secret/);
+      expect(JSON.stringify(matrix)).not.toMatch(/fixture-proxy-token|fixture-venue-secret|fixture-read-secret/);
     } finally {
       setWsRelayEnabled(false);
     }

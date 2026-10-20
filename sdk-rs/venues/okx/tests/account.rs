@@ -345,7 +345,15 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
 #[test]
 fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     use safe_cex_engine::Command;
-    let (mut e, _, _, stale) = startup();
+    let (mut e, private, _, initial) = startup();
+    complete(&mut e, initial, ORDER);
+    // The SDK completes startup before commands; repeat authentication starts
+    // another read sweep whose replies race the acknowledged settings write.
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    let stale = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
     e.handle(
         5.0,
         Event::Command(Command::SetLeverage {
