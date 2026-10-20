@@ -206,7 +206,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (options.phemexProtocol && ['server.ping', 'server.pong'].includes(method)) return undefined;
-  if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
+  // Binance's private watchdog queries its implicit user-stream subscriptions;
+  // it does not subscribe/unsubscribe a feed or mutate account state.
+  if (['ping', 'pong', 'heartbeat'].includes(method) ||
+      (method === 'list_subscriptions' && /\/private\/ws$/.test(new URL(url).pathname))) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;

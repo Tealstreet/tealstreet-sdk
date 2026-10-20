@@ -562,6 +562,98 @@ Deletion proceeds in separate, reviewable PRs:
 - Binance testnet (or live test-account) API keys for the live private tape.
   The documented-payload tape does not need them.
 
+Credentialed lifecycle coverage uses `corepack yarn rust:live-smoke --venue
+<name> [--testnet|--demo]`. Its reviewed environment profiles default to an
+engine-supported testnet or demo; production-only profiles require explicit
+`--mainnet`. This task was verified with scripted transports only: **no real
+account was contacted**. Sam still needs to supply dedicated, funded simulation
+accounts and authorize actual runs. A minimum-size, distant limit order can be
+rejected by price bands, minimum notional, permissions, or account configuration;
+the runner must report the rejection rather than increase exposure silently.
+Use an otherwise empty dedicated account because cancel-all is account-wide.
+The generic cancel-all path visits the selected symbol and any other observed
+open-order symbols, matching the SDK fallback for venues without a global
+endpoint. Unknown minimum-notional rules or original leverage refuse placement;
+add an authoritative discovery decoder before enabling a product the runner
+cannot size. Independent hedge leverage rails must match.
+The runner uses the Wasm engine with the Node transport. `--symbol <symbol>`
+selects a market and `--out <path>` selects an exclusive, mode-0600 tape file;
+the default is `sdk-rs/harness/tapes/<name>-live-private.jsonl`. Replay a completed
+recording with `corepack yarn rust:gate --venue <name> --tape <path> --runs 1
+--books ''`. A failed or incomplete lifecycle is recorded as a failure and
+cannot serve as live lifecycle proof. The selected Wasm build must include the
+requested venue.
+The gate automatically subscribes the recording's selected book. It rejects
+failed/incomplete live captures. After disposal, a fresh Wasm instance reads the
+account again to verify empty orders/positions and restored leverage independently
+of mutation acknowledgements. These redacted reads are retained under
+`live-smoke-verify-*`; their success marker is an operational check by the runner,
+while the TS/Rust replay compares the primary lifecycle. A scripted Binance run
+round-trips through that gate; other profiles still need credentialed proof on
+their actual products. The runner never silently upgrades size after rejection
+or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
+and cleanup; incomplete cleanup remains a failure.
+After cancel-all, mutable leverage is lowered by one (bounded by the market
+minimum) and restored to its captured value, exercising both writes. Fixed or
+already-minimum leverage is set to its original value without increasing risk.
+
+All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
+family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read
+only from the process environment, never command-line arguments or committed
+configuration. Do not print them or commit shell history, environment files, raw
+requests, or unredacted recordings. The private tape retains the selected
+environment's official URLs and redacts credential material before writing.
+Credential fields shorter than four characters are refused before I/O because
+their arbitrary echoes cannot be scrubbed without corrupting unrelated values;
+short public account/API-key indices remain valid. Unrecordable returned auth
+material fails the capture instead of persisting a usable credential.
+Availability below describes the **current Rust engine's endpoint support**,
+not every environment a venue might offer. Profiles reject arbitrary endpoint
+overrides and refuse unsupported environments before reading credentials.
+
+| Venue name(s) | Family | Required suffixes | Engine-supported nonproduction environment |
+| --- | --- | --- | --- |
+| `binance` | `BINANCE` | `KEY`, `SECRET` | Testnet: `demo-fapi.binance.com`, `demo-fstream.binance.com` |
+| `binancepm`, `binanceinverse`, `binancespot` | — | — | Newly landed during this harness change; their distinct endpoint/auth, unit and leverage contracts have no reviewed live-smoke profile yet. Refused before credential access. USD-M `binance` remains supported. |
+| `bybit`, `bybitinverse`, `bybitspot` | `BYBIT` | `KEY`, `SECRET` | Testnet: `api-testnet.bybit.com`, `stream-testnet.bybit.com` |
+| `bybitdemo` | `BYBIT` | `KEY`, `SECRET` | Demo by default: `api-demo.bybit.com`, `stream-demo.bybit.com`; public market data on `stream.bybit.com`. Testnet also supported. |
+| `bitget`, `bitgetusdc`, `bitgetinverse` | `BITGET` | `KEY`, `SECRET`, `PASSPHRASE` | Testnet selects `susdt-futures`, `susdc-futures`, `scoin-futures` and simulated collateral on the shared `api.bitget.com` / `ws.bitget.com` origins. UTA testnet is unsupported. |
+| `orderly`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
+| `lighter` | `LIGHTER` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | Testnet: `testnet-api.lighter.xyz`, `testnet.zklighter.elliot.ai`; indices are decimal strings. |
+| `phemex` | `PHEMEX` | `KEY`, `SECRET` | Testnet: `testnet-api.phemex.com` |
+| `cryptocom` | `CRYPTOCOM` | `KEY`, `SECRET` | UAT through `--testnet`: `uat-api.3ona.co`, `uat-stream.3ona.co` |
+| `hyperliquid` | `HYPERLIQUID` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS` | Testnet: `api.hyperliquid-testnet.xyz`; optional `VAULT_ADDRESS` |
+| `apexomni` | `APEXOMNI` | `KEY`, `SECRET`, `PASSPHRASE`, `OMNI_KEY_SEED` | Testnet: `testnet.omni.apex.exchange`, `qa-quote.omni.apex.exchange` |
+| `asterdex` | `ASTERDEX` | `KEY`, `SECRET` | Testnet: `fapi.asterdex-testnet.com`, `fstream5.asterdex-testnet.com`. Optional V3 suffixes: `API_VERSION=v3`, `USER_ADDRESS`, `SIGNER_ADDRESS`, `PRIVATE_KEY`; generic key/secret remain required by the engine. |
+| `paradex` | `PARADEX` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | Testnet: `api.testnet.paradex.trade`, `ws.api.testnet.paradex.trade` |
+| `woo` | `WOO` | `KEY`, `SECRET`, `APPLICATION_ID` | Staging through `--testnet`: `api.staging.woox.io`, `wss.staging.woox.io`; public candles use `api-pub.woox.io` |
+| `blofin` | `BLOFIN` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: `demo-trading-openapi.blofin.com` |
+| `okx`, `okxdemo`, `okxeu`, `okxeudemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com:8443`; EU `eea.okx.com` / `wseeapap.okx.com:8443` |
+| `kraken` | `KRAKEN` | `KEY`, `SECRET` | Futures demo: `demo-futures.kraken.com` |
+| `coinbase`, `coinbasespot` | `COINBASE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. CDP key name and ES256 private key PEM. |
+| `backpack` | `BACKPACK` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. Base64 Ed25519 public key and seed. |
+| `mexc` | `MEXC` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. |
+| `bingx` | `BINGX` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. |
+| `weex` | `WEEX` | `KEY`, `SECRET`, `PASSPHRASE` | None wired; explicit `--mainnet` only. WS upgrade headers enabled. |
+| `bitrue` | `BITRUE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. |
+| `kucoin` | `KUCOIN` | `KEY`, `SECRET`, `PASSPHRASE` | None wired; engine explicitly rejects testnet. Explicit `--mainnet` only. Bullet-derived sockets are limited to the reviewed `ws-api-futures.kucoin.com` origin. |
+| `polymarket` | `POLYMARKET` | `PRIVATE_KEY` | None wired; explicit `--mainnet` only. Optional complete L2 tuple: `API_KEY`, `API_SECRET`, `API_PASSPHRASE`; absent tuple derives credentials with L1 auth. Optional `FUNDER_ADDRESS`, `SIGNER_TYPE` (`0`–`3`; default `0`). |
+| `hyrotrader` | — | — | No reviewed built-in profile; refused, including with `--mainnet`. Simulation URLs cannot be inferred safely from caller-supplied endpoints. |
+| `grvt` | — | — | Newly landed during this harness change. Engine has testnet endpoints, but its pinned replay auth/routing contract currently accepts production origins only. No reviewed live-smoke profile yet; refused before credential access. |
+| `breakoutprop` | — | — | Newly landed during this harness change; no reviewed credential/environment/sizing profile yet. Refused before credential access. |
+
+The environment table and credential option mapping live in
+`sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling
+another venue or endpoint. A supported endpoint profile does not itself prove
+that every lifecycle command is available for every product/account type.
+Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS` is a comma-separated
+list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
+for the desired outcome. It is public selection metadata, not a credential.
+Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks
+alone do not establish the monetary floor. Bybit inverse likewise requires an
+explicit monetary floor in discovery. These profiles can read accounts but will
+refuse trading before placing until their complete rules can be established.
+
 ## Repository layout
 
 ```
