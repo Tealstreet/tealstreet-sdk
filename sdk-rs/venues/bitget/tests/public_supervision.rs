@@ -1,10 +1,13 @@
 mod support;
-use safe_cex_engine::{Event, SocketId, TimerId};
+use safe_cex_engine::{Engine, Event, PublicFeedPolicy, SocketId, TimerId};
+use safe_cex_venue_bitget::{BitgetFutures, Options};
 use support::Harness;
 
 const TICKER: &str = r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"101"}]}"#;
 
-fn advance(h: &mut Harness, until: f64) {
+/// Fires every timer due by `until` and returns how many fired.
+fn advance(h: &mut Harness, until: f64) -> usize {
+    let mut fired = 0;
     while let Some((timer, at)) = h
         .timers
         .iter()
@@ -15,24 +18,34 @@ fn advance(h: &mut Harness, until: f64) {
         h.timers.retain(|(t, _)| *t != timer);
         h.now = h.now.max(at);
         h.event(Event::TimerFired { timer });
+        fired += 1;
     }
     h.now = until;
+    fired
 }
 
-fn primary(h: &Harness) -> SocketId {
+fn feed(h: &Harness, name: &str) -> SocketId {
     h.socket_contexts
         .iter()
         .rev()
-        .find(|(_, _, context)| context.as_ref().is_some_and(|c| c.feed == "primary"))
+        .find(|(_, _, context)| context.as_ref().is_some_and(|c| c.feed == name))
         .unwrap()
         .0
 }
 
-fn primary_count(h: &Harness) -> usize {
+fn feed_count(h: &Harness, name: &str) -> usize {
     h.socket_contexts
         .iter()
-        .filter(|(_, _, context)| context.as_ref().is_some_and(|c| c.feed == "primary"))
+        .filter(|(_, _, context)| context.as_ref().is_some_and(|c| c.feed == name))
         .count()
+}
+
+fn primary(h: &Harness) -> SocketId {
+    feed(h, "primary")
+}
+
+fn primary_count(h: &Harness) -> usize {
+    feed_count(h, "primary")
 }
 
 fn retry_delay(h: &Harness, before: &[(TimerId, f64)]) -> f64 {
@@ -124,6 +137,65 @@ fn open_socket_pings_every_five_seconds_and_silence_retires_it_at_twenty() {
     assert!(!h.closed.contains(&socket));
     advance(&mut h, opened + 20_000.0);
     assert!(h.closed.contains(&socket));
+    let sockets = primary_count(&h);
+    // First retry backoff is at most the 1s base.
+    let until = h.now + 1_000.0;
+    advance(&mut h, until);
+    assert_eq!(
+        primary_count(&h),
+        sockets + 1,
+        "idle timeout reconnects once"
+    );
+    assert_ne!(primary(&h), socket);
+}
+
+#[test]
+fn silent_secondary_public_feed_times_out_and_reconnects() {
+    let mut h = Harness::public();
+    let socket = feed(&h, "secondary-1");
+    let opened = h.now;
+    advance(&mut h, opened + 19_999.0);
+    assert!(!h.closed.contains(&socket));
+    advance(&mut h, opened + 20_000.0);
+    assert!(h.closed.contains(&socket));
+    let sockets = feed_count(&h, "secondary-1");
+    // First retry backoff is at most the 1s base.
+    let until = h.now + 1_000.0;
+    advance(&mut h, until);
+    assert_eq!(feed_count(&h, "secondary-1"), sockets + 1);
+    assert_ne!(feed(&h, "secondary-1"), socket);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut engine = Engine::new(BitgetFutures::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine
+        .set_public_feed_policy(PublicFeedPolicy::Shared)
+        .unwrap();
+    let mut h = Harness {
+        engine,
+        now: 1_000_000.0,
+        requests: vec![],
+        sockets: vec![],
+        socket_contexts: vec![],
+        sent: vec![],
+        closed: vec![],
+        timers: vec![],
+        done: vec![],
+        logs: vec![],
+    };
+    h.engine.start(h.now);
+    h.collect();
+    h.load_public();
+    h.book();
+    let until = h.now + 600_000.0;
+    let fired = advance(&mut h, until);
+    assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(fired, 0, "no supervision timers fire");
 }
 
 #[test]

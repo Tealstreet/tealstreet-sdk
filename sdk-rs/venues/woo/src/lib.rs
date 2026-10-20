@@ -10,8 +10,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue, num,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -334,7 +334,10 @@ impl Woo {
         } else {
             "wss://wss.woox.io/ws/stream/"
         };
-        self.public_supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public_supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(
             format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
             SocketChannel::Public,

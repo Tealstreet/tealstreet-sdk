@@ -13,7 +13,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -197,7 +198,10 @@ impl BitgetFutures {
             self.account.authenticated = false;
             self.account.supervisor.connecting(cx);
         } else {
-            connection.supervisor.connecting(cx);
+            // Suppressed public feeds never open; supervising them would only churn retries.
+            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+                connection.supervisor.connecting(cx);
+            }
         }
     }
 

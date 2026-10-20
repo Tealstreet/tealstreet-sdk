@@ -1,6 +1,7 @@
 mod support;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketChannel,
+    SocketId, TimerId,
 };
 use safe_cex_venue_mexc::{MexcFutures, Options};
 
@@ -17,21 +18,28 @@ struct Harness {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     http: Vec<HttpRequest>,
+    fired: usize,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_policy(PublicFeedPolicy::Direct)
+    }
+    fn with_policy(policy: PublicFeedPolicy) -> Self {
+        let mut engine = Engine::new(MexcFutures::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }));
+        engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
-            engine: Engine::new(MexcFutures::new(Options {
-                public_data_only: true,
-                ..Default::default()
-            })),
+            engine,
             now: 0.0,
             timers: vec![],
             public: vec![],
             sent: vec![],
             closed: vec![],
             http: vec![],
+            fired: 0,
         };
         h.engine.start(0.0);
         h.collect();
@@ -93,6 +101,7 @@ impl Harness {
             self.timers.retain(|(t, _)| *t != timer);
             self.now = self.now.max(at);
             self.event(Event::TimerFired { timer });
+            self.fired += 1;
         }
         self.now = until;
     }
@@ -181,6 +190,11 @@ fn open_socket_pings_every_eight_seconds_and_silence_retires_it_at_twenty() {
     h.advance(opened + 20_000.0);
     assert_eq!(h.closed, [socket]);
     assert_eq!(h.public.len(), 1, "retry waits for backoff");
+    // First retry backoff is at most the 1s base.
+    let until = h.now + 1_000.0;
+    h.advance(until);
+    assert_eq!(h.public.len(), 2, "idle timeout reconnects once");
+    assert_ne!(h.socket(), socket);
 }
 
 fn advance_and_check(h: &mut Harness, until: f64, socket: SocketId, pings: usize) {
@@ -228,4 +242,17 @@ fn stable_public_traffic_resets_backoff() {
         h.message(socket, PONG);
     }
     assert!((750.0..=1_000.0).contains(&h.close()));
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::with_policy(PublicFeedPolicy::Shared);
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    let until = h.now + 600_000.0;
+    h.advance(until);
+    assert!(h.public.is_empty(), "no public connects: {:?}", h.public);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(h.fired, 0, "no supervision timers fire");
 }

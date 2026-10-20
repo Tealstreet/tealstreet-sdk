@@ -1,4 +1,6 @@
-use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId, TimerId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
+};
 use safe_cex_venue_blofin::{Blofin, Options};
 
 const INSTRUMENT: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"}]}"#;
@@ -13,21 +15,29 @@ struct Harness {
     sockets: Vec<SocketId>,
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
+    fired: usize,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_policy(PublicFeedPolicy::Direct)
+    }
+
+    fn with_policy(policy: PublicFeedPolicy) -> Self {
+        let mut engine = Engine::new(Blofin::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }));
+        engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
-            engine: Engine::new(Blofin::new(Options {
-                public_data_only: true,
-                ..Options::default()
-            })),
+            engine,
             now: 0.0,
             requests: vec![],
             timers: vec![],
             sockets: vec![],
             sent: vec![],
             closed: vec![],
+            fired: 0,
         };
         h.engine.start(0.0);
         h.collect();
@@ -82,6 +92,7 @@ impl Harness {
             self.timers.retain(|(t, _)| *t != timer);
             self.now = self.now.max(at);
             self.event(Event::TimerFired { timer });
+            self.fired += 1;
         }
         self.now = until;
     }
@@ -233,4 +244,14 @@ fn stable_public_traffic_resets_backoff() {
         });
     }
     assert!((750.0..=1_000.0).contains(&h.close()));
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::with_policy(PublicFeedPolicy::Shared);
+    let until = h.now + 600_000.0;
+    h.advance(until);
+    assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(h.fired, 0, "no supervision timers fire");
 }

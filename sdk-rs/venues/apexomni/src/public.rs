@@ -5,7 +5,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, PositionSide, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -360,7 +360,10 @@ impl ApexOmni {
         } else {
             "quote.omni.apex.exchange"
         };
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(
             format!(
                 "wss://{host}/realtime_public?v=2&timestamp={}&requestId=rust-{}",

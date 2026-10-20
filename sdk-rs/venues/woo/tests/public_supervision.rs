@@ -1,5 +1,7 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, SocketChannel, SocketId, TimerId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId,
+};
 use safe_cex_venue_woo::{Options, Woo};
 use support::{MARKETS, TICKERS, TestEngine, requests, response};
 
@@ -14,14 +16,19 @@ struct Harness {
     public: Vec<SocketId>,
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
+    fired: usize,
 }
 
 impl Harness {
     fn new() -> Self {
+        Self::with_policy(PublicFeedPolicy::Direct)
+    }
+    fn with_policy(policy: PublicFeedPolicy) -> Self {
         let mut engine = Engine::new(Woo::new(Options {
             public_data_only: true,
             ..Default::default()
         }));
+        engine.set_public_feed_policy(policy).unwrap();
         engine.start(0.0);
         let r = requests(&mut engine).remove(0);
         response(&mut engine, &r, 10.0, MARKETS);
@@ -33,6 +40,7 @@ impl Harness {
             public: Vec::new(),
             sent: Vec::new(),
             closed: Vec::new(),
+            fired: 0,
         };
         response(&mut h.engine, &r, 20.0, TICKERS);
         h.collect();
@@ -80,6 +88,7 @@ impl Harness {
             self.timers.retain(|(t, _)| *t != timer);
             self.now = self.now.max(at);
             self.event(Event::TimerFired { timer });
+            self.fired += 1;
         }
         self.now = until;
     }
@@ -213,4 +222,17 @@ fn stable_public_traffic_resets_backoff() {
         h.message(socket, PONG);
     }
     assert!((750.0..=1_000.0).contains(&h.close(socket)));
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::with_policy(PublicFeedPolicy::Shared);
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    let until = h.now + 600_000.0;
+    h.advance(until);
+    assert!(h.public.is_empty(), "no public connects: {:?}", h.public);
+    assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
+    assert_eq!(h.fired, 10, "only the minute funding refresh fires");
 }

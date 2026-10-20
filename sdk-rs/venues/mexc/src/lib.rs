@@ -9,7 +9,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{BTreeSet, HashMap};
 use wire::*;
@@ -452,7 +452,10 @@ impl MexcFutures {
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public_supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public_supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
