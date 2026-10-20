@@ -1,5 +1,4 @@
 // @vitest-environment node
-import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
@@ -20,14 +19,6 @@ import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
 import { realVenue } from './realVenue';
-
-const accountApplier = (store: DefaultStore, name: ExchangeName) => new FrameApplier(
-  store,
-  ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(name),
-  name === 'bitgetinverse',
-  ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(name),
-  name === 'binanceinverse',
-);
 
 // Clock synchronization is host policy. Supplying a local server-time source
 // keeps the real worker lifecycle without its unrelated live Bybit time read.
@@ -50,7 +41,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
     vi.restoreAllMocks();
   });
 
-  it.each(Object.keys(RUST_VENUES) as ExchangeName[])(
+  it.each([...RUST_VENUES])(
     '%s starts natively and sends a complete late-consumer snapshot',
     async (name) => {
       const nativeTimeout = globalThis.setTimeout;
@@ -161,7 +152,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       worker.sendSnapshot();
       expect(frames.length).toBeGreaterThan(before);
       const lateStore = new DefaultStore();
-      const lateApplier = accountApplier(lateStore, name);
+      const lateApplier = new FrameApplier(lateStore);
       lateApplier.apply(new Frame(frames.at(-1)!));
       // A late HTTP reply may update native state just after the periodic
       // flush. Wait for the real store mirror to catch up with the snapshot;
@@ -253,7 +244,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       const exchange = worker.exchange as RustEngineExchange;
       const baselineFrame = new Frame(exchange.snapshotFrame()!);
       const baseline = new DefaultStore();
-      accountApplier(baseline, name).apply(baselineFrame);
+      new FrameApplier(baseline).apply(baselineFrame);
       lateApplier.apply(baselineFrame);
       const baselineBooks = lateApplier.books(baselineFrame);
       const privateBaseline = structuredClone({

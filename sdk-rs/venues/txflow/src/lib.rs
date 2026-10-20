@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
     TimerId, Venue,
@@ -59,16 +60,29 @@ pub enum Pending {
     Trade(trading::Request),
     History(Box<history::Request>),
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     subscriptions: VecDeque<String>,
     subscription_timer: Option<TimerId>,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 30_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+            subscriptions: VecDeque::new(),
+            subscription_timer: None,
+        }
+    }
 }
 #[derive(Default)]
 struct Ladder {
@@ -103,7 +117,7 @@ pub struct TxFlow {
     node: Connection,
     api: Connection,
     books: HashMap<String, Ladder>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
     ticker_queue: VecDeque<u32>,
     seed_tickers: Vec<Ticker>,
     ticker_seeded: std::collections::HashSet<u32>,
@@ -215,34 +229,48 @@ impl TxFlow {
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
             self.ticker_request(cx, asset);
-        } else if !self.seed_tickers.is_empty()
-            && self.ticker_seeded.len() == self.seed_tickers.len()
-        {
+            return;
+        }
+        if !self.seed_tickers.is_empty() && self.ticker_seeded.len() == self.seed_tickers.len() {
             self.ticker_seeded.clear();
             let mut rows = std::mem::take(&mut self.seed_tickers);
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
             self.open_sockets(cx);
         }
+        // TS records the account execution window after the paced seed; once every
+        // read has been attempted, a market still retrying must not block private data.
+        if !self.assets.is_empty() {
+            self.account_start(cx);
+        }
     }
     fn open_sockets(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.node.socket.is_none() {
-            self.node.socket = Some(cx.connect_channel(
-                format!("{}/ws", REST_URL.replacen("https:", "wss:", 1)),
-                if self.options.public_data_only {
-                    SocketChannel::Public
-                } else {
-                    SocketChannel::Private
-                },
-            ));
+            self.connect(cx, false);
         }
         if self.api.socket.is_none() {
-            self.api.socket = Some(cx.connect_channel(
-                format!("{}/api-ws", REST_URL.replacen("https:", "wss:", 1)),
-                SocketChannel::Public,
-            ));
+            self.connect(cx, true);
         }
-        self.account_start(cx);
+    }
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>, api: bool) {
+        let channel = if api || self.options.public_data_only {
+            SocketChannel::Public
+        } else {
+            SocketChannel::Private
+        };
+        let conn = if api { &mut self.api } else { &mut self.node };
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if channel != SocketChannel::Public || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            conn.supervisor.connecting(cx);
+        }
+        conn.socket = Some(cx.connect_channel(
+            format!(
+                "{}/{}",
+                REST_URL.replacen("https:", "wss:", 1),
+                if api { "api-ws" } else { "ws" }
+            ),
+            channel,
+        ));
     }
     fn subscribe(
         &mut self,
@@ -471,11 +499,10 @@ impl TxFlow {
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
                     if let Some(symbol) = self.coin_symbol(&row.s)
-                        && self
-                            .candles
-                            .contains_key(&(symbol.to_owned(), row.i.to_string()))
+                        && let Some(interval) = Interval::parse(&row.i)
+                        && self.candles.contains_key(&(symbol.to_owned(), interval))
                     {
-                        cx.candle(symbol, &row.i, row.candle());
+                        cx.candle(symbol, interval, row.candle());
                     }
                 };
                 let raw = data.get();
@@ -530,18 +557,19 @@ impl TxFlow {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         add: bool,
     ) {
-        if !valid_interval(&interval)
-            || (cx.store.loaded().markets && !self.assets.contains_key(&symbol))
-        {
+        if !supported(interval) {
+            if add {
+                cx.log(LogLevel::Error, interval.unsupported("TxFlow"));
+            }
             return;
         }
-        let count = self
-            .candles
-            .entry((symbol.clone(), interval.clone()))
-            .or_default();
+        if cx.store.loaded().markets && !self.assets.contains_key(&symbol) {
+            return;
+        }
+        let count = self.candles.entry((symbol.clone(), interval)).or_default();
         if add {
             *count += 1;
             if *count > 1 {
@@ -552,7 +580,7 @@ impl TxFlow {
             if *count > 0 {
                 return;
             }
-            self.candles.remove(&(symbol.clone(), interval.clone()));
+            self.candles.remove(&(symbol.clone(), interval));
         }
         if let Some(asset) = self.assets.get(&symbol) {
             self.subscribe(
@@ -562,7 +590,7 @@ impl TxFlow {
                 Sub {
                     r#type: "candle",
                     coin: Some(&asset.to_string()),
-                    interval: Some(&interval),
+                    interval: Some(interval.as_str()),
                     user: None,
                     instrument_id: None,
                 },
@@ -585,13 +613,13 @@ impl TxFlow {
             cx.done(command, Err("Market not found".into()));
             return;
         };
-        if !valid_interval(&interval) {
-            cx.done(command, Err("Unsupported candle interval".into()));
+        if !supported(interval) {
+            cx.done(command, Err(interval.unsupported("TxFlow")));
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
         let start = from_ms
-            .unwrap_or(end - interval_ms(&interval) * f64::from(limit.unwrap_or(500).min(1500)))
+            .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)))
             .max(0.0);
         if !start.is_finite()
             || !end.is_finite()
@@ -620,7 +648,7 @@ impl TxFlow {
             r#type: "candleSnapshot",
             req: Req {
                 coin: asset.to_string(),
-                interval: &interval,
+                interval: interval.as_str(),
                 start_time: start.floor() as u64,
                 end_time: end.floor() as u64,
             },
@@ -639,14 +667,18 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
-    fn supports_account_identity(&self) -> bool {
-        true
-    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
             cx.log(LogLevel::Error, error);
@@ -661,9 +693,7 @@ impl Venue for TxFlow {
         }
         let conn = if api { &mut self.api } else { &mut self.node };
         conn.open = true;
-        conn.attempts = 0;
-        conn.last_received = cx.now;
-        conn.ping = Some(cx.set_timer(10_000.0));
+        conn.supervisor.opened(cx);
         if let Some(timer) = conn.subscription_timer.take() {
             cx.clear_timer(timer);
         }
@@ -702,9 +732,7 @@ impl Venue for TxFlow {
                 .candles
                 .keys()
                 .filter_map(|(symbol, interval)| {
-                    self.assets
-                        .get(symbol)
-                        .map(|asset| (*asset, interval.clone()))
+                    self.assets.get(symbol).map(|asset| (*asset, *interval))
                 })
                 .collect::<Vec<_>>();
             for (asset, interval) in candles {
@@ -715,7 +743,7 @@ impl Venue for TxFlow {
                     Sub {
                         r#type: "candle",
                         coin: Some(&asset.to_string()),
-                        interval: Some(&interval),
+                        interval: Some(interval.as_str()),
                         user: None,
                         instrument_id: None,
                     },
@@ -777,9 +805,9 @@ impl Venue for TxFlow {
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let node = self.node.socket == Some(socket);
         if node {
-            self.node.last_received = cx.now;
+            self.node.supervisor.received(cx.now);
         } else if self.api.socket == Some(socket) {
-            self.api.last_received = cx.now;
+            self.api.supervisor.received(cx.now);
         } else {
             return;
         }
@@ -806,16 +834,11 @@ impl Venue for TxFlow {
         let conn = if api { &mut self.api } else { &mut self.node };
         conn.socket = None;
         conn.open = false;
-        if let Some(timer) = conn.ping.take() {
-            cx.clear_timer(timer);
-        }
         if let Some(timer) = conn.subscription_timer.take() {
             cx.clear_timer(timer);
         }
         conn.subscriptions.clear();
-        conn.attempts = conn.attempts.saturating_add(1);
-        conn.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(conn.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        conn.supervisor.retry(cx);
         if !api {
             for (symbol, ladder) in &mut self.books {
                 ladder.book.clear();
@@ -1061,38 +1084,20 @@ impl Venue for TxFlow {
                 conn.subscription_timer = None;
                 Self::pump_subscriptions(cx, conn);
             }
-            if conn.reconnect == Some(timer) {
-                conn.reconnect = None;
-                let role = if api || self.options.public_data_only {
-                    SocketChannel::Public
-                } else {
-                    SocketChannel::Private
-                };
-                conn.socket = Some(cx.connect_channel(
-                    format!(
-                        "{}/{}",
-                        REST_URL.replacen("https:", "wss:", 1),
-                        if api { "api-ws" } else { "ws" }
-                    ),
-                    role,
-                ));
-            }
-            if conn.ping == Some(timer) {
-                conn.ping = None;
-                if let Some(socket) = conn.socket {
-                    if cx.now - conn.last_received >= 30_000.0 {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                    } else {
+            match conn.supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => self.connect(cx, api),
+                Tick::Ping => {
+                    if let Some(socket) = conn.socket {
                         cx.send(socket, "{\"method\":\"ping\"}");
-                        let next = cx.set_timer(10_000.0);
-                        if api {
-                            self.api.ping = Some(next);
-                        } else {
-                            self.node.ping = Some(next);
-                        }
                     }
                 }
+                Tick::TimedOut(_) => {
+                    if let Some(socket) = conn.socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                }
+                Tick::Handled | Tick::Unhandled => {}
             }
         }
     }
@@ -1126,20 +1131,11 @@ impl Venue for TxFlow {
         )
     }
 }
-fn valid_interval(interval: &str) -> bool {
+// TxFlow's candle codes are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
     matches!(
         interval,
-        "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "8h" | "12h" | "1d"
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1
     )
-}
-fn interval_ms(interval: &str) -> f64 {
-    let (n, unit) = interval.split_at(interval.len() - 1);
-    n.parse::<f64>().unwrap_or(1.0)
-        * match unit {
-            "m" => 60_000.0,
-            "h" => 3_600_000.0,
-            "d" => 86_400_000.0,
-            "w" => 604_800_000.0,
-            _ => 2_592_000_000.0,
-        }
 }

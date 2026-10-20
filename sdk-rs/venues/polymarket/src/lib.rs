@@ -7,11 +7,14 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, PredictionMarket, Ticker};
+use safe_cex_engine::model::{
+    Candle, Interval, Limits, Market, MinMax, Precision, PredictionMarket, Ticker,
+};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -63,7 +66,7 @@ pub enum Pending {
     Candles {
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: usize,
         rows: Vec<Candle>,
         from_ms: Option<f64>,
@@ -114,7 +117,7 @@ pub struct Polymarket {
     market_symbols: HashSet<String>,
     walk_skipped_slugs: HashSet<String>,
     skipped_slugs: HashSet<String>,
-    candles: BTreeMap<(String, String), CandleSubscription>,
+    candles: BTreeMap<(String, Interval), CandleSubscription>,
     candle_timer: Option<TimerId>,
     seed_tickers: Vec<Ticker>,
     seeded_tokens: HashSet<String>,
@@ -319,7 +322,10 @@ impl Polymarket {
         if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
-        c.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if index != 0 || cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            c.supervisor.connecting(cx);
+        }
         c.socket = Some(cx.connect_feed(
             SOCKETS[index],
             if index == 0 {
@@ -558,7 +564,7 @@ impl Polymarket {
         cx: &mut Cx<'_, Pending>,
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -568,9 +574,7 @@ impl Polymarket {
                 .store
                 .market(&symbol)
                 .ok_or("Unknown Polymarket symbol")?;
-            if !["1m", "5m", "15m", "1h", "4h", "1d"].contains(&interval.as_str()) {
-                return Err("Unsupported Polymarket interval");
-            }
+            let fidelity = fidelity(interval).ok_or_else(|| interval.unsupported("Polymarket"))?;
             if limit == Some(0)
                 || from_ms
                     .into_iter()
@@ -578,13 +582,13 @@ impl Polymarket {
                     .any(|v| !v.is_finite() || v < 0.0)
                 || matches!((from_ms,to_ms),(Some(a),Some(b)) if a>b)
             {
-                return Err("Invalid Polymarket candle bounds");
+                return Err("Invalid Polymarket candle bounds".to_owned());
             }
             if from_ms.is_none() && to_ms.is_some() {
-                return Err("Polymarket upper-only candle bounds require from");
+                return Err("Polymarket upper-only candle bounds require from".to_owned());
             }
             if from_ms.is_some_and(|from| from < 1000.0) {
-                return Err("Polymarket candle from must be at least 1000 milliseconds");
+                return Err("Polymarket candle from must be at least 1000 milliseconds".to_owned());
             }
             let mut path = format!("{REST}/prices-history?market={}", encode(&market.id));
             if let Some(from) = from_ms {
@@ -597,15 +601,6 @@ impl Polymarket {
             if from_ms.is_none() && to_ms.is_none() {
                 path.push_str("&interval=max");
             }
-            let fidelity = match interval.as_str() {
-                "1m" => 1,
-                "5m" => 5,
-                "15m" => 15,
-                "1h" => 60,
-                "4h" => 240,
-                "1d" => 1440,
-                _ => unreachable!(),
-            };
             path.push_str(&format!("&fidelity={fidelity}"));
             Ok(path)
         })();
@@ -630,7 +625,7 @@ impl Polymarket {
             }
             Err(e) => {
                 if let Some(command) = command {
-                    cx.done(command, Err(e.into()));
+                    cx.done(command, Err(e));
                 } else {
                     cx.log(LogLevel::Error, e);
                 }
@@ -642,10 +637,17 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
-    fn supports_account_identity(&self) -> bool {
-        true
-    }
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            cancel_all: safe_cex_engine::CancelAll::Native,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            max_leverage: safe_cex_engine::MaxLeverage::Rails,
+            order_book_query: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, None, vec![], vec![]);
     }
@@ -933,11 +935,10 @@ impl Venue for Polymarket {
                 }
                 if let Some(c) = command {
                     cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
-                } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval.clone()))
-                {
+                } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     for row in rows {
                         if row.timestamp > sub.last {
-                            cx.candle(&symbol, &interval, row);
+                            cx.candle(&symbol, interval, row);
                             sub.last = row.timestamp;
                         }
                     }
@@ -1203,13 +1204,17 @@ impl Venue for Polymarket {
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
             Command::SubscribeCandles { symbol, interval } => {
-                let sub = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_insert(CandleSubscription {
-                        users: 0,
-                        last: 0.0,
-                    });
+                if fidelity(interval).is_none() {
+                    cx.log(LogLevel::Error, interval.unsupported("Polymarket"));
+                    return;
+                }
+                let sub =
+                    self.candles
+                        .entry((symbol.clone(), interval))
+                        .or_insert(CandleSubscription {
+                            users: 0,
+                            last: 0.0,
+                        });
                 sub.users += 1;
                 if sub.users == 1 {
                     self.fetch_candles(
@@ -1275,4 +1280,18 @@ impl Venue for Polymarket {
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
+}
+
+/// Polymarket price-history fidelity in minutes.
+fn fidelity(interval: Interval) -> Option<u32> {
+    use Interval::*;
+    Some(match interval {
+        M1 => 1,
+        M5 => 5,
+        M15 => 15,
+        H1 => 60,
+        H4 => 240,
+        D1 => 1440,
+        _ => return None,
+    })
 }

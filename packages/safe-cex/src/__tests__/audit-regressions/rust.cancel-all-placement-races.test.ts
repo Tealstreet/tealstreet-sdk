@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 const names = ['phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue'] as const;
 const market: Market = {
@@ -22,6 +23,7 @@ const setup = (name: ExchangeName) => {
   const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture' }, store);
   const command = vi.fn<(command: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue(['native-order']);
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   running.push(exchange);
   return { exchange, command, store };

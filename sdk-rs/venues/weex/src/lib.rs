@@ -11,9 +11,10 @@ mod wire;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Market, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
@@ -61,13 +62,21 @@ struct DeferredGet {
     task: Task,
     stream: Option<ArrayAt>,
 }
+/// Both sockets keep the old watchdog shape: 30s silence, 5s PING, 1s-16s backoff.
+fn socket_supervisor() -> Supervisor {
+    Supervisor::new(Config {
+        connect_timeout_ms: 30_000.0,
+        idle_timeout_ms: 30_000.0,
+        ping_interval_ms: Some(5_000.0),
+        backoff_base_ms: 1_000.0,
+        backoff_cap_ms: 16_000.0,
+        ..Config::default()
+    })
+}
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     next_id: u32,
     operations: VecDeque<f64>,
     topics: HashSet<String>,
@@ -77,10 +86,7 @@ impl Default for Connection {
         Self {
             socket: None,
             open: false,
-            last_received: 0.0,
-            watchdog: None,
-            reconnect: None,
-            attempts: 0,
+            supervisor: socket_supervisor(),
             next_id: 1,
             operations: VecDeque::new(),
             topics: HashSet::new(),
@@ -138,7 +144,7 @@ pub struct WeexFutures {
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
-    candles: BTreeMap<(String, String), u32>,
+    candles: BTreeMap<(String, Interval), u32>,
     seed: Seed,
     paused_until: f64,
     next_generation: u32,
@@ -181,7 +187,7 @@ impl WeexFutures {
             public: Connection::default(),
             active_symbols: HashSet::new(),
             deferred_gets: Vec::new(),
-            account: account::State::default(),
+            account: account::State::new(),
             trading: trading::State::default(),
             history: history::State::default(),
             credentials,
@@ -296,8 +302,37 @@ impl WeexFutures {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket =
             Some(cx.connect_channel(paths::PUBLIC_WS, safe_cex_engine::SocketChannel::Public));
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.0));
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
+    }
+    fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => {
+                self.connect_public(cx);
+                let symbols: Vec<_> = self.books.keys().cloned().collect();
+                for s in symbols {
+                    self.snapshot(cx, &s);
+                }
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    let id = self.public.next_id;
+                    self.public.next_id += 1;
+                    cx.send(socket, format!(r#"{{"method":"PING","id":{id}}}"#));
+                }
+            }
+            Tick::TimedOut(_) => {
+                if let Some(s) = self.public.socket {
+                    cx.close(s);
+                    self.on_close(cx, s, 1006);
+                }
+            }
+            Tick::Handled => (),
+        }
+        true
     }
     fn subscription(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
         if !self.public.open {
@@ -460,6 +495,8 @@ impl WeexFutures {
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
+                // Markets are loaded; account state does not depend on tickers.
+                self.start_account(cx);
             }
             Task::Depth { symbol, generation } => {
                 if self
@@ -511,15 +548,17 @@ fn row_symbol(item: &str) -> String {
     serde_json::from_str::<Row<'_>>(item)
         .map_or_else(|_| "unknown".into(), |r| r.symbol.into_owned())
 }
-fn interval(i: &str, stream: bool) -> bool {
-    matches!(
-        i,
-        "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "12h" | "1d" | "1w"
-    ) || (stream && matches!(i, "2h" | "6h"))
+// WEEX kline codes are the TS spellings; 2h and 6h are stream-only.
+fn interval(i: Interval, stream: bool) -> bool {
+    use Interval::*;
+    matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
-    fn supports_account_identity(&self) -> bool {
-        true
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
     fn guard_order_mutations(&self) -> bool {
         true
@@ -551,8 +590,7 @@ impl Venue for WeexFutures {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.public.operations.clear();
         self.public.topics.clear();
         self.reconcile_topics(cx);
@@ -564,7 +602,7 @@ impl Venue for WeexFutures {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -623,11 +661,10 @@ impl Venue for WeexFutures {
             "kline" => {
                 if let Ok(row) = serde_json::from_str::<Rows<'_, Vec<CandleEvent<'_>>>>(text) {
                     for c in row.d {
-                        if self
-                            .candles
-                            .contains_key(&(row.s.to_string(), c.i.to_string()))
+                        if let Some(i) = Interval::parse(&c.i)
+                            && self.candles.contains_key(&(row.s.to_string(), i))
                         {
-                            cx.candle(&row.s, &c.i, c.candle());
+                            cx.candle(&row.s, i, c.candle());
                         }
                     }
                 }
@@ -644,14 +681,7 @@ impl Venue for WeexFutures {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.public.attempts += 1;
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public.supervisor.retry(cx);
         for b in self.books.values_mut() {
             b.last = None;
             b.fetching = false;
@@ -800,7 +830,6 @@ impl Venue for WeexFutures {
                 }
                 self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(markets);
-                self.start_account(cx);
                 self.seed = Seed {
                     rows: cx
                         .store
@@ -829,6 +858,7 @@ impl Venue for WeexFutures {
                 if self.seed.finished == 3 && !self.seed.failed {
                     if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
                         self.discovery.failed(cx, true);
+                        self.start_account(cx);
                         return;
                     }
                     let rows = std::mem::take(&mut self.seed.rows)
@@ -840,6 +870,8 @@ impl Venue for WeexFutures {
                     cx.store.set_tickers(rows);
                     self.discovery.succeeded(cx, &true);
                     self.connect_public(cx);
+                    // After the ticker seed so account rows map against seeded prices.
+                    self.start_account(cx);
                 }
             }
             Task::Depth { symbol, generation } => {
@@ -929,32 +961,7 @@ impl Venue for WeexFutures {
                     Some(ArrayAt::Root),
                 );
             }
-        } else if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            let symbols: Vec<_> = self.books.keys().cloned().collect();
-            for s in symbols {
-                self.snapshot(cx, &s);
-            }
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 30_000.0 {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-            } else {
-                if self.public.open {
-                    let id = self.public.next_id;
-                    self.public.next_id += 1;
-                    cx.send(
-                        self.public.socket.unwrap(),
-                        format!(r#"{{"method":"PING","id":{id}}}"#),
-                    );
-                }
-                self.public.watchdog = Some(cx.set_timer(5_000.0));
-            }
-        } else {
+        } else if !self.public_timer(cx, timer) {
             let symbol = self.books.iter_mut().find_map(|(s, b)| {
                 (b.retry == Some(timer)).then(|| {
                     b.retry = None;
@@ -1010,11 +1017,8 @@ impl Venue for WeexFutures {
                 symbol,
                 interval: i,
             } => {
-                if !interval(&i, true) {
-                    cx.log(
-                        LogLevel::Warning,
-                        format!("WEEX does not support {i} candles"),
-                    );
+                if !interval(i, true) {
+                    cx.log(LogLevel::Error, i.unsupported("WEEX"));
                     return;
                 }
                 let key = (symbol, i);
@@ -1043,8 +1047,8 @@ impl Venue for WeexFutures {
                 from_ms,
                 to_ms,
             } => {
-                if !interval(&i, false) {
-                    cx.done(command, Err(format!("WEEX does not support {i} candles")));
+                if !interval(i, false) {
+                    cx.done(command, Err(i.unsupported("WEEX")));
                     return;
                 }
                 let historical = from_ms.is_some() || to_ms.is_some();

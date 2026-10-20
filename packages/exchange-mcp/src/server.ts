@@ -49,6 +49,9 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
       }));
 
   const server = new McpServer({ name: `exchange-mcp-${name}`, version });
+  // A Rust record needs its engine. A failed load surfaces on the first tool
+  // call, which retries with a fresh account; tools then use the base answers.
+  await exchange.loadCapabilities().catch(() => undefined);
   for (const tool of supportedTools(exchange, { options: Boolean(options.enableOptionMarkets) })) {
     server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args) => {
       const result = await tool.run(await ready(), args as never);

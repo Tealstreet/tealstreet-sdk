@@ -350,10 +350,13 @@ worker and main-thread FrameApplier instances retain metadata across later
 position-only frames; explicit empty sections clear it. Holdings removed from
 the authoritative position table lose their flags before later reopening.
 
-Frame application keeps OKX native contract-count metadata separate from Binance
-COIN-M contract multipliers: constructor argument four is the OKX count policy;
-argument five is COIN-M inverse notional sizing. Worker and main-thread callers
-set both independently; Bitget inverse retains its existing third argument.
+Each market's MARKETS flags carry its quantity units (bits 8-11, declared by the
+venue's `Capabilities::quantity_units`): native placement (MEXC, BloFin, KuCoin
+futures, Coinbase), inverse native (Bitget inverse), contract count (OKX) or
+inverse contract-sized (Binance COIN-M). `FrameApplier` reads them per market,
+so worker and main-thread appliers need no venue arguments; rows outside the
+table use the venue's units, kept across an empty table. OKX native
+contract-count metadata stays separate from Binance COIN-M contract multipliers.
 
 ## Instrument and derivative frame metadata
 

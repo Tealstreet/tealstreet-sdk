@@ -97,7 +97,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | Kind | Section | Payload |
 | --- | --- | --- |
 | 1 | `STRINGS` | `u32 n`, `u32 offsets[n + 1]`, UTF-8 bytes |
-| 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]`; f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
+| 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]` (bits 0-5 active, inverse, spot, perpetual, expiring, read-only; bits 8-11 quantity units: base, native placement, inverse native, contract count, inverse contract-sized); f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
 | 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order; optional appended `u32 symbol[n]`, `u32 id[n]` string references |
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
@@ -114,7 +114,8 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 16 | `INSTRUMENT_CLASSIFICATIONS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][3]` (native symbolType, marketRegion, underlyingTicker); absent and explicitly empty strings differ |
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
-| 19 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
+| 19 | `CAPABILITIES` (snapshot frames only) | `u32` flags (bits 0-11: clientOrderLookup, fillHistory, orderHistory, incomeHistory, fillsByOrderId, accountLeverage, accountMarginType, cancelWithSymbols, amendWithSymbol, orderBookQuery, options, accountTier); `u32` four-bit fields: account, cancelAll, leverageQuery, maxLeverage, quantityUnits |
+| 20 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
 
 The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
 Section revision 0 preserves the layouts above. Revision 1 has explicit fixed
@@ -186,8 +187,8 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 ## Correctness gate
 
 Recorded traffic (websocket frames, REST responses, user commands, timestamps)
-is replayed through TS and Rust. The final `StoreData`, the emitted
-order-book/candle deltas and the outbound REST/WS requests must match after
+is replayed through TS and Rust. The `StoreData` at startup, fixed tape quarters, every
+command and terminal checkpoints, the emitted order-book/candle deltas and the outbound REST/WS requests must match after
 normalisation: numbers compared as numbers, map order ignored. A known TS bug
 is fixed in Rust and listed in the PR. The test is the same outcome, not
 byte-identical behaviour.
@@ -197,13 +198,25 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS. A CPU objective under 10 ms TS allows Rust 1 ms
-  above TS: at that size tied runs differ by up to 0.9 ms
-  (`RUST_GATE_TIMING.md`).
-- Peak and steady memory (Wasm linear memory plus JS heap retained by the
-  worker): Rust < TS.
+- At least seven fresh interleaved public pairs with alternating first runner.
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
+  90% of TS. A main or steady CPU objective under 10 ms TS instead allows Rust
+  1 ms above TS: at that size tied runs differ by up to 0.9 ms
+  (`RUST_GATE_TIMING.md`). Include cold implementation loading/WASM compilation in total CPU;
+  exclude audit callbacks, checkpoint reconstruction and baseline collection.
+- Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
+  reservation; never clamp releases to zero. Each measured run must reproduce
+  its implementation's audited output and transport receipt.
+- Shipped combined WASM: at most 13,631,488 bytes (13 MiB). Standalone builds
+  use the 1,310,720-byte family budget (#1421). Check browser and Node artifacts before overwrite.
 
-Every venue PR states both numbers. A PR that loses on either does not merge.
+Peak memory and browser cold-start remain cutover requirements; this replay
+gate measures idle-loaded retained memory rather than establishing either.
+
+Every venue PR states the measurements and incomplete evidence. A venue port
+that loses does not merge. Gate-infrastructure changes may land explicit,
+tape-hash-bound known failures in `harness/known-gate-failures.json`; they retain
+strict FAIL and do not certify venue parity. New or invalid evidence fails CI.
 
 ## Banned (CI fails)
 
@@ -418,6 +431,12 @@ fixture assumptions, not a live-feed bandwidth forecast.
   wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
+
+The stricter gate-honesty matrix has 107 mandatory cases. Its single
+[`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
+list records exact venue/tape/diagnostic failures; accepted known failures stay
+FAIL and do not certify parity. Port states below describe implementation and
+historical checks, not a claim that every stricter replay case passes.
 
 ### 8. Remaining venues — in progress
 

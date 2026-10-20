@@ -47,6 +47,17 @@ fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
         .1
         .as_str()
 }
+/// Capability-unsupported products are refused by the engine before the venue runs.
+fn assert_engine_refusal(actions: Vec<Action>) {
+    let [Action::Notice(Notice::CommandDone { command, result })] = actions.as_slice() else {
+        panic!("expected only the engine refusal: {actions:?}")
+    };
+    assert_eq!(*command, 42);
+    assert_eq!(
+        result,
+        &Err("This action is not supported on this venue".to_string())
+    );
+}
 fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     let mut done = Vec::new();
     let mut errors = Vec::new();
@@ -209,8 +220,6 @@ fn unsupported_and_private_disabled_accounts_fail_before_io() {
             public_data_only: true,
             ..options(true, Variant::UsdM)
         },
-        options(false, Variant::Spot),
-        options(false, Variant::CoinM),
         Options {
             secret: Some(String::new()),
             ..options(false, Variant::UsdM)
@@ -227,6 +236,16 @@ fn unsupported_and_private_disabled_accounts_fail_before_io() {
         let mut engine = seeded(opts);
         let before = engine.account_snapshot_frame(NOW).to_vec();
         result(ask(&mut engine), true).unwrap_err();
+        assert_eq!(engine.account_snapshot_frame(NOW), before);
+    }
+}
+
+#[test]
+fn spot_and_coin_m_identity_is_refused_by_capability_before_io() {
+    for variant in [Variant::Spot, Variant::CoinM] {
+        let mut engine = seeded(options(false, variant));
+        let before = engine.account_snapshot_frame(NOW).to_vec();
+        assert_engine_refusal(ask(&mut engine));
         assert_eq!(engine.account_snapshot_frame(NOW), before);
     }
 }

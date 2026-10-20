@@ -80,14 +80,6 @@ fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity,
 }
 impl BybitLinear {
     pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if self.variant.is_hyro() {
-            finish(
-                cx,
-                command,
-                Err("HyroTrader account identity is unsupported".into()),
-            );
-            return;
-        }
         if let Some(error) = &self.config_error {
             finish(cx, command, Err(error.clone()));
             return;

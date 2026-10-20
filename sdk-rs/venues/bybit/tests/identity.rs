@@ -47,6 +47,17 @@ fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
         .1
         .as_str()
 }
+/// Capability-unsupported products are refused by the engine before the venue runs.
+fn assert_engine_refusal(actions: Vec<Action>) {
+    let [Action::Notice(Notice::CommandDone { command, result })] = actions.as_slice() else {
+        panic!("expected only the engine refusal: {actions:?}")
+    };
+    assert_eq!(*command, 42);
+    assert_eq!(
+        result,
+        &Err("This action is not supported on this venue".to_string())
+    );
+}
 fn result(actions: Vec<Action>, rejected: bool) -> Result<String, String> {
     let mut done = Vec::new();
     let mut errors = Vec::new();
@@ -252,10 +263,9 @@ fn malformed_missing_or_failed_identity_finishes_once_without_state_changes() {
     }
 }
 #[test]
-fn hyro_public_only_and_missing_credentials_never_query_bybit_identity() {
+fn public_only_and_missing_credentials_never_query_bybit_identity() {
     for opts in [
         Options::default(),
-        options(false, Variant::Hyrotrader),
         Options {
             public_data_only: true,
             ..options(true, Variant::Spot)
@@ -278,4 +288,12 @@ fn hyro_public_only_and_missing_credentials_never_query_bybit_identity() {
         result(ask(&mut engine), true).unwrap_err();
         assert_eq!(engine.account_snapshot_frame(NOW), before);
     }
+}
+
+#[test]
+fn hyro_identity_is_refused_by_capability_before_io() {
+    let mut engine = seeded(options(false, Variant::Hyrotrader));
+    let before = engine.account_snapshot_frame(NOW).to_vec();
+    assert_engine_refusal(ask(&mut engine));
+    assert_eq!(engine.account_snapshot_frame(NOW), before);
 }

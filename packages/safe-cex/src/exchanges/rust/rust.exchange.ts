@@ -1,5 +1,11 @@
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
-import type { CommandProgress, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type {
+  CommandProgress,
+  EngineCapabilities,
+  EngineHost as EngineHostType,
+  Transport,
+  WasmEngineLike,
+} from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
@@ -25,8 +31,8 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker } from '../base';
-import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
+import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
@@ -52,7 +58,15 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange, markBaseCapabilityFallback } from '../base';
+import {
+  BaseExchange,
+  CAPABILITY_METHODS,
+  type ExchangeCapabilities,
+  markBaseCapabilityFallback,
+  WORKER_FORWARDED_METHODS,
+  WORKER_WRITE_METHODS,
+  workerCallClientOrderIds,
+} from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -60,68 +74,79 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../bybit/bybit.types';
-import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
+import {
+  decodeWorkerOrderIds,
+  isRegularClientOrderShape,
+  patternClientOrderIdRule,
+  withReplacementClientOrderId,
+} from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import {
+  IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from './publicFeed';
 
-/** Venues the Rust engine runs, by exchange name, and its name for each. */
-export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
-  coinbase: 'coinbase',
-  coinbasespot: 'coinbasespot',
-  apexomni: 'apexomni',
-  asterdex: 'asterdex',
-  breakoutprop: 'breakoutprop',
-  binance: 'binance',
-  binancespot: 'binancespot',
-  binanceinverse: 'binanceinverse',
-  backpack: 'backpack',
-  'tealstreet-dex': 'tealstreet-dex',
-  kodiakfi: 'kodiakfi',
-  mode: 'mode',
-  salsadex: 'salsadex',
-  what: 'what',
-  woofi: 'woofi',
-  binancepm: 'binancepm',
-  bitget: 'bitget',
-  bitgetusdc: 'bitgetusdc',
-  bitgetinverse: 'bitgetinverse',
-  blofin: 'blofin',
-  bitrue: 'bitrue',
-  grvt: 'grvt',
-  mexc: 'mexc',
-  woo: 'woo',
-  bingx: 'bingx',
-  bybit: 'bybit',
-  bybitinverse: 'bybitinverse',
-  bybitspot: 'bybitspot',
-  bybitdemo: 'bybitdemo',
-  hyrotrader: 'hyrotrader',
-  cryptocom: 'cryptocom',
-  kucoin: 'kucoin',
-  kucoinspot: 'kucoinspot',
-  polymarket: 'polymarket',
-  hyperliquid: 'hyperliquid',
-  hyperliquidspot: 'hyperliquidspot',
-  paradex: 'paradex',
-  txflow: 'txflow',
-  kraken: 'kraken',
-  krakenspot: 'krakenspot',
-  lighter: 'lighter',
-  'lighter-robinhood': 'lighter-robinhood',
-  okx: 'okx',
-  okxeu: 'okxeu',
-  okxdemo: 'okxdemo',
-  okxeudemo: 'okxeudemo',
-  weex: 'weex',
-  phemex: 'phemex',
-};
+/** Exchange names the Rust engine runs; the engine takes the same name. */
+export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
+  'coinbase',
+  'coinbasespot',
+  'apexomni',
+  'asterdex',
+  'breakoutprop',
+  'binance',
+  'binancespot',
+  'binanceinverse',
+  'backpack',
+  'tealstreet-dex',
+  'kodiakfi',
+  'mode',
+  'salsadex',
+  'what',
+  'woofi',
+  'binancepm',
+  'bitget',
+  'bitgetusdc',
+  'bitgetinverse',
+  'blofin',
+  'bitrue',
+  'grvt',
+  'mexc',
+  'woo',
+  'bingx',
+  'bybit',
+  'bybitinverse',
+  'bybitspot',
+  'bybitdemo',
+  'hyrotrader',
+  'cryptocom',
+  'kucoin',
+  'kucoinspot',
+  'polymarket',
+  'hyperliquid',
+  'hyperliquidspot',
+  'paradex',
+  'txflow',
+  'kraken',
+  'krakenspot',
+  'lighter',
+  'lighter-robinhood',
+  'okx',
+  'okxeu',
+  'okxdemo',
+  'okxeudemo',
+  'weex',
+  'phemex',
+]);
 
-export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
+export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -229,10 +254,16 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
-const placementScopedCancelAllNames = new Set<ExchangeName>([
-  'phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex',
-  'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
+const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
+  'cancelAllOrders',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
 ]);
+const NATIVE_ACCOUNT_READS = ['fetchOrders', 'fetchPositions', 'fetchBalance', 'fetchPositionMode'] as const;
+type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
+const MULTI_COMMAND_WAIT_FACTOR = 5;
+const WORKER_CAPABILITY_RETRY_MS = 30_000;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -255,8 +286,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
-    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    if (this.options.publicFeed?.mode === 'shared' || this.usesInProcessPublicData) return 'shared';
+    // exchange-server keys its shared source by venue only, so testnet runs its own feed.
+    if (this.options.externalPublicData?.type === 'in-process' && this.options.testnet) return 'direct';
     return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  private get usesInProcessPublicData() {
+    return this.options.externalPublicData?.type === 'in-process' && !this.options.testnet;
   }
 
   override disablePublicWebsockets(): void {
@@ -264,6 +301,7 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
   private sharedValidatedMarkets?: Store['markets'];
@@ -308,6 +346,101 @@ export class RustEngineExchange extends BaseExchange {
   /** Lighter: the engine's cached account tier, when known. */
   fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
+  override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
+    // A main-thread mirror asks the worker's engine rather than building its own.
+    if (this.routesToWorker && !this.host) await this.loadWorkerCapabilities();
+    else await this.ensureHost();
+    return this.capabilities;
+  };
+
+  /** Worker side of `loadCapabilities` for a main-thread mirror. */
+  fetchEngineCapabilities = async (): Promise<EngineCapabilities | undefined> => {
+    await this.ensureHost();
+    return this.capabilityRecord;
+  };
+
+  private workerCapabilities?: Promise<void>;
+  private workerCapabilityRetryAt = 0;
+  private stopWorkerCapabilitySync?: () => void;
+
+  private loadWorkerCapabilities = (): Promise<void> =>
+    (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
+      (record) => {
+        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
+      },
+      (error: unknown) => {
+        this.workerCapabilities = undefined;
+        this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
+        throw error;
+      },
+    ));
+
+  // A mirror learns capability-defined methods (Lighter tiers, history axes) once the worker has loaded.
+  private syncWorkerCapabilities = () => {
+    if (this.capabilityRecord || this.host || this.workerCapabilities || this.isDisposed) return;
+    if (!this.store.loaded.markets || !this.routesToWorker || Date.now() < this.workerCapabilityRetryAt) return;
+    void this.loadWorkerCapabilities().catch(() => {
+      /* Retried on a later store update; explicit loadCapabilities callers see the failure. */
+    });
+  };
+
+  /** What the venue answers, as its engine reports it; unknown until the engine exists. */
+  get engineCapabilities(): EngineCapabilities | undefined {
+    return this.capabilityRecord;
+  }
+  private capabilityRecord?: EngineCapabilities;
+
+  /** Venue-specific answers wait for the engine rather than guessing from the base contract. */
+  private requireCapabilities(): EngineCapabilities {
+    if (this.capabilityRecord) return this.capabilityRecord;
+    throw this.engineFailure ?? new Error(`${this.name} engine is not started`);
+  }
+
+  // History axes the engine lacks take the branded base fallbacks, which
+  // `exchange.capabilities` reports absent. A main-thread mirror adopts the
+  // record from the worker's snapshot frame; the record never changes.
+  protected override adoptEngineCapabilities(capabilities: EngineCapabilities) {
+    if (this.capabilityRecord) return;
+    this.capabilityRecord = capabilities;
+    if (!capabilities.fillHistory)
+      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
+    if (!capabilities.orderHistory)
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+    if (!capabilities.incomeHistory) {
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
+    }
+    if (capabilities.fillsByOrderId) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
+    if (capabilities.accountTier) {
+      this.changeAccountTier = async (tier: LighterAccountTier) => {
+        if (this.routesToWorker) {
+          await this.callWorker('changeAccountTier', tier);
+          return;
+        }
+        await this.command<null>({ op: 'setAccountTier', tier });
+        this.writeLighterTier(tier);
+      };
+      this.fetchAccountTier = async () => {
+        if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
+        return (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
+      };
+    }
+  }
+
+  private fetchFilledQuantities = async (ids: string[]) => {
+    const quantities = new Map<string, number>();
+    for (const id of new Set(ids)) {
+      const fills = await this.command<Execution[]>(
+        { op: 'fetchFills', orderId: id, from: 0, limit: 1000 },
+        { report: false },
+      );
+      for (const fill of fills) {
+        if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
+      }
+    }
+    return quantities;
+  };
+
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
@@ -319,106 +452,15 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
-    if (placementScopedCancelAllNames.has(exchangeName)) {
-      this.cancelAllOrders = async () => {
-        // Frames can lag placement ACKs. Keep attempted scopes for this account's
-        // lifetime, including uncertain/rejected outcomes and races with later places.
-        const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
-        const failures: string[] = [];
-        for (const symbol of symbols) {
-          if (this.isDisposed) continue;
-          try {
-            await this.cancelSymbolOrders(symbol);
-          } catch (error) {
-            // A rejected scope must not prevent cancellation of later live orders.
-            failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-        if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
-      };
-    }
-    if (exchangeName === 'polymarket') {
-      this.cancelAllOrders = async () => {
-        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
-      };
-      this.fetchSymbolMaxLeverage = async (symbol: string) => {
-        const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
-        return Math.max(rails.buyLeverage, rails.sellLeverage);
-      };
-    }
-    if (exchangeName === 'apexomni' || exchangeName === 'kucoinspot') {
-      this.getAccount = async () => {
-        await this.ensureHost();
-        return this.command<ExchangeAccount>({ op: 'getAccount' });
-      };
-    }
-    if (['hyperliquid', 'grvt', 'paradex', 'bitrue', 'kucoinspot', 'phemex', 'binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(exchangeName)) {
-      this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
-        this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
-    }
-    if (['apexomni', 'bitrue', 'kucoinspot'].includes(exchangeName)) {
-      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
-      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
-      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
-    }
-    if (exchangeName === 'grvt') {
-      this.fetchFillsForOrderIds = async (ids) => {
-        const quantities = new Map<string, number>();
-        for (const id of new Set(ids)) {
-          const fills = await this.command<Execution[]>(
-            { op: 'fetchFills', orderId: id, from: 0, limit: 1000 },
-            { report: false },
-          );
-          for (const fill of fills) {
-            if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
-          }
-        }
-        return quantities;
-      };
-    }
-    this.applier = new FrameApplier(
-      store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
-    if (this.name === 'breakoutprop') {
-      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
-      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
-      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
-      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
-      this.cancelAllOrders = async () => {
-        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
-      };
-    }
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
     if (this.name === 'binance') {
       // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
-    }
-    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
-      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
-      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
-      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
-      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
-    }
-    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
-      this.cancelAllOrders = async () => {
-        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
-      };
-    }
-    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
-      this.changeAccountTier = async (tier: LighterAccountTier) => {
-        await this.command<null>({ op: 'setAccountTier', tier });
-        this.writeLighterTier(tier);
-      };
-      this.fetchAccountTier = async () =>
-        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
     }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
@@ -432,6 +474,8 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
+    this.forwardToWorker();
+    this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
   get isPublicDataOnly(): boolean {
@@ -525,10 +569,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
-    if (this.options.externalPublicData) {
+    if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
-        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+        'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
+    }
+    if (this.options.externalPublicData && this.options.publicFeed) {
+      throw new Error('externalPublicData conflicts with publicFeed policy');
     }
     if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
@@ -611,7 +658,7 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.startupWaiters.add(disposed);
       try {
-        void loadWasmEngine(RUST_VENUES[this.name]!)
+        void loadWasmEngine(this.name)
           .then(resolve, reject)
           .finally(() => this.startupWaiters.delete(disposed));
       } catch (error) {
@@ -641,7 +688,7 @@ export class RustEngineExchange extends BaseExchange {
       if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
     }
     const engine = new WasmEngine(
-      RUST_VENUES[this.name]!,
+      this.name,
       JSON.stringify({
         key,
         secret,
@@ -716,7 +763,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
-    this.host = new EngineHost(
+    const host = new EngineHost(
       engine,
       ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
         ? { ...transport, now: virtualClock.getCurrentTimeMs }
@@ -738,18 +785,69 @@ export class RustEngineExchange extends BaseExchange {
       },
       { commandTimeoutMs: this.commandTimeoutMs },
     );
+    try {
+      this.adoptEngineCapabilities(host.capabilities());
+    } catch (error) {
+      host.dispose();
+      throw error;
+    }
+    this.host = host;
   };
 
-  protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
+  // Nuke and cancel-all run several engine commands in sequence on the worker.
+  protected override workerCommandTimeoutMs = (method: CallableMethodsInWorker) =>
+    Math.min(
+      (MULTI_COMMAND_WORKER_METHODS.has(method) ? MULTI_COMMAND_WAIT_FACTOR : 1) * this.commandTimeoutMs + 1000,
+      2_147_483_647,
+    );
 
-  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker): Error =>
-    Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
       code: 'COMMAND_TIMEOUT',
       command: method,
-      ...(['setLeverage', 'scheduleCancel', 'changePositionMode', 'changeMarginType'].includes(method)
-        ? { outcome: 'unknown' as const }
-        : {}),
+      ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'unknown' as const } : {}),
+      ...(clientOrderIds ? { clientOrderIds } : {}),
     });
+  };
+
+  /**
+   * The host's worker bridge listens for `callMethod` on a main-thread instance;
+   * the worker's instance owns the engine and never has that listener. Trading
+   * runs there whole, so preflight, placement scopes and nuke retries see the
+   * authoritative state, even if a main-thread read started a local engine.
+   */
+  private get routesToWorker(): boolean {
+    return this.emitter.hasListeners('callMethod');
+  }
+
+  /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
+  private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
+    (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+
+  private forwardToWorker() {
+    // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
+    const capabilities = this.capabilities;
+    const inert = new Set<string>(
+      Object.entries(CAPABILITY_METHODS)
+        .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
+        .map(([, method]) => method),
+    );
+    // Native account reads start an engine, so a mirror asks the worker's instead.
+    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const, ...NATIVE_ACCOUNT_READS];
+    for (const method of methods) {
+      if (inert.has(method)) continue;
+      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions' | NativeAccountRead, unknown>)[method] = async (
+        ...args: unknown[]
+      ) => {
+        if (!this.routesToWorker) return local(...args);
+        const result = await this.callWorker(method, ...args);
+        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+      };
+    }
+  }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
     if (this.isDisposed || this.engineFailure) return;
@@ -780,12 +878,25 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
+  private openSharedFeedPort = ():
+    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
+    | undefined => {
+    if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
+    const external = this.options.externalPublicData;
+    if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
+    const [port, sourcePort] = inProcessPortPair();
+    this.stopInProcessFeed = serveInProcessPublicData(external.source, sourcePort);
+    return { port, policy: { handshakeTimeoutMs: IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS, inProcess: true } };
+  };
+
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
-    if (this.options.publicFeed?.mode === 'shared') {
+    const sharedFeed = this.openSharedFeedPort();
+    if (sharedFeed) {
       this.sharedPublicFeed = new RustPublicFeedClient(
-        this.options.publicFeed.port,
+        sharedFeed.port,
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
@@ -805,6 +916,7 @@ export class RustEngineExchange extends BaseExchange {
           this.emitAndLogError(error);
           this.dispose();
         },
+        sharedFeed.policy,
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -813,6 +925,8 @@ export class RustEngineExchange extends BaseExchange {
         throw error;
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+      if (!this.sharedPublicFeed.isReady)
+        this.log('In-process public data has not loaded; continuing private startup', LogSeverity.Warning);
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
@@ -917,11 +1031,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (this.name === 'bitrue') {
-      if (!this.isPublicDataOnly) await this.fetchSymbolMaxLeverage(symbol);
+    const capabilities = this.capabilityRecord;
+    if (!capabilities || this.isPublicDataOnly) return;
+    if (capabilities.maxLeverage === 'query') {
+      await this.fetchSymbolMaxLeverage(symbol);
       return;
     }
-    if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
+    if (capabilities.leverageQuery !== 'onMetadata') return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
     this.applier.applyLeverage(symbol, rails);
   };
@@ -1198,9 +1314,7 @@ export class RustEngineExchange extends BaseExchange {
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
     for (const order of orders) {
       if (order.impliedVolatility === undefined) continue;
-      if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
-        this.rejectPreflight('Options are not enabled on this account');
-      }
+      if (!this.capabilityRecord?.options) this.rejectPreflight('Options are not enabled on this account');
       if (typeof order.impliedVolatility !== 'number' || !Number.isFinite(order.impliedVolatility) || order.impliedVolatility <= 0) {
         this.rejectPreflight('impliedVolatility must be finite and positive');
       }
@@ -1247,7 +1361,7 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
-    if (this.host && placementScopedCancelAllNames.has(this.name)) {
+    if (this.capabilityRecord?.cancelAll === 'eachPlacedSymbol') {
       for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
     }
     return this.command<string[]>({ op: 'placeOrders', orders });
@@ -1265,10 +1379,11 @@ export class RustEngineExchange extends BaseExchange {
     if ([price, amount].some((value) => value !== undefined && !Number.isFinite(value))) {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
+    const withSymbol = this.capabilityRecord?.amendWithSymbol;
     const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({
-      op: this.name === 'kucoinspot' ? 'amendOrderWithSymbol' : 'amendOrder',
+      op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
       id: order.id,
-      ...(this.name === 'kucoinspot' ? { symbol: order.symbol } : {}),
+      ...(withSymbol ? { symbol: order.symbol } : {}),
       ...('price' in update ? { price: update.price } : {}),
       ...('amount' in update ? { amount: update.amount } : {}),
     });
@@ -1277,21 +1392,13 @@ export class RustEngineExchange extends BaseExchange {
 
   cancelOrders = async (orders: Order[]) => {
     const descriptors = orders.map(({ id, symbol, type }) => ({ id, symbol, type }));
-    if (this.name === 'asterdex' || this.name === 'kucoinspot') {
+    if (this.capabilityRecord?.cancelWithSymbols) {
       await this.command({ op: 'cancelOrdersWithSymbols', orders: descriptors });
     } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id), orders: descriptors });
   };
 
   cancelSymbolOrders = async (symbol: string) => {
     await this.command({ op: 'cancelSymbolOrders', symbol });
-  };
-
-  cancelAllOrders = async () => {
-    const symbols = new Set((await this.fetchOrders()).map((order) => order.symbol));
-    for (const symbol of symbols) {
-      if (this.isDisposed) break;
-      await this.cancelSymbolOrders(symbol);
-    }
   };
 
   nuke = async (_tries = 0) => this.runNativeNuke(true);
@@ -1363,26 +1470,56 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  getAccount = async (): Promise<ExchangeAccount> => {
-    if (['coinbase', 'coinbasespot'].includes(this.name)) {
-      if (!this.host) await this.start();
-      await this.untilLoaded();
-      const userId = this.host?.accountId();
-      if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
-      return { userId };
+  // Without an engine (a main-thread mirror) the open-order lookup still answers, non-definitively.
+  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
+    this.capabilityRecord?.clientOrderLookup
+      ? this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId })
+      : this.findOrderFromOpenOrders(symbol, clientOrderId);
+
+  cancelAllOrders = async () => {
+    const mode = this.requireCapabilities().cancelAll;
+    if (mode === 'native') await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+    else if (mode === 'eachPlacedSymbol') await this.cancelEachPlacedSymbol();
+    else await this.cancelEachNativeOrderSymbol();
+  };
+
+  // Native current orders, not a JS store that can lag the engine's flush.
+  private cancelEachNativeOrderSymbol = async () => {
+    const symbols = new Set((await this.fetchOrders()).map((order) => order.symbol));
+    for (const symbol of symbols) {
+      if (this.isDisposed) break;
+      await this.cancelSymbolOrders(symbol);
     }
-    if (this.name === 'asterdex' || this.name === 'polymarket')
-      return this.command<ExchangeAccount>({ op: 'fetchAccount' });
-    if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
-    if (!this.host) await this.start();
-    await this.untilLoaded();
-    const accountId = this.options.applicationId;
-    if (!accountId || this.isPublicDataOnly) throw new Error('Orderly private account ID is required');
-    return { userId: accountId, affiliateId: accountId };
+  };
+
+  private cancelEachPlacedSymbol = async () => {
+    // Frames can lag placement ACKs. Keep attempted scopes for this account's
+    // lifetime, including uncertain/rejected outcomes and races with later places.
+    const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+    const failures: string[] = [];
+    for (const symbol of symbols) {
+      if (this.isDisposed) continue;
+      try {
+        await this.cancelSymbolOrders(symbol);
+      } catch (error) {
+        // A rejected scope must not prevent cancellation of later live orders.
+        failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
+  };
+
+  /** Identity reads leave failure visibility to their caller. */
+  getAccount = async (): Promise<ExchangeAccount> => {
+    await this.ensureHost();
+    const lookup = this.capabilityRecord?.account;
+    if (lookup === 'afterLoad') await this.start();
+    else if (lookup !== 'query') throw new Error('Not implemented');
+    return this.command<ExchangeAccount>({ op: 'fetchAccount' }, { report: false });
   };
 
   setAllLeverage = async (leverage: number) => {
-    if (orderlyNames.has(this.name)) await this.command({ op: 'setLeverage', symbol: '', leverage });
+    if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       for (const position of await this.fetchPositions()) {
         if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
@@ -1392,13 +1529,12 @@ export class RustEngineExchange extends BaseExchange {
 
   setLeverage = async (symbol: string, leverage: number, side?: PositionSide) => {
     await this.command({ op: 'setLeverage', symbol, leverage, ...(side !== undefined ? { side } : {}) });
-    if (this.name === 'kucoinspot') {
-      this.applier.applyLeverage(symbol, { buyLeverage: 1, sellLeverage: 1 });
-    }
+    // Publish the confirmed rails now rather than at the next store flush.
+    this.host?.flush();
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
-    if (!symbol && this.name !== 'blofin' && this.name !== 'kucoinspot') throw new Error('Symbol is required');
+    if (!symbol && !this.capabilityRecord?.accountMarginType) throw new Error('Symbol is required');
     await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 
@@ -1524,9 +1660,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private assertOptionQueries = (): void => {
-    if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
-      this.rejectPreflight('Options are not enabled on this account');
-    }
+    if (!this.capabilityRecord?.options) this.rejectPreflight('Options are not enabled on this account');
   };
 
   fetchOrders = async (symbols?: string[]) => {
@@ -1548,10 +1682,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
-    if (this.name === 'breakoutprop') throw new Error('Not implemented');
+    const source = this.requireCapabilities().maxLeverage;
+    if (source === 'unsupported') throw new Error('Not implemented');
+    if (source === 'rails') {
+      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      return Math.max(rails.buyLeverage, rails.sellLeverage);
+    }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
-    if (this.name === 'bitrue' && !this.isPublicDataOnly) {
+    if (source === 'query' && !this.isPublicDataOnly) {
       const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
       if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
       this.host?.flush();
@@ -1561,26 +1700,16 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
-    if (this.name !== 'asterdex' && this.name !== 'polymarket')
+    if (!this.requireCapabilities().orderBookQuery)
       throw new Error('Orderbook snapshot queries are unavailable for this venue');
-    return this.command<OrderBook>({
-      op: 'fetchOrderBook',
-      symbol,
-      limit: this.name === 'asterdex' ? (limit ?? 100) : limit,
-    });
+    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
-
-  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
-    this.name === 'asterdex' &&
-    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
-      ? '1h'
-      : interval;
 
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: this.candleInterval(opts.interval),
+      interval: opts.interval,
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -1623,29 +1752,8 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       this.host?.flush();
-      const known = this.store.fetchedLeverage[symbol];
-      if (['bitget', 'bitgetinverse', 'bitgetusdc', 'bingx', 'mexc', 'phemex', 'weex'].includes(this.name)
-        && known && Number.isFinite(known.buyLeverage) && known.buyLeverage > 0
-        && Number.isFinite(known.sellLeverage) && known.sellLeverage > 0) return known;
       let leverage: FetchedLeverage;
-      if (
-        [
-          'asterdex',
-          'blofin',
-          'bitrue',
-          'grvt',
-          'paradex',
-          'txflow',
-          'coinbase',
-          'coinbasespot',
-          'polymarket',
-          'okx',
-          'okxeu',
-          'okxdemo',
-          'okxeudemo',
-        ].includes(this.name) ||
-        orderlyNames.has(this.name)
-      )
+      if (this.requireCapabilities().leverageQuery === 'onRead')
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       else {
         const cached = this.store.fetchedLeverage[symbol];
@@ -1742,7 +1850,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const interval = this.candleInterval(opts.interval);
+    const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     const first = !listeners;
@@ -1767,8 +1875,6 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
-  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
-
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
     this.feedCandleListeners.add(listener);
@@ -1780,8 +1886,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopWorkerCapabilitySync?.();
+    this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
+    this.stopInProcessFeed?.();
+    this.stopInProcessFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();

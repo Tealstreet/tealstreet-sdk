@@ -15,6 +15,7 @@ const ORDER: &str = r#"{"id":"order-1","symbol":"BTC-USDT","clientOid":"caller-1
 struct H {
     e: Engine<KucoinSpot>,
     actions: Vec<Action>,
+    failures: Vec<safe_cex_engine::VenueError>,
     requests: Vec<HttpRequest>,
     now: f64,
     public: SocketId,
@@ -45,6 +46,7 @@ impl H {
         let mut h = Self {
             e: Engine::new(KucoinSpot::new(options)),
             actions: vec![],
+            failures: vec![],
             requests: vec![],
             now: 1700000000000.0,
             public: SocketId(0),
@@ -139,6 +141,15 @@ impl H {
                 self.actions
                     .retain(|a| !matches!(a,Action::SetTimer{timer:old,..}if timer==old));
             }
+            // Failures as the plain text the host renders.
+            let action = match action {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    let result = Err(error.legacy_text());
+                    self.failures.push(error);
+                    Action::Notice(Notice::CommandDone { command, result })
+                }
+                action => action,
+            };
             self.actions.push(action);
         }
     }
@@ -423,7 +434,7 @@ fn candles_use_spot_order_and_second_timestamps() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: "BTC-USDT".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(1),
         from_ms: None,
         to_ms: Some(1700000060000.0),
@@ -499,7 +510,7 @@ fn hf_native_place_and_amend_keep_caller_identity_on_original() {
 }
 #[test]
 fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
-    assert!(!KucoinSpot::new(Options::default()).supports_options());
+    assert!(!KucoinSpot::new(Options::default()).capabilities().options);
     for invalid in ["duplicate", "bracket", "type", "id", "iv"] {
         let mut h = H::new(true);
         h.actions.clear();
@@ -1293,7 +1304,7 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
         h.command(Command::FetchCandles {
             command: 3,
             symbol: "BTC-USDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(10),
@@ -1658,7 +1669,7 @@ fn spot_supervisors_repost_role_tokens_with_increasing_backoff_and_restore_inter
             });
             h.command(Command::SubscribeCandles {
                 symbol: "BTC-USDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             });
         }
         let old = if private { h.private } else { h.public };
@@ -1890,5 +1901,74 @@ fn spot_invalid_negotiated_heartbeat_intervals_reject_before_connecting() {
             h.retry(1500.0, 2000.0);
             assert_eq!(h.http(spot_private_path(private)).method, Method::Post);
         }
+    }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (503, r#"{"code":"500000","msg":"busy"}"#, unknown),
+        (
+            200,
+            r#"{"code":"200004","msg":"Balance insufficient"}"#,
+            rejected(ErrorKind::Rejected),
+        ),
+        (
+            401,
+            r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#,
+            rejected(ErrorKind::AuthInvalid),
+        ),
+        (200, r#"{"code":"200000","data":{}}"#, unknown),
+    ] {
+        let mut h = H::new(true);
+        h.command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![place(None)],
+        });
+        let r = h.http("/hf/orders");
+        h.respond(&r, status, body);
+        let text = h.done(1).unwrap_err();
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text()),
+            (classified, text),
+            "{status} {body}"
+        );
+    }
+    let mut h = H::new(true);
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![place(None)],
+    });
+    let r = h.http("/hf/orders");
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "reset",
+    });
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+}
+
+#[test]
+fn balance_events_faster_than_the_heal_read_cannot_starve_the_balance() {
+    let mut h = H::new(true);
+    let event = json!({"currency":"USDT","available":"900","hold":"100","total":"1000"});
+    h.ws(true, "/account/balance", event.clone());
+    h.timer(250.0);
+    let mut read = h.http("/accounts?type=trade");
+    for step in 1..=3u32 {
+        h.ws(true, "/account/balance", event.clone());
+        let total = (2000 + step).to_string();
+        let body = json!({"code":"200000","data":[{"currency":"USDT","available":total,"holds":"0","balance":total}]});
+        h.respond(&read, 200, &body.to_string());
+        let expected = if step <= 2 { 1300.0 } else { 2003.0 };
+        assert_eq!(h.e.store().balance().total, expected, "step {step}");
+        h.timer(250.0);
+        read = h.http("/accounts?type=trade");
     }
 }

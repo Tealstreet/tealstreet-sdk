@@ -1,5 +1,7 @@
 use super::*;
+use crate::wire::not_sent;
 use safe_cex_engine::num::{adjust, format};
+use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Placement<'a> {
@@ -34,6 +36,8 @@ pub struct Job {
     ids: Vec<String>,
     current: WriteKind,
     returns_ids: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 // Keep entropy failure fallible so batch preflight cannot dispatch a partial write.
 fn client_oid(
@@ -181,10 +185,9 @@ impl KucoinSpot {
             {
                 Some(id) => job.ids.push(id.into()),
                 None => {
-                    cx.done(
-                        job.command,
-                        Err("KuCoin Spot placement acknowledgement missing orderId".into()),
-                    );
+                    let error =
+                        VenueError::new("KuCoin Spot placement acknowledgement missing orderId");
+                    self.write_failed(cx, job, error.outcome(Outcome::Unknown));
                     return;
                 }
             },
@@ -196,15 +199,31 @@ impl KucoinSpot {
                         .into(),
                 ),
                 Err(e) => {
-                    cx.done(job.command, Err(e.to_string()));
+                    let error = VenueError::new(e.to_string()).outcome(Outcome::Unknown);
+                    self.write_failed(cx, job, error);
                     return;
                 }
             },
             WriteKind::Cancel => {}
         }
+        job.effective = true;
         self.revision += 1;
         self.heal(cx, false);
         self.next_write(cx, job);
+    }
+    /// Fails the write job; after a write took effect it is never Rejected or NotSent.
+    pub(super) fn write_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: Job,
+        mut error: VenueError,
+    ) {
+        if (job.effective || !job.ids.is_empty())
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
+            error.outcome = None;
+        }
+        cx.fail(job.command, error);
     }
     pub(super) fn trade(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let command = match command {
@@ -215,7 +234,7 @@ impl KucoinSpot {
                 amount,
             } => {
                 let Some(order) = cx.store.order(&id) else {
-                    cx.done(command, Err("KuCoin Spot amend order not found".into()));
+                    cx.fail(command, not_sent("KuCoin Spot amend order not found"));
                     return;
                 };
                 Command::AmendOrderWithSymbol {
@@ -387,13 +406,19 @@ impl KucoinSpot {
             Command::FetchStpMode { command }
             | Command::FetchOrderBook { command, .. }
             | Command::SetStpMode { command, .. } => {
-                cx.done(command, Err("unsupported KuCoin Spot command".into()));
+                cx.fail(
+                    command,
+                    not_sent("unsupported KuCoin Spot command").kind(ErrorKind::Unsupported),
+                );
                 return;
             }
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.done(id, Err("KuCoin Spot requires credentials".into()));
+            cx.fail(
+                id,
+                not_sent("KuCoin Spot requires credentials").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         match build {
@@ -405,9 +430,10 @@ impl KucoinSpot {
                     ids: vec![],
                     current: WriteKind::Cancel,
                     returns_ids,
+                    effective: false,
                 },
             ),
-            Err(e) => cx.done(id, Err(e)),
+            Err(e) => cx.fail(id, not_sent(e)),
         }
     }
 }
