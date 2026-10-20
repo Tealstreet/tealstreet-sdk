@@ -832,6 +832,29 @@ impl Woo {
                         compact(&leaf.symbol)
                     };
                     if cx.store.market(&symbol).is_none() {
+                        let supported = !*algo
+                            || matches!(
+                                leaf.algo_type.as_ref(),
+                                "STOP" | "STOP_LOSS" | "TAKE_PROFIT" | "TRAILING_STOP"
+                            );
+                        let terminal = terminal(if *algo {
+                            &leaf.algo_status
+                        } else {
+                            &leaf.status
+                        })
+                        .is_some();
+                        let native = if leaf.symbol.is_empty() {
+                            parent.map_or("", |p| p.symbol.as_ref())
+                        } else {
+                            leaf.symbol.as_ref()
+                        };
+                        if native.starts_with("PERP_") && supported && !terminal {
+                            *bad = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "WOO working order market unavailable; preserving previous orders",
+                            );
+                        }
                         continue;
                     }
                     let relevant = !*algo

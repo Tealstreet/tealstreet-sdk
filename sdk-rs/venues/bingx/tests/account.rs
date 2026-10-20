@@ -657,3 +657,19 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
             .any(|log| log.contains("owned position market unavailable"))
     );
 }
+
+#[test]
+fn unknown_working_order_rejects_snapshot_but_terminal_rows_do_not() {
+    for (status, loaded) in [("NEW", false), ("FILLED", true)] {
+        let mut h = Harness::new();
+        h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+        h.respond(
+            ORDERS,
+            200,
+            &OPEN
+                .replace("BTC-USDT", "MISSING-USDT")
+                .replace("NEW", status),
+        );
+        assert_eq!(h.engine.store().loaded().orders, loaded);
+    }
+}

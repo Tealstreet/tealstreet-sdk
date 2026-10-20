@@ -437,7 +437,16 @@ impl Backpack {
                 ..
             } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
-                    if cx.store.market(&r.symbol).is_some() {
+                    if cx.store.market(&r.symbol).is_none()
+                        && r.symbol.ends_with("_PERP")
+                        && status(&r.status) == OrderStatus::Open
+                    {
+                        *invalid = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "Backpack working order market unavailable; preserving previous orders",
+                        );
+                    } else if cx.store.market(&r.symbol).is_some() {
                         if r.trigger_price.is_some()
                             && r.trigger_by.is_none()
                             && let Ok(repair) = self.trigger_repair(cx, &r)

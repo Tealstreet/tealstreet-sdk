@@ -851,3 +851,46 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
         );
     }
 }
+
+#[test]
+fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapshot() {
+    for (algo_bad, terminal_children) in [(false, false), (true, false), (true, true)] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        let regular = take(&mut reads, "/v1/orders?");
+        let unknown_regular = ORDER.replace("PERP_BTC_USDT", "PERP_MISSING_USDT");
+        response(
+            &mut e,
+            &regular,
+            80.0,
+            &page(if algo_bad { "" } else { &unknown_regular }),
+        );
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        let mut unknown_algo = ALGO.replace("PERP_BTC_USDT", "PERP_MISSING_USDT").replacen(
+            "\"rootAlgoOrderId\"",
+            "\"algoStatus\":\"FILLED\",\"rootAlgoOrderId\"",
+            1,
+        );
+        if terminal_children {
+            unknown_algo =
+                unknown_algo.replace("\"algoStatus\":\"NEW\"", "\"algoStatus\":\"FILLED\"");
+        }
+        response(
+            &mut e,
+            &algo,
+            90.0,
+            &algos(if algo_bad { &unknown_algo } else { "" }),
+        );
+        if terminal_children {
+            assert!(e.store().orders().is_empty());
+        } else {
+            assert_eq!(e.store().orders(), before);
+            assert!(e.drain_actions().any(|action| matches!(action,
+                Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+        }
+    }
+}

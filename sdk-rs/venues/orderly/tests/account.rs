@@ -621,3 +621,18 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
     let (e, _) = ready_with(ORDER, "[]", &body);
     assert!(!e.store().loaded().positions);
 }
+
+#[test]
+fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
+    for (symbol, status, loaded) in [
+        ("PERP_MISSING_USDC", "NEW", false),
+        ("PERP_MISSING_USDC", "FILLED", true),
+        ("SPOT_MISSING_USDC", "NEW", true),
+    ] {
+        let order = ORDER
+            .replace("PERP_BTC_USDC", symbol)
+            .replace("NEW", status);
+        let (e, _) = ready_with(&order, "[]", POSITIONS);
+        assert_eq!(e.store().loaded().orders, loaded, "{symbol} {status}");
+    }
+}

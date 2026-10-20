@@ -288,3 +288,18 @@ fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
     let (e, _) = ready_position(200, &body);
     assert!(!e.store().loaded().positions);
 }
+
+#[test]
+fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
+    for (symbol, status, loaded) in [
+        ("MISSING_USDC_PERP", "New", false),
+        ("MISSING_USDC_PERP", "Filled", true),
+        ("MISSING_USDC", "New", true),
+    ] {
+        let order = ORDER
+            .replace("SOL_USDC_PERP", symbol)
+            .replace("New", status);
+        let (e, _) = ready_orders(&format!("[{order}]"));
+        assert_eq!(e.store().loaded().orders, loaded, "{symbol} {status}");
+    }
+}

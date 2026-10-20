@@ -1093,3 +1093,36 @@ fn unknown_owned_live_position_cannot_grant_snapshot_authority_or_consume_sequen
     );
     assert!(e.store().loaded().orders);
 }
+
+#[test]
+fn unknown_working_live_order_cannot_clear_previous_snapshot_or_consume_sequence() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    push_orders(&mut e, socket, "incremental", 1, &order("New", 1));
+    let before = e.store().orders().to_vec();
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":2,"orders_p":[{}]}}"#,
+            order("New", 2).replace("BTCUSDT", "MISSINGUSDT")
+        ),
+    );
+    assert_eq!(e.store().orders(), before);
+    assert!(!e.store().loaded().orders);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("working order market unavailable"))));
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":2,"orders_p":[{}]}}"#,
+            order("New", 2).replace("69000", "70000")
+        ),
+    );
+    // The corrected same-sequence snapshot is accepted, while the newer
+    // incremental row remains protected by the existing snapshot race fence.
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().order("one").unwrap().price, 69000.0);
+}

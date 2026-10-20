@@ -112,3 +112,31 @@ Shared public-feed compatibility and seed readiness remain prerequisites.
 Fake-Wasm tests use real host frame application, worker frame forwarding and a
 shared-feed handshake; public discovery warnings do not invalidate funded
 account validation, while private authentication errors still do.
+
+The final owned-working-order boundary audit covers the same 12 families.
+WOO regular/protective children, Orderly lineages, Backpack, BingX and
+Crypto.com reject a snapshot that would silently discard a working supported
+product whose market is absent. Terminal rows and explicitly unsupported spot
+products retain their previous filtering behavior. Phemex validates unknown
+working linear orders before granting live snapshot authority or consuming its
+sequence. KuCoin rejects unknown working futures sizing in REST and live input
+rather than treating a lot as one unit. All retain prior whole order snapshots
+and emit a visible warning; tolerant valid-peer merging remains the next phase.
+MEXC and Bitget already reject failed order mapping, while Binance, Bybit and
+WEEX preserve native unknown order rows without catalogue-dependent quantity
+conversion. No additional skip guard is needed for those paths.
+
+| Family | Working-order mapping when public market metadata is missing |
+| --- | --- |
+| Binance | Native placement quantities retained; inverse order quantities are native lots, unlike base-unit positions. |
+| Bybit | Native order rows retained; invalid semantic mapping rejects its snapshot. |
+| Bitget | Existing mapper returns an error and rejects the snapshot. |
+| BingX | New working-row guard rejects its snapshot; terminal rows remain filtered. |
+| Backpack | New perpetual working-row guard rejects its snapshot; terminal/spot filtering stays unchanged. |
+| Crypto.com | New perpetual working-row guard rejects its snapshot; terminal/spot filtering stays unchanged. |
+| KuCoin | New working-row guard rejects guessed lot sizing; both initial normal/stop books must complete before `loaded.orders`. Unknown-symbol live executions warn and preserve state before sizing/fills. |
+| MEXC | Existing failed mapper marks its snapshot invalid. |
+| Orderly | New working-lineage guard rejects its snapshot; explicit final lineage status and spot exclusions stay unchanged. |
+| Phemex | New working linear-row guard rejects live snapshot authority before its sequence is consumed. |
+| WEEX | Native order converters preserve rows without catalogue-based sizing. |
+| WOO | New regular/protective leaf guard rejects its snapshot; a FILLED parent does not prove a NEW protection child is terminal. |

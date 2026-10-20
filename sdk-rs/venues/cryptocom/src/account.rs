@@ -363,6 +363,11 @@ impl Cryptocom {
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.order(cx.now));
+                } else if row.instrument_name.ends_with("-PERP")
+                    && status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open
+                {
+                    request.invalid = true;
+                    cx.log(LogLevel::Warning, "Crypto.com working order market unavailable; preserving previous orders");
                 }
             }),
             Rows::Balance(balance) => serde_json::from_str::<BalanceRow>(item).map(|row| {

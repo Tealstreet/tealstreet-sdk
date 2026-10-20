@@ -569,9 +569,17 @@ impl Account {
                     *failed = true;
                     return;
                 };
-                if cx.store.market(&order.symbol).is_none()
-                    || self.terminal_orders.contains_key(&order.id)
-                {
+                if self.terminal_orders.contains_key(&order.id) {
+                    return;
+                }
+                if cx.store.market(&order.symbol).is_none() {
+                    if order.status == OrderStatus::Open {
+                        *failed = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "BingX working order market unavailable; preserving previous orders",
+                        );
+                    }
                     return;
                 }
                 if native.complete_metadata() {

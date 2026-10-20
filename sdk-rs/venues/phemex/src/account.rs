@@ -607,6 +607,19 @@ impl PhemexPerpetuals {
         };
         if orders.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| {
+                (row.symbol.ends_with("USDT") || row.symbol.ends_with("USDC"))
+                    && row.status() == Some(OrderStatus::Open)
+                    && cx.store.market(&row.symbol.to_ascii_uppercase()).is_none()
+            })
+        }) {
+            cx.log(
+                LogLevel::Warning,
+                "Phemex working order market unavailable; preserving previous orders",
+            );
+            return true;
+        }
+        if orders.as_ref().is_some_and(|rows| {
+            rows.iter().any(|row| {
                 cx.store.market(&row.symbol.to_ascii_uppercase()).is_some()
                     && row.orders(cx.now).is_none()
             })

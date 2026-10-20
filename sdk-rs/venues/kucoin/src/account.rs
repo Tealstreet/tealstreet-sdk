@@ -73,6 +73,7 @@ pub(crate) struct Account {
     order_versions: HashMap<String, u64>,
     order_fills: HashMap<String, f64>,
     order_books: HashMap<String, bool>,
+    initial_order_books: u8,
     terminal: HashSet<String>,
     order_absences: HashMap<String, u64>,
     incomplete_orders: HashSet<String>,
@@ -374,7 +375,14 @@ pub(crate) fn map_order(store: &Store, raw: &RawValue, now: f64) -> Result<Vec<O
     if row.id.is_empty() && row.order_id.is_empty() {
         return Err("KuCoin order missing id".into());
     }
-    Ok(row.orders(store, now))
+    let orders = row.orders(store, now);
+    if orders
+        .iter()
+        .any(|order| order.status == OrderStatus::Open && store.market(&order.symbol).is_none())
+    {
+        return Err("KuCoin working order market unavailable; preserving previous orders".into());
+    }
+    Ok(orders)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -671,7 +679,13 @@ impl Kucoin {
                         request.invalid = true;
                     }
                 }
-                Err(_) => request.invalid = true,
+                Err(_) => {
+                    request.invalid = true;
+                    cx.log(
+                        LogLevel::Warning,
+                        "KuCoin invalid working order mapping; preserving previous orders",
+                    );
+                }
             },
             _ => request.invalid = true,
         }
@@ -922,7 +936,24 @@ impl Kucoin {
                         orders.push(row);
                     }
                 }
-                cx.store.set_orders(orders);
+                self.account.initial_order_books |= if stop { 2 } else { 1 };
+                if cx.store.loaded().orders || self.account.initial_order_books == 3 {
+                    cx.store.set_orders(orders);
+                } else {
+                    // Publish the valid book without claiming the other book was read.
+                    let removed: Vec<_> = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|old| !orders.iter().any(|order| order.id == old.id))
+                        .map(|old| old.id.clone())
+                        .collect();
+                    cx.store
+                        .remove_orders(&removed.iter().map(String::as_str).collect::<Vec<_>>());
+                    for order in orders {
+                        cx.store.upsert_order(order);
+                    }
+                }
             }
             Read::Balance => {
                 if let Some(row) = envelope
@@ -1030,6 +1061,13 @@ impl Kucoin {
             let Ok(row) = serde_json::from_str::<OrderRow>(data.get()) else {
                 return;
             };
+            if cx.store.market(&symbol(cx.store, row.symbol)).is_none() {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin working order market unavailable; preserving previous orders",
+                );
+                return;
+            }
             let orders = row.orders(cx.store, cx.now);
             if orders[0].id.is_empty() {
                 return;
