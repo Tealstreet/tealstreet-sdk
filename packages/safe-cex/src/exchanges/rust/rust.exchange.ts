@@ -1,3 +1,4 @@
+import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -291,6 +292,10 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
+  /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
+  changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
+  /** Lighter: the engine's cached account tier, when known. */
+  fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
@@ -385,6 +390,13 @@ export class RustEngineExchange extends BaseExchange {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
+    }
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      this.changeAccountTier = async (tier: LighterAccountTier) => {
+        await this.command<null>({ op: 'setAccountTier', tier });
+      };
+      this.fetchAccountTier = async () =>
+        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
     }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {

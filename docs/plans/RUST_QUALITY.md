@@ -112,7 +112,8 @@ Low risk, do first:
 3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
    Migrate with constants unchanged, then jitter, then one startup-retry policy
    (fixes startup fail-closed on OKX, BloFin, Bitget).
-4. `engine::time`: ISO/civil-date math in 9 venues.
+4. ~~`engine::time`: ISO/civil-date math in 9 venues.~~ Done: civil math,
+   month arithmetic and ISO formatting shared; venue text grammars stay local.
 
 Medium:
 5. `SnapshotBuilder<T>` with `push`, `reject(id, err)`, `commit`: a rejected

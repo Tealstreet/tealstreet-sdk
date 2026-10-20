@@ -314,3 +314,124 @@ fn unknown_and_nonlabel_values_do_not_become_standard_or_skip_builder_approval()
         );
     }
 }
+impl Client {
+    fn action(
+        &mut self,
+        now: f64,
+        command: u32,
+        action: safe_cex_engine::VenueAction,
+    ) -> Vec<Action> {
+        self.engine
+            .handle(now, Event::Command(Command::Venue { command, action }));
+        self.engine.drain_actions().collect()
+    }
+}
+fn done(actions: &[Action], id: u32) -> Option<&Result<String, String>> {
+    actions.iter().find_map(|action| match action {
+        Action::Notice(Notice::CommandDone { command, result }) if *command == id => Some(result),
+        _ => None,
+    })
+}
+#[test]
+fn account_tier_reads_the_cached_tier_and_a_change_posts_then_rereads_limits() {
+    let mut client = Client::new(options());
+    let read = client.tick(2_000.0).pop().unwrap();
+    reply_at(
+        &mut client.engine,
+        NOW + 2_001.0,
+        &read,
+        200,
+        r#"{"code":200,"user_tier_name":"standard"}"#,
+    );
+    client.engine.drain_actions().count();
+    let actions = client.action(
+        NOW + 2_002.0,
+        61,
+        safe_cex_engine::VenueAction::FetchAccountTier,
+    );
+    assert_eq!(done(&actions, 61), Some(&Ok("\"standard\"".into())));
+    let actions = client.action(
+        NOW + 2_003.0,
+        62,
+        safe_cex_engine::VenueAction::SetAccountTier {
+            tier: "premium".into(),
+        },
+    );
+    let post = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("/api/v1/changeAccountTier") => {
+                Some(request.clone())
+            }
+            _ => None,
+        })
+        .expect("tier change request");
+    assert_eq!(post.method, safe_cex_engine::Method::Post);
+    assert_eq!(
+        post.body.as_deref(),
+        Some("account_index=718895&new_tier=premium")
+    );
+    assert!(
+        post.headers
+            .iter()
+            .any(|(k, v)| *k == "authorization" && !v.is_empty())
+    );
+    reply_at(
+        &mut client.engine,
+        NOW + 2_004.0,
+        &post,
+        200,
+        r#"{"code":200}"#,
+    );
+    let actions = client.engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(done(&actions, 62), Some(&Ok("null".into())));
+    assert!(actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("accountLimits"))
+    ));
+}
+#[test]
+fn rejected_or_invalid_tier_changes_report_the_reason() {
+    let mut client = Client::new(options());
+    let actions = client.action(
+        NOW,
+        63,
+        safe_cex_engine::VenueAction::SetAccountTier {
+            tier: "gold".into(),
+        },
+    );
+    assert!(
+        done(&actions, 63)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("standard, premium or plus")
+    );
+    let actions = client.action(
+        NOW,
+        64,
+        safe_cex_engine::VenueAction::SetAccountTier {
+            tier: "plus".into(),
+        },
+    );
+    let post = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request.clone()),
+            _ => None,
+        })
+        .unwrap();
+    reply_at(
+        &mut client.engine,
+        NOW + 1.0,
+        &post,
+        200,
+        r#"{"code":21100,"message":"tier change cooldown"}"#,
+    );
+    let actions = client.engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        done(&actions, 64),
+        Some(&Err(
+            "Lighter account tier change failed: tier change cooldown".into()
+        ))
+    );
+}

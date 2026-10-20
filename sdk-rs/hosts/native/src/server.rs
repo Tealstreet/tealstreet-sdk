@@ -697,7 +697,8 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::FetchLeverage { command, .. }
         | Command::FetchMaxLeverage { command, .. }
         | Command::Query { command, .. }
-        | Command::FetchCandles { command, .. } => Some(command),
+        | Command::FetchCandles { command, .. }
+        | Command::Venue { command, .. } => Some(command),
         Command::SetTickerSymbols { .. }
         | Command::SubscribeOrderBook { .. }
         | Command::UnsubscribeOrderBook { .. }
