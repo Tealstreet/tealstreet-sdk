@@ -938,6 +938,7 @@ if (!isPrivate) {
 }
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
+  console.log(`per-run metrics ${JSON.stringify({ ts: results.ts.map((result) => result.metrics), rust: results.rust.map((result) => result.metrics) })}`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);
   process.exit(1);
 }
