@@ -136,8 +136,10 @@ describe('Rust cancel-all placement scopes', () => {
     expect(submitted.clientOrderId).toBe('caller123');
   });
 
-  it('keeps the generic store-only cancel-all behavior on unaffected venues', async () => {
-    const { exchange, command } = setup('backpack');
+  it('keeps the generic open-orders cancel-all behavior on unaffected venues', async () => {
+    const { exchange, command, store } = setup('backpack');
+    // Generic venues select scopes from the authoritative native order read.
+    Object.defineProperty(exchange, 'fetchOrders', { value: async () => store.orders });
     await exchange.placeOrder(order());
     await exchange.cancelAllOrders();
     expect(command).toHaveBeenCalledTimes(1);

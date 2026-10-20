@@ -459,7 +459,7 @@ describe('Rust native current-account reads', () => {
     await r.exchange.setAllLeverage(9);
     expect(r.commands.filter((c) => c.command !== undefined).map(({ command: _id, ...c }) => c)).toEqual([
       { op: 'cancelSymbolOrders', symbol: 'BTCUSDT' },
-      { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 9 },
+      { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 9, side: PositionSide.Long },
     ]);
   });
 

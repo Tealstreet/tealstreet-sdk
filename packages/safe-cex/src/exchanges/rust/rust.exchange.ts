@@ -20,7 +20,6 @@ import type {
   OrderBook,
   OrderHistoryOptions,
   PlaceOrderOpts,
-  PositionSide,
   PublicTrade,
   UpdateOrderOpts,
   ValidateAccountResult,
