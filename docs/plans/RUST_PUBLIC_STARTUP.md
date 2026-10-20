@@ -69,3 +69,36 @@ Source and fixture repairs are not yet complete. Do not merge this WIP commit:
 
 Third phase is separately planned in `RUST_APP_STOP_PAYLOADS.md` and the private
 rows/ticker subscription audit. It has not been implemented or verified.
+
+## Review repairs in progress (2026-10-20)
+
+- `b8b858568f`: independently reviewed ApeX/Bitrue funded valuation fixes,
+  five focused regressions and both crates' all-target Clippy passed. These
+  explicit TS bugs are documented in `KNOWN_TS_FIXES`; no replay output is
+  normalized by this change.
+- Public all-malformed source responses preserve existing state and retry;
+  a successful earlier product/page must not hide a wholly malformed later
+  required source. Good peers continue to commit.
+- Public read retries emit warnings so an otherwise usable authenticated
+  account is not rejected by SDK validation. Auth/command failures retain
+  their existing error behavior. SDK private readiness requires markets and
+  actual private snapshots, independently of ticker readiness; public-only
+  and shared-feed readiness still require genuine public data.
+- Early socket data must survive delayed REST ticker seeds. Field-level
+  overlays retain only fields actually received live, so a BBO cannot suppress
+  valid REST mark/last data. Backpack must have one owned public socket.
+- Hyperliquid discovery retains native positional identities, preserves
+  quotes already received while missing contexts retry, and does not mark a
+  wholly unusable catalogue loaded. During partial discovery, private reads
+  cannot claim an empty account before an authoritative snapshot. Standalone
+  spot still retains raw unpriceable holdings with zero notional after a
+  complete catalogue; temporary missing contexts preserve prior valuation.
+
+**Explicit scope boundary:** BreakoutProp's authenticated Instruments/Details/
+Quotes discovery remains for the third phase alongside its account row audit.
+Those catalogue/ticker reads still need the shared retry and malformed-peer
+policy before the overall cross-venue task can be called complete. This public
+PR must not claim all 26 families have finished that migration.
+
+Independent review reports and test totals remain provisional until the final
+source is committed and all native/Wasm/root/replay gates have passed.
