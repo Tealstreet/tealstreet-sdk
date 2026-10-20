@@ -110,6 +110,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 | 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
 | 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
+| 15 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve
@@ -302,9 +303,74 @@ as they are; zero-copy book consumers (`Float64Array` rows into the order
 book, DOM and depth chart) come after that. How the web build obtains the
 compiled wasm is decided then.
 
-Then: exchange-server moves to the native host and streams the same frames
-(with `BOOK_DELTA` sections for networked clients — full books every flush
-are ~450 KB/s for two 1,000-level books).
+Then: exchange-server moves to the native host and streams the same frames.
+The first step is the native frame server (plan and acceptance checkpoints in
+`RUST_FRAME_SERVER_PROGRESS.md`). Deployment and application adoption remain
+separate from this engine/transport change.
+
+#### Native frame server migration
+
+The mirror's `packages/safe-cex-server` is a library, not the deployed
+exchange-server application. Its current exports are:
+
+- `RedisCandleCacheBackend`: adapts a caller-supplied Redis/Valkey client to
+  the SDK key-value candle cache; prefers SCAN, with KEYS as a fallback.
+- `PublicExchangeFactory`: owns a public-only exchange per venue, hydrates
+  market stores from quantized UTC-hour snapshots, serializes refreshes with
+  an in-process lock, and falls back to the latest valid cached snapshot.
+  Market snapshots and their validated latest pointers have three-hour TTLs.
+  Ticker-cache helpers provide a 150-second bootstrap seed with a 300-second
+  TTL; these seeds are not executable quotes.
+- `PublicdataTickerBridge`: filters explicitly requested Binance/Bybit
+  capabilities and fresh connected health, loads market indexes, and maps
+  the publicdata service's JSON ticker snapshots/deltas into SDK ticker state.
+  An empty eligible set does not subscribe to all venues.
+
+The native host replaces the per-account venue/Store execution loop, outbound
+venue REST/WebSockets/timers, and repeated serialization of live account and
+book state. A configured account owns one engine independently of its client
+connections. Its authenticated clients receive a binary `snapshot_frame`
+first, then ordered SCXF flush frames; commands and their correlated results
+remain typed JSON. An account token grants full command access to that account;
+client-supplied venue credentials and account creation are outside this protocol.
+The embedding application supplies account engines, routing and token policy.
+The runnable example uses Binance; the server API accepts other venue engines.
+
+`BOOK_DELTA` carries only changed `[price, amount]` levels since the previous
+flush (zero deletes). Full `BOOK` replaces the baseline on subscription,
+resnapshot/gap, or market identity changes. Local WASM consumers retain full
+books by default. The engine's `book-deltas` feature is enabled by the native
+host; default WASM builds omit the producer and baseline state while retaining
+the shared wire decoder. Network consumers reconstruct sorted levels and cumulative
+totals. A new connection first establishes the current flush boundary before
+its snapshot, so snapshot interleaving cannot omit a later reverted level.
+A slow client is disconnected instead of dropping frames; reconnect starts
+with a fresh snapshot. A lost connection is a stream gap, never permission to
+apply more deltas against stale state.
+
+For now TS retains Redis persistence, hourly refresh/stale-fallback policy,
+bootstrap ticker caches, the publicdata capability/health adapter, and the
+worker shell's chasers, TWAP, CLI, post-processors and derived store fields.
+Application session authorization, TLS termination, credential provisioning,
+process supervision and public routing remain deployment responsibilities.
+No cache export or existing hosted-account protocol is removed in this step.
+A later TS session adapter can translate worker commands and feed these frames
+through `FrameApplier`; only after parity for shell behavior and cache hydration
+can the deployed exchange-server stop its old worker execution path. Browser
+adoption is still the separate master/Copybara step above.
+
+Bandwidth is measured with a deterministic two-book fixture, without a load
+test. Report depth per side, number of changed levels, flush cadence, full and
+delta SCXF bytes, WebSocket framing and initial/resync snapshots separately;
+compression and TCP/TLS/IP overhead are not inferred from payload bytes.
+The deterministic Rust writer/JS reader check (`yarn rust:test-frame-wire`)
+measures two books with 1,000 levels **per side**, changing ten levels per side
+per book at four flushes/second: full SCXF frames are 96,064 bytes and deltas
+704 bytes, a 99.267% payload reduction (384,256 versus 2,816 B/s). With one
+unmasked WebSocket message per frame the totals are 384,296 versus 2,832 B/s.
+A book-only initial/resync snapshot still costs 96,064 bytes; market and account
+sections add their current serialized size. Change counts and cadence are
+fixture assumptions, not a live-feed bandwidth forecast.
 
 ### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 
@@ -327,7 +393,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 
 | Venue | State |
 | --- | --- |
-| Binance USD-M, Binance PM | done |
+| Binance USD-M, Binance PM | done; regression gates retained by variants lane |
+| Binance Spot, COIN-M inverse | port complete in existing Binance crate ([#1326](https://github.com/Tealstreet/tealstreet-sdk/pull/1326)); all four Binance profiles and fresh Hyro regression gates pass |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |
@@ -354,14 +421,147 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | BreakoutProp legacy DXtrade | implemented; [PR #1328](https://github.com/Tealstreet/tealstreet-sdk/pull/1328), documented public/private gates PASS (scripted public fixture accepted by Sam); live capture needs Sam's legacy DXtrade credentials (`RUST_BREAKOUTPROP.md`) |
-| TxFlow, Binance spot and inverse | next, as lanes free up |
+| TxFlow | next, as lanes free up |
 
-### 9. Delete TypeScript and merge
+### 9. Prove consumer cutover, then delete TypeScript — readiness work
 
-- Each venue that passes both gates and ships has its TS implementation
-  deleted in the same PR.
-- After the last venue: delete `BaseExchange`, the TS Store and the object
-  payload paths, then merge `feat/rust-rewrite` into master once.
+**Do not delete TS venues in the readiness change.** A venue replay gate proves
+its protocol and performance; deletion also requires the SDK's consumers to
+work with its frames. The implementation/checkpoints are in
+[RUST_CUTOVER_READINESS.md](RUST_CUTOVER_READINESS.md). The exhaustive
+[caller inventory and deletion dependencies](RUST_CUTOVER_CALLERS.md) lists
+each direct `BaseExchange`/venue/registry importer across `packages/` and
+`apps/`, including type-only callers, tests and dynamic reference loaders.
+
+The SDK has 49 registered names: 43 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 35 with opt-in Rust adapters but
+TS defaults, and six without a Rust registration. `createExchange` now honors
+explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
+registries remains a separate cutover decision.
+
+#### Consumer evidence required for every registered Rust alias
+
+`packages/safe-cex/src/__tests__/cutover/*.wasm.test.ts`, selected by
+`SAFE_CEX_WASM_TESTS=1`, enumerates `RUST_VENUES` directly:
+
+- Real combined-WASM venue startup uses recorded public responses/native
+  documented-schema inputs through `RustEngineExchange` and the actual
+  `ExchangeWorker` frame mode. Main-thread transfer and late-consumer snapshots
+  must preserve nonempty markets and tickers, including spot/inverse identity.
+  This includes HTTP-polling venues: BreakoutProp consumes documented
+  authenticated session/account/quote fixtures without a venue WebSocket. Its
+  scripted fixture is not live credential-capture/connectivity proof.
+- An independent binary format-1 corpus tests private/lifecycle edge cases
+  through the real host/worker/adapter shell, against ordinary TS store inputs.
+  This corpus is an explicit frame-boundary oracle, not a private venue emulator.
+  It checks split ticker deltas, orders/positions and empty-section clearing,
+  balance, leverage rails, IDs, books/candles/fills, terminal-order opt-in,
+  update-ID bumps, and `serialize`/stub parity including derived fields.
+- Actual post-processors, CLI monitor/positions/orders reads, chaser fill
+  arithmetic and supervisor notifications, and TWAP limit-price selection must
+  agree with the TS store consumer contract. Preserve native quantity extras:
+  the readiness audit found and repaired OKX's missing native fill bridge.
+  Main-thread orders also reconstruct worker-derived chaser tags through the
+  public order mutation path, preserving update-ID observers in either frame/
+  derived-payload arrival order.
+  Do not infer terminality from a frame's `Closed` enum: some triggered orders
+  are deliberately reopenable unless explicitly marked final.
+
+These tests do not certify private live connectivity, optional account modes,
+or downstream tealstreet-next deployment. Generic per-alias algorithm fixtures
+prove the shared frame/store contract; they do not enable venue capabilities.
+Polymarket remains development-only (`enabled: false`, `enabledInDev: true`),
+with `supportsChaser: false` and native 1x leverage rails. BreakoutProp also has
+`supportsChaser: false`; its generic algorithm inputs do not enable chasers.
+Native venue/private replay and performance matrices remain required alongside
+consumer conformance.
+
+#### Per-venue deletion readiness
+
+All rows retain TS/reference code in this change. “Opt-in” means the consumer
+suite covers the named adapter, not that every TS product/account option is
+ported. The linked inventory records exact callers and product constraints.
+
+| Names | Readiness / remaining deletion prerequisites |
+| --- | --- |
+| `coinbase`, `coinbasespot` | Rust defaults; CFM/spot and saved spot-only covered. Retired INTX is fixture compatibility only. Keep frozen TS reference and inert Starbase evidence separate. |
+| `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
+| `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
+| `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
+| `binanceinverse` | Opt-in COIN-M; native contract quantities, USD-per-contract multiplier, base position quantities and coin-denominated PnL/margin; worker/main native-count/quote-notional bridge retained. Regular/stops/trailing, identity/final-fill-safe replacement, caller client IDs rejected. Public trades implemented; private histories retain TS empty-result contract. Keep USD-M/PM controls and [exact scope/evidence](BINANCE_VARIANTS_PORT.md). |
+| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; combined inverse/options toggles and semantic instrument classification remain blockers. Hyro live connectivity unverified. Preserve region/Hyro policy helpers. |
+| `bitget`, `bitgetusdc`, `bitgetinverse` | Opt-in; keep inverse/native sizing, UTA ledger/trailing and account-mode evidence; extract shared transport constants. |
+| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; native chaser bridge repaired. Rust filters linear USDT/USDC markets; TS inverse and EU product coverage need explicit resolution before deletion. Extract broker constants. |
+| `apexomni` | Opt-in; preserve native zkLink/API-key and consumer/protocol evidence. |
+| `asterdex` | Opt-in; retain V1/V3, builder/STP, public wallet/approval exports and secondary-read-key policy. |
+| `backpack` | Opt-in; perpetuals and uint32 decimal IDs, no spot claim. |
+| `bingx` | Opt-in; default/routing/account-option migration and reference retention required. |
+| `blofin` | Opt-in; native units and shared broker constants must survive deletion. |
+| `bitrue` | Opt-in; futures, no implicit spot coverage. |
+| `cryptocom` | Opt-in; preserve account/product option and routing gates. |
+| `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
+| `hyperliquid` | Opt-in perps/HIP-3; spot absent, wallet/builder/agent and caller-ID helpers still imported. |
+| `kraken` | Opt-in futures; spot remains TS. |
+| `lighter` | Opt-in; retain wallet/account-tier exports; broker alias and remote-signing modes unresolved. |
+| `mexc` | Opt-in; preserve native sizing and conditional/trailing evidence. |
+| `paradex` | Opt-in; retain binary feed, native signing and routing evidence. |
+| `phemex` | Opt-in; retain account identity/native protocol and broker helper. |
+| `weex` | Opt-in; preserve host/header/routing evidence. |
+| `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
+| `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
+| `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
+| `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
+| `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+
+#### Known consumer blockers and replacement order
+
+The source audit found additional gates that must stay visible before default
+cutover or deletion:
+
+- `privateOnly` does not currently suppress Rust public sockets, and Rust does
+  not initialize/use the TS `externalPublicData` provider. Replace these with
+  explicit shared-public-feed policy and test private-worker/provider fan-out.
+- Rust frames carry typed Polymarket prediction/holding metadata, reconstructed
+  into its specific `info` fields; they do not carry arbitrary native `info`.
+  Bybit's instrument classifier still lacks `info.symbolType`, so CLI TradFi
+  preflight returns unknown and no longer enforces the existing refusal. Carry
+  typed semantic classification
+  through frames and test the real preflight before changing those defaults.
+- `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
+  exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
+  starts are empty and forced refresh does not refresh native metadata. Define
+  and test explicit startup/refresh semantics before adopting this factory.
+- GRVT's Rust discovery retains `PERPETUAL` only, while the TS catalog mapper
+  also accepts non-perpetual instrument kinds. Resolve retained Future/Call/Put
+  product and semantic metadata coverage explicitly before deleting that TS
+  path; perpetual fixtures and registration do not prove those products.
+
+Deletion proceeds in separate, reviewable PRs:
+
+1. Close missing products/account modes and the blockers above, then prove
+   saved-account CLI, MCP, public factory, native/mobile loading and hosted/object
+   paths. Switch ready names in **both** registries; keep factory APIs stable.
+2. Extract the neutral exchange interface, callable-method allowlist,
+   capability branding, broker/site/routing constants and exported wallet
+   utilities. `RustEngineExchange` still extends `BaseExchange`; deleting that
+   base now would delete the working Rust adapter's shell too.
+3. Remove independent ready implementations first, after freezing/replacing
+   the replay oracle. Remove Bybit/Hyro, OKX and Bitget subclasses as family
+   units. Retire the four Binance TS profile paths only after their default
+   callers and shared oracle migrate, preserving USD-M/PM gates. Keep KuCoin,
+   Kraken, Hyperliquid and Lighter shared modules while unported siblings still
+   depend on them. The inventory maps every
+   caller to its interface, host, shared-helper or test-reference replacement.
+4. Migrate test/harness imports deliberately. Preserve independent documented
+   protocol fixtures and a reviewed performance baseline; never compare Rust
+   with itself and call it TS parity.
+5. Remove TS-only Axios/signing/socket scaffolding only after its last runtime
+   **and reference** caller is gone. Keep `DefaultStore`, chasers, TWAP,
+   post-processors and object fallback while real consumers need them. Replace
+   each contract before removing its implementation; the store is the current
+   compatibility seam, not dead code.
+6. Merge `feat/rust-rewrite` into master only after phase 6 adoption/build and
+   every cutover gate passes. This readiness PR targets `feat/rust-rewrite`.
 
 ### Blockers that need Sam
 
@@ -385,8 +585,9 @@ packages/                 TypeScript
 TypeScript lives on beside it: `packages/safe-cex` keeps the shell (worker,
 store, chasers, TWAP, CLI, types) and reaches Rust only through
 `@tealstreet/safe-cex-wasm`. Each venue under
-`packages/safe-cex/src/exchanges/` is deleted once its Rust port ships, and
-the shell shrinks as its pieces move into the engine.
+`packages/safe-cex/src/exchanges/` is deleted only after its Rust port and the
+phase-9 consumer/dependency gates pass, and the shell shrinks as its contracts
+receive tested replacements.
 
 ## Branching
 

@@ -411,3 +411,66 @@ test('orphan ticker identities survive transfer and packed deltas without changi
   state.apply(new Frame(tickerFrame(false)));
   assert.equal(state.identity, undefined, 'a later legacy replacement clears the old identity closure');
 });
+
+const bookSection = (kind, market, bids = [], asks = []) => ({
+  kind,
+  length: 16 + (bids.length + asks.length) * 8,
+  write(view, offset) {
+    const width = kind === SECTION.BOOK ? 3 : 2;
+    view.setUint32(offset, market, true);
+    view.setUint32(offset + 4, bids.length / width, true);
+    view.setUint32(offset + 8, asks.length / width, true);
+    [...bids, ...asks].forEach((value, i) => view.setFloat64(offset + 16 + i * 8, value, true));
+  },
+});
+
+test('book deltas expose transferred zero-copy pairs independently of full reset books', () => {
+  const frame = numericFrame([
+    bookSection(SECTION.BOOK, 7, [100, 2, 2], [101, 3, 3]),
+    bookSection(SECTION.BOOK_DELTA, 9, [50, 0, 49, 7], [51, 8]),
+    bookSection(SECTION.BOOK_DELTA, 7),
+  ]);
+  const [reset] = frame.books();
+  assert.deepEqual([...reset.bids], [100, 2, 2]);
+  assert.deepEqual([...reset.asks], [101, 3, 3]);
+  const [delta, empty] = frame.bookDeltas();
+  assert.equal(delta.market, 9);
+  assert.deepEqual([...delta.bids], [50, 0, 49, 7]);
+  assert.deepEqual([...delta.asks], [51, 8]);
+  assert.equal(delta.bids.buffer, frame.buffer);
+  assert.equal(delta.asks.buffer, frame.buffer);
+  assert.equal(empty.market, 7);
+  assert.equal(empty.bids.length, 0);
+  assert.equal(empty.asks.length, 0);
+});
+
+test('book readers refuse short, overflowing, trailing and reserved payloads', () => {
+  for (const kind of [SECTION.BOOK, SECTION.BOOK_DELTA]) {
+    for (const mutate of [
+      (view) => view.setUint32(20, 8, true),
+      (view) => view.setUint32(28, 0xffffffff, true),
+      (view) => view.setUint32(32, 1, true),
+      (view) => view.setUint32(36, 1, true),
+    ]) {
+      const frame = numericFrame([bookSection(kind, 0), bookSection(SECTION.BOOK, 1)]);
+      mutate(new DataView(frame.buffer));
+      assert.throws(() => {
+        const mutated = new Frame(frame.buffer);
+        return [...(kind === SECTION.BOOK ? mutated.books() : mutated.bookDeltas())];
+      }, /invalid book|truncated|trailing/);
+    }
+  }
+  const frame = numericFrame([bookSection(SECTION.BOOK_DELTA, 0, [10, 1])]);
+  new DataView(frame.buffer).setUint32(28, 0, true);
+  assert.throws(() => [...frame.bookDeltas()], /invalid book/);
+});
+
+test('frame envelope refuses truncated section headers, payloads and trailing bytes', () => {
+  assert.throws(() => new Frame(new ArrayBuffer(8)), /truncated/);
+  const buffer = numericFrame([bookSection(SECTION.BOOK_DELTA, 0)]).buffer;
+  assert.throws(() => new Frame(buffer.slice(0, 20)), /truncated/);
+  assert.throws(() => new Frame(buffer.slice(0, buffer.byteLength - 1)), /truncated/);
+  const extra = new Uint8Array(buffer.byteLength + 8);
+  extra.set(new Uint8Array(buffer));
+  assert.throws(() => new Frame(extra.buffer), /trailing/);
+});

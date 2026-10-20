@@ -190,9 +190,9 @@ export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options) {
     if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
     records = records.filter((record) => {
-      if (record.type !== 'http' || record.impl === undefined) return true;
-      if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown HTTP record implementation');
-      if (impl === undefined) throw new Error('Tagged HTTP records require a replay implementation');
+      if (record.impl === undefined) return true;
+      if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown tape record implementation');
+      if (impl === undefined) throw new Error('Tagged tape records require a replay implementation');
       return record.impl === impl;
     });
     this.records =

@@ -1,5 +1,9 @@
 # Engine performance
 
+Current integration checkpoint: see `RUST_PERF_NATIVE25.md`. The Bitrue compiler
+trial was unfavorable; z was restored (`RUST_PERF_BITRUE25.md`). Final gates,
+matched comparison and PR remain pending.
+
 Branch: `feat/rust-perf`, based on `origin/feat/rust-rewrite`.
 
 Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,

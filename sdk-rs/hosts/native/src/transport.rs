@@ -208,96 +208,100 @@ impl Transport for NetworkTransport {
             (None, headers)
         };
         tokio::spawn(async move {
-            let (target, headers, relay, key) = match selected {
-                Some(selected) => (
-                    selected.url,
-                    selected.headers,
-                    selected.relay,
-                    Some(selected.key),
-                ),
-                None => (url, direct_headers, None, None),
-            };
-            let opening = async {
-                let mut ws = open_socket(&target, headers).await?;
-                if let Some(upstream) = relay {
-                    let state = routing.as_ref().ok_or("relay requires routing")?;
-                    authenticate_relay(&mut ws, &state.tokens, &upstream).await?;
-                }
-                Ok::<_, String>(ws)
-            };
-            let opening = tokio::time::timeout(Duration::from_secs(15), opening);
-            tokio::pin!(opening);
-            let mut queued = Vec::new();
-            let mut ws = loop {
-                tokio::select! {
-                    biased;
-                    message = pending.recv() => match message {
-                        Some(message) => queued.push(message),
-                        None => return,
-                    },
-                    result = &mut opening => match result {
-                        Ok(Ok(ws)) => break ws,
-                        _ => { let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
-                    },
-                }
-            };
-            if pending.is_closed() {
-                let _ = ws.close(None).await;
-                return;
-            }
-            let _ = events.send(HostEvent::WsOpened(socket));
-            for message in queued {
-                if ws.send(Message::text(message)).await.is_err() {
-                    let _ = events.send(HostEvent::WsClosed(socket, 1006));
+            let canceled = events.clone();
+            let operation = async move {
+                let (target, headers, relay, key) = match selected {
+                    Some(selected) => (
+                        selected.url,
+                        selected.headers,
+                        selected.relay,
+                        Some(selected.key),
+                    ),
+                    None => (url, direct_headers, None, None),
+                };
+                let opening = async {
+                    let mut ws = open_socket(&target, headers).await?;
+                    if let Some(upstream) = relay {
+                        let state = routing.as_ref().ok_or("relay requires routing")?;
+                        authenticate_relay(&mut ws, &state.tokens, &upstream).await?;
+                    }
+                    Ok::<_, String>(ws)
+                };
+                let opening = tokio::time::timeout(Duration::from_secs(15), opening);
+                tokio::pin!(opening);
+                let mut queued = Vec::new();
+                let mut ws = loop {
+                    tokio::select! {
+                        biased;
+                        message = pending.recv() => match message {
+                            Some(message) => queued.push(message),
+                            None => return,
+                        },
+                        result = &mut opening => match result {
+                            Ok(Ok(ws)) => break ws,
+                            _ => { let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                        },
+                    }
+                };
+                if pending.is_closed() {
+                    let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
                     return;
                 }
-            }
-            let code = loop {
-                tokio::select! {
-                    message = ws.next() => match message {
-                        Some(Ok(Message::Text(text))) => {
-                            let received_at = now_ms();
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                            if events.send_at(HostEvent::WsMessage(socket, text.to_string()), received_at).is_err() {
-                                return;
-                            }
-                        }
-                        Some(Ok(Message::Binary(bytes))) if binary => {
-                            let received_at = now_ms();
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
-                            if events.send_at(HostEvent::WsBinary(socket, bytes.to_vec()), received_at).is_err() {
-                                return;
-                            }
-                        }
-                        Some(Ok(Message::Binary(bytes))) => {
-                            let received_at = now_ms();
-                            let mut decoded = Vec::new();
-                            let result = if bytes.starts_with(&[0x1f, 0x8b]) {
-                                flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
-                            } else if bytes.first() == Some(&0x78) {
-                                flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
-                            } else {
-                                decoded.extend_from_slice(&bytes);
-                                Ok(decoded.len())
-                            };
-                            let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else {break 1007};
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                            if events.send_at(HostEvent::WsMessage(socket, text), received_at).is_err() {
-                                return;
-                            }
-                        }
-                        Some(Ok(Message::Ping(_))) => { let _ = ws.flush().await; }
-                        Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),
-                        Some(Ok(_)) => {}
-                        Some(Err(_)) | None => break 1006,
-                    },
-                    text = pending.recv() => match text {
-                        Some(text) => { if ws.send(Message::text(text)).await.is_err() { break 1006; } }
-                        None => { let _ = ws.close(None).await; return; }
-                    },
+                let _ = events.send(HostEvent::WsOpened(socket));
+                for message in queued {
+                    if !matches!(
+                        tokio::time::timeout(
+                            Duration::from_secs(5),
+                            ws.send(Message::text(message))
+                        )
+                        .await,
+                        Ok(Ok(()))
+                    ) {
+                        let _ = events.send(HostEvent::WsClosed(socket, 1006));
+                        return;
+                    }
                 }
+                let code = loop {
+                    tokio::select! {
+                        message = ws.next() => match message {
+                            Some(Ok(Message::Text(text))) => {
+                                let received_at = now_ms();
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
+                                if events.send_at(HostEvent::WsMessage(socket, text.to_string()), received_at).is_err() { return; }
+                            }
+                            Some(Ok(Message::Binary(bytes))) if binary => {
+                                let received_at = now_ms();
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
+                                if events.send_at(HostEvent::WsBinary(socket, bytes.to_vec()), received_at).is_err() { return; }
+                            }
+                            Some(Ok(Message::Binary(bytes))) => {
+                                let received_at = now_ms();
+                                let mut decoded = Vec::new();
+                                let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
+                                    else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
+                                    else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
+                                let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
+                                if events.send_at(HostEvent::WsMessage(socket, text), received_at).is_err() { return; }
+                            }
+                            Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break 1006; } }
+                            Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),
+                            Some(Ok(_)) => {}
+                            Some(Err(_)) | None => break 1006,
+                        },
+                        text = pending.recv() => match text {
+                            Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break 1006; } }
+                            None => { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; return; }
+                        },
+                    }
+                };
+                let _ = events.send(HostEvent::WsClosed(socket, code));
             };
-            let _ = events.send(HostEvent::WsClosed(socket, code));
+            tokio::select! {
+                biased;
+                _ = canceled.closed() => {},
+                _ = operation => {},
+            }
         });
         outgoing
     }

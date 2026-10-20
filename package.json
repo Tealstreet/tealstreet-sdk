@@ -59,7 +59,11 @@
     "rust:private-tape-bybitdemo": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitdemo",
     "rust:private-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader",
     "rust:public-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader --public",
+    "rust:test-frame-wire": "node --import tsx --test sdk-rs/harness/frame-wire.integration.mjs",
     "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs",
+    "rust:private-tape-binancespot": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancespot",
+    "rust:private-tape-binanceinverse": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binanceinverse",
+    "rust:private-tape-binancepm": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancepm",
     "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
   },
   "devDependencies": {

@@ -14,6 +14,8 @@ const families = Object.freeze({
   backpack: 'backpack',
   binance: 'binance',
   binancepm: 'binance',
+  binancespot: 'binance',
+  binanceinverse: 'binance',
   bingx: 'bingx',
   bitget: 'bitget',
   bitgetusdc: 'bitget',

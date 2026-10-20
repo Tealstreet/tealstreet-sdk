@@ -10,7 +10,7 @@ const align8 = (n: number) => Math.ceil(n / 8) * 8;
 
 // Independent format-1 encoder of the documented prediction extension. IDs stay
 // strings, shares stay base units, and optional tables never shift old columns.
-const fixture = ({ markets = true, metadata = true, positions = true, holdings = true, flags = 2, empty = false, orderOnly = false } = {}) => {
+const fixture = ({ markets = true, metadata = true, positions = true, holdings = true, flags = 2, empty = false, orderOnly = false, book = '' } = {}) => {
   const strings = [tokenId, 'Yes', 'pUSD', '0xcondition', 'Will café open?', 'Exact description', '2026-12-31T00:00:00Z', 'cafe-open', 'order'];
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
   const table = (kind: number, words: number[], columns: number[][]) => {
@@ -29,6 +29,8 @@ const fixture = ({ markets = true, metadata = true, positions = true, holdings =
       table(2, [1, 0, 0, 1, 2, 5], [0.01, 0.001, 5, Infinity, 1, 1, NaN, NaN, NaN, NaN].map((value) => [value]));
       if (metadata) table(13, [1, 0, 3, 1, 4, 5, 6, 7, 1], [[0.001]]);
     }
+    if (book === 'full') table(5, [0, 1, 1, 0], [[0.49, 2, 2, 0.51, 3, 3]]);
+    if (book === 'delta') table(15, [0, 2, 1, 0], [[0.49, 0, 0.48, 4, 0.51, 5]]);
     if (positions) {
       table(8, empty ? [0] : [1, 0, 0], [0.4, 6, 1, 2, NaN, 10, 0, NaN, NaN].map((value) => empty ? [] : [value]));
       if (holdings) table(14, empty ? [0] : [1, 0, flags], []);
@@ -107,5 +109,22 @@ describe('Rust prediction market frame metadata', () => {
     new FrameApplier(store).apply(fixture({ metadata: false, holdings: false }));
     expect(store.markets[0].info).toBeUndefined();
     expect(store.positions[0].info).toBeUndefined();
+  });
+
+  it('keeps prediction sections 13/14 distinct from interleaved book deltas at section 15', () => {
+    const store = new DefaultStore();
+    const applier = new FrameApplier(store);
+    applier.apply(fixture({ book: 'full' }));
+    const update = fixture({ book: 'delta', flags: 1 });
+    expect(update.predictionMarkets()!.count).toBe(1);
+    expect(update.predictionHoldings()!.flags[0]).toBe(1);
+    expect([...update.bookDeltas()]).toHaveLength(1);
+    applier.apply(update);
+    expect(store.markets[0].info).toEqual(marketInfo);
+    expect(store.positions[0].info).toEqual({ tokenId, conditionId: '0xcondition', redeemable: true, mergeable: false });
+    expect(applier.books(update)).toEqual([{ symbol: tokenId, orderbook: {
+      bids: [{ price: 0.48, amount: 4, total: 4 }],
+      asks: [{ price: 0.51, amount: 5, total: 5 }],
+    } }]);
   });
 });

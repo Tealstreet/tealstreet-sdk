@@ -17,7 +17,7 @@ const aliases = {
   asterdex: ['asterdex'],
   kucoin: ['kucoin'],
   backpack: ['backpack'],
-  binance: ['binance', 'binancepm'],
+  binance: ['binance', 'binancepm', 'binancespot', 'binanceinverse'],
   bingx: ['bingx'],
   bitget: ['bitget', 'bitgetusdc', 'bitgetinverse'],
   bitrue: ['bitrue'],

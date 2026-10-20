@@ -1769,7 +1769,7 @@ test('only unique valid recorded socket strings are cached and live fallbacks ne
       assert.throws(() => new Tape(records, venue, false, 100, 'typo'), /Unknown replay implementation/);
       assert.throws(
         () => new Tape([{ ...records[0], impl: 'typo' }], venue, false, 100, 'rust'),
-        /Unknown HTTP record/,
+        /Unknown tape record/,
       );
     }
   });
@@ -1945,6 +1945,22 @@ test('Coinbase same-URL sockets retain exact channel and product scope across ba
   tape.close(a);
   await assert.rejects(tape.socketFor(url, frame('l2_data', 'BTC-USD').text), /replay timeout/);
   tape.close(b);
+});
+
+test('implementation tags independently scope websocket requests and replies', () => {
+  const records = ['ts', 'rust'].flatMap((impl) => [
+    { impl, type: 'ws-send', url: 'wss://example.test/ws', text: JSON.stringify({id: impl, method: impl}) },
+    { impl, type: 'ws', t: 1, url: 'wss://example.test/ws', text: JSON.stringify({id: impl, status: 200}) },
+  ]);
+  const venue = { socketRequest: (message) => ({id: message.id, key: message.method}) };
+  for (const impl of ['ts', 'rust']) {
+    const tape = new Tape(records, venue, true, 100, impl);
+    assert.equal(tape.frames.length, 1);
+    assert.equal(JSON.parse(tape.frames[0].text).id, impl);
+    assert.deepEqual([...tape.recordedSocketRequests.values()], [impl]);
+  }
+  assert.throws(() => new Tape(records, venue), /require a replay implementation/);
+  assert.throws(() => new Tape([{...records[0], impl:'typo'}], venue, true, 100, 'rust'), /Unknown tape record/);
 });
 
 test('wait markers advance virtual timers and onTick without sockets or commands, including Bitget', async () => {
