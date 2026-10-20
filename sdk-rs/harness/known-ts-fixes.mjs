@@ -119,7 +119,7 @@ export function fixLighterCommands(results, records) {
 export function fixKrakenOutput(ts,records){
  const books=new Map(Object.keys(ts.books).map(s=>[s,{seq:undefined,bids:new Map(),asks:new Map()}]));
  const markets=new Map(ts.markets.map(m=>[m.symbol,m]));
- const fills=[],seen=new Set();let coins={};
+ const fills=[],seen=new Set();let coins;
  const extraReads=new Set();
  const reads=records.filter(r=>r.type==='http'&&r.method==='GET'&&r.status===200);
  const redundant=new Set();
@@ -183,7 +183,7 @@ export function fixKrakenOutput(ts,records){
  }
  for(const[s,b]of books){if(b.seq===undefined)continue;const scale=markets.get(s)?.contractSize??1;ts.books[s]={bids:[...b.bids].filter(([,q])=>q>0).sort(([a],[b])=>b-a).map(([p,q])=>[p,q*scale]),asks:[...b.asks].filter(([,q])=>q>0).sort(([a],[b])=>a-b).map(([p,q])=>[p,q*scale])};}
  if(ts.account){
-  ts.account.fills=fills;ts.account.balance.coins=coins;
+  ts.account.fills=fills;if(coins!==undefined)ts.account.balance.coins=coins;
   // Kraken publishes no position margin allocation; TS's base store invents 0.
   for(const p of ts.account.positions)if(p.marginSize===0)p.marginSize=null;
  }

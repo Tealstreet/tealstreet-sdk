@@ -853,3 +853,23 @@ fn initial_position_snapshot_cannot_roll_back_accepted_settings() {
     assert_eq!(p.margin_type, Some(MarginType::Isolated));
     assert_eq!(e.store().setting("PF_XBTUSD").unwrap().leverage, 7.0);
 }
+
+#[test]
+fn batch_rejects_bybit_controls_before_any_write() {
+    for field in ["bybitBbo", "bybitSlippageToleranceTicks"] {
+        let (mut e, _) = ready();
+        let mut bad = serde_json::to_value(limit()).unwrap();
+        bad[field] = if field == "bybitBbo" {
+            json!({"sideType":"Counterparty","level":1})
+        } else {
+            json!(5)
+        };
+        place(&mut e, vec![limit(), opts(bad)]);
+        let all = e.drain_actions().collect::<Vec<_>>();
+        assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(all.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { result: Err(error), .. })
+                if error.contains("Bybit execution controls")
+        )));
+    }
+}

@@ -212,6 +212,12 @@ impl Kraken {
         if orders.iter().any(|o| o.client_order_id.is_some()) {
             return Err("Kraken does not support caller client order IDs".into());
         }
+        if orders
+            .iter()
+            .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+        {
+            return Err("Bybit execution controls are supported only on Bybit".into());
+        }
         let mut steps = VecDeque::new();
         for opts in orders {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
@@ -448,6 +454,8 @@ impl Kraken {
                 price: Some(replacement.price),
                 trigger_price: None,
                 max_slippage_pct: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: Some(true),

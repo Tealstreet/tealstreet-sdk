@@ -190,3 +190,13 @@ Fetched landing advanced to 922b5fdc89 (Bybit variants). Preserve its shared
 engine, wrapper, request/gate and host changes; union Kraken normalization once
 with the incoming generic fix dispatcher, and retain both constructor tests.
 Independent merge review and affected final gate reruns follow this checkpoint.
+
+Integration code-correctness review accepted after two fixes: native Kraken now
+rejects the entire batch containing Bybit-only execution controls before writes,
+and protective amendment initializes the new shared optional fields. Regression
+failed before on an observed HTTP write and passes after; Kraken 85 tests pass.
+Kraken collateral normalization now requires successful recorded account evidence
+instead of inventing coins for an unrelated fake account. Incoming universal gate
+CLI smoke failed before, passes after; independent harness 235/235 pass. Shared
+protocol hooks, book readiness, constructor validation and single fix dispatch
+were independently reviewed with no remaining findings.
