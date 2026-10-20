@@ -122,7 +122,7 @@ fn reconnect_resubscribes_live_topics_and_ignores_retired_socket() {
     }));
     rig.handle(Event::Command(Command::SubscribeCandles {
         symbol: "ETH".into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     }));
     let old = rig.socket;
     let delay = rig.close_and_retry_delay();

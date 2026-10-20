@@ -5,7 +5,7 @@ use crate::capabilities::Capabilities;
 use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
-    CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
+    CancelOrderRef, Candle, Interval, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
 };
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -244,11 +244,11 @@ pub enum Command {
     },
     SubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     UnsubscribeCandles {
         symbol: String,
-        interval: String,
+        interval: Interval,
     },
     PlaceOrders {
         command: CommandId,
@@ -337,7 +337,7 @@ pub enum Command {
     FetchCandles {
         command: CommandId,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -526,7 +526,7 @@ struct Io<P> {
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
     changed_books_active: usize,
-    candles: Vec<(String, String, Candle)>,
+    candles: Vec<(String, Interval, Candle)>,
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
@@ -971,18 +971,15 @@ impl<P> Cx<'_, P> {
 
     /// Queue a live candle for the next frame; a newer update of the same
     /// candle replaces the queued one.
-    pub fn candle(&mut self, symbol: &str, interval: &str, candle: Candle) {
+    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
         let same = self
             .io
             .candles
             .iter_mut()
-            .find(|(s, i, c)| s == symbol && i == interval && c.timestamp == candle.timestamp);
+            .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
         match same {
             Some(queued) => queued.2 = candle,
-            None => self
-                .io
-                .candles
-                .push((symbol.to_owned(), interval.to_owned(), candle)),
+            None => self.io.candles.push((symbol.to_owned(), interval, candle)),
         }
     }
 
@@ -1197,7 +1194,7 @@ impl<V: Venue> Engine<V> {
         }
         for update in update.candles {
             if cx.store.market(&update.symbol).is_some() {
-                cx.candle(&update.symbol, &update.interval, update.candle());
+                cx.candle(&update.symbol, update.interval, update.candle());
             }
         }
         Ok(())
@@ -2751,7 +2748,7 @@ mod streaming_tests {
         );
         engine.io.candles.push((
             "A".into(),
-            "1m".into(),
+            Interval::M1,
             Candle {
                 timestamp: 1.,
                 open: 2.,
