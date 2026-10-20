@@ -43,6 +43,9 @@ export interface EngineRoutingPlan {
   http: EngineHttpRoute;
   publicHttp?: EngineHttpRoute;
   readHttp?: EngineHttpRoute;
+  readPublicHttp?: EngineHttpRoute;
+  readHeader?: string;
+  readPublic?: boolean;
   publicCorsHttp?: EngineHttpRoute;
   publicHeader?: string;
   ws: { public: EngineWsRoute; private: EngineWsRoute; business: EngineWsRoute };
@@ -70,19 +73,77 @@ const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): v
   }
 };
 
+const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
+  binance: 'X-MBX-APIKEY',
+  binancepm: 'X-MBX-APIKEY',
+  binancespot: 'X-MBX-APIKEY',
+  binanceinverse: 'X-MBX-APIKEY',
+  asterdex: 'X-MBX-APIKEY',
+  bybit: 'X-BAPI-API-KEY',
+  bybitinverse: 'X-BAPI-API-KEY',
+  bybitspot: 'X-BAPI-API-KEY',
+  bybitdemo: 'X-BAPI-API-KEY',
+  hyrotrader: 'X-BAPI-API-KEY',
+  okx: 'OK-ACCESS-KEY',
+  okxeu: 'OK-ACCESS-KEY',
+  okxdemo: 'OK-ACCESS-KEY',
+  okxeudemo: 'OK-ACCESS-KEY',
+  phemex: 'X-PHEMEX-ACCESS-TOKEN',
+  backpack: 'X-API-Key',
+  kraken: 'APIKey',
+  krakenspot: 'API-Key',
+  bitget: 'ACCESS-KEY',
+  bitgetusdc: 'ACCESS-KEY',
+  bitgetinverse: 'ACCESS-KEY',
+  kucoin: 'KC-API-KEY',
+  mexc: 'ApiKey',
+  bingx: 'X-BX-APIKEY',
+  bitrue: 'X-CH-APIKEY',
+  weex: 'ACCESS-KEY',
+  blofin: 'ACCESS-KEY',
+  woo: 'x-api-key',
+};
+
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
-  if (exchange === 'asterdex' && options.secondary_key && options.secondary_secret) return;
-  if (options.secondary_key || options.secondary_secret) {
-    throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
+  if (
+    options.secondary_key === undefined &&
+    options.secondary_secret === undefined &&
+    options.secondary_passphrase === undefined
+  )
+    return;
+  if (!exchange || (!secondaryReadHeaders[exchange] && exchange !== 'cryptocom')) {
+    throw new Error('Rust engine secondary signing keys are unsupported for this venue');
+  }
+  if (!options.secondary_key || !options.secondary_secret) {
+    throw new Error('Rust engine secondary signing keys require a nonempty key and secret');
+  }
+  if (
+    [
+      'okx',
+      'okxeu',
+      'okxdemo',
+      'okxeudemo',
+      'bitget',
+      'bitgetusdc',
+      'bitgetinverse',
+      'kucoin',
+      'blofin',
+      'weex',
+    ].includes(exchange) &&
+    !(options.secondary_passphrase ?? options.passphrase)
+  ) {
+    throw new Error('Rust engine secondary signing keys require a passphrase');
   }
 };
 
-const asterReadOptions = (options: ExchangeOptions, provider: TransportProvider): ExchangeOptions => ({
+const secondaryReadOptions = (options: ExchangeOptions, provider: TransportProvider): ExchangeOptions => ({
   ...options,
   key: options.secondary_key!,
   secret: options.secondary_secret!,
+  passphrase: options.secondary_passphrase ?? options.passphrase,
   secondary_key: undefined,
   secondary_secret: undefined,
+  secondary_passphrase: undefined,
   overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy(),
 });
 
@@ -149,6 +210,9 @@ export const resolveEngineRoutingPlan = (
       ...(how ? { tunnelUrl: routing.howEgress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS } : {}),
     };
   };
+  const readPlan = options.secondary_key
+    ? resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL)
+    : undefined;
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
     ...(publicCorsProxy
@@ -162,10 +226,12 @@ export const resolveEngineRoutingPlan = (
           },
         }
       : {}),
-    ...(exchange === 'asterdex' && options.secondary_key
+    ...(readPlan
       ? {
-          publicHeader: 'X-MBX-APIKEY',
-          readHttp: resolveEngineRoutingPlan(exchange, asterReadOptions(options, provider), baseURL).http,
+          readHeader: secondaryReadHeaders[exchange],
+          readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
+          readHttp: readPlan.http,
+          ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
       : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
@@ -183,10 +249,10 @@ export const resolveEngineRoutingPlan = (
 const hasHeader = (headers: Record<string, string>, name: string): boolean =>
   Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase() && Boolean(headers[key]));
 
-// Match the public Binance client, which deliberately bypasses ordinary proxy
-// routing. Private/listen-key requests carry the key even when they are unsigned.
+// Futures profiles use a separate public client that bypasses account routing.
+// Spot keeps its selected GET client and only removes public auth headers.
 const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean =>
-  exchange.startsWith('binance') && !hasHeader(request.headers, 'X-MBX-APIKEY');
+  ['binance', 'binancepm', 'binanceinverse'].includes(exchange) && !hasHeader(request.headers, 'X-MBX-APIKEY');
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
@@ -310,15 +376,24 @@ const httpTransport = (
       signal.throwIfAborted();
       // Proxy auth may add credentials or apply a declared host header alias;
       // the venue's signed packet and credential bytes remain unchanged.
-      if (signed && (
-        request.url !== signed.url || request.method !== signed.method || request.body !== signed.body ||
-        config.url !== originalUrl || config.baseURL !== signed.url ||
-        config.method !== signed.method || config.data !== signed.body ||
-        config.params !== undefined || config.signal !== signal ||
-        signed.headers.some(([name, value]) => config.headers.get(
-          Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
-        ) !== value)
-      )) throw new Error('Engine transport authorization changed signed request bytes or headers');
+      if (
+        signed &&
+        (request.url !== signed.url ||
+          request.method !== signed.method ||
+          request.body !== signed.body ||
+          config.url !== originalUrl ||
+          config.baseURL !== signed.url ||
+          config.method !== signed.method ||
+          config.data !== signed.body ||
+          config.params !== undefined ||
+          config.signal !== signal ||
+          signed.headers.some(([name, value]) =>
+            config.headers.get(
+              Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
+            ) !== value,
+          ))
+      )
+        throw new Error('Engine transport authorization changed signed request bytes or headers');
       config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
       if (adapter) {
         const response = await untilAborted(adapter(config), signal);
@@ -397,8 +472,13 @@ export const createEngineTransport = (
     // Tealstreet's identification headers are supplied by the browser itself.
     // A custom provider's headers may authenticate the upgrade; dropping them
     // silently would route an Orderly account through an unauthenticated socket.
-    if (orderlyExchanges.has(exchange) && provider !== tealstreetTransport && !transport.webSocketHeaders &&
-        connection && Object.keys(connection.headers).length) {
+    if (
+      orderlyExchanges.has(exchange) &&
+      provider !== tealstreetTransport &&
+      !transport.webSocketHeaders &&
+      connection &&
+      Object.keys(connection.headers).length
+    ) {
       throw new Error('Orderly custom WebSocket routing requires upgrade header support');
     }
     return connection;
@@ -409,7 +489,10 @@ export const createEngineTransport = (
     const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/${account}`;
     const urls = [[publicUrl, routes.public]] as Array<[string, EngineWsRoute]>;
     if (!options.publicDataOnly && options.key && options.secret && options.applicationId) {
-      urls.push([`wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${options.applicationId}`, routes.private]);
+      urls.push([
+        `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${options.applicationId}`,
+        routes.private,
+      ]);
     }
     for (const [url, route] of urls) {
       const candidates = route.directUrls?.includes(url) ? [url] : [route.host ?? url, route.relay, route.fallback];
@@ -425,8 +508,7 @@ export const createEngineTransport = (
   const publicCorsHttp = publicCorsProxy
     ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
     : undefined;
-  const readOptions =
-    exchange === 'asterdex' && options.secondary_key ? asterReadOptions(options, provider) : undefined;
+  const readOptions = options.secondary_key ? secondaryReadOptions(options, provider) : undefined;
   const readHttp = readOptions
     ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
     : undefined;
@@ -444,12 +526,16 @@ export const createEngineTransport = (
     clearTimeout: (handle) => transport.clearTimeout(handle),
     request: (request) => {
       const { route, ...nativeRequest } = request;
+      if (route === 'primary') return http.request(nativeRequest);
       if (route === 'direct') return directHttp.request(nativeRequest);
       if (route === 'publicCors')
         return publicCorsHttp
           ? publicCorsHttp.request(nativeRequest)
           : Promise.reject(new Error('Public CORS request routing is not configured'));
-      return readHttp && request.method.toUpperCase() === 'GET' && hasHeader(request.headers, 'X-MBX-APIKEY')
+      return readHttp &&
+        request.method.toUpperCase() === 'GET' &&
+        (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
+          hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
         : http.request(nativeRequest);
     },
@@ -485,8 +571,12 @@ export const createEngineTransport = (
         if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
         handlers.onMessage(text);
       };
-      const receiveBinary = (data: Uint8Array) => { fallback?.onMessage(); handlers.onBinary?.(data); };
-      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
+      const receiveBinary = (data: Uint8Array) => {
+        fallback?.onMessage();
+        handlers.onBinary?.(data);
+      };
+      if (connection?.kind !== 'relay')
+        return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
       let socket: { send(text: string): void; close(): void } | undefined;
       let closed = false;
       let opened = false;
@@ -512,7 +602,10 @@ export const createEngineTransport = (
           });
           const decode = socketMessages(
             (data) => {
-              if (!closed) { if (typeof data === 'string') receive(data); else receiveBinary(data); }
+              if (!closed) {
+                if (typeof data === 'string') receive(data);
+                else receiveBinary(data);
+              }
             },
             () => {
               if (!closed) {

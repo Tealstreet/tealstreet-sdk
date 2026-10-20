@@ -719,3 +719,26 @@ reviews pass. Final published-head adversarial correctness review and exact-head
 green CI are the remaining landing requirements. Source, tape/artifact/log hashes,
 raw metrics, separate historical failures and fresh integration checks are recorded
 in the three adjacent proof files.
+
+## Parity-sweep landing integration
+
+Published `a423107682` passed all **40 CI checks**, including Linux Paradex
+**1,246,974 bytes** with public main/steady CPU TS/Rust **499.1/413.8 ms**
+and **186.9/135.3 ms**. Before merge, target advanced to `df2d6a4a03`
+(parity-sweep PR #1340), creating two conflicts. Merge the twelve-venue
+client-ID lookup registration union, retaining Bitrue/Spot and the incoming
+Phemex/Binance/OKX registrations; preserve the unsupported TS fallback contracts.
+The native routing golden matrix contains **66** merged examples, including
+Spot HOW and the incoming secondary-read policies; its assertion follows the
+actual merged matrix. Preserve host-side primary/direct/public-CORS routing,
+Paradex direct JWT and remote signing, and all incoming secondary-read identity
+contracts without venue URL rewriting.
+
+Independent merge reviews pass after explicitly supplying the new optional
+KuCoin read-credential field in the Spot constructor. Review also established
+that TS Spot supports secondary GET credentials; Rust previously rejected this
+mode. The next phase closes that newly exposed Spot parity gap using the landed
+shared read-credential/routing support before final verification. Because shared host
+routing/decoding and several touched venue read paths changed, refresh full
+integration and all 22 replay gates on the committed merge before publishing.
+The complete ee4a proofs and green a423 CI remain historical checkpoints.

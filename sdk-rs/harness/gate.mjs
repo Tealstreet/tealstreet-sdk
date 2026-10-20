@@ -169,6 +169,16 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // last-trade filter permanently deleted valid levels when the trade lagged.
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
+// Binance paired TS/Rust fix: EXPIRED_IN_MATCH maps to canceled, like EXPIRED,
+// rather than the historical mapper's fallback Closed. Status/lookup regressions
+// cover this native STP expiration; no replay answer is normalized.
+// OKX paired TS/Rust fix: definitive client-ID lookup uses the primary account
+// even when ordinary GETs use a secondary key; a different account's 51603
+// cannot establish that the primary order was never placed. Regression tests
+// exercise routing directly; no replay result is rewritten for this fix.
+// Binance/OKX also bypass cached client-ID hits with secondary credentials:
+// that cache may contain another account's orders. TS and Rust both query
+// the primary account; native tests retain PM's canonical client-ID identity.
 const KNOWN_TS_FIXES = {
   // KuCoin Spot: emit each native execution once even across replay, preserve
   // newer private state across stale REST snapshots, and retain good orders
@@ -258,13 +268,17 @@ const KNOWN_TS_FIXES = {
   // tombstones against delayed stream events. Session code 1000 refreshes once
   // even when delivered in an HTTP-200 error envelope.
   // Orders use exact EIP-712 integers, distinct reducing bracket children,
-  // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // exact-instrument cancellation and remaining quantity on partial-fill amend.
   // Conditional replacement retains native execution price separately from
   // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
   // agree with proxy-session headers and reconnect the private socket.
   // The private server ping receives pong rather than being ignored.
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
+  // Mixed products retain native kind/hash; full raw open-order validation
+  // precedes individual symbol cancellations and preserves sibling contracts.
+  // Raw ACK checks stop rejected/ambiguous writes; client-only cancellations
+  // cannot silently reauthenticate and retarget a reused client identity.
   grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,
@@ -287,8 +301,10 @@ const KNOWN_TS_FIXES = {
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {
-    // Paired TS authority fences now protect REST reads across private pushes,
-    // socket generations and other REST commits; compare balances unchanged.
+    // Paired TS/Rust REST balance totals now exclude position UPnL just as
+    // their WS handlers do; native free remains reported total minus used.
+    // Authority fences protect reads across pushes, socket generations and
+    // other REST commits; compare balances without financial normalization.
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
     // Phemex zero-open ticker changes remain finite.
@@ -610,6 +626,7 @@ const KNOWN_TS_FIXES = {
 
   okx: [
     'full books retain levels past a stale last trade',
+    'paired TS/Rust fix: untraded X-Perp blank quote fields seed and stream finite zeros and zero-open percentage stays zero; one unpriced ticker cannot abort the whole catalog',
     'public trades implement the inherited Not implemented method',
     'candle calendar bounds use UTC independently of host timezone',
     'fill window filtering retains native milliseconds before output seconds are truncated',
@@ -621,7 +638,8 @@ const KNOWN_TS_FIXES = {
     'positive protective dust cannot round into a close-entire-position order',
     'standalone protective limit amendment fails before cancel if execution price cannot be retained',
     'standalone cancellation continues remaining batches after per-row failures',
-    'new account equity survives delayed snapshots and local balance ticks',
+    // Paired TS/Rust fix; account output is still compared without normalization.
+    'account totalEq stays separate from real USD currency equity; delta currencies, live-order margin and revision fences survive delayed reads and local ticks',
     'acknowledged leverage survives failed post-write snapshots',
     // Position pushes carry a slice, not whole-account maintenance margin.
     'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',

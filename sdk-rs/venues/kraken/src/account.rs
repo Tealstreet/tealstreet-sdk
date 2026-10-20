@@ -333,7 +333,10 @@ impl Kraken {
         pending: Pending,
     ) -> Result<(), String> {
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
-        cx.request_streamed_body(method, url, headers, body, at, pending);
+        let id = cx.request_streamed_body(method, url, headers, body, at, pending);
+        if path.starts_with("/api/history/") {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        }
         Ok(())
     }
     fn signed_parts(
@@ -343,14 +346,38 @@ impl Kraken {
         path: &str,
         form: String,
     ) -> Result<SignedParts, String> {
-        let signer = self
-            .signer
-            .as_mut()
-            .ok_or("Kraken signing credentials unavailable")?;
-        let nonce = signer.nonce(cx.now)?;
+        let read = method == Method::Get
+            && !path.starts_with("/api/history/")
+            && self.read_signer.is_some();
+        // Nonces belong to the API key even when its two configured secrets differ.
+        let same_key = self
+            .options
+            .read_credentials
+            .as_ref()
+            .is_some_and(|r| Some(r.key.as_str()) == self.options.key.as_deref());
+        let nonce = if read && !same_key {
+            self.read_signer.as_mut()
+        } else {
+            self.signer.as_mut()
+        }
+        .ok_or("Kraken signing credentials unavailable")?
+        .nonce(cx.now)?;
+        let signer = if read {
+            self.read_signer.as_ref()
+        } else {
+            self.signer.as_ref()
+        }
+        .ok_or("Kraken signing credentials unavailable")?;
         let auth = signer.signature(&form, &nonce, path)?;
         let headers = vec![
-            ("APIKey", self.options.key.clone().unwrap_or_default()),
+            (
+                "APIKey",
+                if read {
+                    self.options.read_credentials.as_ref().unwrap().key.clone()
+                } else {
+                    self.options.key.clone().unwrap_or_default()
+                },
+            ),
             ("Authent", auth),
             ("Nonce", nonce),
             ("Content-Type", "application/x-www-form-urlencoded".into()),

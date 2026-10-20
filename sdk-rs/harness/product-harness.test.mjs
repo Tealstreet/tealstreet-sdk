@@ -59,9 +59,9 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
       assert(records.some((r) => r.type === 'command' && r.op === 'fetchFills' && r.symbol === 'BTCUSD'));
       if (name.startsWith('okxeu')) {
         assert(catalogs.every((r) => r.url.includes('/account/instruments?')));
-        assert(rows.some((r) => r.instId === 'BTC-USD-UM' && r.instType === 'FUTURES' && r.ruleType === 'xperp'));
+        assert(rows.some((r) => r.instId === 'BTC-USD_UM_XPERP-310404' && r.instType === 'FUTURES' && r.ruleType === 'xperp' && r.ctVal === '0.0001'));
         assert(records.some((r) => r.url?.endsWith('/account/positions?instType=FUTURES')));
-        assert(records.some((r) => r.type === 'command' && r.op === 'fetchOrderHistory' && r.symbol === 'BTCUSDUM'));
+        assert(records.some((r) => r.type === 'command' && r.op === 'fetchOrderHistory' && r.symbol === 'BTCUSD_UM_XPERP310404'));
         const startup = records.filter((record) => record.type === 'http' && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))$/.test(new URL(record.url).pathname));
         assert(startup.length > 0);
         for (const scoped of startup) {
@@ -86,7 +86,7 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
         for (const endpoint of ['/account/positions', '/trade/orders-pending']) {
           const sources = startup.filter((record) => new URL(record.url).pathname.endsWith(endpoint));
           assert(sources.some((record) => JSON.parse(record.body).data.some((row) => row.instId === 'BTC-USD-SWAP' && row.instType === 'SWAP')));
-          assert(sources.some((record) => JSON.parse(record.body).data.some((row) => row.instId === 'BTC-USD-UM' && row.instType === 'FUTURES')));
+          assert(sources.some((record) => JSON.parse(record.body).data.some((row) => row.instId === 'BTC-USD_UM_XPERP-310404' && row.instType === 'FUTURES')));
         }
       }
       const tape = new Tape([], venueOf(name));

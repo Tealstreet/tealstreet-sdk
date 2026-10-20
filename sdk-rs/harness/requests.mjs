@@ -183,6 +183,7 @@ export const subscriptionMessage = (message) => {
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
+  if (options.rust === 'grvt' && (text === 'ping' || text === 'pong')) return undefined;
   try {
     message = typeof text === 'string' ? JSON.parse(text) : text;
   } catch {
@@ -315,7 +316,9 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     if (field)
       return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }
-  const key = subscriptionKey(url, message, callerIds, options);
+  // A quoted JSON string is not a bare GRVT heartbeat frame.
+  const input = options.rust === 'grvt' && typeof text === 'string' && typeof message === 'string' ? text : message;
+  const key = subscriptionKey(url, input, callerIds, options);
   return key === undefined ? [] : [key];
 };
 

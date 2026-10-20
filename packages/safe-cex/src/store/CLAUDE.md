@@ -285,6 +285,18 @@ inverse publishes native amount/filled, so its adapter can subtract those values
 when the exact optional tail is absent. Order rejection metadata must survive
 alongside the native sizing fields.
 
+OKX frame bridges keep native contract-count placement amounts separately from
+base-sized fills and remaining quantities. Exact native leaves populate
+`remainingNative`, with inverse `remainingNotional` equal to those counts times
+the quote contract value. A finite exact `filledInPlacementUnits` tail is
+authoritative; legacy regular-order frames derive native fills as amount minus
+leaves. Position `contractsNative` is base contracts divided by ctVal for linear
+markets and quote notional divided by ctVal for inverse markets. OKX inverse
+PnL is already converted to USD, so do not relabel it as coin-native PnL. Both
+the worker and main-thread frame appliers use this OKX profile; other venue
+quantity profiles keep their existing conventions. Strictly admitted X-Perp
+market IDs retain their dated identity and their base/quote XPERP display label.
+
 ## Prediction-market frame metadata
 
 Optional typed `PREDICTION_MARKETS` and `PREDICTION_HOLDINGS` sections carry
@@ -293,6 +305,11 @@ The numeric market and position tables retain their existing shapes. Both
 worker and main-thread FrameApplier instances retain metadata across later
 position-only frames; explicit empty sections clear it. Holdings removed from
 the authoritative position table lose their flags before later reopening.
+
+Frame application keeps OKX native contract-count metadata separate from Binance
+COIN-M contract multipliers: constructor argument four is the OKX count policy;
+argument five is COIN-M inverse notional sizing. Worker and main-thread callers
+set both independently; Bitget inverse retains its existing third argument.
 
 ## Instrument and derivative frame metadata
 

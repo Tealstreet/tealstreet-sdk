@@ -28,6 +28,7 @@ pub enum Product {
 
 #[derive(Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -458,6 +459,14 @@ fn candle(row: &CandleRow) -> Candle {
 impl Venue for BitgetFutures {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read
+                .validate()
+                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         self.get(
             cx,
             format!("{}?productType={}", paths::CONTRACTS, self.product()),
@@ -849,3 +858,6 @@ impl Venue for BitgetFutures {
         )
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

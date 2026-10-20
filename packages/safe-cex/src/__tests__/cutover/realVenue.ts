@@ -65,7 +65,7 @@ export const realVenue = (name: ExchangeName) => {
   const fixture = orderlyAliases.has(name)
     ? 'orderly'
     : name.startsWith('okxeu')
-      ? 'okxeu'
+      ? 'okxeu-xperp'
       : name.startsWith('okx')
         ? 'okx'
         : name === 'binancepm'

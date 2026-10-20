@@ -386,6 +386,7 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
     use safe_cex_engine::Engine;
     use safe_cex_venue_backpack::{Backpack, Options};
     let mut e = Engine::new(Backpack::new(Options {
+        read_credentials: None,
         public_data_only: false,
         key: Some("public-test-key".into()),
         secret: Some(STANDARD.encode([7u8; 32])),

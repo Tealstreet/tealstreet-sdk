@@ -26,8 +26,26 @@ test('real OKX partial position/account handlers retain full IMR, coin valuation
     assert.deepEqual(amounts(store.balance), { used: 680, upnl: 130, total: 11870, free: 11276 });
     const tick = await exchange.formatBalanceUsedAvail(store.balance.info, store.positions, store.orders);
     assert.deepEqual(amounts(tick), amounts(store.balance), 'old cached raw REST balance cannot replace newer totalEq at next tick');
-    const fresh = await exchange.formatBalanceUsedAvail([{ ccy: 'USD', eq: '12050' }], store.positions, store.orders);
-    assert.deepEqual(amounts(fresh), { used: 680, upnl: 130, total: 11920, free: 11326 }, 'a distinct successful REST snapshot retains its actual newer equity');
+    // A new array alone has no freshness provenance. Complete the production
+    // REST read, whose captured account revision can retire the older WS anchor.
+    const priorGet = exchange.xhr.get;
+    const reads = [];
+    const positionRows = store.positions.map((position) => position.info);
+    exchange.xhr.get = async (url, config) => {
+      reads.push({ url, instType: config?.params?.instType });
+      if (url === '/api/v5/account/account-position-risk')
+        return { data: { data: [{ balData: [{ ccy: 'USD', eq: '12050' }] }] } };
+      if (url === '/api/v5/account/positions') return { data: { data: positionRows } };
+      throw new Error(`Unexpected fresh REST read ${url}`);
+    };
+    let fresh;
+    try { ({ balance: fresh } = await exchange.fetchBalanceAndOpenPositions()); }
+    finally { exchange.xhr.get = priorGet; }
+    assert.deepEqual(reads, [
+      { url: '/api/v5/account/account-position-risk', instType: 'SWAP' },
+      { url: '/api/v5/account/positions', instType: 'SWAP' },
+    ]);
+    assert.deepEqual(amounts(fresh), { used: 680, upnl: 130, total: 11920, free: 11326 }, 'a completed fresh REST snapshot retains its actual newer equity');
     store.update({ balance: fresh });
     exchange.privateWebsocket.handlePositionTopic({ data: [raw(inverse.id, { ccy: 'BTC', pos: '0', imr: '0', mmr: '0', upl: '0' })] });
     assert.deepEqual(amounts(store.balance), { used: 200, upnl: 50, total: 12000, free: 11806 }, 'flat inverse removes only its own risk');

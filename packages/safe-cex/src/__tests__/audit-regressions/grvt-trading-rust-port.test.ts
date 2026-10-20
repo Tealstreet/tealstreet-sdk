@@ -29,11 +29,21 @@ describe('GRVT order semantics repaired by the Rust port', () => {
     await expect(place({ symbol: 'BTC_USDT_PERP', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100, stopLoss: -1 })).rejects.toThrow('Invalid GRVT bracket');
     expect(e.placeOrder).not.toHaveBeenCalled();
   });
-  it('uses native kind/base/quote filters for symbol cancellation', async () => {
-    const e = exchange(); const cancelAllOrders = vi.fn().mockResolvedValue({ ack: true });
+  it('reads complete native orders and cancels exact IDs without cancelling same-base siblings', async () => {
+    const e = exchange();
+    const cancelAllOrders = vi.fn();
+    const openOrders = vi.fn().mockResolvedValueOnce({ status: 200, data: { r: [
+      { sa: '777', oi: '0x1', l: [{ i: 'BTC_USDT_Perp' }], m: { co: '1' } },
+      { sa: '777', oi: '0x2', l: [{ i: 'BTC_USDT_Fut_30Dec26' }], m: { co: '2' } },
+    ] } }).mockResolvedValueOnce({ status: 200, data: { r: { a: true } } });
+    e.tradingXhr.post = openOrders;
     e.grvtClient = { tdgClient: { cancelAllOrders }, authenticatedEndpoint: async () => ({}) } as any;
     await e.cancelSymbolOrders('BTC_USDT_PERP');
-    expect(cancelAllOrders).toHaveBeenCalledWith({ sub_account_id: '777', kind: ['PERPETUAL'], base: ['BTC'], quote: ['USDT'] }, {});
+    expect(openOrders.mock.calls.map(([path, body]) => [path, body])).toEqual([
+      ['/lite/v1/open_orders', { sa: '777' }],
+      ['/lite/v1/cancel_order', { sa: '777', oi: '0x1' }],
+    ]);
+    expect(cancelAllOrders).not.toHaveBeenCalled();
   });
   it('replaces only the remaining quantity after a partial fill', async () => {
     const e = exchange(); e.cancelOrder = vi.fn().mockResolvedValue(undefined); e.placeOrder = vi.fn().mockResolvedValue(['new']);

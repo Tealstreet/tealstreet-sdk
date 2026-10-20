@@ -125,7 +125,10 @@ fn own_fills_keep_native_ids_units_and_seconds() {
     let body = r.body.as_deref().unwrap();
     assert!(body.contains(r#""sa":"777""#));
     assert!(body.contains("1699999999000000000"));
-    assert!(body.contains(r#""k":["PERPETUAL"]"#));
+    assert!(
+        !body.contains(r#""k":"#),
+        "history spans every derivative kind"
+    );
     h.respond(r, &format!(r#"{{"r":[{FILL}],"n":""}}"#), "");
     let rows: Vec<Execution> = serde_json::from_str(&h.result().unwrap()).unwrap();
     assert_eq!(rows.len(), 1);

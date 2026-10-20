@@ -223,14 +223,14 @@ impl Grvt {
                 },
                 request.array_at(),
             ),
-            Job::Trade(_) => (
+            Job::Trade(request) => (
                 if self.options.testnet {
                     "https://trades.testnet.grvt.io"
                 } else {
                     "https://trades.grvt.io"
                 },
                 self.account_headers(),
-                None,
+                request.array_at(),
             ),
             Job::Account(request) => (
                 if self.options.testnet {
@@ -716,7 +716,7 @@ impl Venue for Grvt {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
             Job::Account(request) => self.account_item(cx, request, item),
-            Job::Trade(_) => {}
+            Job::Trade(request) => self.trade_item(cx, request, item),
             Job::History(request) => self.history_item(cx, request, item),
             Job::Markets {
                 rows,
@@ -800,6 +800,9 @@ impl Venue for Grvt {
                 if let Job::History(request) = &mut pending.job {
                     request.reset();
                 }
+                if let Job::Trade(request) = &mut pending.job {
+                    request.reset();
+                }
                 self.account_refresh(cx, pending);
             } else {
                 self.fail_pending(cx, pending, &error);
@@ -808,6 +811,12 @@ impl Venue for Grvt {
         }
         if pending.job.is_private() {
             self.account_response_headers(cx, pending.auth_generation, &response);
+        }
+        if matches!(&pending.job, Job::Trade(request) if request.is_symbol_read())
+            && pending.auth_generation != self.account.generation
+        {
+            self.fail_pending(cx, pending, "Stale GRVT cancellation snapshot session");
+            return;
         }
         match pending.job {
             Job::Account(request) => self.account_response(cx, request, response),
@@ -935,7 +944,7 @@ impl Venue for Grvt {
                     *failed = false;
                 }
                 Job::Account(request) => request.reset(),
-                Job::Trade(_) => {}
+                Job::Trade(request) => request.reset(),
                 Job::History(request) => request.reset(),
             }
             self.send_request(cx, pending);

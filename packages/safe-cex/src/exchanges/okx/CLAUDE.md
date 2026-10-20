@@ -1108,8 +1108,21 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+- With secondary GET credentials, cached client-ID hits cannot prove primary
+  identity and are bypassed in both TS and Rust. The primary response determines
+  success, absence or failure without changing the cached secondary snapshot.
+- Definitive client-ID lookup always uses the primary REST client that placed
+  the order. A secondary read key can belong to another account; its not-found
+  response cannot establish absence from the primary account. Rust also tags
+  this request with the explicit primary routing hint.
 
 ## Rust replay depth correction
+
+Price updates cache native market IDs to current ticker rows. Rebuild this
+derived map after either authoritative market or ticker table replacement;
+preserve Store's last duplicate-symbol row and known markets without tickers.
+Mark/index readiness still records those known markets for private trigger
+fallbacks. Repeated updates reuse the readiness ID instead of allocating it.
 
 Books retain every venue level. Never filter bids/asks by the last trade price:
 trades can lag book updates, so that filter permanently deletes valid liquidity.
@@ -1118,15 +1131,18 @@ The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
 ## Rust engine scope and verified corrections
 
 `engine: 'rust'` supports linear and inverse SWAPs under all four OKX names;
-EU profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
-Signed EU discovery uses account-scoped instruments for both product types.
+EEA profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
+Signed EEA discovery uses account-scoped instruments for both product types.
+Catalogs, tickers, positions, and regular/algo orders stage complete product
+unions before committing. X-Perp dated IDs stay distinct from matching SWAPs.
 Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
 while the existing book contract uses lotSz. Inverse base quantities divide
-quote contract value by the native reference price, position notional remains
-quote value, and coin margin/PnL normalize to USD. Exact native filled/leaves
-and position counts survive both frame consumers. EU income walks both product
-types before global limiting; stalled/capped composite sources fail explicitly.
-Generic account-wide fills retain the inherited empty-result contract.
+quote contract value by the native reference price; position notional remains
+quote value. Position PnL and margin are USD-normalized, while raw coin collateral
+and ledger units remain distinct. Exact native filled/leaves and position counts
+survive both frame consumers. EEA income walks both product types before global
+limiting; stalled/capped composite sources fail explicitly. Generic account-wide
+fills retain the inherited empty-result contract.
 
 The replay oracle also implements public trades (previously inherited an
 unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
@@ -1136,7 +1152,13 @@ refuses negative protective sizes and unsafe market/terminal amends, and
 continues standalone cancel batches after item failures. These corrections are
 listed in the harness KNOWN_TS_FIXES; they are independently tested instead
 of normalizing away output differences. Newer account equity survives REST
-snapshots and subsequent local balance ticks.
+snapshots and subsequent local balance ticks in both Rust and TS. Account WS
+`totalEq` is a separate aggregate anchor, never a synthetic USD currency row:
+USD is real settlement collateral for X-Perps. Details are currency deltas;
+validate the whole push before merging, retain currencies absent from it, and
+include live-order initial margin in free balance. Revision fences stop an
+older REST join, startup callback, or asynchronous local tick from restoring
+stale equity. A newer successful REST read can replace the WS anchor.
 
 Public-only business sockets subscribe candles directly without sending an
 empty-credential login or private order topics. Private accounts authenticate
@@ -1148,10 +1170,11 @@ before truncating public execution timestamps to seconds. Positive protective
 dust must not become close-all; ambiguous standalone protective limit amends
 fail before cancellation in Rust, preserving the existing execution price.
 
-EU Rust account reconciliation reads explicit SWAP and FUTURES scopes and commits
+EEA account reconciliation reads explicit SWAP and FUTURES scopes and commits
 positions/orders only after both products finish successfully. Failed, malformed
 or stale later-product reads retain the proven whole-account snapshot. Public
 index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
-An explicitly empty live last/open quote retains the last proven trade/change;
-unavailable REST seeds start at zero, while malformed nonempty quotes remain
-visible to the reference oracle.
+Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
+unavailable REST seeds start at finite zero. An explicitly empty live last/open
+quote retains the last proven trade/change. Blank bid/ask/volume fields remain
+finite zero; malformed nonempty quotes stay visible to the reference oracle.

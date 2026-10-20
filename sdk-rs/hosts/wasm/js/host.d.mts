@@ -34,7 +34,7 @@ export interface Transport {
   request(request: {
     method: string;
     /** Host policy; this is metadata, never an HTTP header or parameter. */
-    route?: 'direct' | 'publicCors';
+    route?: 'direct' | 'publicCors' | 'primary';
     /** Whole-operation deadline; defaults to 20 seconds. */
     timeoutMs?: number;
     url: string;

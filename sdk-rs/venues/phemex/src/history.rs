@@ -22,16 +22,24 @@ pub struct Request {
     to: Option<f64>,
     limit: usize,
     order_id: Option<String>,
+    client_id: Option<String>,
     rows: Rows,
     seen: HashSet<String>,
     count: usize,
     invalid: bool,
 }
 
+impl Request {
+    pub(crate) fn is_lookup(&self) -> bool {
+        self.client_id.is_some()
+    }
+}
+
 enum Rows {
     Fills(Vec<Execution>),
     Orders(Vec<HistoricalOrder>),
     Trades(Vec<Trade>),
+    Lookup(Vec<safe_cex_engine::model::Order>),
 }
 
 #[derive(Deserialize)]
@@ -170,16 +178,32 @@ impl PhemexPerpetuals {
         query: Query,
     ) {
         if matches!(query, Query::Income { .. }) {
-            cx.done(command, Err("Phemex generic income history is unsupported: ledger scope and amount semantics are not verified".into()));
+            self.income_query(cx, command, query);
             return;
         }
+        let mut client_id = None;
         let (symbol, from, to, limit, order_id, rows) = match query {
-            Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("Phemex client-order-id query is not supported".into()),
-                );
-                return;
+            Query::OrderByClientId {
+                symbol,
+                client_order_id,
+            } => {
+                if !crate::trading::valid_client(&client_order_id) {
+                    cx.done(command, Err("Invalid Phemex client order ID".into()));
+                    return;
+                }
+                if cx.store.market(&symbol).is_none() {
+                    cx.done(command, Ok(r#"{"found":false,"definitive":false}"#.into()));
+                    return;
+                }
+                client_id = Some(client_order_id);
+                (
+                    Some(symbol),
+                    None,
+                    None,
+                    Some(1),
+                    None,
+                    Rows::Lookup(Vec::new()),
+                )
             }
             Query::Fills {
                 symbol,
@@ -266,6 +290,7 @@ impl PhemexPerpetuals {
             to,
             limit,
             order_id,
+            client_id,
             rows,
             seen: HashSet::new(),
             count: 0,
@@ -281,6 +306,7 @@ impl PhemexPerpetuals {
             return;
         }
         let (path, at) = match request.rows {
+            Rows::Lookup(_) => ("/api-data/g-futures/orders/by-order-id", ArrayAt::Root),
             Rows::Fills(_) => ("/api-data/g-futures/trades", ArrayAt::Root),
             Rows::Orders(_) => ("/api-data/g-futures/orders", ArrayAt::Root),
             Rows::Trades(_) => ("/md/v2/trade", ArrayAt::Path(&["result", "trades_p"])),
@@ -289,7 +315,10 @@ impl PhemexPerpetuals {
         let from = request.from;
         let to = request.to;
         let limit = request.limit;
-        if !matches!(request.rows, Rows::Trades(_)) {
+        if let Some(client_id) = &request.client_id {
+            query.push_str("&clOrdID=");
+            query.push_str(&crate::trading::encode(client_id));
+        } else if !matches!(request.rows, Rows::Trades(_)) {
             if let Some(from) = from {
                 query.push_str(&format!("&start={from:.0}"));
             }
@@ -388,6 +417,21 @@ impl PhemexPerpetuals {
             return;
         }
         let result = match &mut request.rows {
+            Rows::Lookup(rows) => {
+                #[derive(Serialize)]
+                struct Lookup<'a> {
+                    found: bool,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    order: Option<&'a safe_cex_engine::model::Order>,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    definitive: Option<bool>,
+                }
+                serde_json::to_string(&Lookup {
+                    found: !rows.is_empty(),
+                    order: rows.first(),
+                    definitive: rows.is_empty().then_some(true),
+                })
+            }
             Rows::Fills(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
                 rows.truncate(request.limit);
@@ -432,6 +476,20 @@ impl PhemexPerpetuals {
 
 fn decode(request: &mut Request, text: &str) -> Option<()> {
     match request.rows {
+        Rows::Lookup(_) => {
+            let row: crate::account_wire::OrderRow<'_> = serde_json::from_str(text).ok()?;
+            if row.symbol != request.native_symbol
+                || Some(row.client_order_id.as_ref()) != request.client_id.as_deref()
+                || request.count > 1
+                || row.version() == 0
+            {
+                return None;
+            }
+            let mut orders = row.orders(milliseconds(row.version()))?;
+            if let Rows::Lookup(rows) = &mut request.rows {
+                rows.push(orders.remove(0));
+            }
+        }
         Rows::Fills(_) => {
             let row: FillRow<'_> = serde_json::from_str(text).ok()?;
             if row.trade_type != "Trade" {
