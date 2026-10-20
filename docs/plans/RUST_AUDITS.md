@@ -816,6 +816,7 @@ Signing, order payloads (incl. app stop shapes), amend, cancel and positions mat
 
 ### BreakoutProp (disabled in production)
 App stop payloads accepted; amend stricter than TS.
-- High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
+- High if re-enabled: ~~one unexpected portfolio row (XBTUSD lot, terminal-placed
   order type, multi-leg order) rejects the whole snapshot
-  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).
+  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
+  skipped and logged; off-catalogue position margin still counts).
