@@ -293,7 +293,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 
 | Venue | State |
 | --- | --- |
-| Binance USD-M, Binance PM | done |
+| Binance USD-M, Binance PM | done; regression gates retained by variants lane |
+| Binance Spot, COIN-M inverse | implementing in existing Binance crate (`feat/rust-binance-variants`); Hyro performance verification included |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |
@@ -312,7 +313,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

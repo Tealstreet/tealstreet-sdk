@@ -242,8 +242,11 @@ applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios
 ## Rust frame native units
 
 `FrameApplier` preserves inverse sizing metadata across the worker bridge.
-Inverse position `notional` is the native quote-contract size, so the applier
-also publishes it as `extra.contractsNative`; `extra.unrealizedPnlNative`
+For Bybit/Bitget inverse, position `notional` is the native quote-contract
+size, so the applier also publishes it as `extra.contractsNative`. Binance
+COIN-M uses fixed USD contract sizes: its worker and main appliers divide
+notional by market `contractSize` for native contract counts, and multiply exact
+order leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
 keeps the native PnL. Copier closes consume the native size rather than the
 rounded base-coin `contracts` field.
 

@@ -31,3 +31,36 @@ contracts define regression expectations. TS defects fixed deliberately require
 - Planning: inspected the four TS Binance profiles and current Rust engine.
   Public/account implementation and Hyro investigation have bounded owners;
   trading/query/integration remains with the lane owner.
+
+
+### Native implementation checkpoint
+
+Public/private/trading phases share option selection and socket callbacks, so
+these implementations are committed together after independent phase reviews.
+USD-M/PM regression tests remain in the Binance crate. Native checks reached
+73 passing cases before the final depth-generation regression; crate Clippy,
+WASM-target Clippy, bans, root typecheck (44 tasks), root lint (28 tasks), the
+first two actual WASM boundary cases and six independent frame tests passed.
+Final rebuilt-artifact checks and replay evidence remain pending.
+
+Phase reviews fixed protective lot splitting, ignored trigger intent, post-only
+amendment semantics (including REST seeds), duplicated/reordered executions,
+subscription ACK deadlines, Spot collateral valuation, native COIN-M sizing in
+both worker/main frame appliers, and old depth snapshots crossing resubscription.
+A real live Spot failure was isolated to large compressed subscription messages:
+17,392-byte requests received close1008 `Payload too long` with Node's `ws`;
+smaller messages worked. Public control messages now have bounded topics/bytes
+and 400ms pacing; recapture will verify the correction.
+
+Known TS defects deliberately fixed: retired aggregate Spot feeds; signature-only
+Spot subscription liveness; split quantities rounded away; invalid/oversized Spot
+protective legs; Spot fill price and replay/cancel identity; lost maker semantics
+on amendment; COIN-M caller-ID preflight and duplicate/terminal execution state;
+malformed inverse order snapshots. The harness checkpoint lists any further
+verified differences. Defensive rejection and Rust-only bridge/depth fixes are
+not presented as new TS defects.
+
+Hyro unchanged baseline: three-run public PASS, TS/Rust main50.8/34.4ms,
+steady17.6/13.2ms, retained16.1/0.9MB. Profiling found no confirmed production
+regression. Machine-wide concurrent work prevents claiming strict isolation;
+final fresh-artifact Hyro gates remain required with unchanged thresholds.

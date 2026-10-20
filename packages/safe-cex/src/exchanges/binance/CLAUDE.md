@@ -1,5 +1,38 @@
 # Binance Exchange Integration
 
+## Rust profiles
+
+`sdk-rs/venues/binance` implements all four profiles through `Options.variant`
+and one endpoint table. The legacy `portfolio_margin` flag remains compatible.
+`binance`, `binancepm`, `binanceinverse` and `binancespot` select the corresponding
+profile through the WASM host and worker adapter.
+
+COIN-M placement and order amounts are native contract counts; market
+`contractSize` is USD per contract. Position `contracts` remains base quantity
+at the mark price, `notional` is native quantity times contract size, and
+position PnL/margin remains in collateral coin. Aggregate wallet balances are
+USD-valued; an unpriced coin retains its native balance without inventing a USD
+price. Stops, trailing orders and regular orders share COIN-M's regular order
+endpoints. COIN-M caller client IDs remain unsupported and reject the entire
+batch before writes.
+
+Spot uses signed `userDataStream.subscribe.signature`, checks the matching
+subscription ACK and subscription ID, and checks `session.subscriptions` for
+liveness. It has coin balances and no derivative positions/settings. Spot
+order identity is the native client ID. A cancel/replace preserves time in
+force but generates a new client ID. Whole-batch validation rejects unsupported
+trailing/conditional parameters, derivative execution flags, invalid triggers
+and client IDs before cancellation or placement.
+
+Spot public ticker streams use individual `@ticker` topics, with bid/ask from
+the same event, split into sockets of at most 1024 topics with stable feed
+identities. The retired `!bookTicker` and `!ticker@arr` topics are not used.
+Depth and candles use a separate feed; Spot continuity uses the `U`/`u` range,
+while futures additionally require `pu` continuity after synchronization.
+Sources: [Spot changelog](https://developers.binance.com/docs/binance-spot-api-docs/CHANGELOG),
+[Spot user-data requests](https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/user-data-stream-requests),
+[COIN-M orders](https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/New-Order).
+
 This directory contains four Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, and **Portfolio Margin**. All variants share the same directory rather than having separate subdirectories.
 
 ## Exchange Information

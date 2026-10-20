@@ -30,7 +30,10 @@ enum Call {
     PlaceOne {
         client_id: Option<String>,
     },
-    PlaceBatch,
+    PlaceBatch {
+        expected: usize,
+        strict: bool,
+    },
     PlaceAlgo {
         client_id: Option<String>,
     },
@@ -164,6 +167,22 @@ fn number(value: f64) -> String {
 
 impl BinanceFutures {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.is_spot() {
+            let id = match &command {
+                Command::SetLeverage { command, .. }
+                | Command::FetchLeverage { command, .. }
+                | Command::SetMarginType { command, .. }
+                | Command::SetPositionMode { command, .. } => Some(*command),
+                _ => None,
+            };
+            if let Some(id) = id {
+                cx.done(
+                    id,
+                    Err("Binance Spot does not support derivative settings".into()),
+                );
+                return;
+            }
+        }
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
@@ -187,7 +206,7 @@ impl BinanceFutures {
                     .filter(|o| o.symbol == symbol)
                     .partition(|o| is_algo(o.kind));
                 let ids = |orders: Vec<&Order>| orders.iter().map(|o| o.id.clone()).collect();
-                let step = vec![
+                let mut step = vec![
                     Planned {
                         method: Method::Delete,
                         path: self.paths.cancel_all,
@@ -201,6 +220,18 @@ impl BinanceFutures {
                         call: Call::Cancel { ids: ids(algo) },
                     },
                 ];
+                if self.is_spot() || self.is_inverse() {
+                    step.truncate(1);
+                    if let Call::Cancel { ids } = &mut step[0].call {
+                        *ids = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|o| o.symbol == symbol)
+                            .map(|o| o.id.clone())
+                            .collect();
+                    }
+                }
                 let job = Job {
                     steps: VecDeque::from([step]),
                     continue_on_error: true,
@@ -308,6 +339,21 @@ impl BinanceFutures {
                 Call::PlaceOne {
                     client_id: Some(id),
                 },
+                Ok(body),
+            ) if self.is_spot() => match serde_json::from_str::<PlacedOrder>(body) {
+                Ok(placed) if placed.order_id.is_some() => {
+                    ids.push(id);
+                    None
+                }
+                _ => Some((
+                    0,
+                    "Binance Spot placement response has no native order ID".into(),
+                )),
+            },
+            (
+                Call::PlaceOne {
+                    client_id: Some(id),
+                },
                 Ok(_),
             )
             | (
@@ -321,20 +367,42 @@ impl BinanceFutures {
             }
             (Call::PlaceOne { .. }, Ok(body)) | (Call::PlaceAlgo { .. }, Ok(body)) => {
                 match serde_json::from_str::<PlacedOrder>(body) {
-                    Ok(placed) => {
-                        ids.extend(placed.order_id.or(placed.algo_id).map(|id| id.to_string()));
-                        None
-                    }
+                    Ok(placed) => match placed.order_id.or(placed.algo_id) {
+                        Some(id) => {
+                            ids.push(id.to_string());
+                            None
+                        }
+                        None => Some((
+                            0,
+                            "Binance placement response has no native order ID".into(),
+                        )),
+                    },
                     Err(error) => Some((0, error.to_string())),
                 }
             }
-            (Call::PlaceBatch, Ok(body)) => {
+            (Call::PlaceBatch { expected, strict }, Ok(body)) => {
+                let mut rejection = None;
                 if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
+                    if strict && items.len() != expected {
+                        rejection = Some((
+                            0,
+                            "Binance batch response count does not match the request".into(),
+                        ));
+                    }
                     for item in items {
                         match (item.order_id, item.code) {
                             (Some(id), None) => ids.push(id.to_string()),
                             (_, code) => {
                                 let code = code.unwrap_or(0);
+                                if strict {
+                                    rejection.get_or_insert((
+                                        code,
+                                        item.msg
+                                            .as_deref()
+                                            .unwrap_or("Binance batch order rejected")
+                                            .to_owned(),
+                                    ));
+                                }
                                 if code != POST_ONLY_REJECTED {
                                     let msg = item.msg.as_deref().unwrap_or("batch order rejected");
                                     cx.log(LogLevel::Error, msg.to_owned());
@@ -342,8 +410,10 @@ impl BinanceFutures {
                             }
                         }
                     }
+                } else if strict {
+                    rejection = Some((0, "Binance batch response malformed".into()));
                 }
-                None
+                rejection
             }
             (Call::Cancel { ids: canceled }, Ok(_)) => {
                 mark_canceled(cx, &canceled);
@@ -403,6 +473,26 @@ impl BinanceFutures {
         orders: &[PlaceOrderOpts],
     ) -> Result<Job, String> {
         check_client_order_ids(orders)?;
+        for opts in orders {
+            if let Some(id) = &opts.client_order_id {
+                if self.is_inverse() {
+                    return Err("Binance COIN-M does not support caller client order IDs".into());
+                }
+                if self.options.portfolio_margin && id.len() > 32 {
+                    return Err("Binance PM client order IDs must be at most 32 characters".into());
+                }
+                if self.is_spot()
+                    && !id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+                {
+                    return Err(
+                        "Binance Spot client order IDs must contain only letters, digits, _ or -"
+                            .into(),
+                    );
+                }
+            }
+        }
         if orders
             .iter()
             .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
@@ -423,7 +513,13 @@ impl BinanceFutures {
                     }
                 }
             }
-            let (r, a) = self.format_order(cx, opts)?;
+            let (r, a) = if self.is_spot() {
+                (self.format_spot(cx, opts)?, Vec::new())
+            } else if self.is_inverse() {
+                (self.format_inverse(cx, opts)?, Vec::new())
+            } else {
+                self.format_order(cx, opts)?
+            };
             regular.extend(r);
             if pm {
                 algo.extend(
@@ -456,7 +552,9 @@ impl BinanceFutures {
                     path: self.paths.order,
                     query: only.query(),
                     call: Call::PlaceOne {
-                        client_id: pm.then(|| only.get("newClientOrderId")).flatten(),
+                        client_id: (pm || self.is_spot())
+                            .then(|| only.get("newClientOrderId"))
+                            .flatten(),
                     },
                 },
                 (_, Some(path)) => {
@@ -465,7 +563,10 @@ impl BinanceFutures {
                         method: Method::Post,
                         path,
                         query: Query::new().str("batchOrders", &format!("[{}]", batch.join(","))),
-                        call: Call::PlaceBatch,
+                        call: Call::PlaceBatch {
+                            expected: lot.len(),
+                            strict: self.is_inverse(),
+                        },
                     }
                 }
                 (_, None) => unreachable!("lots are single orders without a batch endpoint"),
@@ -512,10 +613,10 @@ impl BinanceFutures {
 
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
-        if self.options.portfolio_margin {
+        if self.options.portfolio_margin || self.is_spot() {
             // One at a time, by the client ids the orders were placed with.
             for order in orders {
-                let (path, field) = if is_algo(order.kind) {
+                let (path, field) = if !self.is_spot() && is_algo(order.kind) {
                     (self.paths.conditional_order, "newClientStrategyId")
                 } else {
                     (self.paths.order, "origClientOrderId")
@@ -534,7 +635,10 @@ impl BinanceFutures {
             return job;
         }
         let mut by_symbol: Vec<(String, Vec<String>)> = Vec::new();
-        for order in orders.iter().filter(|o| !is_algo(o.kind)) {
+        for order in orders
+            .iter()
+            .filter(|o| self.is_inverse() || !is_algo(o.kind))
+        {
             match by_symbol
                 .iter_mut()
                 .find(|(symbol, _)| *symbol == order.symbol)
@@ -568,7 +672,10 @@ impl BinanceFutures {
                 }]);
             }
         }
-        for order in orders.iter().filter(|o| is_algo(o.kind)) {
+        for order in orders
+            .iter()
+            .filter(|o| !self.is_inverse() && is_algo(o.kind))
+        {
             job.steps.push_back(vec![Planned {
                 method: Method::Delete,
                 path: self.paths.conditional_order,
@@ -579,6 +686,223 @@ impl BinanceFutures {
             }]);
         }
         job
+    }
+
+    fn format_spot(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Params>, String> {
+        if opts.reduce_only == Some(true) || opts.close == Some(true) {
+            return Err("Binance Spot does not support reduceOnly or closePosition".into());
+        }
+        if matches!(
+            opts.kind,
+            OrderType::TrailingStopLoss | OrderType::Conditional
+        ) {
+            return Err("Binance Spot trailing/conditional placement requires unsupported native parameters".into());
+        }
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err("Binance Spot orders require a positive explicit quantity".into());
+        }
+        let mut params = Params::default();
+        params.set("symbol", opts.symbol.clone());
+        params.set("side", side_text(opts.side));
+        let kind = match opts.kind {
+            OrderType::Limit if opts.time_in_force == Some(TimeInForce::PostOnly) => "LIMIT_MAKER",
+            OrderType::Limit => "LIMIT",
+            OrderType::Market => "MARKET",
+            OrderType::StopLoss => "STOP_LOSS",
+            OrderType::TakeProfit => "TAKE_PROFIT",
+            _ => unreachable!(),
+        };
+        params.set("type", kind);
+        if matches!(opts.kind, OrderType::Limit | OrderType::Market) && opts.trigger_price.is_some()
+        {
+            return Err("Binance Spot plain orders cannot carry triggerPrice".into());
+        }
+        if opts.kind == OrderType::Limit {
+            params.set(
+                "price",
+                number(positive_price(opts.price, market.precision.price)?),
+            );
+            if kind != "LIMIT_MAKER" {
+                params.set(
+                    "timeInForce",
+                    tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)),
+                );
+            }
+        } else if matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+            params.set(
+                "stopPrice",
+                number(positive_price(
+                    opts.trigger_price.or(opts.price),
+                    market.precision.price,
+                )?),
+            );
+        } else if opts.trigger_price.is_some() {
+            return Err("Binance Spot plain orders cannot carry triggerPrice".into());
+        }
+        let mut out = sized_payloads(
+            params,
+            amount,
+            market.limits.amount.max,
+            market.precision.amount,
+        )?;
+        if opts.client_order_id.is_some() && out.len() != 1 {
+            return Err("Client order ID requires one native order".into());
+        }
+        for p in &mut out {
+            p.set(
+                "newClientOrderId",
+                opts.client_order_id.clone().unwrap_or_else(generated_id),
+            );
+        }
+        for (kind, trigger) in [
+            ("STOP_LOSS", opts.stop_loss),
+            ("TAKE_PROFIT", opts.take_profit),
+        ] {
+            if let Some(trigger) = trigger {
+                let mut p = Params::default();
+                p.set("symbol", opts.symbol.clone());
+                p.set(
+                    "side",
+                    side_text(if opts.side == OrderSide::Buy {
+                        OrderSide::Sell
+                    } else {
+                        OrderSide::Buy
+                    }),
+                );
+                p.set("type", kind);
+                p.set(
+                    "stopPrice",
+                    number(positive_price(Some(trigger), market.precision.price)?),
+                );
+                for mut part in
+                    sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
+                {
+                    part.set("newClientOrderId", generated_id());
+                    out.push(part);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn format_inverse(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Params>, String> {
+        if opts.kind == OrderType::Conditional {
+            return Err("Binance COIN-M conditional orders require a supported stop type".into());
+        }
+        if matches!(opts.kind, OrderType::Limit | OrderType::Market) && opts.trigger_price.is_some()
+        {
+            return Err("Binance COIN-M plain orders cannot carry triggerPrice".into());
+        }
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if !amount.is_finite() || amount < 0.0 {
+            return Err("Binance COIN-M quantity must be finite and nonnegative".into());
+        }
+        let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        let closing_side = if opts.side == OrderSide::Buy {
+            PositionSide::Short
+        } else {
+            PositionSide::Long
+        };
+        let position = cx
+            .store
+            .positions()
+            .iter()
+            .find(|p| p.symbol == opts.symbol && p.side == closing_side && p.contracts > 0.0);
+        let close = stop && (opts.close == Some(true) || amount == 0.0) && position.is_some();
+        if !close && amount <= 0.0 {
+            return Err(
+                "Binance COIN-M orders require a quantity or an existing position for a full stop"
+                    .into(),
+            );
+        }
+        let mut p = Params::default();
+        p.set("symbol", opts.symbol.clone());
+        p.set(
+            "positionSide",
+            self.position_side(cx, opts.side, opts.kind, opts.reduce_only == Some(true)),
+        );
+        p.set("side", side_text(opts.side));
+        p.set("type", type_text(opts.kind));
+        if close {
+            p.set("closePosition", "true");
+        } else if !cx.store.hedged() && opts.reduce_only == Some(true) {
+            p.set("reduceOnly", "true");
+        }
+        p.set("workingType", working_type(opts));
+        if opts.kind == OrderType::Limit {
+            p.set(
+                "price",
+                number(positive_price(opts.price, market.precision.price)?),
+            );
+            p.set(
+                "timeInForce",
+                tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)),
+            );
+        } else if stop {
+            p.set(
+                "stopPrice",
+                number(positive_price(
+                    opts.trigger_price.or(opts.price),
+                    market.precision.price,
+                )?),
+            );
+        } else if opts.kind == OrderType::TrailingStopLoss {
+            let target = positive_price(opts.price, market.precision.price)?;
+            let last = cx.store.ticker(&opts.symbol).map_or(0.0, |t| t.last);
+            if !last.is_finite() || last <= 0.0 {
+                return Err("Binance COIN-M trailing orders require a valid ticker".into());
+            }
+            let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
+            p.set("callbackRate", number(rate.clamp(0.1, 10.0)));
+            p.set("activationPrice", number(target));
+        }
+        let mut out = if close {
+            vec![p]
+        } else {
+            sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
+        };
+        for p in &mut out {
+            p.set("newClientOrderId", generated_id());
+        }
+        for (kind, trigger) in [
+            (OrderType::StopLoss, opts.stop_loss),
+            (OrderType::TakeProfit, opts.take_profit),
+        ] {
+            if let Some(trigger) = trigger {
+                let mut bracket = opts.clone();
+                bracket.kind = kind;
+                bracket.side = if opts.side == OrderSide::Buy {
+                    OrderSide::Sell
+                } else {
+                    OrderSide::Buy
+                };
+                bracket.price = Some(trigger);
+                bracket.trigger_price = None;
+                bracket.stop_loss = None;
+                bracket.take_profit = None;
+                bracket.reduce_only = Some(true);
+                bracket.close = Some(false);
+                out.extend(self.format_inverse(cx, &bracket)?);
+            }
+        }
+        Ok(out)
     }
 
     /// Portfolio margin's conditional orders name their fields differently and
@@ -638,7 +962,7 @@ impl BinanceFutures {
             stop_loss: None,
             take_profit: None,
             reduce_only: Some(order.reduce_only),
-            time_in_force: None,
+            time_in_force: order.time_in_force,
             trigger_type: None,
             tp_trigger_type: (order.kind == OrderType::TakeProfit)
                 .then_some(order.trigger_type)
@@ -976,4 +1300,37 @@ fn check_client_order_ids(orders: &[PlaceOrderOpts]) -> Result<(), String> {
         seen.push(id);
     }
     Ok(())
+}
+
+fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
+    let price = value.map(|v| num::adjust(v, precision)).unwrap_or(0.0);
+    if !price.is_finite() || price <= 0.0 {
+        return Err("Binance price/trigger must be finite and positive after rounding".into());
+    }
+    Ok(price)
+}
+
+fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
+    let max = if max.is_finite() && max > 0.0 {
+        num::adjust(max, step)
+    } else {
+        amount
+    };
+    if !max.is_finite() || max <= 0.0 {
+        return Err("Binance quantity limit must permit a positive lot".into());
+    }
+    let count = (amount / max).floor();
+    if count > 10000.0 {
+        return Err("Binance order requires too many native lots".into());
+    }
+    let mut out = Vec::new();
+    let at = params.0.len();
+    for _ in 0..count as usize {
+        out.push(with_quantity(&params, at, max));
+    }
+    let rest = num::adjust(amount - count * max, step);
+    if rest > 0.0 {
+        out.push(with_quantity(&params, at, rest));
+    }
+    Ok(out)
 }

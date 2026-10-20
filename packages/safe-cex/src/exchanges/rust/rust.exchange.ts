@@ -48,6 +48,8 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
+  binancespot: 'binancespot',
+  binanceinverse: 'binanceinverse',
   backpack: 'backpack',
   'tealstreet-dex': 'tealstreet-dex',
   kodiakfi: 'kodiakfi',
@@ -89,6 +91,11 @@ const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode'
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  binance: patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `x-s3vFFRQp${uuid()}` }),
+  binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, {
+    mint: () => `x-s3vFFRQp${uuid()}`.slice(0, 32),
+  }),
+  binancespot: patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/, { mint: () => `x-s3vFFRQp${uuid()}` }),
   'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,
   mode: orderlyClientOrderIdRule,
@@ -196,14 +203,19 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = exchangeName === 'bybitspot';
+    this.isSpot = exchangeName === 'bybitspot' || exchangeName === 'binancespot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'hyperliquid') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin', this.name === 'bitgetinverse');
+    this.applier = new FrameApplier(
+      store,
+      this.name === 'mexc' || this.name === 'blofin',
+      this.name === 'bitgetinverse',
+      this.name === 'binanceinverse',
+    );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
@@ -214,7 +226,8 @@ export class RustEngineExchange extends BaseExchange {
         const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
         const orders = await this.fetchHistoricalOrders({ from, to });
         return wooOrdersToPositionRecords(orders, {
-          account: opts.account, from,
+          account: opts.account,
+          from,
           resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
         });
       };
