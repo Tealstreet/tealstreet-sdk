@@ -83,9 +83,10 @@ pub fn trading_engine() -> Engine<Okx> {
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let mut out = actions(&mut e);
+    let a = out.remove(0);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    let out = actions(&mut e);
+    out.extend(actions(&mut e));
     let a = out
         .iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
