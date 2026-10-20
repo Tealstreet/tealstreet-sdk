@@ -13,6 +13,7 @@ import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { LogSeverity } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 const accounts: RustEngineExchange[] = [];
@@ -45,6 +46,7 @@ function fixture(name: (typeof aliases)[number], saved: Partial<ExchangeOptions>
   }));
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     // A controlled signed private action exercises the actual host and routing;
     // JWT cryptography itself remains native and is not implemented by this fixture.
     start: () =>

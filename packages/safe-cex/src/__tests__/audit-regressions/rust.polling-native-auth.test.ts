@@ -11,6 +11,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 const accounts: RustEngineExchange[] = [];
@@ -38,6 +39,7 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
   const commands: Array<{ op: string; scale?: number | null; ceiling?: number }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities('binance'),
     start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://controlled.invalid/private' }, ...initial]),
     command(json) {
       const command = JSON.parse(json);

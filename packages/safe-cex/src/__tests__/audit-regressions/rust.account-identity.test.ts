@@ -15,6 +15,7 @@ import {
 } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { nativeReadyFrame } from './rust.native-startup.fixtures';
 
 // Audited TS getAccount implementations and inherited product aliases. Keep this
@@ -88,12 +89,11 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
   let value: ExchangeAccount = identity;
   let failure: unknown;
   let nativeError: string | undefined;
-  let portfolio: string | undefined = 'native-portfolio-900719925474099312345';
   const commands: Array<{ op: string; command?: number }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: vi.fn(idle),
-    accountId: vi.fn(() => portfolio),
     command(json) {
       const command = JSON.parse(json);
       commands.push(command);
@@ -182,16 +182,13 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
     nativeError: (message: string) => {
       nativeError = message;
     },
-    portfolio: (id: string | undefined) => {
-      portfolio = id;
-    },
   };
 }
 
 it('audits every registered alias as supported identity or an explicit unsupported product', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
   expect(new Set(inventory).size).toBe(48);
-  expect(inventory.slice().sort()).toEqual(Object.keys(RUST_VENUES).sort());
+  expect(inventory.slice().sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
 });
 
@@ -201,45 +198,45 @@ it.each(commandAliases)(
     const r = fixture(name);
     const before = r.store.serialize();
     await expect(r.exchange.getAccount()).resolves.toEqual(identity);
-    expect(r.queries()).toEqual([
-      { op: ['apexomni', 'kucoinspot'].includes(name) ? 'getAccount' : 'fetchAccount', command: 1 },
-    ]);
+    expect(r.queries()).toEqual([{ op: 'fetchAccount', command: 1 }]);
     expect(r.construct).toHaveBeenCalledOnce();
     expect(r.native.start).not.toHaveBeenCalled();
-    expect(r.native.accountId).not.toHaveBeenCalled();
     expect(r.store.serialize()).toEqual(before);
     expect(r.errors).not.toHaveBeenCalled();
   },
 );
 
 it.each(unsupportedAliases)(
-  '%s rejects unsupported identity before constructing a host or dispatching balance reads',
+  '%s rejects unsupported identity from its capability record without commands or startup',
   async (name) => {
     const r = fixture(name);
-    await expect(r.exchange.getAccount()).rejects.toThrow('does not support account identity');
-    expect(r.construct).not.toHaveBeenCalled();
-    expect(r.commands).toEqual([]);
-    expect(r.errors).toHaveBeenCalledOnce();
+    // HyroTrader's URLs come from build-time env, so here its host refuses to build.
+    await expect(r.exchange.getAccount()).rejects.toThrow(
+      name === 'hyrotrader' ? /Not implemented|URLs are not configured/ : /Not implemented/,
+    );
+    expect(r.native.start).not.toHaveBeenCalled();
+    expect(r.queries()).toEqual([]);
+    // Identity reads leave failure visibility to their caller.
+    expect(r.errors).not.toHaveBeenCalled();
   },
 );
 
-it.each(coinbaseAliases)('%s preserves its native portfolio lookup and readiness path', async (name) => {
+it.each(coinbaseAliases)('%s asks the started engine for its native portfolio identity', async (name) => {
   const r = fixture(name);
   const result = r.exchange.getAccount();
   await vi.advanceTimersByTimeAsync(250);
-  await expect(result).resolves.toEqual({ userId: 'native-portfolio-900719925474099312345' });
+  await expect(result).resolves.toEqual(identity);
   expect(r.native.start).toHaveBeenCalledOnce();
-  expect(r.native.accountId).toHaveBeenCalledOnce();
-  expect(r.queries()).toEqual([]);
+  expect(r.queries()).toEqual([{ op: 'fetchAccount', command: 1 }]);
 });
 
-it.each(orderlyAliases)('%s preserves its ready configured Orderly identity and affiliate', async (name) => {
+it.each(orderlyAliases)('%s asks the started engine for its Orderly identity', async (name) => {
   const r = fixture(name);
   const result = r.exchange.getAccount();
   await vi.advanceTimersByTimeAsync(250);
-  await expect(result).resolves.toEqual({ userId: 'configured-account', affiliateId: 'configured-account' });
+  await expect(result).resolves.toEqual(identity);
   expect(r.native.start).toHaveBeenCalledOnce();
-  expect(r.queries()).toEqual([]);
+  expect(r.queries()).toEqual([{ op: 'fetchAccount', command: 1 }]);
 });
 
 it.each<ExchangeAccount>([
@@ -280,7 +277,7 @@ it('propagates a missing native identity rejection once without empty-account fa
   const r = fixture('phemex');
   r.nativeError('Phemex account-position response did not include a user ID');
   await expect(r.exchange.getAccount()).rejects.toThrow('did not include a user ID');
-  expect(r.errors).toHaveBeenCalledOnce();
+  expect(r.errors).not.toHaveBeenCalled();
   expect(r.queries()).toHaveLength(1);
   expect(r.exchange.isDisposed).toBe(false);
 });
@@ -290,7 +287,7 @@ it('preserves an original frozen failure and does not construct another host to 
   const failure = Object.freeze(Object.assign(new Error('query transport failed'), { code: 'CONTROLLED_READ' }));
   r.failure(failure);
   await expect(r.exchange.getAccount()).rejects.toBe(failure);
-  expect(r.errors).toHaveBeenCalledOnce();
+  expect(r.errors).not.toHaveBeenCalled();
   expect(r.construct).toHaveBeenCalledOnce();
   expect(r.queries()).toHaveLength(1);
 });

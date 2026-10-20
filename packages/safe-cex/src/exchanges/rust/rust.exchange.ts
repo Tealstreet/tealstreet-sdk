@@ -1541,6 +1541,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Identity reads leave failure visibility to their caller. */
   getAccount = async (): Promise<ExchangeAccount> => {
+    this.assertEngineAlive();
     await this.ensureHost();
     const lookup = this.capabilityRecord?.account;
     if (lookup === 'afterLoad') await this.start();
