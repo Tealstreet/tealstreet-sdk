@@ -61,6 +61,8 @@ pub struct Account {
     position_times: HashMap<String, f64>,
     executions: HashSet<String>,
     execution_order: VecDeque<String>,
+    /// Trigger orders labelled before any price existed; relabelled at the seed.
+    pub unpriced_triggers: HashSet<String>,
 }
 impl Default for Account {
     fn default() -> Self {
@@ -81,6 +83,7 @@ impl Default for Account {
             position_times: HashMap::new(),
             executions: HashSet::new(),
             execution_order: VecDeque::new(),
+            unpriced_triggers: HashSet::new(),
         }
     }
 }
@@ -143,6 +146,12 @@ pub fn kind(
     } else {
         OrderType::TakeProfit
     }
+}
+
+fn unpriced(store: &safe_cex_engine::Store, symbol: &str) -> bool {
+    store
+        .ticker(symbol)
+        .is_none_or(|t| t.last <= 0.0 && t.mark <= 0.0)
 }
 
 pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
@@ -469,7 +478,9 @@ impl Backpack {
                         {
                             repairs.push(repair);
                         }
-                        rows.push(order(r, cx.store));
+                        let mapped = order(r, cx.store);
+                        self.note_unpriced_trigger(cx.store, &mapped);
+                        rows.push(mapped);
                     }
                 });
                 if result.is_err() {
@@ -681,12 +692,18 @@ impl Backpack {
                 self.account
                     .order_times
                     .insert(d.i.to_string(), d.event_time);
+                let order_kind = kind(cx.store, &d.s, side, &d.o, trigger);
+                if matches!(order_kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    && unpriced(cx.store, &d.s)
+                {
+                    self.account.unpriced_triggers.insert(d.i.to_string());
+                }
                 cx.store.upsert_order(Order {
                     id: d.i.to_string(),
                     parent_id: None,
                     status: status(&d.status),
                     symbol: d.s.to_string(),
-                    kind: kind(cx.store, &d.s, side, &d.o, trigger),
+                    kind: order_kind,
                     side,
                     price,
                     amount,
@@ -857,6 +874,39 @@ fn instruction(method: Method, path: &str) -> &'static str {
         (Method::Get, "/wapi/v1/history/orders") => "orderHistoryQueryAll",
         (Method::Get, "/wapi/v1/history/funding") => "fundingHistoryQueryAll",
         _ => unreachable!("unregistered Backpack instruction"),
+    }
+}
+
+impl crate::Backpack {
+    fn note_unpriced_trigger(&mut self, store: &safe_cex_engine::Store, order: &Order) {
+        if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && unpriced(store, &order.symbol)
+        {
+            self.account.unpriced_triggers.insert(order.id.clone());
+        } else {
+            self.account.unpriced_triggers.remove(&order.id);
+        }
+    }
+
+    /// A trigger read before any price defaults to StopLoss; relabel it from
+    /// the seeded price once that exists.
+    pub(crate) fn relabel_unpriced_triggers(&mut self, cx: &mut Cx<'_, Pending>) {
+        for id in std::mem::take(&mut self.account.unpriced_triggers) {
+            let Some(order) = cx.store.order(&id) else {
+                continue;
+            };
+            if unpriced(cx.store, &order.symbol) {
+                continue;
+            }
+            let relabelled = kind(
+                cx.store,
+                &order.symbol,
+                order.side,
+                "Market",
+                Some(order.price),
+            );
+            cx.store.update_order(&id, |order| order.kind = relabelled);
+        }
     }
 }
 

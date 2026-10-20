@@ -262,6 +262,7 @@ impl Backpack {
         if let MarkSeed::Loaded(marks) = std::mem::take(&mut self.seed.marks) {
             Self::apply_marks(cx, marks);
         }
+        self.relabel_unpriced_triggers(cx);
         self.connect_public(cx);
     }
 
