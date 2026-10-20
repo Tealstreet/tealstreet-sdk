@@ -576,8 +576,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - High: ~~`SetPositionMode` has no symbol (`engine/src/command.rs:95`), so Phemex
   loops PUTs over every market and can half-switch (`phemex/src/trading.rs:858`).~~
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
-  one unknown order status/type drops the whole private frame incl. positions
-  and balances (`account_wire.rs:298`, `account.rs:601`).
+  ~~one unknown order status/type drops the whole private frame incl. positions
+  and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
+  its executions still emit, the store keeps its copy).
 - Medium: one bad public row stops startup; one bad position row freezes a
   currency slice (`account.rs:286`); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`).
