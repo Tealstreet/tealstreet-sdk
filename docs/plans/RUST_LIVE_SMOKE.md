@@ -140,3 +140,11 @@ native network primitives provide its transport. No engine shapes change.
   Full harness 533/533 and all 9 real-Wasm fake lifecycle scenarios pass. A
   second independent merge review passed 193 scoped units plus fake lifecycle
   replay; no remaining concrete integration finding. No real accounts used.
+- Combined landing gates PASS: 533 harness, 9 scripted real-Wasm lifecycle
+  scenarios, 108 Wasm SDK and 99 native Binance tests; root 44 typecheck /
+  28 lint / 27 test tasks. Bans, fmt, native Binance and wasm clippy, full
+  branch secret scan pass. Binance private gate PASS (14 frames/2 markets).
+  Public gate 3 runs/873 frames/917 markets/783 tickers/3 books: TS/Rust CPU
+  298.6/177.5 ms, steady CPU 175.2/96.3 ms, retained memory 16.3/3.3 MB.
+  Merge review PASS; post the repaired-head evidence and wait for its full CI
+  before merging PR #1332, then cut the fresh follow-up branch.
