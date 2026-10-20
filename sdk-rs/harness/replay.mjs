@@ -66,10 +66,13 @@ const config = records.find((record) => record.type === 'config') ?? {};
 const isPrivate = config.private ?? metadata?.private ?? records.some((record) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
-const options = { ...venue.options, ...(isPrivate
+const options = { ...venue.options, ...metadata?.options,
+  ...(typeof metadata?.testnet === 'boolean' ? { testnet: metadata.testnet } : {}), ...(isPrivate
   ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
   : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
 await venue.prepareReplay?.({ isPrivate, options });
+
+await venue.initializeReplay?.(values.impl, options);
 
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
@@ -150,7 +153,7 @@ async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine();
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, options);
   const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options);
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
@@ -264,6 +267,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
+  const protocolErrors = tape.audit?.errors() ?? [];
   host.dispose();
   clock?.restore();
 
@@ -298,7 +302,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors, wsRequests: [...tape.sentRequests].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -622,9 +626,10 @@ async function runTs() {
         })),
       }
     : undefined;
+  const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), writes: tape.writes, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), invalidSignatures: tape.invalidSignatures, protocolErrors, wsRequests: [...tape.sentRequests].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -707,7 +712,8 @@ writeFileSync(
     ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands,
+    commands: result.commands.map((result, index) => venue.commandResult?.(result,
+      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
   }),
 );
 realClearTimeout(replayDeadline);

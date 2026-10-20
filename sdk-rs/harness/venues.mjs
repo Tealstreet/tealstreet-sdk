@@ -5,8 +5,276 @@ import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
+import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
+
+let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
+
+const base58 = (bytes) => {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let value = BigInt(`0x${Buffer.from(bytes).toString('hex')}`);
+  let result = '';
+  while (value) {
+    result = alphabet[Number(value % 58n)] + result;
+    value /= 58n;
+  }
+  for (const byte of bytes) {
+    if (byte !== 0) break;
+    result = '1' + result;
+  }
+  return result;
+};
+const orderlySeed = Buffer.alloc(32, 11);
+const orderlyPrivate = createPrivateKey({
+  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), orderlySeed]),
+  format: 'der',
+  type: 'pkcs8',
+});
+const orderlyPublic = createPublicKey(orderlyPrivate);
+export const ORDERLY_REPLAY = {
+  key: `ed25519:${base58(orderlyPublic.export({ format: 'der', type: 'spki' }).subarray(-32))}`,
+  secret: `ed25519:${base58(orderlySeed)}`,
+  applicationId: `0x${'11'.repeat(32)}`,
+  // OrderlyNetwork/js-sdk packages/net/src/ws/ws.ts COMMON_ID.
+  publicApplicationId: 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY',
+};
+export const ORDERLY_BROKERS = {
+  'tealstreet-dex': 'TEALSTREET',
+  kodiakfi: 'TEALKODIAK',
+  mode: 'TEALMODE',
+  salsadex: 'TEALSALSA',
+  what: 'TEALWHAT',
+  woofi: 'TEALSTREET',
+};
+const orderlyClasses = {
+  'tealstreet-dex': 'TealstreetDEXExchange',
+  kodiakfi: 'KodiakFIExchange',
+  mode: 'MODEExchange',
+  salsadex: 'SalsaDEXExchange',
+  what: 'WhatExchange',
+  woofi: 'WoofiExchange',
+};
+const orderlyNative = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
+const orderlyPrivateUrl = (url) => new URL(url).pathname.startsWith('/v2/ws/private/stream/');
+const orderlySocketRequest = (message) => {
+  if (message.event !== 'request') return undefined;
+  if (
+    message.params?.type !== 'orderbook' ||
+    typeof message.params.symbol !== 'string' ||
+    !message.params.symbol.startsWith('PERP_') ||
+    typeof message.id !== 'string' ||
+    !message.id
+  )
+    throw new Error('invalid Orderly orderbook request');
+  return { key: JSON.stringify(['orderbook', message.params.symbol]), id: message.id };
+};
+const orderlySocketResponse = (message) => {
+  if (message.event !== 'request') return undefined;
+  if (
+    typeof message.id !== 'string' ||
+    !message.id ||
+    (message.success === true && typeof message.data?.symbol !== 'string')
+  )
+    throw new Error('invalid Orderly orderbook response');
+  return {
+    id: message.id,
+    key: message.data?.symbol ? JSON.stringify(['orderbook', message.data.symbol]) : undefined,
+  };
+};
+const orderlySignature = (payload, signature) => {
+  try {
+    return (
+      typeof signature === 'string' &&
+      /^[A-Za-z0-9_-]+={0,2}$/.test(signature) &&
+      verify(null, Buffer.from(payload), orderlyPublic, Buffer.from(signature, 'base64url'))
+    );
+  } catch {
+    return false;
+  }
+};
+const orderlyAuth = (message) => {
+  if (message.event !== 'auth') return true;
+  const params = message.params;
+  return (
+    params?.orderly_key === ORDERLY_REPLAY.key &&
+    Number.isSafeInteger(params.timestamp) &&
+    Math.abs(Date.now() - params.timestamp) < 60000 &&
+    orderlySignature(String(params.timestamp), params.sign)
+  );
+};
+const orderly = (alias) => {
+  const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
+  return {
+    family: 'orderly',
+    orderlyProtocol: true,
+    subscriptionGenerations: true,
+    publicTickers: (records) => {
+      const seed = records.find((r) => r.type === 'http' && new URL(r.url).pathname === '/v1/public/info');
+      return seed ? JSON.parse(seed.body).data.rows.map((row) => row.symbol) : [];
+    },
+    rust: alias,
+    ts: {
+      module: `${root}/../__tests__/reference/orderly/exchanges/${name}/${name}.exchange.ts`,
+      className: orderlyClasses[name],
+      name,
+    },
+    options: { applicationId: ORDERLY_REPLAY.applicationId, testnet: false },
+    publicOptions: { applicationId: ORDERLY_REPLAY.publicApplicationId },
+    configureTs(exchange) {
+      exchange.publicWebsocket.replaySnapshots = true;
+    },
+    replayCredentials: { key: ORDERLY_REPLAY.key, secret: ORDERLY_REPLAY.secret },
+    privateSocket: '/v2/ws/private/stream/',
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >=
+      count,
+    streamOf: (text) => {
+      try {
+        const message = JSON.parse(text);
+        return message.data && message.topic;
+      } catch {
+        return undefined;
+      }
+    },
+    socketRequest: orderlySocketRequest,
+    socketResponse: orderlySocketResponse,
+    requireSocketRequestRecords: true,
+    matchRequestBody: true,
+    requestBodies: true,
+    compareWriteOrder: true,
+    compareClientIds: true,
+    compareFillPrices: true,
+    isWrite: (method) => method !== 'GET',
+    verifySubscribe: orderlyAuth,
+    verifyRequest: ({ method, url, headers, body = '' }) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes('/public/') || parsed.pathname === '/v1/kline') return true;
+      const h = Object.fromEntries(
+        (Array.isArray(headers) ? headers : Object.entries(headers ?? {})).map(([key, value]) => [
+          key.toLowerCase(),
+          String(value),
+        ]),
+      );
+      if (
+        h['orderly-key'] !== ORDERLY_REPLAY.key ||
+        h['orderly-account-id'] !== ORDERLY_REPLAY.applicationId ||
+        !/^\d+$/.test(h['orderly-timestamp'] ?? '') ||
+        !Number.isSafeInteger(Number(h['orderly-timestamp'])) ||
+        Math.abs(Date.now() - Number(h['orderly-timestamp'])) >= 60000
+      )
+        return false;
+      const contentType = h['content-type']?.split(';')[0];
+      if (
+        contentType !== (['GET', 'DELETE'].includes(method) ? 'application/x-www-form-urlencoded' : 'application/json')
+      )
+        return false;
+      const text = `${h['orderly-timestamp']}${method}${parsed.pathname}${parsed.search}${body || ''}`;
+      return (
+        (h['orderly-textsign'] === undefined || h['orderly-textsign'] === text) &&
+        orderlySignature(text, h['orderly-signature'])
+      );
+    },
+    createSocketAudit: (_impl, { isPrivate, books, tickers = [] }) => {
+      const connections = new Map();
+      const failures = [];
+      const socket = (url, generation = 1) => {
+        const key = `${url} ${generation}`;
+        if (!connections.has(key))
+          connections.set(key, {
+            url,
+            auth: false,
+            authAck: false,
+            channels: new Set(),
+            serverPings: 0,
+            closed: false,
+          });
+        return connections.get(key);
+      };
+      const active = () => [...connections.values()].filter((s) => !s.closed);
+      const publicTopics = [
+        'tickers',
+        'bbos',
+        'markprices',
+        ...tickers.map((native) => `${native}@estfundingrate`),
+        ...books.map((symbol) => `${orderlyNative(symbol)}@orderbookupdate`),
+      ];
+      const privateTopics = ['executionreport', 'algoexecutionreportv2', 'position'];
+      return {
+        connected(url, generation) {
+          socket(url, generation);
+        },
+        closed(url, generation) {
+          socket(url, generation).closed = true;
+        },
+        sent(url, text, generation) {
+          const message = JSON.parse(text),
+            state = socket(url, generation);
+          if (message.event === 'auth') {
+            state.auth = orderlyPrivateUrl(url) && orderlyAuth(message);
+            if (!state.auth) failures.push('invalid Orderly private auth signature');
+          } else if (['subscribe', 'unsubscribe'].includes(message.event)) {
+            if (orderlyPrivateUrl(url) && !state.authAck)
+              failures.push('Orderly private subscription preceded authentication');
+            if (typeof message.topic !== 'string' || !message.topic)
+              failures.push('invalid Orderly subscription topic');
+            if (message.event === 'subscribe') {
+              state.channels.add(message.topic);
+              if (state.channels.size > 100) failures.push('Orderly socket exceeds its 100-topic limit');
+            }
+            else state.channels.delete(message.topic);
+          } else if (message.event === 'pong') {
+            if (!state.serverPings) failures.push('unexpected Orderly heartbeat response');
+            else state.serverPings--;
+          } else if (message.event === 'request' && orderlyPrivateUrl(url)) {
+            failures.push('Orderly public snapshot requested on private socket');
+          }
+        },
+        received(url, text, generation) {
+          const message = JSON.parse(text),
+            state = socket(url, generation);
+          if (['subscribe', 'unsubscribe'].includes(message.event) && message.success === false) {
+            if (message.event === 'subscribe') {
+              if (typeof message.topic === 'string') state.channels.delete(message.topic);
+              else state.channels.clear();
+            }
+            failures.push(`rejected Orderly ${message.event}: ${message.topic ?? 'unknown topic'}`);
+          }
+          if (message.event === 'ping') state.serverPings++;
+          if (message.event === 'auth' && message.success === true) {
+            if (!state.auth) failures.push('Orderly auth success preceded a valid request');
+            state.authAck = state.auth;
+          }
+          if (message.data && message.topic) {
+            if (!state.channels.has(message.topic)) failures.push(`unsubscribed Orderly data ${message.topic}`);
+            if (orderlyPrivateUrl(url) && !state.authAck) failures.push('Orderly private data preceded authentication');
+          }
+        },
+        ready() {
+          return (
+            publicTopics.every((t) => active().some((s) => !orderlyPrivateUrl(s.url) && s.channels.has(t))) &&
+            (!isPrivate || active().some((s) => orderlyPrivateUrl(s.url) && s.auth))
+          );
+        },
+        errors() {
+          const errors = [...failures];
+          if (!publicTopics.every((t) => active().some((s) => !orderlyPrivateUrl(s.url) && s.channels.has(t))))
+            errors.push('missing Orderly public subscriptions');
+          if (
+            isPrivate &&
+            !active().some(
+              (s) => orderlyPrivateUrl(s.url) && s.authAck && privateTopics.every((t) => s.channels.has(t)),
+            )
+          )
+            errors.push('missing Orderly authenticated private subscriptions');
+          if (active().some((s) => s.serverPings)) errors.push('missing Orderly heartbeat response');
+          return errors;
+        },
+      };
+    },
+  };
+};
+
 
 // Replay transport and signing clocks both default to wall-clock milliseconds.
 const validWeexTimestamp = (time, now) => typeof time === 'string' && /^\d+$/.test(time)
@@ -173,6 +441,33 @@ export const VENUES = {
     })),
     tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
     isWrite: (method) => method !== 'GET',
+  },
+  ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
+  lighter: {
+    rust: 'lighter',
+    ts: { module: `${root}/lighter/lighter.exchange.ts`, className: 'LighterExchange', name: 'lighter' },
+    replayCredentials: { applicationId: '42', apiKeyIndex: '3', secret: '01' + '00'.repeat(39), key: '' },
+    recordOptions: { publicDataOnly: true, key: '' },
+    async initializeReplay(impl, options) {
+      if (options.publicDataOnly) return;
+      const oracle = await initializeLighterCrypto(impl);
+      lighterVerifier = createLighterVerifier(options, oracle);
+    },
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
+      .filter((key) => key.startsWith('order_book:')).length >= count,
+    isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
+    isWrite: (method) => method !== 'GET',
+    requestBody: lighterRequestBody,
+    requestUrl(url) { const parsed = new URL(url); parsed.searchParams.delete('auth'); return parsed.href; },
+    subscriptionMessage(message) {
+      return message.auth === undefined ? message : {...message,auth:'<verified-auth>'};
+    },
+    verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
+    verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
+    validateMatchedRequest: (record, request) => lighterVerifier?.matched(record, request),
+    commandResult: (result, command, index) => lighterVerifier?.commandResult(result, command, index) ?? result,
+    compareFillPrices: true,
+    compareWriteOrder: true,
   },
   woo: {
     rust: 'woo',
@@ -679,4 +974,5 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange))].filter((value) => value?.defaults && value?.interceptors);
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
+    .filter((value) => value?.defaults && value?.interceptors);

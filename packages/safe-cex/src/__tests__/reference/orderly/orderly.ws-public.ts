@@ -1,14 +1,14 @@
-import type { Candle, OHLCVOptions, OrderBook } from '../../types';
+import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { OrderlyExchange } from './orderly.exchange';
 
 import flatten from 'lodash/flatten';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { v } from '../../utils/get-key';
-import { calcOrderBookTotal } from '../../utils/orderbook';
-import { updateOrderBook } from '../../utils/updateOrderBook';
-import { BaseWebSocket } from '../base.ws';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { v } from '../../../utils/get-key';
+import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { updateOrderBook } from '../../../utils/updateOrderBook';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL, ENDPOINTS } from './orderly.types';
 import { normalizeSymbol, reverseSymbol } from './orderly.utils';
 
@@ -22,6 +22,11 @@ type SubscribedTopics = {
 
 export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
   topics: SubscribedTopics = {};
+  replaySnapshots = false;
+  fundingOnly?: string[];
+  fundingSockets: OrderlyPublicWebsocket[] = [];
+  snapshotSequence = 0;
+  snapshots = new Map<string, (data: Data) => void>();
   messageHandlers: MessageHandlers = {
     ping: [() => this.handlePingEvent()],
     pong: [() => this.handlePongEvent()],
@@ -30,6 +35,12 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
     markprices: [({ data }: Data) => this.handleMarkPricesStreamEvents(data)],
     estfundingrate: [({ data }: Data) => this.handleFundingRateStreamEvents(data)],
   };
+
+  dispose() {
+    for (const socket of this.fundingSockets) socket.dispose();
+    this.fundingSockets = [];
+    super.dispose();
+  }
 
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
@@ -46,10 +57,25 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
   onOpen = () => {
     if (!this.isDisposed) {
       this.ping();
+      if (this.fundingOnly) {
+        for (const topic of this.fundingOnly) this.send(JSON.stringify({ event: 'subscribe', topic }));
+        return;
+      }
       this.send(JSON.stringify({ event: 'subscribe', topic: 'tickers' }));
       this.send(JSON.stringify({ event: 'subscribe', topic: 'bbos' }));
       this.send(JSON.stringify({ event: 'subscribe', topic: 'markprices' }));
-      this.send(JSON.stringify({ event: 'subscribe', topic: 'estfundingrate' }));
+      if (this.replaySnapshots) {
+        if (!this.fundingSockets.length) {
+          const topics = this.parent.store.markets.map((market) => `${reverseSymbol(market.symbol)}@estfundingrate`).sort();
+          for (let at = 0; at < topics.length; at += 90) {
+            const socket = new OrderlyPublicWebsocket(this.parent);
+            socket.replaySnapshots = true;
+            socket.fundingOnly = topics.slice(at, at + 90);
+            this.fundingSockets.push(socket);
+            socket.connectAndSubscribe();
+          }
+        }
+      } else this.send(JSON.stringify({ event: 'subscribe', topic: 'estfundingrate' }));
       this.subscribe();
       if (ENABLE_RECONNECTING_WEBSOCKET) {
         this.emitWsReconnected();
@@ -68,6 +94,16 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
   onMessage = ({ data }: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
+      const response = jsonParse(data);
+      if (this.replaySnapshots && response?.topic?.endsWith('@estfundingrate')) {
+        this.handleFundingRateStreamEvents([response.data]);
+        return;
+      }
+      if (response?.event === 'request' && this.snapshots.has(String(response.id))) {
+        this.snapshots.get(String(response.id))!(response.data);
+        this.snapshots.delete(String(response.id));
+        return;
+      }
       const handlers = Object.entries(this.messageHandlers);
 
       for (const [topic, handler] of handlers) {
@@ -214,25 +250,31 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
 
     const fetchSnapshot = async () => {
       try {
-        const {
-          data: { data },
-        } = await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`);
+        const data = this.replaySnapshots ? await new Promise<Data>((resolve) => {
+          const id = `reference-${++this.snapshotSequence}`;
+          this.snapshots.set(id, resolve);
+          this.send(JSON.stringify({ id, event: 'request', params: { type: 'orderbook', symbol: reverseSymbol(symbol) } }));
+        }) : await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`).then(({ data: { data } }) => ({
+          ts: data.timestamp,
+          bids: data.bids.map((row: Data) => [row.price, row.quantity]),
+          asks: data.asks.map((row: Data) => [row.price, row.quantity]),
+        }));
 
         if (!this.isDisposed) {
-          orderBook.bids = data.bids.map((row: Record<string, any>) => ({
-            price: row.price,
-            amount: row.quantity,
+          orderBook.bids = data.bids.map(([price, amount]: [number, number]) => ({
+            price,
+            amount,
             total: 0,
           }));
 
-          orderBook.asks = data.asks.map((row: Record<string, any>) => ({
-            price: row.price,
-            amount: row.quantity,
+          orderBook.asks = data.asks.map(([price, amount]: [number, number]) => ({
+            price,
+            amount,
             total: 0,
           }));
 
           // drop events where timestamp is older than the snapshot
-          innerState.updates = innerState.updates.filter((update: Record<string, any>) => update.ts > data.timestamp);
+          innerState.updates = innerState.updates.filter((update: Record<string, any>) => update.ts > data.ts);
 
           // apply all updates
           innerState.updates.forEach((update: Record<string, any>) => {
@@ -255,12 +297,11 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
     };
 
     const parser = (json: Data) => {
-      if (!innerState.isSnapshotLoaded && innerState.updates.length === 0) {
+      if (!this.replaySnapshots && !innerState.isSnapshotLoaded && innerState.updates.length === 0) {
         void fetchSnapshot();
         innerState.updates = [json];
         return;
       }
-
       if (!innerState.isSnapshotLoaded) {
         innerState.updates.push(json);
         return;
@@ -286,6 +327,7 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
 
           const payload = { event: 'subscribe', topic };
           this.send(JSON.stringify(payload));
+          if (this.replaySnapshots) void fetchSnapshot();
         }
       } else {
         timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);

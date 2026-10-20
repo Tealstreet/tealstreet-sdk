@@ -96,7 +96,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
 | 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss |
-| 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate |
+| 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
@@ -310,7 +310,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | ApeX Omni perpetuals | In progress on `feat/rust-apexomni`; native zkLink signing and API-key authentication, phased reviews and gates |
 | KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| Lighter, Paradex, GRVT, AsterDEX, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
+| Paradex, GRVT, AsterDEX, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

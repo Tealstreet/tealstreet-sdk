@@ -167,3 +167,14 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Next: commit paired corrections/integration, merge latest landing branch
   (Orderly and Lighter), rerun all native/WASM/root checks, public/private and
   Binance gates, then PR code-correctness reviews and green CI.
+
+### Landing integration
+
+- Paired phase committed at `d2ffb5155b`; 75 focused ApeX TS tests and 177
+  harness tests pass. All reported phase review findings are fixed/re-reviewed.
+- Integrated landing `f66bdc26f9` (Orderly and Lighter), retaining its nested
+  workspace, all venue aliases/features/transport and SDK loader changes.
+  Merge conflicts were resolved by disjoint file owners and reviewed against
+  the landing version. Merged harness: 222 tests passing.
+- Final gate run starts from this merged state. No thresholds, output
+  normalization or memory accounting were weakened.
