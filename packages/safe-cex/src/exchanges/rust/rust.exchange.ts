@@ -127,6 +127,12 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+// ApeX and KuCoin Spot retain their existing getAccount command aliases below.
+const nativeIdentityNames = new Set<ExchangeName>([
+  'asterdex', 'backpack', 'binance', 'binancepm', 'bingx', 'bitget', 'bitgetinverse', 'bitgetusdc',
+  'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'cryptocom', 'grvt', 'kucoin', 'lighter',
+  'lighter-robinhood', 'mexc', 'paradex', 'phemex', 'polymarket', 'weex', 'woo',
+]);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, {
@@ -1287,9 +1293,12 @@ export class RustEngineExchange extends BaseExchange {
       if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
       return { userId };
     }
-    if (this.name === 'asterdex' || this.name === 'polymarket')
+    if (nativeIdentityNames.has(this.name)) {
+      this.assertEngineAlive();
+      await this.ensureHost();
       return this.command<ExchangeAccount>({ op: 'fetchAccount' });
-    if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
+    }
+    if (!orderlyNames.has(this.name)) this.rejectPreflight(`${this.name} does not support account identity queries`);
     if (!this.host) await this.start();
     await this.untilLoaded();
     const accountId = this.options.applicationId;

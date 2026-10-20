@@ -1008,3 +1008,19 @@ Logs: /tmp/bridge-c44-native7-complete.log plus
 /tmp/bridge-landing-wire-merge-final.log; /tmp/bridge-landing-c44-recovery-verified.log;
 /tmp/bridge-landing-worker-ack-results.json. Four initial auth hooks were preserved
 as explicit WIP before merge; the full classifier migration remains unproved.
+
+## Phase 4d SDK identity dispatch checkpoint
+
+All 48 registered aliases have explicit identity behavior: 33 supported and
+15 unsupported. SDK dispatch exposes the native identity continuations without
+starting public streams or waiting for unrelated reconciliation; native code
+continues to own signing, sessions, typed ID parsing and namespacing. Existing
+ApeX/KuCoin Spot aliases, Coinbase portfolio IDs and Orderly configured IDs stay
+intact. Kraken Spot's balance command is never treated as identity.
+
+128 focused tests across six files PASS (61 new controls, complete JSON receipt
+/tmp/bridge-identity-sdk-final.json), including unchanged existing query paths.
+SDK types and strict scoped lint PASS. Independent correctness review PASS.
+See RUST_IDENTITY_ROUTING.md for exact alias inventory and receipts. This is
+real EngineHost/fake-ABI proof; combined native-WASM identity acceptance remains
+part of the final artifact gates.
