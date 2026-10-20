@@ -68,4 +68,7 @@ in force, and venue code emits only the deployment's real REST/socket URLs.
 - Native verification: 95 tests PASS including final history/index edge
   coverage; bans, crate fmt/Clippy PASS. Wrapper + TS mode regressions: 56 PASS;
   package typecheck/lint PASS.
+- WASM host Clippy and formatting PASS. Serialized focused harness checks:
+  145 PASS (Lighter, venue registration, tape and gate tests).
 - Combined release WASM build and replay gates in progress.
+- Production phases committed as `1ee5bb304d`; all phase reviews PASS after fixes.
