@@ -37,7 +37,7 @@ export const settledMemory = async ({
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
   quietMs = 100,
-  timeoutMs = 1000,
+  timeoutMs = 5000,
 } = {}) => {
   const deadline = now() + timeoutMs;
   let previous;

@@ -120,3 +120,29 @@ test('settled samples use real time when replay replaces global timers', async (
     globalThis.setTimeout = original;
   }
 });
+
+// A busy worker may need several full GCs to release cold loader storage.
+test('cold backing-store cleanup can exceed one second before the first quiet sample', async () => {
+  let time = 0;
+  const sampling = {
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time < 1500 ? 2000 - time : 100, heapUsed: 1000 }),
+  };
+  await assert.rejects(settledMemory({ ...sampling, timeoutMs: 1000 }), /Backing-buffer memory did not settle/);
+  time = 0;
+  assert.deepEqual(await settledMemory(sampling), { arrayBuffers: 100, heapUsed: 1000 });
+  assert.equal(time, 1600);
+});
+
+test('the extended startup deadline still rejects continuously changing backing stores', async () => {
+  let time = 0;
+  await assert.rejects(settledMemory({
+    collect() {},
+    pause: async () => { time += 100; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+  }), /Backing-buffer memory did not settle/);
+  assert.equal(time, 5100);
+});
