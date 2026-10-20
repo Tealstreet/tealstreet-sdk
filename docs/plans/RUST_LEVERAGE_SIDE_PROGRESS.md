@@ -106,7 +106,7 @@ Reference-only TS for deleted families is inspected in
 
 - Independent phase-1 inventory/plan audit: PASS; five side-aware families,
   BreakoutProp metadata-only exception, several reachable dynamic clamp risks.
-- Implementation source phases complete; final workspace/replay/CI gates pending.
+- Implementation and all local gates complete. Final PR reviews, green CI and merge remain pending.
 
 ### Accepted addenda
 
@@ -290,3 +290,82 @@ Reference-only TS for deleted families is inspected in
 - Later landing documentation (`702a62050c`) merged as `8946d40386`; runtime
   sources and this comparison are unchanged. Refreshed compiled suites,
   canonical replays and all 30 sizes are still running before PR creation.
+
+### Final local gate evidence
+
+Runtime source: `4677fc0ba7` (later commits are documentation only).
+
+- Bans, workspace formatting, all-target native clippy and wasm32 clippy pass.
+  Full native workspace: 2,860 tests. Root: typecheck 44/44, lint 28/28, tests
+  27/27; both SDK runners pass 7,772 tests in 526 files.
+- Combined WASM/native fixture builds pass. Compiled gates: SDK 444, Workers
+  76, wire 1, native adapter 1, product semantics 16, harness 590, scripted
+  lifecycle 9, server consumer 11, MCP 5, CLI 2, RN 2. MCP build/smoke pass.
+  Bitget's four Classic/UTA contract tests pass on combined and isolated builds.
+- Sixteen canonical public and nineteen paired private replay gates pass,
+  including Binance variants, Bitget inverse and both Lighter testnets. Every
+  public output matches with lower main-thread/steady CPU and retained memory.
+  UTA ledger/trailing uses the independent documented-contract suite above.
+- All 30 CI profile sizes pass the unchanged 1,258,291-byte budget; largest
+  Paradex is 1,224,951 bytes (33,340 bytes headroom). Combined Node bindings
+  were restored and their hash matches the integrated artifact above.
+- Final source/document diff check passes; latest landing is already merged.
+  Secret scan: nine lane commits, 153,895 bytes, no leaks (documentation-only
+  evidence commit is scanned again before push). No deployment or live private
+  trading occurred. PR reviews and CI are the remaining process steps.
+
+Canonical public gates (three-run medians; TS/Rust):
+
+| Profile | Main CPU TS/Rust (ms) | Steady CPU TS/Rust (ms) | Retained TS/Rust (MB) | WASM bytes |
+| --- | ---: | ---: | ---: | ---: |
+| binance | 197.3 / 86.6 | 105.9 / 33.6 | 18.2 / 4.0 | 979779 |
+| bitget | 789.6 / 635.3 | 539.2 / 417.5 | 21.1 / 4.6 | 1016470 |
+| bingx | 122.6 / 71.9 | 43.4 / 31.3 | 17.4 / 3.5 | 916678 |
+| mexc | 522.1 / 281.8 | 312.3 / 152.8 | 27.6 / 5.0 | 850051 |
+| phemex | 373.6 / 102.1 | 249.5 / 35.0 | 20.2 / 4.4 | 826977 |
+| weex | 135.1 / 89.9 | 63.9 / 37.5 | 19.1 / 3.5 | 865646 |
+| lighter | 437.6 / 226.2 | 287.2 / 118.4 | 17.8 / 2.8 | 1052987 |
+| lighter-robinhood | 242.3 / 95.3 | 168.4 / 52.4 | 20.3 / 5.0 | 1052987 |
+| orderly | 114.7 / 74.1 | 82.5 / 47.7 | 14.4 / 1.8 | 861699 |
+| blofin | 144.7 / 113.5 | 79.4 / 54.7 | 16.6 / 3.0 | 862691 |
+| okx | 1814.7 / 1282.8 | 1301.6 / 882.6 | 19.3 / 5.2 | 872327 |
+| kucoin | 456.1 / 236.8 | 295.5 / 129.6 | 21.5 / 4.0 | 827100 |
+| kraken | 1002.6 / 156.6 | 722.4 / 85.0 | 16.9 / 2.7 | 1122420 |
+| binancespot | 818.7 / 492.8 | 408.8 / 172.4 | 27.5 / 10.8 | 979779 |
+| binanceinverse | 202.8 / 74.2 | 135.7 / 41.7 | 13.9 / 1.9 | 979779 |
+| binancepm | 228.2 / 115.5 | 128.5 / 51.7 | 18.0 / 4.1 | 979779 |
+
+All isolated size gates:
+
+| Profile | WASM bytes |
+| --- | ---: |
+| apexomni | 1053896 |
+| asterdex | 1097392 |
+| backpack | 841879 |
+| binance | 979779 |
+| bingx | 916678 |
+| bitget | 1016470 |
+| bitrue | 860451 |
+| blofin | 862691 |
+| breakoutprop | 727474 |
+| bybit | 1162398 |
+| coinbase | 1052487 |
+| cryptocom | 730742 |
+| grvt | 1049276 |
+| hyperliquid | 1106140 |
+| hyperliquidspot | 1106140 |
+| kraken | 1122420 |
+| krakenspot | 1122420 |
+| kucoin | 827100 |
+| kucoinspot | 731067 |
+| lighter | 1052987 |
+| lighter-robinhood | 1052987 |
+| mexc | 850051 |
+| okx | 872327 |
+| orderly | 861699 |
+| paradex | 1224951 |
+| phemex | 826977 |
+| polymarket | 902630 |
+| txflow | 1000697 |
+| weex | 865646 |
+| woo | 915887 |
