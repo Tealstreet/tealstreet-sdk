@@ -19,6 +19,16 @@ fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
 
 /// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
 pub fn float(text: &str) -> f64 {
+    // Every unsigned integer of at most 15 digits is represented exactly by f64.
+    if !text.is_empty()
+        && text.len() <= 15
+        && let Some(integer) = text.bytes().try_fold(0u64, |integer, byte| {
+            let digit = byte.wrapping_sub(b'0');
+            (digit <= 9).then(|| integer * 10 + u64::from(digit))
+        })
+    {
+        return integer as f64;
+    }
     text.trim().parse::<f64>().unwrap_or(f64::NAN)
 }
 
@@ -765,6 +775,76 @@ pub fn topic(text: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_unsigned_integer_float_matches_standard_parser_bitwise() {
+        for integer in 0..1000 {
+            let text = integer.to_string();
+            assert_eq!(
+                float(&text).to_bits(),
+                text.parse::<f64>().unwrap().to_bits()
+            );
+        }
+        for digits in 1..=15 {
+            for digit in ["0", "1", "9"] {
+                let text = digit.repeat(digits);
+                assert_eq!(
+                    float(&text).to_bits(),
+                    text.parse::<f64>().unwrap().to_bits()
+                );
+            }
+        }
+        for text in ["000000000000001", "100000000000000", "999999999999999"] {
+            assert_eq!(
+                float(text).to_bits(),
+                text.parse::<f64>().unwrap().to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn non_integer_float_spellings_keep_original_parser_semantics() {
+        for text in [
+            "",
+            "-",
+            "++1",
+            "1x",
+            "1\0",
+            "１２",
+            "0.5",
+            ".5",
+            "5.",
+            "1e-9",
+            "1E12",
+            "+1",
+            "-1",
+            "-0",
+            "-0.0",
+            "+0",
+            " 1",
+            "1 ",
+            "\t1\n",
+            "\u{2003}1\u{2003}",
+            "0000000000000001",
+            "1000000000000000",
+            "9007199254740991",
+            "9007199254740992",
+            "9007199254740993",
+            "18446744073709551615",
+            "NaN",
+            "nan",
+            "inf",
+            "-inf",
+            "Infinity",
+        ] {
+            assert_eq!(
+                float(text).to_bits(),
+                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                "changed {text:?}"
+            );
+        }
+        assert_eq!(float("-0").to_bits(), (-0.0f64).to_bits());
+    }
 
     #[test]
     fn book_decoder_reuses_numeric_buffers_across_frames() {

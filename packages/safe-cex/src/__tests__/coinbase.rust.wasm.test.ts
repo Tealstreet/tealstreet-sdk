@@ -89,6 +89,17 @@ describe('shipping Coinbase Rust family', () => {
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
+  it.each([
+    ['coinbasespot', true],
+    ['coinbase', false],
+    ['grvt', false],
+    ['bybitspot', true],
+  ] as const)('%s preserves its public spot identity', (name, isSpot) => {
+    exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    expect(exchange.isPublicDataOnly).toBe(true);
+    expect(exchange.isSpot).toBe(isSpot);
+  });
+
   it.each(names)('%s selects private startup from downloaded JSON, returns native portfolio and preserves native commands', async (name) => {
     const tape = transport();
     setWasmEngineLoader(loadNodeEngine);

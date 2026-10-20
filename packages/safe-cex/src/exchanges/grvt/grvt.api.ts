@@ -341,6 +341,7 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
               const authResult = await exchange.authenticate();
               if (authResult) {
                 exchange.log?.('GRVT session refresh succeeded; retrying request', LogSeverity.Debug);
+                if (exchange.privateWebsocket?.isConnected) exchange.privateWebsocket.reconnect();
 
                 // Mark the request as a retry to prevent infinite loops
                 error.config._retry = true;
@@ -349,6 +350,9 @@ export function createTradingAPI(opts: ExchangeOptions, exchange: any): AxiosIns
                 if (exchange.apiExtras?.sessionCookie) {
                   // Use custom header - Lambda will convert to Cookie
                   error.config.headers['X-Ts-Grvt-Session'] = exchange.apiExtras.sessionCookie;
+                  const cookie = `rm=true; gravity=${exchange.apiExtras.sessionCookie}`;
+                  if (typeof error.config.headers.set === 'function') error.config.headers.set('Cookie', cookie);
+                  else error.config.headers.Cookie = cookie;
                   error.config.grvtCookie = `rm=true; gravity=${exchange.apiExtras.sessionCookie}`;
                 }
                 if (exchange.apiExtras?.accountId) {
