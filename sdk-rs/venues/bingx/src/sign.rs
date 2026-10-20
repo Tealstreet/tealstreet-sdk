@@ -122,3 +122,13 @@ impl Params {
 pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
 }
+
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

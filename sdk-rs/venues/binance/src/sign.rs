@@ -76,3 +76,35 @@ mod tests {
         );
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
+
+#[cfg(test)]
+mod security_receive_window {
+    use super::*;
+
+    #[test]
+    fn configured_receive_window_is_signed_without_changing_supported_values() {
+        let c = Credentials {
+            key: "k".into(),
+            secret: "s".into(),
+        };
+        for (window, expected) in [
+            (None, 20_000.0),
+            (Some(500.0), 500.0),
+            (Some(0.0), 0.0),
+            (Some(500.125), 500.125),
+            (Some(60_000.0), 60_000.0),
+        ] {
+            let query = Query::new()
+                .str("symbol", "BTCUSDT")
+                .signed(&c, 1000.0, window);
+            let (payload, signature) = query.split_once("&signature=").unwrap();
+            assert!(payload.ends_with(&format!("recvWindow={expected}")));
+            assert_eq!(
+                signature,
+                hmac_sha256(b"s", payload.as_bytes(), Encoding::Hex)
+            );
+        }
+    }
+}

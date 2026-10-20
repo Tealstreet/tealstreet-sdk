@@ -1,5 +1,6 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -16,7 +17,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -27,8 +28,21 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 pub enum Pending {
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
@@ -63,7 +77,7 @@ struct CandleState {
     last: Option<Candle>,
 }
 pub struct Blofin {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
@@ -123,6 +137,7 @@ fn round_usd(v: f64) -> f64 {
 }
 impl Blofin {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::new(),
@@ -433,6 +448,7 @@ impl Venue for Blofin {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,
+            closed_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -551,6 +567,7 @@ impl Venue for Blofin {
         match pending {
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
@@ -684,6 +701,10 @@ impl Venue for Blofin {
                 self.history_response(cx, request, response);
                 return;
             }
+            Pending::Closed(request) => {
+                self.closed_response(cx, request, response);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 return;
@@ -754,6 +775,10 @@ impl Venue for Blofin {
                 self.history_failed(cx, request, error);
                 return;
             }
+            Pending::Closed(request) => {
+                Self::closed_failed(cx, request, error);
+                return;
+            }
             Pending::Trade(request) => {
                 let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
                 self.trade_failed(cx, request, error);
@@ -808,6 +833,21 @@ impl Venue for Blofin {
                 self.public_close(cx);
             }
             SocketTick::Handled | SocketTick::Unhandled => {}
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
