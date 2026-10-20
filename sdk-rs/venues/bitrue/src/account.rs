@@ -91,6 +91,7 @@ pub struct Snapshot {
     settings: Vec<(String, MarketSetting)>,
     invalid: bool,
     valuation_pending: bool,
+    uncatalogued: Vec<String>,
 }
 #[derive(Default)]
 pub struct Account {
@@ -1113,11 +1114,18 @@ impl Bitrue {
                 return Err(());
             }
             let Some(market) = cx.store.market(&group.contract_name) else {
-                // Only owned exposure on an uncatalogued contract blocks the snapshot.
+                // Only owned exposure on a contract skipped as malformed blocks the snapshot.
                 if group.positions.iter().all(|row| row.volume.0 == 0.0) {
                     continue;
                 }
-                return Err(());
+                if self
+                    .malformed_markets
+                    .contains(group.contract_name.as_ref())
+                {
+                    return Err(());
+                }
+                data.uncatalogued.push(group.contract_name.to_string());
+                continue;
             };
             for row in group.positions {
                 let side = match &*row.side {
@@ -1628,6 +1636,12 @@ impl Bitrue {
                         cx.log(
                             LogLevel::Warning,
                             "Bitrue ticker price unavailable; retaining prior position valuation",
+                        );
+                    }
+                    for contract in &data.uncatalogued {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Skipping Bitrue position on uncatalogued contract {contract}"),
                         );
                     }
                     let closed: Vec<String> = cx

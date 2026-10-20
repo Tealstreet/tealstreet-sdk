@@ -13,6 +13,9 @@ pub struct Harness {
 }
 impl Harness {
     pub fn new() -> Self {
+        Self::with_instruments(INSTRUMENTS)
+    }
+    pub fn with_instruments(instruments: &str) -> Self {
         let mut h = Self {
             engine: Engine::new(Cryptocom::new(Options {
                 key: Some("replay-key".into()),
@@ -24,7 +27,7 @@ impl Harness {
         };
         h.engine.start(h.now);
         h.collect();
-        h.reply("public/get-instruments", INSTRUMENTS);
+        h.reply("public/get-instruments", instruments);
         h.reply("public/get-tickers", TICKERS);
         h
     }

@@ -13,7 +13,7 @@ pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Debug, Default)]
@@ -33,6 +33,7 @@ pub enum Pending {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
         skipped: Skipped,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -79,6 +80,8 @@ pub struct Cryptocom {
     rest: &'static str,
     sockets: [Connection; 2],
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    // Instruments rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -151,6 +154,7 @@ impl Cryptocom {
                     rows: vec![],
                     indexes: HashMap::new(),
                     skipped: Skipped::default(),
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -182,6 +186,7 @@ impl Cryptocom {
             options,
             sockets: [Connection::new(false), Connection::new(true)],
             discovery: Default::default(),
+            malformed_markets: HashSet::new(),
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -507,6 +512,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 // Other instrument types carry fields this venue never reads.
                 let key = serde_json::from_str::<InstrumentKey>(item);
@@ -526,7 +532,13 @@ impl Venue for Cryptocom {
                             rows.push(market);
                         }
                     }
-                    Err(_) => skipped.add(key.ok().and_then(|k| k.symbol)),
+                    Err(_) => {
+                        let symbol = key.ok().and_then(|k| k.symbol);
+                        skipped.add(symbol);
+                        if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
+                            malformed.insert(symbol.into());
+                        }
+                    }
                 }
             }
             Pending::Tickers { rows, skipped } => {
@@ -595,6 +607,7 @@ impl Venue for Cryptocom {
                 rows,
                 indexes,
                 skipped,
+                malformed,
             } => {
                 skipped.report(cx, "instrument");
                 if rows.is_empty() {
@@ -609,9 +622,21 @@ impl Venue for Cryptocom {
                     self.discovery.failed(cx, false);
                     return;
                 }
+                let refresh = cx.store.loaded().markets;
                 self.indexes = indexes;
                 cx.store.set_markets(rows);
-                self.discovery.succeeded(cx, &false);
+                self.malformed_markets
+                    .retain(|symbol| cx.store.market(symbol).is_none());
+                // A partial catalogue commits so private reads start, then re-reads.
+                if malformed.is_empty() {
+                    self.discovery.succeeded(cx, &false);
+                } else {
+                    self.malformed_markets.extend(malformed);
+                    self.discovery.failed(cx, false);
+                }
+                if refresh {
+                    return;
+                }
                 self.discovery_read(cx, true);
                 if self.credentials.is_some() {
                     self.private_start(cx);

@@ -13,8 +13,8 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::HashMap;
-use wire::{CandleWire, Contract, Message, Payload};
+use std::collections::{HashMap, HashSet};
+use wire::{CandleWire, Contract, ContractKey, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ pub enum Job {
     Markets {
         rows: Vec<Market>,
         contracts: HashMap<String, ContractInfo>,
-        failed: bool,
+        malformed: HashSet<String>,
     },
     Account(account::Request),
     Trade(trading::Request),
@@ -117,6 +117,8 @@ pub struct Bitrue {
     candles: HashMap<(String, String), u32>,
     reads: HashMap<String, Vec<SocketRead>>,
     startup_retry: safe_cex_engine::startup::Backoff<()>,
+    // Contracts rejected as malformed; owned exposure there holds the snapshot.
+    malformed_markets: HashSet<String>,
     deferred: Vec<Command>,
 }
 #[derive(Serialize)]
@@ -216,6 +218,7 @@ impl Bitrue {
             candles: HashMap::new(),
             reads: HashMap::new(),
             startup_retry: Default::default(),
+            malformed_markets: HashSet::new(),
             deferred: Vec::new(),
         }
     }
@@ -322,11 +325,11 @@ impl Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed,
+                malformed,
             } => {
                 rows.clear();
                 contracts.clear();
-                *failed = false;
+                malformed.clear();
             }
             Job::Account(r) => r.reset(),
             Job::History(r) => r.reset(),
@@ -343,7 +346,7 @@ impl Bitrue {
             Job::Markets {
                 rows: Vec::new(),
                 contracts: HashMap::new(),
-                failed: false,
+                malformed: HashSet::new(),
             },
         );
     }
@@ -560,12 +563,16 @@ impl Venue for Bitrue {
             .store
             .markets()
             .iter()
-            .enumerate()
-            .map(|(i, m)| (i as u32, m.symbol.clone()))
+            .map(|m| m.symbol.clone())
             .collect();
-        for (i, symbol) in markets {
+        for symbol in markets {
+            // A refreshed catalogue can re-index markets; ticker rows keep their slots.
+            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                continue;
+            };
             let channel = topic(&symbol, "ticker");
-            self.channels.insert(channel.clone(), Channel::Ticker(i));
+            self.channels
+                .insert(channel.clone(), Channel::Ticker(ticker));
             self.subscription(cx, "sub", &channel, None, None, None);
         }
         for symbol in self.books.keys().cloned().collect::<Vec<_>>() {
@@ -616,8 +623,9 @@ impl Venue for Bitrue {
             Some(Channel::Ticker(index)) => {
                 let multiplier = cx
                     .store
-                    .markets()
+                    .tickers()
                     .get(*index as usize)
+                    .and_then(|t| cx.store.market(&t.symbol))
                     .map_or(1.0, |m| m.precision.amount);
                 cx.store.update_ticker_at(*index, |t| {
                     t.last = data.close.unwrap_or_default().0;
@@ -708,16 +716,20 @@ impl Venue for Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed: _,
+                malformed,
             } => match serde_json::from_str::<Contract<'_>>(item) {
                 Ok(row) => {
                     let parts: Vec<_> = row.symbol.split('-').collect();
-                    if parts.len() != 3
-                        || row.multiplier.0 <= 0.0
+                    if parts.len() != 3 {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
+                    if row.multiplier.0 <= 0.0
                         || row.max_market_volume.0 <= 0.0
                         || row.price_precision > 18
                     {
                         safe_cex_engine::startup::skipped_row(cx);
+                        malformed.insert(row.symbol.to_string());
                         return;
                     }
                     contracts.insert(
@@ -759,7 +771,14 @@ impl Venue for Bitrue {
                         maker_fee: Some(0.001),
                     });
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    if let Ok(key) = serde_json::from_str::<ContractKey<'_>>(item)
+                        && key.symbol.split('-').count() == 3
+                    {
+                        malformed.insert(key.symbol.into_owned());
+                    }
+                }
             },
             Job::Account(r) => self.account_item(cx, r, item),
             Job::Trade(r) => self.trade_item(cx, r, item),
@@ -786,15 +805,28 @@ impl Venue for Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed,
+                malformed,
             } => {
-                if failed || !(200..300).contains(&response.status) || rows.is_empty() {
+                if !(200..300).contains(&response.status) || rows.is_empty() {
                     cx.log(LogLevel::Warning, "Bitrue contracts read failed");
                     self.startup_retry.failed(cx, ());
                     return;
                 }
-                self.startup_retry.succeeded(cx, &());
+                // A partial catalogue commits so private reads start, then re-reads.
+                if malformed.is_empty() {
+                    self.startup_retry.succeeded(cx, &());
+                } else {
+                    self.startup_retry.failed(cx, ());
+                }
                 self.contracts = contracts;
+                if cx.store.loaded().markets {
+                    cx.store.set_markets(rows);
+                    self.malformed_markets
+                        .retain(|symbol| cx.store.market(symbol).is_none());
+                    self.malformed_markets.extend(malformed);
+                    return;
+                }
+                self.malformed_markets.extend(malformed);
                 let tickers = rows
                     .iter()
                     .map(|m| Ticker {

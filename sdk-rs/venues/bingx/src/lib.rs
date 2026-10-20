@@ -242,6 +242,26 @@ impl Bingx {
         self.trading.retain_open_orders(cx.store);
     }
 
+    /// Market-indexed side tables follow their symbols across a catalogue refresh.
+    fn remap_market_slots(&mut self, cx: &Cx<'_, Pending>, previous: &[String]) {
+        fn remap<T: Copy + Default>(
+            store: &safe_cex_engine::store::Store,
+            previous: &[String],
+            slots: &mut Vec<T>,
+        ) {
+            let mut moved = vec![T::default(); store.markets().len()];
+            for (symbol, value) in previous.iter().zip(slots.iter()) {
+                if let Some(index) = store.market_index(symbol) {
+                    moved[index as usize] = *value;
+                }
+            }
+            *slots = moved;
+        }
+        remap(cx.store, previous, &mut self.seed_index);
+        remap(cx.store, previous, &mut self.seed_rows_index);
+        remap(cx.store, previous, &mut self.live_priced);
+    }
+
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
         if matches!(kind, List::Premium) {
             self.seed_reported.fill(false);
@@ -860,11 +880,31 @@ impl Venue for Bingx {
                     self.retry_list(cx, List::Markets);
                     return;
                 }
-                self.account
-                    .set_skipped_markets(skipped.iter().map(|id| id.replace('-', "")));
+                let refresh = cx.store.loaded().markets;
+                let previous: Vec<String> = if refresh {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .map(|m| m.symbol.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 rows.shrink_to_fit();
-                self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
+                let malformed = skipped.iter().any(|id| !id.is_empty());
+                self.account
+                    .set_skipped_markets(cx.store, skipped.iter().map(|id| id.replace('-', "")));
+                // A partial catalogue commits so private reads start, then re-reads.
+                if malformed {
+                    self.retry_list(cx, List::Markets);
+                } else {
+                    self.retries.succeeded(cx, &List::Markets);
+                }
+                if refresh {
+                    self.remap_market_slots(cx, &previous);
+                    return;
+                }
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);
                 }

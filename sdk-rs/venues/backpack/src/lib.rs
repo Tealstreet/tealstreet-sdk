@@ -122,6 +122,7 @@ pub struct Backpack {
     seed: Seed,
     /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
     skipped_markets: HashMap<String, bool>,
+    unlisted_logged: std::collections::HashSet<String>,
     account: account::Account,
     trading: trading::Trading,
     generation: u64,
@@ -180,6 +181,7 @@ impl Backpack {
             candles: HashMap::new(),
             seed: Seed::default(),
             skipped_markets: Default::default(),
+            unlisted_logged: Default::default(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
             generation: 0,
@@ -247,8 +249,8 @@ impl Backpack {
         self.connect_public(cx);
     }
 
-    /// Account rows on a market skipped at load are dropped; say so once per symbol.
-    /// False means the market was never in the catalogue at all.
+    /// Account rows on a market skipped as malformed hold their snapshot; say so once
+    /// per symbol. False means the market was filtered or never listed.
     pub(crate) fn report_skipped_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
         let Some(reported) = self.skipped_markets.get_mut(symbol) else {
             return false;
@@ -256,12 +258,20 @@ impl Backpack {
         if !std::mem::replace(reported, true) {
             cx.log(
                 LogLevel::Error,
-                format!(
-                    "Backpack account data for {symbol} is hidden: its market row was malformed"
-                ),
+                format!("Backpack account data for {symbol} is held: its market row was malformed"),
             );
         }
         true
+    }
+
+    /// Account rows on a filtered or delisted market are skipped; say so once per symbol.
+    pub(crate) fn report_unlisted_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if self.unlisted_logged.insert(symbol.into()) {
+            cx.log(
+                LogLevel::Warning,
+                format!("Backpack {symbol} is not a listed market; its account rows are skipped"),
+            );
+        }
     }
 
     fn apply_marks(cx: &mut Cx<'_, Pending>, marks: Vec<(String, [f64; 4])>) {
@@ -755,13 +765,26 @@ impl Venue for Backpack {
                     self.seed.backoff.failed(cx, SeedRead::Markets);
                     return;
                 }
-                self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                // A partial catalogue commits so private reads start, and is re-read.
+                if skipped.is_empty() {
+                    self.seed.backoff.succeeded(cx, &SeedRead::Markets);
+                } else {
+                    self.seed.backoff.failed(cx, SeedRead::Markets);
+                }
+                let previous = std::mem::take(&mut self.skipped_markets);
                 self.skipped_markets = skipped
                     .into_iter()
-                    .filter(|s| s.ends_with("_PERP"))
-                    .map(|s| (s, false))
+                    .filter(|s| s.ends_with("_PERP") && !rows.iter().any(|m| &m.symbol == s))
+                    .map(|s| {
+                        let reported = previous.get(&s).copied().unwrap_or(false);
+                        (s, reported)
+                    })
                     .collect();
+                let refresh = cx.store.loaded().markets;
                 cx.store.set_markets(rows);
+                if refresh {
+                    return;
+                }
                 self.seed.live.begin();
                 self.connect_public(cx);
                 self.account_start(cx);

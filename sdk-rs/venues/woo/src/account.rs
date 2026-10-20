@@ -415,10 +415,10 @@ impl Woo {
             }
         }
     }
-    /// Whether exposure on an unlisted native symbol could belong to a skipped catalogue row.
+    /// Whether exposure on an unlisted native symbol sits on a catalogue row skipped as
+    /// malformed. An anonymous skipped row names no market, so it holds nothing.
     fn catalogue_may_list(&self, native: &str) -> bool {
-        native.starts_with("PERP_")
-            && (self.skipped_anonymous || self.skipped_markets.contains(native))
+        native.starts_with("PERP_") && self.skipped_markets.contains(native)
     }
     // Exposure the store cannot show must be visible once, not every poll.
     fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {

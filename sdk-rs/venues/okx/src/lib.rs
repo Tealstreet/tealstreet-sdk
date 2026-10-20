@@ -125,6 +125,9 @@ pub struct Okx {
     ticker_refresh_pending: bool,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     skipped_instruments: HashSet<String>,
+    /// Instruments skipped as malformed by the catalogue read in flight.
+    skipping_instruments: HashSet<String>,
+    catalogue_partial: bool,
 }
 
 impl Okx {
@@ -164,6 +167,8 @@ impl Okx {
             ticker_refresh_pending: false,
             live_tickers: Default::default(),
             skipped_instruments: HashSet::new(),
+            skipping_instruments: HashSet::new(),
+            catalogue_partial: false,
         }
     }
 
@@ -327,6 +332,12 @@ impl Okx {
                 invalid: false,
             },
         );
+    }
+
+    fn load_catalogue(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.skipping_instruments.clear();
+        self.catalogue_partial = false;
+        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
     }
 
     fn load_tickers(
@@ -696,7 +707,7 @@ impl Venue for Okx {
             cx.log(LogLevel::Error, error);
             return;
         }
-        self.load_markets(cx, InstrumentType::Swap, Vec::new(), false);
+        self.load_catalogue(cx);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -810,7 +821,7 @@ impl Venue for Okx {
                     {
                         *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -866,7 +877,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -889,7 +900,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -902,7 +913,7 @@ impl Venue for Okx {
                             *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         };
-                        self.skipped_instruments.insert(m.inst_id.into());
+                        self.skipping_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(
@@ -959,7 +970,7 @@ impl Venue for Okx {
                     if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
                         && !row.inst_id.is_empty()
                     {
-                        self.skipped_instruments.insert(row.inst_id.into());
+                        self.skipping_instruments.insert(row.inst_id.into());
                     }
                 }
             },
@@ -1059,12 +1070,14 @@ impl Venue for Okx {
                 incomplete,
             } => {
                 let incomplete = incomplete || (invalid && rows.len() == scope_start);
+                self.catalogue_partial |= invalid;
                 if let Some(next) = self.next_instrument_type(kind) {
                     self.load_markets(cx, next, rows, incomplete);
                     return;
                 }
                 self.catalogue_incomplete = incomplete;
-                if incomplete {
+                // A partial catalogue commits so private reads start, and is re-read.
+                if incomplete || self.catalogue_partial {
                     self.startup.failed(cx, true);
                 } else {
                     self.startup.succeeded(cx, &true);
@@ -1074,14 +1087,19 @@ impl Venue for Okx {
                 }
                 let was_loaded = cx.store.loaded().markets;
                 let mut merged = cx.store.markets().to_vec();
+                let mut added = false;
                 for row in rows {
                     if let Some(old) = merged.iter_mut().find(|old| old.id == row.id) {
                         *old = row;
                     } else {
                         merged.push(row);
+                        added = true;
                     }
                 }
                 cx.store.set_markets(merged);
+                let mut skipped = std::mem::take(&mut self.skipping_instruments);
+                skipped.retain(|id| cx.store.market_by_id(id).is_none());
+                self.skipped_instruments = skipped;
                 self.products
                     .retain(|id, _| cx.store.market_by_id(id).is_some());
                 self.price_tickers = price_ticker_indexes(cx.store);
@@ -1094,10 +1112,11 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                self.ticker_seed(cx, was_loaded);
                 if !was_loaded {
+                    self.ticker_seed(cx, false);
                     self.account_start(cx);
-                } else {
+                } else if added {
+                    self.ticker_seed(cx, true);
                     if self.connections[PUBLIC].open {
                         self.subscribe(cx, PUBLIC);
                     }
@@ -1216,7 +1235,9 @@ impl Venue for Okx {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(markets) = self.startup.on_timer(timer) {
-            if markets {
+            if markets && cx.store.loaded().markets {
+                self.load_catalogue(cx);
+            } else if markets {
                 self.start(cx);
             } else {
                 self.ticker_seed(cx, false);

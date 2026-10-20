@@ -375,21 +375,12 @@ impl OrderRow<'_> {
         orders
     }
 }
-const WORKING_ORDER_MARKET_UNAVAILABLE: &str =
-    "KuCoin working order market unavailable; preserving previous orders";
 pub(crate) fn map_order(store: &Store, raw: &RawValue, now: f64) -> Result<Vec<Order>, String> {
     let row: OrderRow = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
     if row.id.is_empty() && row.order_id.is_empty() {
         return Err("KuCoin order missing id".into());
     }
-    let orders = row.orders(store, now);
-    if orders
-        .iter()
-        .any(|order| order.status == OrderStatus::Open && store.market(&order.symbol).is_none())
-    {
-        return Err(WORKING_ORDER_MARKET_UNAVAILABLE.into());
-    }
-    Ok(orders)
+    Ok(row.orders(store, now))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -664,13 +655,20 @@ impl Kucoin {
         match request.read {
             Read::Positions => match serde_json::from_str::<PositionRow>(item) {
                 Ok(row) => {
-                    if row.current_qty.get() != 0.0
-                        && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
-                    {
+                    let unified = symbol(cx.store, row.symbol);
+                    if row.current_qty.get() == 0.0 || cx.store.market(&unified).is_some() {
+                        request.positions.push(row.position(cx.store));
+                    } else if self.malformed_markets.contains(&unified) {
                         request.invalid = true;
                         cx.log(LogLevel::Warning, "KuCoin owned position market unavailable; preserving previous snapshot");
                     } else {
-                        request.positions.push(row.position(cx.store));
+                        cx.log(
+                            LogLevel::Warning,
+                            format!(
+                                "Skipping KuCoin position on uncatalogued market {}",
+                                row.symbol
+                            ),
+                        );
                     }
                 }
                 Err(error) => match row_identity(item, "symbol") {
@@ -692,16 +690,29 @@ impl Kucoin {
                 .and_then(|r| map_order(cx.store, r, cx.now))
             {
                 Ok(orders) => {
-                    if request.native_ids.insert(orders[0].id.clone()) {
-                        request.orders.extend(orders);
-                    } else {
+                    let uncatalogued = orders
+                        .iter()
+                        .find(|o| {
+                            o.status == OrderStatus::Open && cx.store.market(&o.symbol).is_none()
+                        })
+                        .map(|o| o.symbol.clone());
+                    if !request.native_ids.insert(orders[0].id.clone()) {
                         request.invalid = true;
+                    } else if let Some(symbol) = uncatalogued {
+                        // Without catalogue sizing, a malformed market's order withholds the
+                        // snapshot; one on a filtered market is skipped but still counted.
+                        if self.malformed_markets.contains(&symbol) {
+                            request.invalid = true;
+                            cx.log(LogLevel::Warning, "KuCoin working order market unavailable; preserving previous orders");
+                        } else {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Skipping KuCoin order on uncatalogued market {symbol}"),
+                            );
+                        }
+                    } else {
+                        request.orders.extend(orders);
                     }
-                }
-                // An owned working order without catalogue sizing withholds the whole snapshot.
-                Err(error) if error == WORKING_ORDER_MARKET_UNAVAILABLE => {
-                    request.invalid = true;
-                    cx.log(LogLevel::Warning, error);
                 }
                 Err(error) => match row_identity(item, "id") {
                     // Still counted toward the page census so the snapshot can commit.

@@ -20,20 +20,23 @@ fn startup_signs_reads_and_populates_global_settings() {
         );
     }
 }
+const BOGUS_BTC: (&str, &str) = (
+    r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001""#,
+    r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"bogus""#,
+);
 #[test]
-fn account_rows_on_a_skipped_market_are_reported_once_per_symbol() {
-    let markets = MARKETS.replace(
-        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001""#,
-        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"bogus""#,
-    );
+fn account_rows_on_a_malformed_market_hold_the_snapshot_and_report_once() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
     let btc_position = POSITIONS.replace("SOL_USDC_PERP", "BTC_USDC_PERP");
     let btc_order = format!("[{}]", ORDER.replace("SOL_USDC_PERP", "BTC_USDC_PERP"));
-    let (mut e, socket, logs) = ready_catalogue(&markets, &btc_position, &btc_order);
+    let (mut e, socket, logs, _) = ready_catalogue(&markets, &btc_position, &btc_order);
     assert!(e.store().market("BTC_USDC_PERP").is_none());
-    assert!(e.store().positions().is_empty());
+    assert!(e.store().loaded().balance);
+    assert!(!e.store().loaded().positions);
+    assert!(!e.store().loaded().orders);
     let reports = logs
         .iter()
-        .filter(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is hidden"))
+        .filter(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is held"))
         .count();
     assert_eq!(reports, 1, "{logs:?}");
     e.handle(1000.0, Event::WsOpened { socket });
@@ -54,6 +57,43 @@ fn account_rows_on_a_skipped_market_are_reported_once_per_symbol() {
         })
         .collect();
     assert!(logs.is_empty(), "already reported during startup: {logs:?}");
+}
+#[test]
+fn partial_catalogue_is_reread_without_restarting_the_account() {
+    let markets = MARKETS.replace(BOGUS_BTC.0, BOGUS_BTC.1);
+    let (mut e, socket, _, timers) = ready_catalogue(&markets, POSITIONS, "[]");
+    let (timer, at) = *timers
+        .iter()
+        .find(|(_, at)| *at == 2000.0)
+        .expect("partial catalogue schedules a re-read");
+    e.handle(at, Event::TimerFired { timer });
+    let reread = requests(&mut e);
+    assert_eq!(reread.len(), 1);
+    assert!(reread[0].url.ends_with("/api/v1/markets"));
+    reply(&mut e, &reread[0], 200, MARKETS);
+    assert!(e.store().market("BTC_USDC_PERP").is_some());
+    let after: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !after.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::WsConnect { .. } | Action::SetTimer { .. }
+        )),
+        "a complete re-read neither restarts startup nor schedules another"
+    );
+    e.handle(at, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        "account.positionUpdate",
+        &LONG.replace("SOL_USDC_PERP", "BTC_USDC_PERP"),
+    );
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "BTC_USDC_PERP")
+    );
 }
 #[test]
 fn private_auth_is_single_subscription_and_watchdog_is_armed() {
@@ -318,24 +358,58 @@ fn auth_window_clamps_before_signing_private_requests() {
 }
 
 #[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let body = POSITIONS.replace("SOL_USDC_PERP", "MISSING_USDC_PERP");
-    let (e, _) = ready_position(200, &body);
-    assert!(!e.store().loaded().positions);
+fn rows_on_hidden_or_unlisted_markets_are_skipped_and_the_snapshot_commits() {
+    let markets = MARKETS.replace(
+        "]",
+        r#",{"symbol":"HID_USDC_PERP","marketType":"PERP","visible":false,"quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
+    );
+    for symbol in ["HID_USDC_PERP", "MISSING_USDC_PERP"] {
+        let positions = POSITIONS.replace(
+            "[",
+            &format!(
+                "[{},",
+                POSITIONS[1..POSITIONS.len() - 1].replace("SOL_USDC_PERP", symbol)
+            ),
+        );
+        let orders = format!(
+            "[{},{ORDER}]",
+            ORDER
+                .replace("SOL_USDC_PERP", symbol)
+                .replace("\"123\"", "\"456\"")
+        );
+        let (e, _, logs, _) = ready_catalogue(&markets, &positions, &orders);
+        assert!(e.store().market(symbol).is_none());
+        let loaded = e.store().loaded();
+        assert!(
+            loaded.balance && loaded.positions && loaded.orders,
+            "{symbol}"
+        );
+        assert_eq!(e.store().positions().len(), 1);
+        assert_eq!(e.store().positions()[0].symbol, SYMBOL);
+        assert_eq!(e.store().orders().len(), 1);
+        assert_eq!(e.store().orders()[0].id, "123");
+        assert_eq!(e.store().balance().total, 1005.0);
+        assert!(
+            logs.iter()
+                .any(|l| l.contains(&format!("{symbol} is not a listed market"))),
+            "{logs:?}"
+        );
+    }
 }
 
 #[test]
-fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
-    for (symbol, status, loaded) in [
-        ("MISSING_USDC_PERP", "New", false),
-        ("MISSING_USDC_PERP", "Filled", true),
-        ("MISSING_USDC", "New", true),
+fn working_orders_on_unlisted_markets_are_skipped() {
+    for (symbol, status) in [
+        ("MISSING_USDC_PERP", "New"),
+        ("MISSING_USDC_PERP", "Filled"),
+        ("MISSING_USDC", "New"),
     ] {
         let order = ORDER
             .replace("SOL_USDC_PERP", symbol)
             .replace("New", status);
         let (e, _) = ready_orders(&format!("[{order}]"));
-        assert_eq!(e.store().loaded().orders, loaded, "{symbol} {status}");
+        assert!(e.store().loaded().orders, "{symbol} {status}");
+        assert!(e.store().orders().is_empty());
     }
 }
 

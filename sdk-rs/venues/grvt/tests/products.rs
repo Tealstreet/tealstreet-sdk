@@ -290,7 +290,7 @@ fn broad_and_exact_fill_reads_isolate_supported_markets() {
 }
 
 #[test]
-fn malformed_catalog_refresh_skips_bad_market_and_commits_valid_neighbours() {
+fn malformed_catalog_refresh_keeps_the_previous_row_and_commits_valid_neighbours() {
     let mut h = Harness::new(false);
     let timer = h
         .actions
@@ -310,9 +310,11 @@ fn malformed_catalog_refresh_skips_bad_market_and_commits_valid_neighbours() {
     );
     assert!(malformed.contains(r#""ts":"NaN""#));
     h.respond(r, &malformed, "");
-    assert_eq!(h.e.store().markets().len(), MARKETS.len() - 1);
+    // The malformed AVAX row keeps its previous market so held rows stay mapped.
+    assert_eq!(h.e.store().markets().len(), MARKETS.len());
     for market in h.e.store().markets() {
-        assert_eq!(market.precision.price, 0.2);
+        let expected = if market.base == "AVAX" { 0.1 } else { 0.2 };
+        assert_eq!(market.precision.price, expected, "{}", market.symbol);
     }
 }
 

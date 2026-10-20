@@ -93,7 +93,8 @@ pub struct Woo {
     funding: Option<TimerId>,
     seed_backoff: safe_cex_engine::startup::Backoff<bool>,
     skipped_markets: std::collections::HashSet<String>,
-    skipped_anonymous: bool,
+    /// Set by the first committed catalogue; later reads only refresh markets.
+    catalogue_committed: bool,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -218,7 +219,7 @@ impl Woo {
             funding: None,
             seed_backoff: Default::default(),
             skipped_markets: Default::default(),
-            skipped_anonymous: false,
+            catalogue_committed: false,
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -937,9 +938,17 @@ impl Venue for Woo {
                 }
                 self.price_ranges = ranges;
                 self.skipped_markets = skipped.ids().iter().cloned().collect();
-                self.skipped_anonymous = skipped.anonymous();
+                let refresh = std::mem::replace(&mut self.catalogue_committed, true);
                 cx.store.set_markets(rows);
-                self.seed_backoff.succeeded(cx, &false);
+                // A partial catalogue commits so private reads start, and is re-read.
+                if skipped.ids().is_empty() && !skipped.anonymous() {
+                    self.seed_backoff.succeeded(cx, &false);
+                } else {
+                    self.seed_backoff.failed(cx, false);
+                }
+                if refresh {
+                    return;
+                }
                 if self.options.public_data_only
                     || self.options.key.as_deref().is_none_or(str::is_empty)
                 {

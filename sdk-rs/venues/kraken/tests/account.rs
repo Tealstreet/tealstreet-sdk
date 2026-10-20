@@ -880,36 +880,72 @@ fn local_price_ack_preserves_the_last_native_execution_clock() {
 }
 
 #[test]
-fn unmapped_perpetual_snapshots_preserve_owned_exposure_while_other_products_stay_out_of_scope() {
+fn filtered_market_rows_are_skipped_while_listed_rows_commit() {
     let (mut e, s) = ready();
-    snapshot(&mut e, s);
-    message(&mut e, s, NOW, POSITION);
-    let orders = e.store().orders().to_vec();
-    let positions = e.store().positions().to_vec();
-    for text in [
-        r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}]}"#,
-        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"PF_UNKNOWNUSD","balance":2}]}"#,
-    ] {
-        message(&mut e, s, NOW, text);
-        assert_eq!(e.store().orders(), orders);
-        assert_eq!(e.store().positions(), positions);
-    }
+    // PF_UNKNOWNUSD stands for a market the catalogue filtered (untradeable) or delisted.
+    message(
+        &mut e,
+        s,
+        NOW,
+        &format!(
+            r#"{{"feed":"open_orders_snapshot","orders":[{{"instrument":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}},{ORDER}]}}"#
+        ),
+    );
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"PF_UNKNOWNUSD","balance":2},{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":120,"pnl":40,"liquidation_threshold":50,"maxFixedLeverage":10}]}"#,
+    );
+    let ids = |e: &Engine<Kraken>| {
+        e.store()
+            .orders()
+            .iter()
+            .map(|o| o.id.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&e), ["order-1"]);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "PF_XBTUSD");
+    let logs: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("PF_UNKNOWNUSD is not a listed market"))
+    );
     let reqs = poll(&mut e, s);
     for (path, body) in [
         (
             "openorders",
-            r#"{"result":"success","openOrders":[{"symbol":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}]}"#,
+            r#"{"result":"success","openOrders":[{"symbol":"PF_UNKNOWNUSD","order_id":"unknown","qty":2},{"order_id":"order-2","symbol":"PF_XBTUSD","orderType":"lmt","side":"buy","unfilledSize":1,"filledSize":0,"limitPrice":90}]}"#,
         ),
         (
             "openpositions",
-            r#"{"result":"success","openPositions":[{"symbol":"PF_UNKNOWNUSD","size":2}]}"#,
+            r#"{"result":"success","openPositions":[{"symbol":"PF_UNKNOWNUSD","size":2},{"symbol":"PF_ETHUSD","side":"long","size":3,"price":50,"unrealizedPnl":0,"maxFixedLeverage":10}]}"#,
         ),
     ] {
         let request = reqs.iter().find(|r| r.url.contains(path)).unwrap();
         reply(&mut e, request, 200, body);
-        assert_eq!(e.store().orders(), orders);
-        assert_eq!(e.store().positions(), positions);
     }
+    assert!(e.store().loaded().orders && e.store().loaded().positions);
+    assert!(e.store().order("order-2").is_some());
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "PF_ETHUSD")
+    );
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .all(|p| p.symbol != "PF_UNKNOWNUSD")
+    );
     // Unsupported dated products and explicit zero positions carry no owned
     // perpetual exposure; they do not make otherwise valid empty scopes fatal.
     message(
@@ -926,6 +962,81 @@ fn unmapped_perpetual_snapshots_preserve_owned_exposure_while_other_products_sta
     );
     assert!(e.store().orders().is_empty());
     assert!(e.store().positions().is_empty());
+}
+
+const BAD_ROW: &str = r#"{"symbol":"PF_SOLUSD","base":"SOL","quote":"USD","tradeable":true,"tickSize":0.01,"contractSize":1,"contractValueTradePrecision":2.5,"marginLevels":[{"initialMargin":0.1}]}"#;
+
+fn with_row(row: &str) -> String {
+    META.replace("}]}]}", &format!("}}]}},{row}]}}"))
+}
+
+#[test]
+fn exposure_on_a_malformed_catalogue_row_holds_the_previous_snapshot() {
+    let (mut e, s, _) = ready_with_catalogue(options(), &with_row(BAD_ROW));
+    assert!(e.store().market("PF_SOLUSD").is_none());
+    snapshot(&mut e, s);
+    message(&mut e, s, NOW, POSITION);
+    let orders = e.store().orders().to_vec();
+    let positions = e.store().positions().to_vec();
+    assert_eq!((orders.len(), positions.len()), (1, 1));
+    for text in [
+        r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_SOLUSD","order_id":"bad","qty":2}]}"#,
+        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"PF_SOLUSD","balance":2}]}"#,
+    ] {
+        message(&mut e, s, NOW, text);
+        assert_eq!(e.store().orders(), orders);
+        assert_eq!(e.store().positions(), positions);
+    }
+    let reqs = poll(&mut e, s);
+    for (path, body) in [
+        (
+            "openorders",
+            r#"{"result":"success","openOrders":[{"symbol":"PF_SOLUSD","order_id":"bad","qty":2}]}"#,
+        ),
+        (
+            "openpositions",
+            r#"{"result":"success","openPositions":[{"symbol":"PF_SOLUSD","size":2}]}"#,
+        ),
+    ] {
+        let request = reqs.iter().find(|r| r.url.contains(path)).unwrap();
+        reply(&mut e, request, 200, body);
+        assert_eq!(e.store().orders(), orders);
+        assert_eq!(e.store().positions(), positions);
+    }
+}
+
+#[test]
+fn partial_catalogue_is_reread_and_the_repaired_market_releases_its_rows() {
+    let (mut e, s, timers) = ready_with_catalogue(options(), &with_row(BAD_ROW));
+    let (timer, at) = *timers
+        .iter()
+        .find(|(_, at)| *at == NOW + 1000.0)
+        .expect("partial catalogue schedules a re-read");
+    e.handle(at, Event::TimerFired { timer });
+    let reread = requests(&mut e);
+    assert_eq!(reread.len(), 1);
+    assert!(reread[0].url.ends_with("/derivatives/api/v3/instruments"));
+    reply(
+        &mut e,
+        &reread[0],
+        200,
+        &with_row(&BAD_ROW.replace("2.5", "2")),
+    );
+    assert!(e.store().market("PF_SOLUSD").is_some());
+    // The refresh neither restarts the account nor reconnects or re-seeds.
+    let after: Vec<_> = e.drain_actions().collect();
+    assert!(!after.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::WsConnect { .. } | Action::SetTimer { .. }
+    )));
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"PF_SOLUSD","balance":2,"entry_price":100,"mark_price":120,"pnl":40,"liquidation_threshold":50,"maxFixedLeverage":10}]}"#,
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().positions()[0].symbol, "PF_SOLUSD");
 }
 
 #[test]

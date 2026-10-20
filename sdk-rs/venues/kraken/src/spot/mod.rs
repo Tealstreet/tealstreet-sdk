@@ -62,7 +62,6 @@ pub struct KrakenSpot {
     poll: Option<TimerId>,
     markets_in_flight: bool,
     tickers_in_flight: bool,
-    catalogue_incomplete: bool,
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
@@ -96,7 +95,6 @@ impl KrakenSpot {
             poll: None,
             markets_in_flight: false,
             tickers_in_flight: false,
-            catalogue_incomplete: false,
             retries: vec![],
         }
     }
@@ -289,6 +287,9 @@ impl KrakenSpot {
         if markets.is_empty() {
             return Err("No supported Kraken Spot market rows".into());
         }
+        let added = markets
+            .iter()
+            .any(|market| !self.pairs.contains_key(&market.symbol));
         let recovered: Vec<_> = markets
             .iter()
             .filter(|market| {
@@ -309,7 +310,6 @@ impl KrakenSpot {
             .collect();
         self.pairs = pairs;
         self.identities = identities;
-        self.catalogue_incomplete = rejected;
         if rejected {
             self.discovery.failed(cx, false);
         } else {
@@ -321,12 +321,20 @@ impl KrakenSpot {
                 self.subscribe(cx, "subscribe", "ticker", batch, None);
             }
         }
-        self.revalue_pending_balances(cx);
+        if added {
+            self.revalue_after_catalogue(cx);
+        } else {
+            self.revalue_pending_balances(cx);
+        }
         if self.public.socket.is_none() {
             self.connect(cx);
         }
         self.private_start(cx);
-        self.tickers(cx);
+        // A persistently rejected pair re-reads only the catalogue; tickers are
+        // re-seeded when the read lists a new pair.
+        if !cx.store.loaded().tickers || added {
+            self.tickers(cx);
+        }
         Ok(())
     }
     fn tickers_response(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> Result<(), String> {

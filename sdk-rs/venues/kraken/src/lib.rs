@@ -96,6 +96,9 @@ pub struct Kraken {
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
     markets_in_flight: bool,
+    /// PF_ symbols the last catalogue read skipped as malformed; their rows hold snapshots.
+    skipped_markets: HashSet<String>,
+    skipping_markets: HashSet<String>,
     poll: Option<TimerId>,
 }
 impl Kraken {
@@ -130,6 +133,8 @@ impl Kraken {
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
             markets_in_flight: false,
+            skipped_markets: HashSet::new(),
+            skipping_markets: HashSet::new(),
             poll: None,
         }
     }
@@ -152,6 +157,7 @@ impl Kraken {
             return;
         }
         self.markets_in_flight = true;
+        self.skipping_markets.clear();
         cx.request_streamed(
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
@@ -424,6 +430,13 @@ impl Kraken {
         cx.log(LogLevel::Warning, error);
     }
 }
+/// The PF_ symbol of an undecodable instrument row that was not marked untradeable.
+fn malformed_perpetual(item: &str) -> Option<String> {
+    let row: serde_json::Value = serde_json::from_str(item).ok()?;
+    let symbol = row.get("symbol")?.as_str()?;
+    (symbol.starts_with("PF_") && row.get("tradeable") != Some(&serde_json::Value::Bool(false)))
+        .then(|| symbol.to_owned())
+}
 fn interval_spec(interval: &str) -> (&str, f64) {
     match interval {
         "1m" => ("1m", 60_000.0),
@@ -607,6 +620,7 @@ impl Venue for Kraken {
                         let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
                         if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
                             safe_cex_engine::startup::skipped_row(cx);
+                            self.skipping_markets.insert(m.symbol.into_owned());
                             return;
                         }
                         rows.push(Market {
@@ -661,6 +675,9 @@ impl Venue for Kraken {
                             LogLevel::Warning,
                             format!("Kraken invalid public row: {error}"),
                         );
+                        if let Some(symbol) = malformed_perpetual(item) {
+                            self.skipping_markets.insert(symbol);
+                        }
                     }
                 }
             }
@@ -751,7 +768,7 @@ impl Venue for Kraken {
                     return;
                 }
                 let mut seen = HashSet::new();
-                let rows = rows
+                let rows: Vec<_> = rows
                     .into_iter()
                     .filter(|m| {
                         if seen.insert(m.symbol.clone()) {
@@ -762,8 +779,20 @@ impl Venue for Kraken {
                         }
                     })
                     .collect();
-                self.discovery.succeeded(cx, &false);
+                let mut skipped = std::mem::take(&mut self.skipping_markets);
+                skipped.retain(|symbol| !seen.contains(symbol));
+                // A partial catalogue commits so private reads start, and is re-read.
+                if skipped.is_empty() {
+                    self.discovery.succeeded(cx, &false);
+                } else {
+                    self.discovery.failed(cx, false);
+                }
+                self.skipped_markets = skipped;
+                let refresh = cx.store.loaded().markets;
                 cx.store.set_markets(rows);
+                if refresh {
+                    return;
+                }
                 self.connect(cx);
                 self.account_start(cx);
                 self.tickers_request(cx);

@@ -19,7 +19,7 @@ use safe_cex_engine::{
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
 
 const REST: &str = "https://api-futures.kucoin.com";
@@ -43,7 +43,7 @@ pub enum Pending {
     Funding(funding::Request),
     Markets {
         rows: Vec<Market>,
-        invalid: bool,
+        malformed: HashSet<String>,
     },
     Tickers {
         rows: Vec<Ticker>,
@@ -136,6 +136,8 @@ pub struct Kucoin {
     message_id: u64,
     book_generation: u64,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    // Unified symbols of contracts rejected as malformed; owned exposure there holds.
+    malformed_markets: HashSet<String>,
 }
 
 pub(crate) fn internal_symbol(id: &str) -> String {
@@ -223,6 +225,7 @@ impl Kucoin {
             message_id: 0,
             book_generation: 0,
             discovery: Default::default(),
+            malformed_markets: HashSet::new(),
         }
     }
     pub(crate) fn signed(
@@ -358,7 +361,7 @@ impl Kucoin {
             } else {
                 Pending::Markets {
                     rows: vec![],
-                    invalid: false,
+                    malformed: HashSet::new(),
                 }
             },
         );
@@ -887,15 +890,24 @@ impl Venue for Kucoin {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Funding(request) => self.funding_item(cx, request, item),
             Pending::Trade(request) => self.trading_item(cx, request, item),
-            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
-            {
-                Ok(row) => {
-                    if let Some(m) = row.market() {
-                        rows.push(m);
+            Pending::Markets { rows, malformed } => {
+                match serde_json::from_str::<Instrument>(item) {
+                    Ok(row) => {
+                        if let Some(m) = row.market() {
+                            rows.push(m);
+                        }
+                    }
+                    Err(_) => {
+                        safe_cex_engine::startup::skipped_row(cx);
+                        if let Ok(key) = serde_json::from_str::<InstrumentKey>(item)
+                            && !key.symbol.is_empty()
+                            && key.in_scope()
+                        {
+                            malformed.insert(internal_symbol(&key.symbol));
+                        }
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            }
             Pending::Tickers { rows, invalid: _ } => {
                 match serde_json::from_str::<TickerRow>(item) {
                     Ok(row) => {
@@ -997,14 +1009,26 @@ impl Venue for Kucoin {
                     }
                 }
             }
-            Pending::Markets { rows, invalid } => {
-                if success(status, body).is_err() || invalid || rows.is_empty() {
+            Pending::Markets { rows, malformed } => {
+                if success(status, body).is_err() || rows.is_empty() {
                     self.discovery.failed(cx, false);
                 } else {
-                    self.discovery.succeeded(cx, &false);
+                    let refresh = cx.store.loaded().markets;
                     cx.store.set_markets(rows);
                     self.books
                         .retain(|symbol, _| cx.store.market(symbol).is_some());
+                    self.malformed_markets
+                        .retain(|symbol| cx.store.market(symbol).is_none());
+                    // A partial catalogue commits so private reads start, then re-reads.
+                    if malformed.is_empty() {
+                        self.discovery.succeeded(cx, &false);
+                    } else {
+                        self.malformed_markets.extend(malformed);
+                        self.discovery.failed(cx, false);
+                    }
+                    if refresh {
+                        return;
+                    }
                     self.discovery_read(cx, true);
                     if self.credentials.is_some() {
                         self.account_start(cx);

@@ -372,6 +372,11 @@ impl KrakenSpot {
         ));
         true
     }
+    /// A catalogue re-read can list the route a funded currency was valued without.
+    pub(super) fn revalue_after_catalogue(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.wallet_valuation_pending |= cx.store.currency_balances().is_some();
+        self.revalue_pending_balances(cx);
+    }
     // Private balances can arrive before the first public quote seed. Revalue
     // those retained native holdings once, without changing later poll cadence.
     pub(super) fn revalue_pending_balances(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -383,6 +388,7 @@ impl KrakenSpot {
         };
         let mut total = 0.0;
         let mut missing = false;
+        let mut unquoted = false;
         let mut unsupported = false;
         let mut wanted = Vec::new();
         for holding in currencies {
@@ -408,10 +414,11 @@ impl KrakenSpot {
                     })
                     .next();
                 if rate.is_none() {
-                    if supported || self.catalogue_incomplete {
-                        // A rejected catalogue peer may be this funded asset's
-                        // missing conversion route; absence is not dust proof.
-                        missing = true;
+                    if supported {
+                        // Wait for the first ticker seed; after it, an unquoted
+                        // route counts as zero until a live quote arrives.
+                        missing |= !cx.store.loaded().tickers;
+                        unquoted = true;
                         wanted.push(holding.currency.clone());
                     } else {
                         unsupported = true;
@@ -443,8 +450,17 @@ impl KrakenSpot {
             }
             return;
         }
-        self.account.wallet_valuation_pending = false;
         self.account.wallet_valuation_warnings &= !1;
+        if !unquoted {
+            self.account.wallet_valuation_warnings &= !4;
+        } else if self.account.wallet_valuation_warnings & 4 == 0 {
+            self.account.wallet_valuation_warnings |= 4;
+            cx.log(LogLevel::Warning,
+                "Kraken Spot USD wallet values a currency without a quote at zero until one arrives");
+        }
+        // An unquoted route keeps revaluing on live quotes; a complete valuation
+        // waits for the next private poll.
+        self.account.wallet_valuation_pending = unquoted;
         cx.store.set_balance(Balance {
             total,
             free: total,
