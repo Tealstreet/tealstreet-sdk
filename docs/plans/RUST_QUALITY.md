@@ -138,5 +138,6 @@ Risky, after live-smoke captures:
 9. `num::whole` for leverage (five serialisations today, incl. truncation and
    `20.0`) and one Rust owner for client-id rules.
 
-Lower: shared test-support `ProbeVenue` (12 copied `secondary_tests.rs`),
+Lower: ~~shared test-support `ProbeVenue` (10 copied probes in `secondary_tests.rs`)~~
+(done: `engine::test_support`),
 `RangeWalk` for the 16 hand-rolled history paginators, one `SocketSpec`.
