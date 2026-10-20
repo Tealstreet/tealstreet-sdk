@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",
-    "@testing-library/user-event": "^14.6.7",
+    "@testing-library/user-event": "^14.6.8",
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@tealstreet/prettierrc": "*",
     "@types/node": "^22.15.3",
