@@ -93,3 +93,18 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Landing advanced while working; merge its consumer/public-feed changes before
   taking final measurements. Legacy fill oracle compatibility with widened
   metadata is under review; never erase actual TS fee/time/execution evidence.
+- Landing merged at `d972b4d77d`, retaining URL identity caching and audit-mode
+  guards together; merged tape/measurement/CI coverage controls: 98/98 PASS.
+  The interim repository test run crossed the merge and is not final evidence;
+  its two product-option failures pass 14/14 in a fresh post-merge run.
+- Phase 5 implementation review: PASS after fixing legacy sparse-fill oracles.
+  They now correct a detached TS shadow, preserve actual non-null execution
+  metadata only through unique execution matches, and retain raw fills when
+  matching is ambiguous. New null metadata initialization is explicitly bounded;
+  metadata erasure, invention or reassignment remains forbidden. Coinbase's
+  legacy price assertion follows numeric-string comparison semantics.
+  Review caught Proxy cloning in the first adapter; descriptor-based detached
+  cloning plus 32 production observer/factory integrations corrected it.
+  Current focused results: 114/114 adapter/contracts, 14/14 real gate CLI tests,
+  23/23 policy/budget/coverage/USDC tests. Full matrix evidence and final PR
+  reviews remain required; known-failure declarations are not populated yet.

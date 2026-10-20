@@ -146,9 +146,9 @@ test('reconstructed fill rows permit only their declared historical leaves', () 
     assert.ok(erased.errors.some((error) => error.includes(`.${field}`)));
 });
 
-test('even removing an entire fill cannot silently erase compared metadata', () => {
+test('even removing an entire fill cannot silently erase observed metadata', () => {
   const original = account();
-  Object.assign(original.account.fills[0], { executionId: null, fee: null, timestamp: null });
+  Object.assign(original.account.fills[0], { executionId: 'observed', fee: 0.1, timestamp: 100 });
   const result = audit('cryptocom', original, (output) => { output.account.fills = []; });
   for (const field of ['executionId', 'fee', 'timestamp'])
     assert.ok(result.errors.some((error) => error.includes(`.${field}`)));

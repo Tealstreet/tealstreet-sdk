@@ -160,8 +160,8 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 ## Correctness gate
 
 Recorded traffic (websocket frames, REST responses, user commands, timestamps)
-is replayed through TS and Rust. The final `StoreData`, the emitted
-order-book/candle deltas and the outbound REST/WS requests must match after
+is replayed through TS and Rust. The `StoreData` at startup, fixed tape quarters, every
+command and terminal checkpoints, the emitted order-book/candle deltas and the outbound REST/WS requests must match after
 normalisation: numbers compared as numbers, map order ignored. A known TS bug
 is fixed in Rust and listed in the PR. The test is the same outcome, not
 byte-identical behaviour.
@@ -171,11 +171,23 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS.
-- Peak and steady memory (Wasm linear memory plus JS heap retained by the
-  worker): Rust < TS.
+- At least seven fresh interleaved public pairs with alternating first runner.
+- Main/steady/process CPU and idle-loaded retained memory: Rust medians at most
+  90% of TS. Include cold implementation loading/WASM compilation in total CPU;
+  exclude audit callbacks, checkpoint reconstruction and baseline collection.
+- Retention counts JS heap/buffer deltas plus WASM growth above its idle-loaded
+  reservation; never clamp releases to zero. Each measured run must reproduce
+  its implementation's audited output and transport receipt.
+- Shipped combined WASM: at most 12,582,912 bytes. Standalone builds retain the
+  1,258,291-byte budget. Check browser and Node artifacts before overwrite.
 
-Every venue PR states both numbers. A PR that loses on either does not merge.
+Peak memory and browser cold-start remain cutover requirements; this replay
+gate measures idle-loaded retained memory rather than establishing either.
+
+Every venue PR states the measurements and incomplete evidence. A venue port
+that loses does not merge. Gate-infrastructure changes may land explicit,
+tape-hash-bound known failures in `harness/known-gate-failures.json`; they retain
+strict FAIL and do not certify venue parity. New or invalid evidence fails CI.
 
 ## Banned (CI fails)
 

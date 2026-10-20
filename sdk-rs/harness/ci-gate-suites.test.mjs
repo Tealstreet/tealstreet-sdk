@@ -164,3 +164,15 @@ test('CI matrix and every expanded CLI case exactly match declared suite coverag
   assert.deepEqual(Object.keys(actual).sort(), [...GATE_SUITES].sort());
   for (const suite of GATE_SUITES) assert.deepEqual(validateGateCoverage(suite, actual[suite]), [], suite);
 });
+
+test('deferred strict results require mandatory final certification even after failures', () => {
+  const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const job = source.slice(source.indexOf('\n  gate:'));
+  const verifier = job.indexOf('name: Verify strict replay results and declared known failures');
+  assert.ok(verifier > job.lastIndexOf('rust:gate:record --venue'));
+  assert.match(job.slice(verifier), /if: always\(\)\s+run: corepack yarn -s rust:gate:verify --suite '\$\{\{ matrix\.venue \}\}'/);
+  assert.doesNotMatch(job, /continue-on-error/);
+  const report = readFileSync(new URL('./record-gate.mjs', import.meta.url), 'utf8');
+  assert.match(report, /Strict replay did not produce a complete report/);
+  assert.match(report, /certification remains pending/);
+});

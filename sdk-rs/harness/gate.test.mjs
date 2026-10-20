@@ -9,7 +9,7 @@ import { fixerLint } from './fixer-lint.mjs';
 import { fixPositionMargins } from './margin-expectation.mjs';
 
 test('no TS fixer may read or accept Rust output', () => {
-  for (const name of ['ts-oracle.mjs', 'known-ts-fixes.mjs', 'known-ts-fixes-coinbase.mjs', 'known-ts-fixes-orderly.mjs', 'margin-expectation.mjs']) {
+  for (const name of ['ts-oracle.mjs', 'known-ts-fixes.mjs', 'known-ts-fixes-coinbase.mjs', 'known-ts-fixes-orderly.mjs', 'margin-expectation.mjs', 'legacy-fill-oracle.mjs']) {
     const source = readFileSync(new URL(name, import.meta.url), 'utf8');
     assert.deepEqual(fixerLint(source, name, true), []);
   }

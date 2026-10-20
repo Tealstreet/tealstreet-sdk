@@ -10,6 +10,7 @@ import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { expectedKucoinRequests } from './kucoin-request-contracts.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import { applyLegacyFillOracle } from './legacy-fill-oracle.mjs';
 
 export function createTsFixes(values, tapeRecords) {
 const records = tapeRecords;
@@ -718,7 +719,7 @@ const fixCryptocomAccount = (account) => {
   // afterTsFrame and prepareTsReady hooks in venues.mjs.
 };
 
-function applyTsCorrections(ts) {
+function applyTsCorrectionsToShadow(ts) {
   const fix =
     KNOWN_TS_FIXES[values.venue] ??
     (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
@@ -803,6 +804,15 @@ function applyTsCorrections(ts) {
         if (ticker[field] === null) ticker[field] = 0;
       }
     }
+}
+const legacyFillVenues = new Set([
+  'coinbase', 'coinbasespot', 'orderly', ...Object.keys(ORDERLY_BROKERS),
+  'phemex', 'kraken', 'bingx', 'backpack', 'cryptocom', 'lighter', 'lighter-robinhood',
+]);
+function applyTsCorrections(ts) {
+  if (legacyFillVenues.has(values.venue) && Array.isArray(ts.account?.fills))
+    return applyLegacyFillOracle(ts, applyTsCorrectionsToShadow);
+  return applyTsCorrectionsToShadow(ts);
 }
 return { KNOWN_TS_FIXES, applyTsCorrections };
 }

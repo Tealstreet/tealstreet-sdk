@@ -2,6 +2,7 @@
 // complete leaf paths: [] is one array index and {name} one object-map key.
 // There are deliberately no prefix permissions or recursive wildcards.
 import { isDeepStrictEqual } from 'node:util';
+import { LEGACY_FILL_METADATA, matchLegacyFillRows } from './legacy-fill-oracle.mjs';
 
 const rowFields = (base, fields) => fields.map((field) => `${base}[].${field}`);
 const fillFields = ['id', 'symbol', 'side', 'amount', 'price'];
@@ -20,7 +21,12 @@ const orderRemovalFields = [
 const fills = rowFields('account.fills', fillFields);
 const queryLeaves = rowFields('commands[].ok', queryFields);
 const queryArrays = [{ path: 'commands[].ok', add: true, remove: true }];
-const fillArrays = [{ path: 'account.fills', add: true, remove: true, reorder: true }];
+const fillArrays = [{
+  path: 'account.fills', add: true, remove: true, reorder: true,
+  // Initialization of a newly reconstructed execution supplies nulls only.
+  // Removing a whole execution may remove null placeholders, never evidence.
+  addedFields: LEGACY_FILL_METADATA, removedNullFields: LEGACY_FILL_METADATA,
+}];
 const requestArrays = [{ path: 'requests', add: true, remove: true, reorder: true }];
 const subscriptionArrays = [{ path: 'subscriptions', add: true, remove: true, reorder: true }];
 const bookFields = ['books.{symbol}.bids[][]', 'books.{symbol}.asks[][]'];
@@ -60,8 +66,8 @@ const deepFreeze = (value) => {
 };
 
 // Empty contracts are intentional: adding a new fixer or a new field requires
-// a reviewed declaration here. In particular, rebuilt fills cannot delete the
-// newly compared executionId, fee or timestamp, even when their value is null.
+// a reviewed declaration here. Rebuilt fills cannot overwrite or erase observed
+// metadata, or remove even a null field from an execution that remains present.
 export const FIXER_CONTRACTS = deepFreeze({
   binance: contract(['account.positions[].marginSize']),
   binancepm: contract(['account.positions[].marginSize']),
@@ -155,6 +161,28 @@ export function auditFixerChanges(venue, before, after) {
   const counts = {};
   let total = 0;
   const beforeStack = new Set(), afterStack = new Set();
+  const fillRule = permission.arrays.find((rule) => rule.path === 'account.fills');
+  const previousFills = before?.account?.fills ?? [], nextFills = after?.account?.fills ?? [];
+  const fillMatches = fillRule?.addedFields && Array.isArray(previousFills) && Array.isArray(nextFills)
+    ? matchLegacyFillRows(previousFills, nextFills) : undefined;
+  const metadataErrors = new Set();
+  const metadataError = (index, field) => metadataErrors.add(`${venue}: fixer changed undeclared field account.fills[${index}].${field}`);
+  if (fillMatches && !isDeepStrictEqual(previousFills, nextFills)) {
+    for (const [index, row] of previousFills.entries()) {
+      for (const field of LEGACY_FILL_METADATA) {
+        if (row[field] === null || row[field] === undefined) continue;
+        const target = nextFills[fillMatches.targetIndices[index]];
+        if (!target || !Object.hasOwn(target, field) || !isDeepStrictEqual(row[field], target[field])) metadataError(index, field);
+      }
+    }
+    for (const [index, row] of nextFills.entries()) {
+      for (const field of LEGACY_FILL_METADATA) {
+        if (row[field] === null || row[field] === undefined) continue;
+        const source = previousFills[fillMatches.sourceIndices[index]];
+        if (!source || !Object.hasOwn(source, field) || !isDeepStrictEqual(row[field], source[field])) metadataError(index, field);
+      }
+    }
+  }
   const record = (path, allowed, suffix = '') => {
     const label = pathString(path) + suffix;
     Object.defineProperty(counts, label, { value: (Object.hasOwn(counts, label) ? counts[label] : 0) + 1, enumerable: true, configurable: true });
@@ -162,11 +190,27 @@ export function auditFixerChanges(venue, before, after) {
     if (!allowed) errors.push(`${venue}: fixer changed undeclared field ${label}`);
   };
   const arrayRule = (path) => permission.arrays.find((rule) => matches(rule.path, path));
+  const allowedFillMetadata = (path) => {
+    if (!fillMatches || path.length !== 4 || path[0] !== 'account' || path[1] !== 'fills'
+      || typeof path[2] !== 'number' || !fillRule.addedFields.includes(path[3])) return false;
+    const index = path[2], field = path[3], old = previousFills[index], next = nextFills[index];
+    if (old && Object.hasOwn(old, field)) {
+      const target = nextFills[fillMatches.targetIndices[index]];
+      if (target ? !Object.hasOwn(target, field) || !isDeepStrictEqual(old[field], target[field])
+        : old[field] !== null || !fillRule.removedNullFields.includes(field)) return false;
+    }
+    if (next && Object.hasOwn(next, field)) {
+      const source = previousFills[fillMatches.sourceIndices[index]];
+      if (source ? !Object.hasOwn(source, field) || !isDeepStrictEqual(next[field], source[field])
+        : next[field] !== null) return false;
+    }
+    return true;
+  };
   const allowedLeaf = (path, value, removal) => removal
     ? path.length === removal.path.length + 1
       && removal.path.every((part, index) => part === path[index])
       && removal.fields.includes(path.at(-1))
-    : permission.fields.some((pattern) => matches(pattern, path))
+    : allowedFillMetadata(path) || permission.fields.some((pattern) => matches(pattern, path))
       || (value === null && permission.nulls.some((pattern) => matches(pattern, path)));
   const allowedContainer = (path, value, present, removal, seen = new Set()) => {
     if (!present) return false;
@@ -287,5 +331,6 @@ export function auditFixerChanges(venue, before, after) {
     }
   };
   visit(before, true, after, true, []);
+  for (const message of metadataErrors) if (!errors.includes(message)) errors.push(message);
   return { errors, counts, total };
 }
