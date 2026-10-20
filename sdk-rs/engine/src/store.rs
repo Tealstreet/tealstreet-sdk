@@ -750,6 +750,7 @@ impl Store {
         let mut string_bytes = 0;
         if changes.markets {
             bytes += table(self.markets.len(), 5, 10);
+            #[cfg(feature = "prediction")]
             if let Some(markets) = &self.prediction_markets {
                 bytes += table(markets.len(), 8, 1);
                 for market in markets {
@@ -900,6 +901,7 @@ impl Store {
                     }
                 }
             }
+            #[cfg(feature = "prediction")]
             if let Some(holdings) = &self.prediction_holdings {
                 bytes += table(holdings.len(), 2, 0);
             }

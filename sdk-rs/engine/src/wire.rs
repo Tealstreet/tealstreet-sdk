@@ -562,6 +562,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "prediction")]
     fn prediction_snapshot_reservation_covers_both_tables_and_all_six_strings() {
         for count in [0usize, 63, 64] {
             for shared in [false, true] {

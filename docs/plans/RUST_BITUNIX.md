@@ -2529,3 +2529,33 @@ old impossible startup prefix without relaxing the scheduler. Log/result are
 /tmp/bitunix-1a10-kucoin-causal-functional-ts.{log,json}. This diagnostic runs
 during native compilation; its timings are not performance-gate evidence.
 A rebuilt Rust functional replay and quiet sequential gates remain required.
+
+
+First merged feature-isolated KuCoin release build catches E0609: incoming
+prediction feature isolation removes two Store fields in ordinary builds, but
+the retained table-reservation union still references them unconditionally.
+Preserve the failed log /tmp/bitunix-1a10-kucoin-initial-build.log. Gate the
+prediction market/holding reservation branches with the same prediction feature
+as their fields and frame writers; no counts, strings or enabled-path behavior
+change. Independently review the two attributes and check disabled, product
+and prediction engine feature builds before the release retry. Existing full
+workspace checks unify prediction and therefore could not catch this case.
+
+
+Independent feature audit also catches the retained prediction reservation
+unit test calling gated setters without enabling prediction. Disabled-feature
+all-target Clippy reproduces E0599 in the unchanged test. Add the same feature
+guard to that test, preserving its entire body; explicitly run the prediction
+regression with the feature enabled. This keeps the assertion in its supported
+configuration and makes ordinary engine tests compile. No test is deleted.
+
+
+Prediction feature correction is independently reviewed PASS: exactly three
+attributes, no arithmetic/string/test-body changes. All-target engine Clippy
+passes disabled, product-semantics and prediction configurations. Explicit
+prediction suite passes 107 tests, including the full reservation regression.
+Merged isolated KuCoin release now builds at 778,411 bytes; strict Rust and TS
+functional replay each complete 10,034 lifecycle/data frames with both books,
+zero unmatched requests, signature/protocol/socket errors and unused writes.
+These functional runs occur during compilation and are not timing evidence.
+Quiet performance gates still follow the remaining native/WASM checks.
