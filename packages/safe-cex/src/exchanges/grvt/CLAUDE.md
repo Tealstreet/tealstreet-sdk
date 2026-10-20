@@ -804,3 +804,12 @@ add a credential-reading script under `src/exchanges/**`.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `metadata.client_order_id`. GRVT types it uint64 with the top half reserved for its own UI, so the rule accepts canonical decimal strings `1..2^63-1`. The caller's ID then becomes the canonical safe-cex order ID: it replaces the nonce everywhere the nonce was used (`recordNonce`, builder-fee events, the return value).
+
+## Rust shared public feed
+
+Shared provider quotes enter the native ticker store and run GRVT's existing
+position and balance PnL calculation using the current last price. This starts
+only after native private balance and position snapshots are loaded; a public
+quote cannot mark private datasets ready. Native account-summary and catalog
+refreshes retain provider quotes and the resulting private PnL. Summary equity,
+available funds and margin usage continue to come from the authenticated venue.

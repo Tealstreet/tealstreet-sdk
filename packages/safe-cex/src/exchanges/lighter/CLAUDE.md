@@ -820,3 +820,14 @@ preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
 first-port grouped-order/approval signer surfaces and their unused 32-byte hash
 helpers are removed; the exchange places bracket siblings sequentially as TS
 currently does. Deliberate TS fixes are listed in the port plan and replay gate.
+
+Shared public-feed snapshots revalue loaded native positions with the current
+positive normalized mark, then last price, using the direct ticker handler's
+PnL formula. The ticker mapper copies index into mark when mark is absent;
+an explicit zero mark falls through to last. These are cumulative ticker
+snapshots, so the fallback uses current native fields rather than which
+optional fields appeared in a venue delta.
+Public quotes do not mark private datasets loaded and do not change balance;
+the next authenticated account snapshot calculates balance with the current
+provider last price. Later native REST ticker seeds cannot replace provider
+quotes and reapply position valuations after restoration.
