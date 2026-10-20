@@ -945,3 +945,52 @@ method timing includes boundary/JSON/copy costs. Original control already has
 sorted ticker lookup and OKX ticker updates bypass it: a broad ticker-search
 regression is unproven. Measure hotspots before choosing an engine fix, then
 verify and declare a genuinely new source cohort. Keep every failed result.
+
+
+### Delivery29 diagnostics and delivery30 landing integration (wind-down)
+
+All 20 predeclared unscored diagnostics completed once, with same-arm logical
+output parity and no input drift or remaining processes. The twelve method
+profiles and eight independent V8 samples are preserved in
+`RUST_PERF_DELIVERY29_DIAGNOSTICS.md` and the adjacent complete gzip archive
+(54 files, SHA-256 `5be68783177a5feb14028db9b1cfee2e5a5fa9d26fd51c04fdc21631f5b9f212`).
+These instrumented observations do not supersede the negative official cohort.
+OKX gross socket CPU falls 89.791 to 42.203ms and Bybit 20.255 to 14.651ms;
+method observers combine crossing, parsing, mutation and action serialization.
+Pure crossing cost is still unmeasured. Paradex HTTP chunk processing, rather
+than frame writing, is the strongest measured engine lead. Hyro samples are too
+sparse for attribution. No evidence supports blaming the existing sorted ticker
+index; original control has it too, and OKX price updates bypass it.
+
+Integrate landing `c44f22bd8e` (wire identity, side leverage, trading fixes and
+Bybit direct numeric ticker decoding), keeping nested workspace and isolated
+families. Store resolution preserves stable symbol settings, market reindex
+republishing, midpoint/pretty/orphan identity tails and frame reservation bounds.
+Replay retains incoming side/symbol command arguments and captures fill symbols
+at arrival so later market reorder cannot retarget historical executions.
+Comparison now covers optional pretty symbols and midpoints. Account identity
+resolution rejects missing invalid indices and preserves explicit orphan symbols.
+
+Independent merge review reports no actionable correctness findings. Focused
+engine all-feature tests pass 116/116 after updating the previous exact-hint
+assertion for legitimate duplicate-string slack; pointer/capacity and exact wire
+checks remain. The initial 115/116 result is retained. Focused replay regressions
+pass 7/7, covering orphan identities, invalid indices, market reordering and
+optional pretty/midpoint values. Full source/repository checks are running.
+
+The overseer requested wind-down at the next clean point, with no queued
+follow-up. Do not start a new speculative optimization or relabel prior artifacts
+as this merge: all 27 release artifacts and every scored delivery29 result still
+belong to Rust `7bc9e30d32` / JS `8150295a7c`. PR #1344 remains draft because the
+completed cohort has only 6/40 full performance objectives passing. A future
+continuation needs a current control, fresh merged-source builds, actual WASM
+checks, affected private fixture regeneration, and a new frozen scored cohort.
+No threshold, memory quiet window, timeout or gate requirement is relaxed.
+
+
+Delivery30 repository verification completes: typecheck44, lint28, repo27 tasks,
+harness675/675 and host tests all pass. New identity/projection tests account for
+five additional harness cases. The repository CI run passes all 7,846 safe-cex
+tests; no new current-source performance measurement is inferred. Native strict
+all-target workspace Clippy passes; Rust workspace tests and WASM Clippy remain
+in the same original check pipeline. No new optimization phase has started.

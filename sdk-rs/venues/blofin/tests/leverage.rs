@@ -160,6 +160,7 @@ fn stale_lookup_cannot_overwrite_a_confirmed_setting_change() {
             command: 72,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     h.collect();

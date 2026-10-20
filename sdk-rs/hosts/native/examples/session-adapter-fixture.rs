@@ -105,6 +105,7 @@ impl Venue for FixtureVenue {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 if symbol != "BTCUSDT" || self.pending.is_some() {
                     cx.done(command, Err("invalid or concurrent fixture update".into()));

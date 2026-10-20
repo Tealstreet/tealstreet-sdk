@@ -413,6 +413,7 @@ const KNOWN_TS_FIXES = {
       'Reject API key index 255, the query-all sentinel, for signing.',
       'Support the full official int16 market domain; TS leverage still rejects active IDs above 254.',
       'Acknowledge retaining the only supported net position mode; TS inherits an unsupported method.',
+      'Price-only cancel/replace amendments re-place the remaining quantity after partial execution; TS re-places the original amount and increases exposure.',
     ],
   },
   // WOO repairs live in the TS reference itself; no result normalization:
@@ -517,6 +518,9 @@ const KNOWN_TS_FIXES = {
   // totals, plain-trigger/caller-ID whole-batch rejection, post-only amendment,
   // cumulative-fill/terminal replay fences and malformed openOrders retention.
   // TS cancel-all marks already FILLED rows canceled; use explicit tape events.
+  // Trading audit: derivatives require x=TRADE, deduplicate native trade IDs,
+  // and report genuine late trades after stop-trigger EXPIRED/cancellation.
+  // Native regressions cover those adverse packets; no fill is normalized here.
   binanceinverse: (ts) => fixBinanceFilledStatus(ts.account, tapeRecords, false),
   // Other documented Binance variant fixes have native regression proofs:
   // - TS split lots divide the whole request and can round away quantity;
@@ -661,6 +665,12 @@ const KNOWN_TS_FIXES = {
     'composite capped or stalled product histories fail explicitly as incomplete',
   ],
 
+  // Trading audit: cancel/replace waits for cancellation evidence, subtracts
+  // racing cumulative fills, and refuses unknown-order replacement. Successful
+  // writes fence old USD-M/PM snapshots; generated client-ID RNG errors reject.
+  // Derivative lifecycle packets cannot emit fills; native trade IDs dedupe
+  // retries even after reconnect. Native race tests pin these TS corrections;
+  // this entry adds no output or request rewrite for the audit fixes.
   binance: (ts, rust) => {
     // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
     // stale and skipping restoration; rejected writes were swallowed. Reference
@@ -676,6 +686,10 @@ const KNOWN_TS_FIXES = {
   // the linear feed; malformed supplied option WS Greeks coerced to zero
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
+  // Trading audit: deduplicate native execId and fence acknowledged Demo/Hyro
+  // cancellations behind REST reads issued before, during or after the write,
+  // with bounded native terminal retention against stale replicas. Native tests
+  // exercise equal-time and late-response races without normalization.
   bybit: (ts, rust) => {
     if (!ts.account) return;
     const output = ts;

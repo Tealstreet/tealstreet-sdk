@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::json::{ArrayAt, ArraySplitter};
-use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
+use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
@@ -243,6 +243,7 @@ pub enum Command {
         command: CommandId,
         symbol: String,
         leverage: f64,
+        side: Option<PositionSide>,
     },
     SetMarginType {
         command: CommandId,
@@ -252,6 +253,7 @@ pub enum Command {
     SetPositionMode {
         command: CommandId,
         hedged: bool,
+        symbol: Option<String>,
     },
     FetchStpMode {
         command: CommandId,
@@ -1446,6 +1448,9 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        if !store && self.store.markets_pending() {
+            return None;
+        }
         #[cfg(feature = "book-deltas")]
         let write_books = {
             let markets_match = !self.book_deltas
@@ -1569,7 +1574,7 @@ impl<V: Venue> Engine<V> {
         w.candles(&candles);
         let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
-            w.begin(section::FILLS);
+            w.begin_revision(section::FILLS, 1);
             w.u32(fills.len() as u32);
             let orders: Vec<u32> = fills.iter().map(|f| w.string(&f.order_id)).collect();
             w.u32s(orders);
@@ -1582,6 +1587,10 @@ impl<V: Venue> Engine<V> {
             w.pad();
             for f in &fills {
                 w.f64s([f.price, f.amount]);
+            }
+            for fill in &fills {
+                let symbol = w.string(&fill.symbol);
+                w.u32(symbol);
             }
             w.end();
         }
@@ -1843,6 +1852,85 @@ mod streaming_tests {
             symbol_amend: false,
             commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn market_only_frames_wait_for_pending_market_identity_without_dropping_events() {
+        use crate::model::Candle;
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A"), market("B")]);
+        engine.take_frame(0.);
+        engine.store.set_markets(vec![market("B"), market("A")]);
+        engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "A",
+            },
+        );
+        engine.io.candles.push((
+            "A".into(),
+            "1m".into(),
+            Candle {
+                timestamp: 1.,
+                open: 2.,
+                high: 3.,
+                low: 1.,
+                close: 2.5,
+                volume: 4.,
+            },
+        ));
+        engine.io.fills.push(Fill {
+            order_id: "filled-order".into(),
+            symbol: "ORPHAN".into(),
+            side: OrderSide::Buy,
+            price: 7.,
+            amount: 0.25,
+        });
+        assert!(engine.take_market_frame(1.).is_none());
+        assert_eq!(engine.io.changed_books_active, 1);
+        assert_eq!(engine.io.candles.len(), 1);
+        assert_eq!(engine.io.fills.len(), 1);
+        let frame = engine.take_frame(2.).unwrap().to_vec();
+        let sections: Vec<_> = crate::wire::sections(&frame).collect();
+        assert!(sections.iter().any(|(kind, _)| *kind == section::MARKETS));
+        assert_eq!(book_markets(&frame), [1]);
+        let candles = sections
+            .iter()
+            .find(|(kind, _)| *kind == section::CANDLES)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(candles[4..8].try_into().unwrap()), 1);
+        let fills = sections
+            .iter()
+            .find(|(kind, _)| *kind == section::FILLS)
+            .unwrap()
+            .1;
+        assert_eq!(
+            u32::from_le_bytes(fills[8..12].try_into().unwrap()),
+            crate::wire::NONE
+        );
+        assert_eq!(
+            fills.len(),
+            40,
+            "one fill includes a padded symbol-reference tail"
+        );
+        let reference = u32::from_le_bytes(fills[32..36].try_into().unwrap()) as usize;
+        let strings = sections
+            .iter()
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+        let at = 4 + reference * 4;
+        let start = u32::from_le_bytes(strings[at..at + 4].try_into().unwrap()) as usize;
+        let end = u32::from_le_bytes(strings[at + 4..at + 8].try_into().unwrap()) as usize;
+        let data = 4 + (count + 1) * 4;
+        assert_eq!(&strings[data + start..data + end], b"ORPHAN");
+        assert!(engine.io.fills.is_empty());
+        assert!(engine.io.candles.is_empty());
+        assert_eq!(engine.io.changed_books_active, 0);
+        assert!(engine.take_market_frame(3.).is_none());
     }
 
     #[test]
@@ -2280,28 +2368,17 @@ mod streaming_tests {
             engine.venue.book("A").unwrap().write(0, &mut sequential);
             let expected = sequential.finish();
             assert_eq!(engine.snapshot_frame(5.0), expected);
-            let frame = if market_only {
-                engine.take_market_frame(5.0)
-            } else {
-                engine.take_frame(5.0)
+            if market_only {
+                assert!(engine.take_market_frame(5.0).is_none());
+                assert_eq!(engine.io.changed_books_active, 3);
             }
-            .unwrap()
-            .to_vec();
+            let frame = engine.take_frame(5.0).unwrap().to_vec();
             let books: Vec<_> = sections(&frame)
                 .filter(|(kind, _)| *kind == section::BOOK)
                 .collect();
             assert_eq!(books.len(), 1);
             assert_eq!(book_top(books[0].1), Some((0, 99.0, 101.0)));
-            if market_only {
-                assert_eq!(sections(&frame).count(), 1);
-                let deferred = engine.take_frame(5.0).unwrap();
-                assert_eq!(
-                    sections(deferred).map(|(kind, _)| kind).collect::<Vec<_>>(),
-                    [section::MARKETS, section::STATUS, section::STRINGS]
-                );
-            } else {
-                assert!(sections(&frame).any(|(kind, _)| kind == section::MARKETS));
-            }
+            assert!(sections(&frame).any(|(kind, _)| kind == section::MARKETS));
             assert!(engine.take_frame(5.0).is_none());
         }
     }

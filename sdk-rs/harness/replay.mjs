@@ -135,10 +135,12 @@ const tickerFields = [
   'volume',
   'quoteVolume',
   'openInterest',
+  'midPrice',
 ];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
+  ...(m.prettySymbol !== undefined ? { prettySymbol: m.prettySymbol } : {}),
   base: m.base,
   quote: m.quote,
   active: m.active,
@@ -248,6 +250,7 @@ async function runRust() {
       for (let i = 0; i < (executed?.count ?? 0); i++) {
         fills.push({
           market: executed.market[i],
+          symbol: executed.symbol?.(i) ?? (executed.market[i] !== NONE && executed.market[i] < (markets?.count ?? 0) ? markets.symbol(executed.market[i]) : undefined),
           side: executed.side[i],
           amount: executed.rows[i * 2 + 1],
           ...(venue.compareFillPrices ? { price: executed.rows[i * 2] } : {}),
@@ -299,6 +302,7 @@ async function runRust() {
         marketRows.push({
           id: markets.id(i),
           symbol: markets.symbol(i),
+          ...(markets.prettySymbol?.(i) !== undefined ? { prettySymbol: markets.prettySymbol(i) } : {}),
           base: markets.base(i),
           quote: markets.quote(i),
           active: (markets.flags[i] & 1) !== 0,
@@ -334,7 +338,9 @@ async function runRust() {
         const row = {
           symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]),
         };
-        for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
+        for (const [field, column] of Object.entries(tickers.columns)) {
+          if (field !== 'midPrice' || !Number.isNaN(column[i])) row[field] = column[i];
+        }
         tickerRows.push(row);
       }
       const bookRows = {};
@@ -391,15 +397,91 @@ async function runRust() {
 
 const commandArgs = ({ t, type, expected, ...args }) => args;
 
+async function tsCommand(exchange, store, record) {
+  const { op, ...args } = commandArgs(record);
+  switch (op) {
+    case 'getAccount':
+      return exchange.getAccount();
+    case 'placeOrders':
+      return exchange.placeOrders(args.orders);
+    case 'cancelOrders':
+      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
+      return [];
+    case 'cancelSymbolOrders':
+      if (args.symbol === '') await exchange.cancelAllOrders();
+      else await exchange.cancelSymbolOrders(args.symbol);
+      return [];
+    case 'amendOrder': {
+      const order = store.orders.find((o) => o.id === args.id);
+      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
+      const update = Object.fromEntries(
+        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
+      );
+      const result = (await exchange.updateOrder({ order, update })) ?? [];
+      return result.clientOrderId ? { orderIds: [...result], clientOrderId: result.clientOrderId } : result;
+    }
+    case 'setLeverage':
+      await exchange.setLeverage(args.symbol, args.leverage, args.side);
+      return [];
+    case 'setMarginType':
+      await exchange.changeMarginType(args.isolated, args.symbol);
+      return [];
+    case 'setPositionMode':
+      await exchange.changePositionMode(args.hedged, args.symbol);
+      return [];
+    case 'fetchStpMode':
+      return exchange.fetchStpMode();
+    case 'setStpMode':
+      await exchange.changeStpMode(args.mode);
+      return [];
+    case 'findOrderByClientOrderId':
+      return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
+    case 'fetchLeverage':
+      return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchAccount':
+      return exchange.getAccount();
+    case 'fetchOrderBook':
+      return exchange.fetchOrderBook(args.symbol, args.limit);
+    case 'fetchFills':
+      return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory':
+      return exchange.fetchHistoricalOrders(args);
+    case 'fetchIncome':
+      return exchange.fetchIncomeHistory({
+        symbol: args.symbol,
+        incomeType: args.incomeType,
+        startTime: args.from,
+        endTime: args.to,
+        limit: args.limit,
+      });
+    case 'fetchPublicTrades':
+      return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles':
+      return exchange.fetchOHLCV(args);
+    case 'fetchOptionChain':
+      return exchange.fetchOptionChain(args.query);
+    case 'fetchOptionExpiries':
+      return exchange.fetchOptionExpiries(args.underlying);
+    case 'fetchAccountGreeks':
+      return exchange.fetchAccountGreeks();
+    default:
+      throw new Error(`unknown command ${op}`);
+  }
+}
+
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, positionGreeks, balance, settings, status, fills }) {
-  const symbol = (i) => markets.symbol(i);
+  const symbol = (i, stable) => {
+    if (Number.isInteger(i) && i !== NONE && i >= 0 && i < (markets?.count ?? 0)) return markets.symbol(i);
+    if (stable !== undefined) return stable;
+    throw new Error(`Missing stable market identity for row ${i}`);
+  };
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
     const row = {
       id: orders.id(i),
       ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
-      symbol: symbol(orders.market[i]),
+      symbol: symbol(orders.market[i], orders.symbol?.(i)),
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
@@ -409,7 +491,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
-    const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
+    const row = { symbol: symbol(positions.market[i], positions.symbol?.(i)), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
     const greekIndex = positionGreeks && Array.from({ length: positionGreeks.count }, (_, index) => index).find((index) => positionGreeks.positionId(index) === positions.id(i));
     if (greekIndex !== undefined) row.option = { greeks: { delta: positionGreeks.delta[greekIndex], gamma: positionGreeks.gamma[greekIndex], vega: positionGreeks.vega[greekIndex], theta: positionGreeks.theta[greekIndex], units: positionGreeks.units(greekIndex) } };
@@ -422,7 +504,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
     // TS has no margin-only placeholder; frames retain it for actual consumers.
     if (!venue.independentLeverage && !(settings.leverage[i] > 0)) continue;
     settingRows.push({
-      symbol: symbol(settings.market[i]),
+      symbol: symbol(settings.market[i], settings.symbol?.(i)),
       marginType: settings.marginType(i),
       ...(venue.independentLeverage
         ? { buyLeverage: settings.buyLeverage[i], sellLeverage: settings.sellLeverage[i] }
@@ -445,7 +527,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
     settings: settingRows,
     fills: fills.map((f) => ({
       id: f.id,
-      symbol: symbol(f.market),
+      symbol: f.symbol ?? symbol(f.market),
       side: f.side === 0 ? 'buy' : 'sell',
       amount: f.amount,
       ...(venue.compareFillPrices ? { price: f.price } : {}),
@@ -633,7 +715,7 @@ async function runTs() {
       await until(() => replayTransportReady(venue, tape.open.size), 'TS initial transport');
       await until(() => !tape.audit || tape.audit.ready(accountReady), 'TS protocol readiness');
     },
-    (record) => runTsCommand(exchange, store, record),
+    (record) => tsCommand(exchange, store, record),
     clock,
   );
   await withTimeout(Promise.all([started, subscribed]), 'TS startup/subscriptions', 15000);
@@ -710,78 +792,6 @@ async function runTs() {
   exchange.dispose();
   clock?.restore();
   return result;
-}
-
-async function runTsCommand(exchange, store, record) {
-  const { op, ...args } = commandArgs(record);
-  switch (op) {
-    case 'getAccount':
-      return exchange.getAccount();
-    case 'placeOrders':
-      return exchange.placeOrders(args.orders);
-    case 'cancelOrders':
-      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
-      return [];
-    case 'cancelSymbolOrders':
-      if (args.symbol === '') await exchange.cancelAllOrders();
-      else await exchange.cancelSymbolOrders(args.symbol);
-      return [];
-    case 'amendOrder': {
-      const order = store.orders.find((o) => o.id === args.id);
-      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
-      const update = Object.fromEntries(
-        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
-      );
-      const result = (await exchange.updateOrder({ order, update })) ?? [];
-      return result.clientOrderId ? { orderIds: [...result], clientOrderId: result.clientOrderId } : result;
-    }
-    case 'setLeverage':
-      await exchange.setLeverage(args.symbol, args.leverage);
-      return [];
-    case 'setMarginType':
-      await exchange.changeMarginType(args.isolated, args.symbol);
-      return [];
-    case 'setPositionMode':
-      await exchange.changePositionMode(args.hedged);
-      return [];
-    case 'fetchStpMode':
-      return exchange.fetchStpMode();
-    case 'setStpMode':
-      await exchange.changeStpMode(args.mode);
-      return [];
-    case 'findOrderByClientOrderId':
-      return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
-    case 'fetchLeverage':
-      return exchange.fetchLeverageForSymbol(args.symbol);
-    case 'fetchAccount':
-      return exchange.getAccount();
-    case 'fetchOrderBook':
-      return exchange.fetchOrderBook(args.symbol, args.limit);
-    case 'fetchFills':
-      return exchange.fetchHistoricalFills(args);
-    case 'fetchOrderHistory':
-      return exchange.fetchHistoricalOrders(args);
-    case 'fetchIncome':
-      return exchange.fetchIncomeHistory({
-        symbol: args.symbol,
-        incomeType: args.incomeType,
-        startTime: args.from,
-        endTime: args.to,
-        limit: args.limit,
-      });
-    case 'fetchPublicTrades':
-      return exchange.fetchPublicTrades(args.symbol, args.limit);
-    case 'fetchCandles':
-      return exchange.fetchOHLCV(args);
-    case 'fetchOptionChain':
-      return exchange.fetchOptionChain(args.query);
-    case 'fetchOptionExpiries':
-      return exchange.fetchOptionExpiries(args.underlying);
-    case 'fetchAccountGreeks':
-      return exchange.fetchAccountGreeks();
-    default:
-      throw new Error(`unknown command ${op}`);
-  }
 }
 
 /** The fields both implementations carry, in one shape. */

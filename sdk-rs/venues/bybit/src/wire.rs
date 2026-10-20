@@ -278,7 +278,121 @@ pub struct TickerRow<'a> {
 #[derive(Deserialize)]
 pub struct TickerEvent<'a> {
     #[serde(borrow)]
-    pub data: TickerRow<'a>,
+    pub data: TickerDelta<'a>,
+}
+
+fn optional_string<'de, D: serde::Deserializer<'de>, T, F: FnOnce(&str) -> T>(
+    deserializer: D,
+    map: F,
+) -> Result<Option<T>, D::Error> {
+    struct OptionalString<F>(F);
+    impl<'de, T, F: FnOnce(&str) -> T> serde::de::Visitor<'de> for OptionalString<F> {
+        type Value = Option<T>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string or null")
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<D: serde::Deserializer<'de>>(
+            self,
+            deserializer: D,
+        ) -> Result<Self::Value, D::Error> {
+            deserializer.deserialize_str(self)
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            Ok(Some((self.0)(value)))
+        }
+    }
+    deserializer.deserialize_option(OptionalString(map))
+}
+
+fn optional_decimal<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    optional_string(deserializer, |text| (!text.is_empty()).then(|| float(text)))
+        .map(Option::flatten)
+}
+
+fn discard_optional_string<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
+    optional_string(deserializer, |_| ()).map(|_| ())
+}
+
+/// Stream deltas hold only numeric updates. Unused option fields still validate
+/// their wire types and duplicate keys without retaining their string values.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TickerDelta<'a> {
+    #[serde(borrow, default)]
+    pub symbol: Cow<'a, str>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub last_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub bid1_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub ask1_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub mark_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub index_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub price24h_pcnt: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub open_interest: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub funding_rate: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub next_funding_time: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub volume24h: Option<f64>,
+    #[serde(default, deserialize_with = "optional_decimal")]
+    pub turnover24h: Option<f64>,
+    #[serde(
+        rename = "delta",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _delta: (),
+    #[serde(
+        rename = "gamma",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _gamma: (),
+    #[serde(rename = "vega", default, deserialize_with = "discard_optional_string")]
+    _vega: (),
+    #[serde(
+        rename = "theta",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _theta: (),
+    #[serde(
+        rename = "markIv",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _mark_iv: (),
+    #[serde(
+        rename = "bid1Iv",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _bid1_iv: (),
+    #[serde(
+        rename = "ask1Iv",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _ask1_iv: (),
+    #[serde(
+        rename = "underlyingPrice",
+        default,
+        deserialize_with = "discard_optional_string"
+    )]
+    _underlying_price: (),
 }
 
 #[derive(Default)]
@@ -1033,14 +1147,12 @@ mod tests {
     }
 
     #[test]
-    fn public_ticker_strings_borrow_unescaped_json() {
+    fn public_ticker_decodes_numbers_and_borrows_unescaped_symbol() {
         let event: TickerEvent<'_> = serde_json::from_str(
             r#"{"data":{"symbol":"BTCUSDT","lastPrice":"54321","volume24h":"1000","turnover24h":"54321000"}}"#,
         ).unwrap();
-        assert!(
-            matches!(event.data.last_price, Some(Cow::Borrowed(_))),
-            "ticker price allocated"
-        );
+        assert_eq!(event.data.last_price, Some(54321.0));
+        assert_eq!(event.data.volume24h, Some(1000.0));
         assert!(
             matches!(event.data.symbol, Cow::Borrowed(_)),
             "ticker symbol allocated"
@@ -1064,13 +1176,123 @@ mod tests {
     #[test]
     fn public_ticker_keeps_escape_null_missing_and_empty_field_semantics() {
         let event: TickerEvent<'_> = serde_json::from_str(
-            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"\u00354321","bid1Price":null,"volume24h":""}}"#,
+            r#"{"data":{"symbol":"BTC\u0055SDT","lastPrice":"\u00354321","bid1Price":null,"volume24h":""}}"#,
         ).unwrap();
-        assert_eq!(float_of(&event.data.last_price), 54321.0);
-        assert!(matches!(event.data.last_price, Some(Cow::Owned(_))));
+        assert_eq!(event.data.last_price, Some(54321.0));
+        assert!(matches!(event.data.symbol, Cow::Owned(_)));
+        assert_eq!(event.data.symbol, "BTCUSDT");
         assert!(event.data.bid1_price.is_none());
         assert!(event.data.ask1_price.is_none());
-        assert!(matches!(event.data.volume24h, Some(Cow::Borrowed(""))));
-        assert!(float_of(&event.data.volume24h).is_nan());
+        assert!(event.data.volume24h.is_none());
+    }
+
+    #[derive(Deserialize)]
+    struct LegacyTickerEvent<'a> {
+        #[serde(borrow)]
+        data: TickerRow<'a>,
+    }
+
+    #[test]
+    fn stream_numeric_ticker_matches_legacy_conversion_on_documented_and_sparse_payloads() {
+        // Bybit's ticker snapshot/delta shapes, followed by supported string edge cases.
+        for text in [
+            r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","lastPrice":"66666.60","bid1Price":"66666.60","ask1Price":"66666.70","markPrice":"66666.60","indexPrice":"66660.19","price24hPcnt":"-0.158315","openInterest":"492373.72","fundingRate":"-0.005","nextFundingTime":"1760342400000","volume24h":"73191.3870","turnover24h":"4936790807.6521"}}"#,
+            r#"{"topic":"tickers.ETHUSDT","type":"delta","data":{"symbol":"ETHUSDT","lastPrice":"3001","volume24h":"1001","turnover24h":"3004001"}}"#,
+            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"-0","bid1Price":"1e999","ask1Price":"-1e999","markPrice":" \t-0.0 ","indexPrice":"not-a-number","openInterest":"+0.0","fundingRate":"-0.0","volume24h":"0","turnover24h":"5e-324"}}"#,
+            r#"{"data":{"symbol":"BTCUSD","lastPrice":"\u00350000","bid1Price":null,"ask1Price":"","markPrice":" 50001 ","indexPrice":"bad","price24hPcnt":"NaN","openInterest":" ","fundingRate":"-1e-4","nextFundingTime":"1760342400000","volume24h":"1000000.1250000001","turnover24h":"20.5","delta":"0.1","gamma":null,"vega":"","theta":"oops","markIv":"\u0031.2","bid1Iv":"1.1","ask1Iv":"1.3","underlyingPrice":"50000"}}"#,
+            r#"{"data":{"symbol":"BTC-27MAR26-100000-C","delta":"0.5","gamma":"0.00001","vega":"2","theta":"-1","markIv":"0.6","bid1Iv":"0.59","ask1Iv":"0.61","underlyingPrice":"96000"}}"#,
+        ] {
+            let legacy = serde_json::from_str::<LegacyTickerEvent>(text)
+                .unwrap()
+                .data;
+            let delta = serde_json::from_str::<TickerEvent>(text).unwrap().data;
+            assert_eq!(legacy.symbol, delta.symbol);
+            let expected = [
+                &legacy.last_price,
+                &legacy.bid1_price,
+                &legacy.ask1_price,
+                &legacy.mark_price,
+                &legacy.index_price,
+                &legacy.price24h_pcnt,
+                &legacy.open_interest,
+                &legacy.funding_rate,
+                &legacy.next_funding_time,
+                &legacy.volume24h,
+                &legacy.turnover24h,
+            ]
+            .map(|value| present(value).map(float).map(f64::to_bits));
+            let actual = [
+                delta.last_price,
+                delta.bid1_price,
+                delta.ask1_price,
+                delta.mark_price,
+                delta.index_price,
+                delta.price24h_pcnt,
+                delta.open_interest,
+                delta.funding_rate,
+                delta.next_funding_time,
+                delta.volume24h,
+                delta.turnover24h,
+            ]
+            .map(|value| value.map(f64::to_bits));
+            assert_eq!(actual, expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn stream_ticker_preserves_legacy_type_duplicate_and_trailing_json_rejection() {
+        for field in [
+            "symbol",
+            "lastPrice",
+            "bid1Price",
+            "ask1Price",
+            "markPrice",
+            "indexPrice",
+            "price24hPcnt",
+            "openInterest",
+            "fundingRate",
+            "nextFundingTime",
+            "volume24h",
+            "turnover24h",
+            "delta",
+            "gamma",
+            "vega",
+            "theta",
+            "markIv",
+            "bid1Iv",
+            "ask1Iv",
+            "underlyingPrice",
+        ] {
+            for value in ["42", "true", "[]", "{}"] {
+                let text = format!(r#"{{"data":{{"{field}":{value}}}}}"#);
+                assert!(
+                    serde_json::from_str::<LegacyTickerEvent>(&text).is_err(),
+                    "{text}"
+                );
+                assert!(
+                    serde_json::from_str::<TickerEvent>(&text).is_err(),
+                    "{text}"
+                );
+            }
+            for value in [r#""1""#, "null"] {
+                let text = format!(r#"{{"data":{{"{field}":{value},"{field}":{value}}}}}"#);
+                assert!(
+                    serde_json::from_str::<LegacyTickerEvent>(&text).is_err(),
+                    "{text}"
+                );
+                assert!(
+                    serde_json::from_str::<TickerEvent>(&text).is_err(),
+                    "{text}"
+                );
+            }
+        }
+        for text in [
+            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"100"}} {}"#,
+            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"100","last\u0050rice":"101"}}"#,
+            r#"{"data":{"symbol":"BTCUSDT","delta":"1","d\u0065lta":"2"}}"#,
+        ] {
+            assert!(serde_json::from_str::<LegacyTickerEvent>(text).is_err());
+            assert!(serde_json::from_str::<TickerEvent>(text).is_err());
+        }
     }
 }

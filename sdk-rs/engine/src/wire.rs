@@ -26,7 +26,8 @@ pub mod section {
     pub const BALANCE: u16 = 9;
     pub const STATUS: u16 = 10;
     pub const FILLS: u16 = 11;
-    /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
+    /// Scalar leverage retains its offset; revision one appends buy/sell
+    /// leverage columns and stable symbol references.
     pub const SETTINGS: u16 = 12;
     /// Optional typed prediction outcome identity and signing metadata.
     pub const PREDICTION_MARKETS: u16 = 13;
@@ -173,9 +174,13 @@ impl<'a> FrameWriter<'a> {
     }
 
     pub fn begin(&mut self, kind: u16) {
+        self.begin_revision(kind, 0);
+    }
+
+    pub fn begin_revision(&mut self, kind: u16, revision: u16) {
         debug_assert!(self.open.is_none(), "sections do not nest");
         self.buf.extend_from_slice(&kind.to_le_bytes());
-        self.buf.extend_from_slice(&0u16.to_le_bytes());
+        self.buf.extend_from_slice(&revision.to_le_bytes());
         self.open = Some(self.buf.len());
         self.buf.extend_from_slice(&0u32.to_le_bytes());
     }
@@ -259,7 +264,10 @@ impl<'a> FrameWriter<'a> {
 /// The `(kind, payload)` sections of a frame, for native consumers; the
 /// browser reads frames with `hosts/wasm/js/wire.mjs`.
 pub fn sections(frame: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
-    let count = if frame.len() >= 16 && frame[..4] == MAGIC {
+    let count = if frame.len() >= 16
+        && frame[..4] == MAGIC
+        && u16::from_le_bytes([frame[4], frame[5]]) == FORMAT
+    {
         u16::from_le_bytes([frame[6], frame[7]])
     } else {
         0
@@ -289,7 +297,7 @@ pub fn book_top(payload: &[u8]) -> Option<(u32, f64, f64)> {
     Some((market, float(16), float(16 + bids * 24)))
 }
 
-/// Number of f64 ticker columns in `TICKERS` and fields in `TICKER_DELTAS`.
+/// Ticker fields in revision one, including optional midpoint at bit eleven.
 pub const TICKER_COLUMNS: usize = TICKER_FIELDS.len();
 
 #[cfg(test)]
@@ -340,6 +348,98 @@ mod tests {
         assert_eq!(w.intern("wrap", u32::MAX), 3);
         assert_eq!(w.intern("wrap-two", u32::MAX), 4);
         assert_eq!(w.intern("wrap-two", u32::MAX), 4);
+    }
+
+    #[test]
+    fn revised_ticker_startup_reserves_numeric_columns_and_identity_tails() {
+        let mut store = Store::default();
+        store.set_markets(
+            (0..128)
+                .map(|index| Market {
+                    id: format!("native-{index}"),
+                    symbol: format!("asset-{index}/USDC"),
+                    pretty_symbol: None,
+                    base: format!("asset-{index}"),
+                    quote: "USDC".into(),
+                    active: true,
+                    precision: Precision {
+                        amount: 1.,
+                        price: 0.01,
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: 1.,
+                            max: 1000.,
+                        },
+                        leverage: MinMax { min: 1., max: 1. },
+                        price: None,
+                    },
+                    contract_size: None,
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: Some(true),
+                    is_perpetual: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                })
+                .collect(),
+        );
+        store.set_tickers(
+            (0..128)
+                .map(|index| Ticker {
+                    id: format!("native-{index}"),
+                    symbol: format!("asset-{index}/USDC"),
+                    last: index as f64 + 1.,
+                    mid_price: Some(index as f64 + 0.5),
+                    ..Ticker::default()
+                })
+                .collect(),
+        );
+        let pending = store.take_pending();
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        store.write(&pending, &mut writer);
+        let frame = writer.finish();
+        // Shared quote strings leave conservative slack, far below a doubled buffer.
+        assert!(
+            frame.capacity() <= frame.len() + 2048,
+            "startup reservation grew geometrically: capacity={}, length={}",
+            frame.capacity(),
+            frame.len(),
+        );
+        let rows = sections(&frame)
+            .find(|(kind, _)| *kind == section::TICKERS)
+            .unwrap()
+            .1;
+        assert_eq!(u32_at(rows, 0), 128);
+        let strings = sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let string_data = 4 + (u32_at(strings, 0) as usize + 1) * 4;
+        let text = |reference: u32| {
+            let at = 4 + reference as usize * 4;
+            let start = string_data + u32_at(strings, at) as usize;
+            let end = string_data + u32_at(strings, at + 4) as usize;
+            std::str::from_utf8(&strings[start..end]).unwrap()
+        };
+        let data = 520;
+        for index in 0..128 {
+            assert_eq!(u32_at(rows, 4 + index * 4), index as u32);
+            let midpoint = data + 128 * 88 + index * 8;
+            assert_eq!(
+                f64::from_le_bytes(rows[midpoint..midpoint + 8].try_into().unwrap()),
+                index as f64 + 0.5,
+            );
+            assert_eq!(
+                text(u32_at(rows, data + 128 * 96 + index * 4)),
+                format!("asset-{index}/USDC")
+            );
+            assert_eq!(
+                text(u32_at(rows, data + 128 * 100 + index * 4)),
+                format!("native-{index}")
+            );
+        }
     }
 
     #[test]
@@ -459,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_order_native_column_preserves_full_stop_leaves_without_changing_legacy_columns() {
+    fn revision_one_order_tails_preserve_full_stop_leaves_and_all_native_metadata() {
         let order = Order {
             id: "full-stop".into(),
             parent_id: None,
@@ -486,6 +586,11 @@ mod tests {
             store.set_orders(vec![Order {
                 extra: native.map(|remaining_native| OrderExtra {
                     remaining_native: Some(remaining_native),
+                    filled_in_placement_units: Some(3.0),
+                    remaining_notional: Some(700.0),
+                    conditional_order_price: Some(54320.0),
+                    tp_trigger_type: Some(StopTriggerType::IndexPrice),
+                    sl_trigger_type: Some(StopTriggerType::LastPrice),
                     ..OrderExtra::default()
                 }),
                 ..order.clone()
@@ -499,10 +604,8 @@ mod tests {
                 .unwrap();
             assert_eq!(u32_at(payload, 0), 1);
             // One row: 24 bytes of aligned references/enums, then seven columns.
-            assert_eq!(
-                payload.len(),
-                24 + 7 * 8 + usize::from(native.is_some()) * 8
-            );
+            assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+            assert_eq!(payload.len(), 24 + 11 * 8 + 8);
             let number =
                 |offset| f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap());
             assert_eq!(
@@ -521,7 +624,33 @@ mod tests {
                     native,
                     "native quantity is exact, not rounded base x price"
                 );
+                assert_eq!(number(24 + 8 * 8), 3.0);
+                assert_eq!(number(24 + 9 * 8), 700.0);
+                assert_eq!(number(24 + 10 * 8), 54320.0);
+                assert_eq!(u32_at(payload, 24 + 11 * 8), 3 | (2 << 8));
+            } else {
+                for column in 7..11 {
+                    assert!(number(24 + column * 8).is_nan());
+                }
+                assert_eq!(u32_at(payload, 24 + 11 * 8), 0);
             }
+            assert_ne!(
+                u32_at(payload, 24 + 11 * 8 + 4),
+                NONE,
+                "orphan order retains its symbol"
+            );
         }
+    }
+
+    #[test]
+    fn native_sections_reject_unsupported_frame_formats() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        writer.begin_revision(section::ORDERS, 1);
+        writer.u32(0);
+        writer.end();
+        let mut frame = writer.finish();
+        assert_eq!(sections(&frame).count(), 1);
+        frame[4..6].copy_from_slice(&(FORMAT + 1).to_le_bytes());
+        assert_eq!(sections(&frame).count(), 0);
     }
 }

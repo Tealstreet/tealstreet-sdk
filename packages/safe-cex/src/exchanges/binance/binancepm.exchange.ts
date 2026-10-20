@@ -43,6 +43,7 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { patternClientOrderIdRule } from '../clientOrderId';
+import { markBinanceOrdersCanceled } from './binance.utils';
 import { createFAPI, createPAPI, createPublicAPI } from './binancepm.api';
 import {
   ENDPOINTS,
@@ -264,7 +265,6 @@ export class BinancePMExchange extends BaseExchange {
       orders,
       loaded: { ...this.store.loaded, orders: true },
     });
-
   };
 
   _startPublicDataOnly = async () => {
@@ -788,17 +788,13 @@ export class BinancePMExchange extends BaseExchange {
                 },
               });
             }
+            markBinanceOrdersCanceled(this.store, [order]);
           } catch (err: any) {
             this.emitAndLogError(`Failed to cancel order ${order.id}: ${err?.response?.data?.msg || err?.message}`);
             throw err;
           }
         });
       });
-
-      this.store.updateOrdersStatus(
-        orders.map((order) => ({ id: order.id })),
-        OrderStatus.Canceled,
-      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -807,14 +803,12 @@ export class BinancePMExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
+      const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
       await this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
         params: { symbol },
       });
 
-      this.store.updateOrdersStatus(
-        this.store.orders.filter((o) => o.symbol === symbol),
-        OrderStatus.Canceled,
-      );
+      markBinanceOrdersCanceled(this.store, symbolOrders);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;

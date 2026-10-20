@@ -357,6 +357,7 @@ fn failed_later_product_position_refresh_keeps_both_previous_products() {
             command: 7,
             symbol: "BTCUSD261225".into(),
             leverage: 8.0,
+            side: None,
         }),
     );
     let a = actions(&mut e)
@@ -436,6 +437,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
             command: 8,
             symbol: "BTCUSD261225".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -1162,11 +1164,19 @@ mod product_semantics {
             let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
             if kind == 11 {
                 assert_eq!(
-                    u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap()),
+                    u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
                     1
                 );
+                let data = &frame[at + 8..at + 8 + len];
+                let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+                assert_eq!(count, 1);
+                let rows = (4 + 12 * count).next_multiple_of(8);
                 assert_eq!(
-                    f64::from_le_bytes(frame[at + 8 + len - 8..at + 8 + len].try_into().unwrap()),
+                    f64::from_le_bytes(data[rows..rows + 8].try_into().unwrap()),
+                    50000.0
+                );
+                assert_eq!(
+                    f64::from_le_bytes(data[rows + 8..rows + 16].try_into().unwrap()),
                     0.01
                 );
                 found = true;

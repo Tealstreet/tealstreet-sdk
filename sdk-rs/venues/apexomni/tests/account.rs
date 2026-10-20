@@ -903,6 +903,7 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
             command: 92,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let write = requests(&mut e).remove(0);

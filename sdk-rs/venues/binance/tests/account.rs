@@ -211,6 +211,7 @@ fn order_events_drive_the_order_lifecycle_and_report_each_execution() {
 
     let partial = new
         .replace(r#""X":"NEW""#, r#""X":"PARTIALLY_FILLED""#)
+        .replace(r#""x":"NEW""#, r#""x":"TRADE""#)
         .replace(
             r#""l":"0","z":"0","L":"0""#,
             r#""l":"0.001","z":"0.001","L":"97000.5""#,
@@ -227,7 +228,8 @@ fn order_events_drive_the_order_lifecycle_and_report_each_execution() {
 
     let filled = partial
         .replace(r#""X":"PARTIALLY_FILLED""#, r#""X":"FILLED""#)
-        .replace(r#""z":"0.001""#, r#""z":"0.002""#);
+        .replace(r#""z":"0.001""#, r#""z":"0.002""#)
+        .replace(r#""t":0"#, r#""t":1"#);
     h.message("/private/ws", &filled);
     assert_eq!(
         h.engine.store().order("8886774").unwrap().status,
@@ -486,14 +488,14 @@ fn amend_cancels_then_places_the_replacement() {
         cancel.id,
         200,
         "",
-        r#"{"orderId":8389765519993909000,"status":"CANCELED"}"#,
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
     );
     let replacement = h.take("/fapi/v1/order");
     assert_eq!(replacement.method, Method::Post);
     assert_eq!(param(&replacement.url, "price").as_deref(), Some("91000"));
     assert_eq!(
         param(&replacement.url, "quantity").as_deref(),
-        Some("0.004")
+        Some("0.003")
     );
 }
 
@@ -504,6 +506,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
         command: 13,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     }));
     let request = h.take("/fapi/v1/leverage");
     assert_eq!(
@@ -523,6 +526,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
     h.event(Event::Command(Command::SetPositionMode {
         command: 14,
         hedged: true,
+        symbol: None,
     }));
     assert!(h.requests.is_empty(), "refused while a position is open");
     assert!(matches!(h.result(14), Some(Err(_))));

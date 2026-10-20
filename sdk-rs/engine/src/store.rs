@@ -39,8 +39,8 @@ pub struct Store {
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
     currency_balances: Option<Vec<CurrencyBalance>>,
-    /// Per-market account settings, keyed by market index.
-    settings: HashMap<u32, MarketSetting>,
+    /// Stable symbols retain account settings across market replacement/delisting.
+    settings: HashMap<Box<str>, MarketSetting>,
     hedged: bool,
     loaded: Loaded,
     latency: f64,
@@ -53,7 +53,7 @@ pub struct Store {
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
 /// `packages/safe-cex/src/store/store.base.ts`.
-pub const TICKER_FIELDS: [&str; 11] = [
+pub const TICKER_FIELDS: [&str; 12] = [
     "bid",
     "ask",
     "last",
@@ -65,9 +65,10 @@ pub const TICKER_FIELDS: [&str; 11] = [
     "fundingTime",
     "volume",
     "quoteVolume",
+    "midPrice",
 ];
 
-fn ticker_values(t: &Ticker) -> [f64; 11] {
+fn ticker_values(t: &Ticker) -> [f64; 12] {
     [
         t.bid,
         t.ask,
@@ -80,6 +81,7 @@ fn ticker_values(t: &Ticker) -> [f64; 11] {
         t.funding_time,
         t.volume,
         t.quote_volume,
+        t.mid_price.unwrap_or(f64::NAN),
     ]
 }
 
@@ -156,6 +158,12 @@ impl Store {
     pub fn set_markets(&mut self, mut markets: Vec<Market>) {
         // Rows are replaced wholesale, so collection growth capacity is unused.
         markets.shrink_to_fit();
+        let reindexed = self.markets.len() != markets.len()
+            || self
+                .markets
+                .iter()
+                .zip(&markets)
+                .any(|(old, new)| old.symbol != new.symbol || old.id != new.id);
         self.market_by_symbol = markets
             .iter()
             .enumerate()
@@ -189,7 +197,17 @@ impl Store {
             }
         }
         self.changes.markets = true;
+        if reindexed {
+            self.changes.tickers_replaced |= !self.tickers.is_empty();
+            self.changes.orders |= !self.orders.is_empty();
+            self.changes.positions |= !self.positions.is_empty();
+            self.changes.settings |= !self.settings.is_empty();
+        }
         self.set_loaded(|loaded| loaded.markets = true);
+    }
+
+    pub(crate) fn markets_pending(&self) -> bool {
+        self.changes.markets
     }
 
     #[cfg(any(test, feature = "product-semantics"))]
@@ -532,21 +550,24 @@ impl Store {
     }
 
     pub fn setting(&self, symbol: &str) -> Option<MarketSetting> {
-        let market = self.market_index(symbol)?;
-        self.settings.get(&market).copied()
+        self.settings.get(symbol).copied()
     }
 
     /// Replace every market's settings.
     pub fn set_settings(&mut self, settings: impl IntoIterator<Item = (u32, MarketSetting)>) {
-        self.settings = settings.into_iter().collect();
+        self.settings = settings
+            .into_iter()
+            .filter_map(|(index, setting)| {
+                self.markets
+                    .get(index as usize)
+                    .map(|market| (market.symbol.clone().into_boxed_str(), setting))
+            })
+            .collect();
         self.changes.settings = true;
     }
 
     pub fn update_setting(&mut self, symbol: &str, update: impl FnOnce(&mut MarketSetting)) {
-        let Some(market) = self.market_index(symbol) else {
-            return;
-        };
-        let setting = self.settings.entry(market).or_default();
+        let setting = self.settings.entry(symbol.into()).or_default();
         let before = *setting;
         update(setting);
         if *setting != before {
@@ -653,47 +674,8 @@ impl Store {
     /// Write the drained changes as frame sections.
     pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
         let changes = &pending.changes;
-        w.reserve(self.frame_size_hint(pending));
-        let strings = if changes.markets {
-            // Identity IDs and symbols share a string-table entry.
-            let per_market = if self.market_by_id.is_none() { 3 } else { 4 };
-            per_market * self.markets.len()
-        } else {
-            0
-        } + if changes.orders {
-            3 * self.orders.len()
-        } else {
-            0
-        };
-        #[cfg(feature = "prediction")]
-        let strings = strings
-            + if changes.markets {
-                self.prediction_markets
-                    .as_ref()
-                    .map_or(0, |rows| 6 * rows.len())
-            } else {
-                0
-            };
-        #[cfg(any(test, feature = "product-semantics"))]
-        let strings = strings
-            + if changes.markets {
-                self.instrument_classifications
-                    .as_ref()
-                    .map_or(0, |rows| 3 * rows.len())
-                    + self
-                        .derivative_products
-                        .as_ref()
-                        .map_or(0, |rows| 5 * rows.len())
-            } else {
-                0
-            }
-            + if changes.positions {
-                self.position_greeks
-                    .as_ref()
-                    .map_or(0, |rows| 2 * rows.len())
-            } else {
-                0
-            };
+        let (size, strings) = self.frame_layout_hint(pending);
+        w.reserve(size);
         w.reserve_strings(strings);
         if changes.markets {
             self.write_markets(w);
@@ -708,7 +690,13 @@ impl Store {
         if changes.tickers_replaced {
             self.write_tickers(w);
         } else if !pending.ticker_deltas.is_empty() {
-            w.begin(section::TICKER_DELTAS);
+            let revision = u16::from(
+                pending
+                    .ticker_deltas
+                    .iter()
+                    .any(|(_, mask)| mask & (1 << 11) != 0),
+            );
+            w.begin_revision(section::TICKER_DELTAS, revision);
             for &(index, mask) in &pending.ticker_deltas {
                 let values = ticker_values(&self.tickers[index as usize]);
                 w.f64s([index as f64, mask as f64]);
@@ -788,6 +776,27 @@ impl Store {
     }
 
     pub(crate) fn frame_size_hint(&self, pending: &Pending) -> usize {
+        self.frame_layout_hint(pending).0
+    }
+
+    // Markets precede ticker identity tails in the same frame. Reuse only
+    // strings guaranteed to have been registered by that market table.
+    fn ticker_identity_strings<'a>(
+        &self,
+        ticker: &'a Ticker,
+        markets_written: bool,
+    ) -> [Option<&'a str>; 2] {
+        let market = markets_written
+            .then(|| self.market(&ticker.symbol))
+            .flatten();
+        [
+            market.is_none().then_some(ticker.symbol.as_str()),
+            (!market.is_some_and(|market| ticker.id == market.id || ticker.id == market.symbol))
+                .then_some(ticker.id.as_str()),
+        ]
+    }
+
+    fn frame_layout_hint(&self, pending: &Pending) -> (usize, usize) {
         let changes = &pending.changes;
         let mut size = 0;
         let mut strings = 0;
@@ -803,6 +812,21 @@ impl Store {
                 if market.id != market.symbol {
                     strings += 1;
                     string_bytes += market.symbol.len();
+                }
+            }
+            if self
+                .markets
+                .iter()
+                .any(|market| market.pretty_symbol.is_some())
+            {
+                size += (4 * count).next_multiple_of(8);
+                for pretty in self
+                    .markets
+                    .iter()
+                    .filter_map(|market| market.pretty_symbol.as_deref())
+                {
+                    strings += 1;
+                    string_bytes += pretty.len();
                 }
             }
             #[cfg(any(test, feature = "product-semantics"))]
@@ -866,19 +890,25 @@ impl Store {
         }
         if changes.tickers_replaced {
             let count = self.tickers.len();
-            size += 8 + (4 + 4 * count).next_multiple_of(8) + 88 * count;
-            if self
-                .tickers
-                .iter()
-                .any(|ticker| self.market_index(&ticker.symbol).is_none())
-            {
-                size += 8 * count;
-                strings += 2 * count;
-                string_bytes += self
+            let mid = self.tickers.iter().any(|ticker| ticker.mid_price.is_some());
+            size += 8 + (4 + 4 * count).next_multiple_of(8) + (if mid { 96 } else { 88 }) * count;
+            if mid
+                || self
                     .tickers
                     .iter()
-                    .map(|ticker| ticker.symbol.len() + ticker.id.len())
-                    .sum::<usize>();
+                    .any(|ticker| self.market_index(&ticker.symbol).is_none())
+            {
+                size += 8 * count;
+                for ticker in &self.tickers {
+                    for value in self
+                        .ticker_identity_strings(ticker, changes.markets)
+                        .into_iter()
+                        .flatten()
+                    {
+                        strings += 1;
+                        string_bytes += value.len();
+                    }
+                }
             }
         } else if !pending.ticker_deltas.is_empty() {
             size += 8 + pending
@@ -889,33 +919,14 @@ impl Store {
         }
         if changes.orders {
             let count = self.orders.len();
-            size += 8 + (4 + 20 * count).next_multiple_of(8) + 56 * count;
-            let filled = self.orders.iter().any(|order| {
-                order
-                    .extra
-                    .as_ref()
-                    .and_then(|extra| extra.filled_in_placement_units)
-                    .is_some()
-            });
-            if filled
-                || self.orders.iter().any(|order| {
-                    order
-                        .extra
-                        .as_ref()
-                        .and_then(|extra| extra.remaining_native)
-                        .is_some()
-                })
-            {
-                size += 8 * count;
-            }
-            if filled {
-                size += 8 * count;
-            }
+            // Revision one always writes eleven numeric columns and two u32 tails.
+            size += 8 + (4 + 20 * count).next_multiple_of(8) + 96 * count;
             for order in &self.orders {
                 for value in [
                     Some(order.id.as_str()),
                     order.client_order_id.as_deref(),
                     order.parent_id.as_deref(),
+                    Some(order.symbol.as_str()),
                 ]
                 .into_iter()
                 .flatten()
@@ -927,15 +938,13 @@ impl Store {
         }
         if changes.positions {
             let count = self.positions.len();
-            size += 8 + (4 + 8 * count).next_multiple_of(8) + 72 * count;
-            if self.position_ids {
-                size += (4 * count).next_multiple_of(8);
-                strings += count;
-                string_bytes += self
-                    .positions
-                    .iter()
-                    .map(|position| position.id.len())
-                    .sum::<usize>();
+            // Both identity columns are present in every revision-one position table.
+            size += 8 + (4 + 8 * count).next_multiple_of(8) + 80 * count;
+            for position in &self.positions {
+                for value in [&position.id, &position.symbol] {
+                    strings += 1;
+                    string_bytes += value.len();
+                }
             }
             #[cfg(any(test, feature = "product-semantics"))]
             if let Some(rows) = &self.position_greeks {
@@ -976,14 +985,17 @@ impl Store {
         }
         if changes.settings {
             let count = self.settings.len();
-            size += 8 + (4 + 8 * count).next_multiple_of(8) + 8 * count;
-            if self
+            // Scalar and both side leverages are fixed columns, followed by symbols.
+            size += 8
+                + (4 + 8 * count).next_multiple_of(8)
+                + 24 * count
+                + (4 * count).next_multiple_of(8);
+            strings += count;
+            string_bytes += self
                 .settings
-                .values()
-                .any(|setting| setting.buy_leverage.is_some() || setting.sell_leverage.is_some())
-            {
-                size += 16 * count;
-            }
+                .keys()
+                .map(|symbol| symbol.len())
+                .sum::<usize>();
         }
         if changes.status {
             size += 24;
@@ -993,7 +1005,7 @@ impl Store {
             // still happens in section order and retains the existing wire IDs.
             size += 8 + (8 + 4 * strings + string_bytes).next_multiple_of(8);
         }
-        size
+        (size, strings)
     }
 
     fn market_ref(&self, symbol: &str) -> u32 {
@@ -1123,7 +1135,8 @@ impl Store {
 
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let markets = &self.markets;
-        w.begin(section::MARKETS);
+        let pretty = markets.iter().any(|market| market.pretty_symbol.is_some());
+        w.begin_revision(section::MARKETS, u16::from(pretty));
         w.u32(markets.len() as u32);
         for m in markets {
             let refs = [
@@ -1163,23 +1176,31 @@ impl Store {
         for column in columns {
             w.f64s(markets.iter().map(column));
         }
+        if pretty {
+            for market in markets {
+                let reference = w.optional_string(market.pretty_symbol.as_deref());
+                w.u32(reference);
+            }
+        }
         w.end();
     }
 
     fn write_tickers<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let tickers = &self.tickers;
-        w.begin(section::TICKERS);
+        let mid = tickers.iter().any(|ticker| ticker.mid_price.is_some());
+        w.begin_revision(section::TICKERS, u16::from(mid));
         w.u32(tickers.len() as u32);
         w.u32s(tickers.iter().map(|t| self.market_ref(&t.symbol)));
         w.pad();
-        for column in 0..wire::TICKER_COLUMNS {
+        for column in 0..if mid { wire::TICKER_COLUMNS } else { 11 } {
             w.f64s(tickers.iter().map(|t| ticker_values(t)[column]));
         }
         // Delisted symbols can remain in the venue's aggregate ticker stream.
         // Preserve their identities without inventing a tradeable market row.
-        if tickers
-            .iter()
-            .any(|ticker| self.market_index(&ticker.symbol).is_none())
+        if mid
+            || tickers
+                .iter()
+                .any(|ticker| self.market_index(&ticker.symbol).is_none())
         {
             for ticker in tickers {
                 let symbol = w.string(&ticker.symbol);
@@ -1195,7 +1216,7 @@ impl Store {
 
     fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let orders = &self.orders;
-        w.begin(section::ORDERS);
+        w.begin_revision(section::ORDERS, 1);
         w.u32(orders.len() as u32);
         for o in orders {
             let refs = [
@@ -1231,67 +1252,73 @@ impl Store {
         for column in columns {
             w.f64s(orders.iter().map(column));
         }
-        // Native leavesQty cannot be recovered from rounded base quantities or
-        // amount=0 full-position stops. Older readers ignore this optional tail.
-        if orders.iter().any(|o| {
-            o.extra.as_ref().is_some_and(|e| {
-                e.remaining_native.is_some() || e.filled_in_placement_units.is_some()
+        let extra_columns: [fn(&crate::model::OrderExtra) -> Option<f64>; 4] = [
+            |extra| extra.remaining_native,
+            |extra| extra.filled_in_placement_units,
+            |extra| extra.remaining_notional,
+            |extra| extra.conditional_order_price,
+        ];
+        for column in extra_columns {
+            w.f64s(
+                orders
+                    .iter()
+                    .map(|order| order.extra.as_ref().and_then(column).unwrap_or(f64::NAN)),
+            );
+        }
+        w.u32s(orders.iter().map(|order| {
+            order.extra.as_ref().map_or(0, |extra| {
+                extra
+                    .tp_trigger_type
+                    .map_or(0, |trigger| trigger as u32 + 1)
+                    | (extra
+                        .sl_trigger_type
+                        .map_or(0, |trigger| trigger as u32 + 1)
+                        << 8)
             })
-        }) {
-            w.f64s(orders.iter().map(|o| {
-                o.extra
-                    .as_ref()
-                    .and_then(|e| e.remaining_native)
-                    .unwrap_or(f64::NAN)
-            }));
-            if orders.iter().any(|o| {
-                o.extra
-                    .as_ref()
-                    .and_then(|e| e.filled_in_placement_units)
-                    .is_some()
-            }) {
-                w.f64s(orders.iter().map(|o| {
-                    o.extra
-                        .as_ref()
-                        .and_then(|e| e.filled_in_placement_units)
-                        .unwrap_or(f64::NAN)
-                }));
-            }
+        }));
+        for order in orders {
+            let symbol = w.string(&order.symbol);
+            w.u32(symbol);
         }
         w.end();
     }
 
     fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let mut rows: Vec<(&u32, &MarketSetting)> = self.settings.iter().collect();
-        rows.sort_unstable_by_key(|(market, _)| **market);
-        w.begin(section::SETTINGS);
+        let mut rows: Vec<_> = self
+            .settings
+            .iter()
+            .map(|(symbol, setting)| (self.market_ref(symbol), symbol, setting))
+            .collect();
+        rows.sort_unstable_by(|(a_index, a_symbol, _), (b_index, b_symbol, _)| {
+            a_index.cmp(b_index).then(a_symbol.cmp(b_symbol))
+        });
+        w.begin_revision(section::SETTINGS, 1);
         w.u32(rows.len() as u32);
-        w.u32s(rows.iter().map(|(market, _)| **market));
+        w.u32s(rows.iter().map(|(market, _, _)| *market));
         w.u32s(
             rows.iter()
-                .map(|(_, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+                .map(|(_, _, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
         );
         w.pad();
-        w.f64s(rows.iter().map(|(_, s)| s.leverage));
-        if rows
-            .iter()
-            .any(|(_, s)| s.buy_leverage.is_some() || s.sell_leverage.is_some())
-        {
-            w.f64s(
-                rows.iter()
-                    .map(|(_, s)| s.buy_leverage.unwrap_or(s.leverage)),
-            );
-            w.f64s(
-                rows.iter()
-                    .map(|(_, s)| s.sell_leverage.unwrap_or(s.leverage)),
-            );
+        w.f64s(rows.iter().map(|(_, _, s)| s.leverage));
+        w.f64s(
+            rows.iter()
+                .map(|(_, _, s)| s.buy_leverage.unwrap_or(s.leverage)),
+        );
+        w.f64s(
+            rows.iter()
+                .map(|(_, _, s)| s.sell_leverage.unwrap_or(s.leverage)),
+        );
+        for (_, symbol, _) in &rows {
+            let symbol = w.string(symbol);
+            w.u32(symbol);
         }
         w.end();
     }
 
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        w.begin(section::POSITIONS);
+        w.begin_revision(section::POSITIONS, 1);
         w.u32(positions.len() as u32);
         w.u32s(positions.iter().map(|p| self.market_ref(&p.symbol)));
         w.u32s(
@@ -1314,11 +1341,13 @@ impl Store {
         for column in columns {
             w.f64s(positions.iter().map(column));
         }
-        if self.position_ids {
-            for p in positions {
-                let id = w.string(&p.id);
-                w.u32(id);
-            }
+        for position in positions {
+            let id = w.string(&position.id);
+            w.u32(id);
+        }
+        for position in positions {
+            let symbol = w.string(&position.symbol);
+            w.u32(symbol);
         }
         w.end();
     }
@@ -1327,6 +1356,149 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn word(payload: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(payload[at..at + 4].try_into().unwrap())
+    }
+
+    fn frame_string(frame: &[u8], reference: u32) -> &str {
+        let strings = wire::sections(frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let count = word(strings, 0) as usize;
+        let start = word(strings, 4 + reference as usize * 4) as usize;
+        let end = word(strings, 8 + reference as usize * 4) as usize;
+        std::str::from_utf8(&strings[4 + (count + 1) * 4 + start..4 + (count + 1) * 4 + end])
+            .unwrap()
+    }
+
+    #[test]
+    fn settings_follow_symbols_after_reorder_and_retain_delisted_and_missing_markets() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("A", "A"), market("B", "B")]);
+        store.set_settings([
+            (
+                0,
+                MarketSetting {
+                    leverage: 5.,
+                    ..MarketSetting::default()
+                },
+            ),
+            (
+                1,
+                MarketSetting {
+                    leverage: 9.,
+                    ..MarketSetting::default()
+                },
+            ),
+            (
+                100,
+                MarketSetting {
+                    leverage: 100.,
+                    ..MarketSetting::default()
+                },
+            ),
+        ]);
+        store.update_setting("ORPHAN", |setting| setting.leverage = 11.);
+        store.take_pending();
+        store.set_markets(vec![market("B", "B"), market("A", "A")]);
+        assert_eq!(store.setting("A").unwrap().leverage, 5.);
+        assert_eq!(store.setting("B").unwrap().leverage, 9.);
+        let pending = store.take_pending();
+        assert!(pending.changes.settings);
+        let mut writer = FrameWriter::new(Vec::new(), 1.);
+        store.write(&pending, &mut writer);
+        let frame = writer.finish();
+        let settings = wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::SETTINGS)
+            .unwrap()
+            .1;
+        assert_eq!(word(settings, 0), 3, "invalid index cannot invent a symbol");
+        assert_eq!(
+            (word(settings, 4), word(settings, 8), word(settings, 12)),
+            (0, 1, wire::NONE)
+        );
+        // Three rows: 32 bytes of indices/enums, then three f64 columns.
+        assert_eq!(frame_string(&frame, word(settings, 104)), "B");
+        assert_eq!(frame_string(&frame, word(settings, 108)), "A");
+        assert_eq!(frame_string(&frame, word(settings, 112)), "ORPHAN");
+        store.set_markets(vec![market("B", "B")]);
+        assert_eq!(store.setting("A").unwrap().leverage, 5.);
+        assert_eq!(store.setting("ORPHAN").unwrap().leverage, 11.);
+        store.set_markets(vec![
+            market("A", "A"),
+            market("B", "B"),
+            market("ORPHAN", "ORPHAN"),
+        ]);
+        assert_eq!(store.setting("A").unwrap().leverage, 5.);
+        assert_eq!(store.setting("ORPHAN").unwrap().leverage, 11.);
+    }
+
+    #[test]
+    fn pretty_symbols_preserve_native_empty_and_absent_values() {
+        let mut store = Store::default();
+        let mut native = market("A", "A");
+        native.pretty_symbol = Some("Native / 株式".into());
+        let mut empty = market("B", "B");
+        empty.pretty_symbol = Some(String::new());
+        store.set_markets(vec![native, empty, market("C", "C")]);
+        let mut writer = FrameWriter::new(Vec::new(), 1.);
+        store.write_markets(&mut writer);
+        let frame = writer.finish();
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        let rows = wire::sections(&frame).next().unwrap().1;
+        // Three rows: 64 aligned bytes of identity/flags and ten f64 columns.
+        assert_eq!(frame_string(&frame, word(rows, 304)), "Native / 株式");
+        assert_eq!(frame_string(&frame, word(rows, 308)), "");
+        assert_eq!(word(rows, 312), wire::NONE);
+    }
+
+    #[test]
+    fn orphan_positions_retain_both_exact_id_and_symbol() {
+        let mut store = market_position_store();
+        store.positions[0].symbol = "DELISTED".into();
+        store.positions[0].id = "venue-position-7".into();
+        let mut writer = FrameWriter::new(Vec::new(), 1.);
+        store.write_positions(&mut writer);
+        let frame = writer.finish();
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        let rows = wire::sections(&frame).next().unwrap().1;
+        assert_eq!(word(rows, 4), wire::NONE);
+        assert_eq!(frame_string(&frame, word(rows, 88)), "venue-position-7");
+        assert_eq!(frame_string(&frame, word(rows, 92)), "DELISTED");
+    }
+
+    #[test]
+    fn mid_price_replacement_and_sparse_changes_preserve_absence_and_clear_values() {
+        let mut store = Store::default();
+        store.set_tickers(vec![Ticker {
+            mid_price: Some(100.5),
+            ..ticker("ORPHAN")
+        }]);
+        let mut writer = FrameWriter::new(Vec::new(), 1.);
+        store.write_tickers(&mut writer);
+        let frame = writer.finish();
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        let rows = wire::sections(&frame).next().unwrap().1;
+        assert_eq!(f64::from_le_bytes(rows[96..104].try_into().unwrap()), 100.5);
+        assert_eq!(frame_string(&frame, word(rows, 104)), "ORPHAN");
+        store.take_pending();
+        for value in [Some(101.5), None] {
+            store.update_ticker("ORPHAN", |ticker| ticker.mid_price = value);
+            let pending = store.take_pending();
+            assert_eq!(pending.ticker_deltas, [(0, 1 << 11)]);
+            let mut writer = FrameWriter::new(Vec::new(), 2.);
+            store.write(&pending, &mut writer);
+            let frame = writer.finish();
+            assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+            let rows = wire::sections(&frame).next().unwrap().1;
+            let encoded = f64::from_le_bytes(rows[16..24].try_into().unwrap());
+            assert!(value.map_or(encoded.is_nan(), |value| encoded == value));
+        }
+        store.update_ticker("ORPHAN", |ticker| ticker.mid_price = None);
+        assert!(store.take_pending().ticker_deltas.is_empty());
+    }
 
     fn ticker(symbol: &str) -> Ticker {
         Ticker {
@@ -1442,21 +1614,21 @@ mod tests {
     }
 
     #[test]
-    fn settings_frame_hint_reserves_both_optional_leverage_columns() {
+    fn settings_frame_hint_reserves_fixed_leverage_columns_and_symbol_tail() {
         for count in 0usize..=3 {
             for legs in 0..4 {
                 let mut store = Store::default();
-                store.set_settings((0..count).rev().map(|index| {
-                    (
-                        index as u32,
-                        MarketSetting {
+                store.set_settings([]);
+                for index in (0..count).rev() {
+                    store.update_setting(&format!("setting雪{index}"), |setting| {
+                        *setting = MarketSetting {
                             leverage: 20.0 + index as f64,
                             buy_leverage: (index == 0 && legs & 1 != 0).then_some(10.0),
                             sell_leverage: (index == 0 && legs & 2 != 0).then_some(15.0),
                             ..MarketSetting::default()
-                        },
-                    )
-                }));
+                        };
+                    });
+                }
                 let pending = store.take_pending();
                 let size = 16 + store.frame_size_hint(&pending);
                 let buffer = Vec::with_capacity(size);
@@ -1469,30 +1641,35 @@ mod tests {
 
                 let (kind, payload) = wire::sections(&frame).next().unwrap();
                 assert_eq!(kind, section::SETTINGS);
-                let values: Vec<f64> = payload[(4 + 8 * count).next_multiple_of(8)..]
+                let data = (4 + 8 * count).next_multiple_of(8);
+                let values: Vec<f64> = payload[data..data + 24 * count]
                     .as_chunks::<8>()
                     .0
                     .iter()
                     .map(|bytes| f64::from_le_bytes(*bytes))
                     .collect();
                 let mut expected: Vec<f64> = (0..count).map(|i| 20.0 + i as f64).collect();
-                if count > 0 && legs != 0 {
-                    expected.extend((0..count).map(|i| {
-                        if i == 0 && legs & 1 != 0 {
-                            10.0
-                        } else {
-                            20.0 + i as f64
-                        }
-                    }));
-                    expected.extend((0..count).map(|i| {
-                        if i == 0 && legs & 2 != 0 {
-                            15.0
-                        } else {
-                            20.0 + i as f64
-                        }
-                    }));
-                }
+                expected.extend((0..count).map(|i| {
+                    if i == 0 && legs & 1 != 0 {
+                        10.0
+                    } else {
+                        20.0 + i as f64
+                    }
+                }));
+                expected.extend((0..count).map(|i| {
+                    if i == 0 && legs & 2 != 0 {
+                        15.0
+                    } else {
+                        20.0 + i as f64
+                    }
+                }));
                 assert_eq!(values, expected);
+                for index in 0..count {
+                    assert_eq!(
+                        frame_string(&frame, word(payload, data + 24 * count + 4 * index)),
+                        format!("setting雪{index}")
+                    );
+                }
             }
         }
     }
@@ -1659,6 +1836,76 @@ mod tests {
     }
 
     #[test]
+    fn revised_identity_hints_cover_pretty_symbols_midpoints_and_orphan_tickers() {
+        fn reserved_frame(store: &Store, pending: &Pending) -> Vec<u8> {
+            let hint = 16 + store.frame_size_hint(pending);
+            let buffer = Vec::with_capacity(hint);
+            let capacity = buffer.capacity();
+            let pointer = buffer.as_ptr();
+            let mut writer = FrameWriter::new(buffer, 1.0);
+            store.write(pending, &mut writer);
+            let frame = writer.finish();
+            assert!(frame.len() <= hint);
+            assert_eq!(frame.capacity(), capacity);
+            assert_eq!(frame.as_ptr(), pointer);
+            let mut plain = FrameWriter::new(Vec::new(), 1.0);
+            store.write(pending, &mut plain);
+            assert_eq!(frame, plain.finish());
+            frame
+        }
+
+        let mut store = Store::default();
+        let mut native = market("native雪", "LIVE");
+        native.pretty_symbol = Some("Native / 雪".into());
+        let mut empty = market("EMPTY", "EMPTY");
+        empty.pretty_symbol = Some(String::new());
+        store.set_markets(vec![native, empty]);
+        store.set_tickers(vec![
+            Ticker {
+                id: "native雪".into(),
+                symbol: "LIVE".into(),
+                mid_price: Some(100.5),
+                ..Ticker::default()
+            },
+            Ticker {
+                id: "delisted🦀".into(),
+                symbol: "GONE雪".into(),
+                ..Ticker::default()
+            },
+        ]);
+        let pending = store.take_pending();
+        let frame = reserved_frame(&store, &pending);
+        let rows = wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::MARKETS)
+            .unwrap()
+            .1;
+        let pretty_at = (4usize + 20 * 2).next_multiple_of(8) + 80 * 2;
+        assert_eq!(frame_string(&frame, word(rows, pretty_at)), "Native / 雪");
+        assert_eq!(frame_string(&frame, word(rows, pretty_at + 4)), "");
+
+        // Ticker-only replacement cannot assume the previous frame's strings exist.
+        store.set_tickers(store.tickers().to_vec());
+        let pending = store.take_pending();
+        assert!(!pending.changes.markets);
+        let frame = reserved_frame(&store, &pending);
+        let rows = wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::TICKERS)
+            .unwrap()
+            .1;
+        let identity_at = (4usize + 4 * 2).next_multiple_of(8) + 96 * 2;
+        assert_eq!(frame_string(&frame, word(rows, identity_at)), "LIVE");
+        assert_eq!(frame_string(&frame, word(rows, identity_at + 4)), "GONE雪");
+        assert_eq!(
+            frame_string(&frame, word(rows, identity_at + 8)),
+            "native雪"
+        );
+        assert_eq!(
+            frame_string(&frame, word(rows, identity_at + 12)),
+            "delisted🦀"
+        );
+    }
+
+    #[test]
     fn ticker_identity_tail_preserves_orphans_and_leaves_legacy_columns_unchanged() {
         let mut store = Store::default();
         store.set_markets(vec![market("LIVEUSDT", "LIVEUSDT")]);
@@ -1795,8 +2042,9 @@ mod tests {
     }
 
     #[test]
-    fn scalar_settings_keep_the_original_payload_without_side_columns() {
+    fn scalar_settings_retain_the_original_scalar_offset_with_fixed_revision_one_tails() {
         let mut store = Store::default();
+        store.set_markets(vec![market("A", "A")]);
         store.set_settings([(
             0,
             MarketSetting {
@@ -1809,16 +2057,25 @@ mod tests {
         store.write_settings(&mut writer);
         let frame = writer.finish();
         let (_, payload) = crate::wire::sections(&frame).next().unwrap();
-        assert_eq!(payload.len(), 24);
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        assert_eq!(payload.len(), 48);
         assert_eq!(
             f64::from_le_bytes(payload[16..24].try_into().unwrap()),
             15.0
         );
+        for offset in [24, 32] {
+            assert_eq!(
+                f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap()),
+                15.0
+            );
+        }
+        assert_eq!(frame_string(&frame, word(payload, 40)), "A");
     }
 
     #[test]
     fn settings_append_independent_leverages_after_the_original_scalar_column() {
         let mut store = Store::default();
+        store.set_markets(vec![market("A", "A"), market("B", "B")]);
         store.set_settings([
             (
                 0,
@@ -1868,7 +2125,7 @@ mod tests {
                             id: format!("order雪{index}"),
                             parent_id: None,
                             status: OrderStatus::Open,
-                            symbol: "BTCUSD".into(),
+                            symbol: format!("asset雪{index}"),
                             kind: OrderType::StopLoss,
                             side: OrderSide::Sell,
                             price: 54321.0,
@@ -1883,7 +2140,7 @@ mod tests {
                             trigger_type: None,
                             take_profit: None,
                             stop_loss: None,
-                            // One row enables each optional column for every row.
+                            // Revision one retains every column even when optional values are absent.
                             extra: (index == count - 1).then_some(OrderExtra {
                                 remaining_native: (extensions & 1 != 0).then_some(7.0),
                                 filled_in_placement_units: (extensions & 2 != 0).then_some(3.0),
@@ -2379,19 +2636,16 @@ mod tests {
             let (_, positions) = wire::sections(&frame)
                 .find(|(kind, _)| *kind == section::POSITIONS)
                 .unwrap();
-            // One ordinary position occupies 88 bytes; the optional ID follows it.
+            // Revision one appends exact ID and symbol after numeric columns.
             assert_eq!(positions.len(), 96);
-            assert_eq!(u32::from_le_bytes(positions[88..92].try_into().unwrap()), 0);
-            let (_, strings) = wire::sections(&frame)
-                .find(|(kind, _)| *kind == section::STRINGS)
-                .unwrap();
-            assert_eq!(u32::from_le_bytes(strings[..4].try_into().unwrap()), 1);
-            let id = store.positions()[0].id.as_bytes();
             assert_eq!(
-                u32::from_le_bytes(strings[8..12].try_into().unwrap()) as usize,
-                id.len()
+                frame_string(&frame, word(positions, 88)),
+                store.positions()[0].id,
             );
-            assert_eq!(&strings[12..12 + id.len()], id);
+            assert_eq!(
+                frame_string(&frame, word(positions, 92)),
+                store.positions()[0].symbol,
+            );
         }
 
         for close in ["set_positions", "upsert_position", "update_positions"] {
@@ -2495,7 +2749,9 @@ mod tests {
         let mut reserved = FrameWriter::new(buffer, 7.0);
         store.write(&pending, &mut reserved);
         let frame = reserved.finish();
-        assert_eq!(frame.len(), hint);
+        // The position's symbol is already interned by MARKETS; the hint counts
+        // both references while the writer stores its forty UTF-8 bytes once.
+        assert!(frame.len() <= hint && hint - frame.len() < 64);
         assert_eq!(frame.capacity(), capacity);
         assert_eq!(frame.as_ptr(), pointer);
         let mut plain = FrameWriter::new(Vec::new(), 7.0);
@@ -2561,7 +2817,16 @@ mod tests {
         for kind in [section::MARKETS, section::POSITIONS] {
             let old = wire::sections(&legacy).find(|(k, _)| *k == kind).unwrap().1;
             let new = wire::sections(&frame).find(|(k, _)| *k == kind).unwrap().1;
-            assert_eq!(old, new, "prediction metadata cannot shift legacy columns");
+            let numeric_end = if kind == section::POSITIONS {
+                88
+            } else {
+                old.len()
+            };
+            assert_eq!(
+                &old[..numeric_end],
+                &new[..numeric_end],
+                "prediction metadata cannot shift numeric columns"
+            );
         }
         assert_eq!(store.prediction_markets(), Some([metadata].as_slice()));
         let payload = wire::sections(&frame)
