@@ -4,9 +4,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-// The standalone budget is unchanged. The shipped combined artifact now has
-// its own fixed 12 MiB ceiling, checked before any standalone build replaces it.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_258_291, combined: 12_582_912 });
+// The standalone budget is unchanged. The shipped combined artifact has its own
+// fixed 13 MiB ceiling (raised from 12 MiB for the 2026-10-20 audit fixes),
+// checked before any standalone build replaces it.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_258_291, combined: 13_631_488 });
 export const wasmBudgetError = (bytes, profile) => {
   if (!Object.hasOwn(WASM_BUDGETS, profile) || !Number.isSafeInteger(bytes) || bytes <= 0) return 'invalid wasm budget input';
   return bytes > WASM_BUDGETS[profile] ? `${profile} wasm ${bytes} exceeds ${WASM_BUDGETS[profile]} bytes` : undefined;

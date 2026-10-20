@@ -16,7 +16,9 @@ const observations = [[1, 100, 'PART_FILLED'], [3, 130, 'PART_FILLED'],
   [3, 130, 'PART_FILLED'], [2, 120, 'PART_FILLED'], [5, 170, 'FILLED'], [5, 170, 'FILLED']];
 const orderId = '2334151155877155281';
 const privateUrl = 'wss://fapiws.bitrue.com/stream?listenKey=replay-listen-key';
-const fill = (amount, price) => ({ id: orderId, symbol: 'E-BTC-USDT', side: 'buy', amount, price });
+// Replay fill rows carry execution metadata; TS has none for these rows.
+const fill = (amount, price) => ({ id: orderId, symbol: 'E-BTC-USDT', side: 'buy', amount, price,
+  executionId: null, fee: null, timestamp: null });
 
 /** Only TS fills can change; the native output is never an input. */
 export function fixBitrue(ts, records) {

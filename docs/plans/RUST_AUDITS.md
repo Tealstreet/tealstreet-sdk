@@ -365,7 +365,7 @@ Implemented on the gate-honesty lane:
   intervals. Retention subtracts the idle-loaded module baseline and counts
   WASM growth once. Each performance run must reproduce its own audited final
   output and transport receipt. No rerun-to-green performance selection.
-- Fixed combined shipping WASM budget: 12,582,912 bytes, checked on both browser
+- Fixed combined shipping WASM budget: 13,631,488 bytes, checked on both browser
   and Node artifacts before standalone overwrite. Standalone remains 1,258,291.
 - Bitget USDC has public/private CI cases with explicitly authored synthetic
   provenance. A private query timeout remains incomplete evidence, not a pass.

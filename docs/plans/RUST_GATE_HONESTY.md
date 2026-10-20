@@ -526,3 +526,17 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Spot/COIN-M history stays distinct from empty success, and the frozen USD-M
   fixture's six mandatory-success commands/bytes remain intact. Publish the
   reviewed integration and require fresh complete CI; no local heavy checks.
+- Takeover (claude-jitask) integrates landing `3a6737115e`, `9cb7452673` and
+  `ed2128a337`. Incoming MEXC mini-ticker and Bitrue l/L corrections run through
+  the audited oracle under declared contracts (MEXC subscriptions are add-only
+  with multiplicity); #1380's sub-10 ms main/steady CPU allowance applies to the
+  medians, with the 10% rule above 10 ms and process CPU/memory unchanged.
+- Shipping combined WASM grew from 12,258,087 to 12,749,706 bytes with the
+  2026-10-20 audit-fix merges (#1355, #1357, #1360, #1361, #1365, #1370, #1353,
+  #1369, #1376, #1372, #1381, #1364, #1382, #1380). Overseer decision: raise the
+  combined ceiling to 13,631,488 (13 MiB); per-family budgets unchanged.
+- CI `39453323762`: landing changed the MEXC, BloFin and Backpack private tape
+  generators. New hashes declare only previously declared paths (MEXC 82 of
+  118, BloFin 91 of 91, Backpack 164 of 164). TxFlow public newly fails on
+  empty checkpoint-0 books after #1353 dropped TxFlow's `books()` time filter;
+  that is a real regression routed to the landing auditor, not declared.
