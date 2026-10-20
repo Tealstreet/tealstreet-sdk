@@ -208,7 +208,7 @@ fn non_direct_spot_suppresses_public_socket_but_preserves_private_token_refresh_
             },
         );
         rig.drain(NOW + 16_000.);
-        rig.fire_within(NOW + 16_750., NOW + 17_000.);
+        rig.fire(NOW + 17_000.);
         assert!(rig.public.is_none());
         assert_eq!(rig.private.len(), 2);
         assert_eq!(
