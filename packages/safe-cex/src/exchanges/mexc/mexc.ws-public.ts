@@ -385,17 +385,19 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     state.version = undefined;
     if (!retain) state.buffer = undefined;
     delete this.orderbooks[symbol];
-    // A lost sequence makes the visible book unusable immediately.
+    if (!state.retry) {
+      state.failures++;
+      state.retry = setTimeout(
+        () => {
+          state.retry = undefined;
+          if (!this.isDisposed && this.depthStates.get(symbol) === state) this.fetchDepth(symbol, state);
+        },
+        Math.min(250 * 2 ** Math.min(state.failures, 7), 30_000),
+      );
+    }
+    // A lost sequence makes the visible book unusable immediately. Notify after
+    // arming the retry so a throwing listener cannot stall recovery.
     if (lost) this.handleRoutedMessage(`depth.${symbol}`, {});
-    if (state.retry) return;
-    state.failures++;
-    state.retry = setTimeout(
-      () => {
-        state.retry = undefined;
-        if (!this.isDisposed && this.depthStates.get(symbol) === state) this.fetchDepth(symbol, state);
-      },
-      Math.min(250 * 2 ** Math.min(state.failures, 7), 30_000),
-    );
   };
 
   private fetchDepth = (symbol: string, state: DepthState) => {

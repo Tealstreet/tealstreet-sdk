@@ -234,6 +234,22 @@ describe('MEXC incremental futures depth', () => {
     expect(books[0].bids.map(({ price, amount }) => [price, amount])).toEqual([[100, 13 * 0.0001], [99, 0.002]]);
   });
 
+  it('arms the depth retry before a throwing listener sees the cleared book', async () => {
+    const { exchange, ws, depth } = setup();
+    const fetch = vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue(snapshot('10'));
+    ws.listenOrderBook('BTCUSDT', (book) => {
+      if (!book.bids.length) throw new Error('consumer assumes a best bid');
+    });
+    await settle();
+    try {
+      depth(12, [[100, 12]]);
+    } catch {
+      // The listener's error may surface here; recovery must not depend on it.
+    }
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('retains the live gap-triggering update and resumes after its immediate predecessor anchor', async () => {
     const { exchange, ws, books, listener, depth } = setup();
     const retry = deferred<Snapshot>();
