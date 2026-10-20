@@ -667,25 +667,53 @@ fn omitted_midpoint_is_an_unseeded_token_not_a_failed_batch() {
     assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
 }
 
-#[test]
-fn empty_midpoint_batch_is_still_retried() {
-    let mut h = H::new();
-    h.response("/markets", 200, MARKETS);
-    h.response("/midpoints", 200, "{}");
-    let timer = h
+fn no_midpoint_retry_after(h: &mut H, ms: f64) {
+    h.now += ms;
+    let due: Vec<_> = h
         .timers
         .iter()
-        .find(|(_, at)| *at == h.now + 1000.)
-        .unwrap()
-        .0;
-    h.now += 1000.;
-    h.event(Event::TimerFired { timer });
-    h.response(
-        "/midpoints",
-        200,
-        &format!(r#"{{"{TOKEN}":"0.6","2":"0.4"}}"#),
+        .filter(|(_, at)| *at <= h.now)
+        .map(|(timer, _)| *timer)
+        .collect();
+    for timer in due {
+        h.event(Event::TimerFired { timer });
+    }
+    assert!(!h.http.iter().any(|r| r.url.contains("/midpoints")));
+}
+
+#[test]
+fn well_formed_empty_midpoint_batch_is_complete_not_retried() {
+    let mut h = H::new();
+    h.response("/markets", 200, MARKETS);
+    // Every token is book-less: a well-formed `{}` rejects nothing.
+    h.response("/midpoints", 200, "{}");
+    assert!(
+        h.e.store()
+            .ticker("election-Yes")
+            .is_none_or(|t| t.last == 0.0)
     );
-    assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.4);
+    no_midpoint_retry_after(&mut h, 60_000.);
+}
+
+#[test]
+fn trailing_batch_of_bookless_tokens_finishes_startup_without_retrying() {
+    let mut h = H::new();
+    let tokens: Vec<_> = (1..=101).map(|n| n.to_string()).collect();
+    let outcomes: Vec<_> = (1..=101).map(|n| format!("Outcome{n}")).collect();
+    let markets = serde_json::json!([{
+        "conditionId":"0xbatch", "slug":"batch", "question":"Batch?",
+        "clobTokenIds": serde_json::to_string(&tokens).unwrap(),
+        "outcomes": serde_json::to_string(&outcomes).unwrap(),
+        "orderPriceMinTickSize":0.01, "orderMinSize":5,
+        "active":true,"closed":false
+    }])
+    .to_string();
+    h.response("/markets", 200, &markets);
+    h.response("/midpoints", 200, r#"{"1":"0.5"}"#);
+    h.response("/midpoints", 200, "{}");
+    assert_eq!(h.e.store().ticker("batch-Outcome1").unwrap().last, 0.5);
+    assert!(h.e.store().loaded().tickers);
+    no_midpoint_retry_after(&mut h, 60_000.);
 }
 
 #[path = "support/socket.rs"]

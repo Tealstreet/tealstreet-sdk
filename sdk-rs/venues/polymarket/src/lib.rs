@@ -234,7 +234,11 @@ impl Polymarket {
             .filter(|t| self.seeded_tokens.contains(&t.id))
             .collect();
         self.seeded_tokens.clear();
-        if accepted.is_empty() {
+        let complete = self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty();
+        // A trailing batch of book-less tokens still has to finish startup.
+        if accepted.is_empty() && !complete {
             return;
         }
         let mut rows = cx.store.tickers().to_vec();
@@ -245,10 +249,7 @@ impl Polymarket {
                 rows.push(ticker);
             }
         }
-        if self.midpoint_next.is_none()
-            && self.midpoint_inflight.is_empty()
-            && self.midpoint_failed.is_empty()
-        {
+        if complete {
             self.live_tickers.finish(cx.store, &mut rows);
         } else {
             self.live_tickers.overlay(cx.store, &mut rows);
@@ -826,7 +827,6 @@ impl Venue for Polymarket {
                     .map(|market| market.id.clone())
                     .collect();
                 let mut rejected = false;
-                let mut accepted = 0;
                 match serde_json::from_str::<HashMap<String, &serde_json::value::RawValue>>(
                     response.body,
                 ) {
@@ -872,7 +872,6 @@ impl Venue for Polymarket {
                             ticker.mark = p.0;
                             ticker.index = p.0;
                             self.seeded_tokens.insert(id);
-                            accepted += 1;
                         }
                     }
                     Err(_) => {
@@ -885,8 +884,8 @@ impl Venue for Polymarket {
                     }
                 }
                 // CLOB omits tokens without a book: an omitted token is unseeded, not a
-                // failed batch. Malformed rows or a wholly empty batch still retry.
-                if rejected || accepted == 0 {
+                // failed batch, even when every token is omitted. Only rejected rows retry.
+                if rejected {
                     cx.log(
                         LogLevel::Warning,
                         "Incomplete Polymarket midpoint rows; preserving prior quotes",
