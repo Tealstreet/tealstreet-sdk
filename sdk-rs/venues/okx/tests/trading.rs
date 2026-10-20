@@ -537,6 +537,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -710,6 +711,34 @@ fn entry_and_algo_child_receipts_precede_each_write_and_use_sdk_symbol() {
 }
 
 #[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            5.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
+}
+
+#[test]
 fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
     use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
     use safe_cex_engine::{Action, Notice};
@@ -760,4 +789,268 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         );
         assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
     }
+}
+
+#[test]
+fn fetch_leverage_reads_flat_symbol_cross_leverage_into_settings() {
+    let mut e = trading_engine();
+    assert!(
+        e.store()
+            .setting("BTCUSDT")
+            .is_none_or(|s| s.leverage == 0.0)
+    );
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out
+        .iter()
+        .find(|a| {
+            is_get(
+                a,
+                "/api/v5/account/leverage-info?instId=BTC-USDT-SWAP&mgnMode=cross",
+            )
+        })
+        .expect("leverage-info read");
+    reply(
+        &mut e,
+        request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: Ok(s) }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 25.0);
+}
+
+#[test]
+fn fetch_leverage_failure_answers_instead_of_hanging() {
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| is_get(a, "mgnMode=cross")).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 8,
+            result: Err(_)
+        })
+    )));
+    e.handle(
+        7.0,
+        Event::Command(Command::FetchLeverage {
+            command: 9,
+            symbol: "NOPE".into(),
+        }),
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 9,
+            result: Err(_)
+        })
+    )));
+}
+
+/// A ready account plus every action emitted after its config reply.
+fn ready_engine() -> (
+    safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    Vec<Action>,
+) {
+    let mut e =
+        safe_cex_engine::Engine::new(safe_cex_venue_okx::Okx::new(safe_cex_venue_okx::Options {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..Default::default()
+        }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let mut seen = actions(&mut e);
+    let mut pending: Vec<_> = seen
+        .iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .cloned()
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 3.0);
+        let out = actions(&mut e);
+        pending.extend(out.iter().filter(|a| matches!(a, Action::Http(_))).cloned());
+        seen.extend(out);
+    }
+    (e, seen)
+}
+
+/// Fires the 2s account tick until the periodic config read is sent.
+fn tick_until_config(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    mut out: Vec<Action>,
+) -> (Action, f64) {
+    let mut now = 3.0;
+    loop {
+        let tick = out
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == now + 2_000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("account tick not re-armed at {now}"));
+        now += 2_000.0;
+        e.handle(now, Event::TimerFired { timer: tick });
+        out = actions(e);
+        if let Some(config) = out.iter().find(|a| is_get(a, "/api/v5/account/config")) {
+            assert!(now >= 30_000.0, "polled too early at {now}");
+            return (config.clone(), now);
+        }
+        assert!(now < 40_000.0, "config never re-read");
+    }
+}
+
+#[test]
+fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
+    let (mut e, out) = ready_engine();
+    assert!(!e.store().hedged());
+    let (config, now) = tick_until_config(&mut e, out);
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"long_short_mode","acctLv":"2"}"#),
+        now,
+    );
+    assert!(e.store().hedged());
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+    );
+}
+
+#[test]
+fn config_read_sent_before_our_mode_write_cannot_revert_it() {
+    let (mut e, out) = ready_engine();
+    let (config, now) = tick_until_config(&mut e, out);
+    e.handle(
+        now,
+        Event::Command(Command::SetPositionMode {
+            command: 11,
+            hedged: true,
+            symbol: None,
+        }),
+    );
+    let write = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("/api/v5/account/set-position-mode")))
+        .expect("mode write");
+    reply(
+        &mut e,
+        &write,
+        &envelope(r#"{"posMode":"long_short_mode"}"#),
+        now + 1.0,
+    );
+    assert!(e.store().hedged());
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        now + 2.0,
+    );
+    assert!(
+        e.store().hedged(),
+        "stale poll reverted the confirmed mode write"
+    );
+}
+
+#[test]
+fn unparseable_polled_account_level_keeps_the_known_level() {
+    let (mut e, out) = ready_engine();
+    let (config, now) = tick_until_config(&mut e, out);
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":""}"#),
+        now,
+    );
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP")),
+        "unchanged mode and unknown level must not reconcile"
+    );
+}
+
+#[test]
+fn leverage_read_survives_unrelated_private_pushes() {
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 12,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "mgnMode=cross"))
+        .unwrap();
+    // Any account write bumps the account revision without touching leverage.
+    e.handle(
+        5.5,
+        Event::Command(Command::SetPositionMode {
+            command: 13,
+            hedged: true,
+            symbol: None,
+        }),
+    );
+    let write = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("set-position-mode")))
+        .unwrap();
+    reply(
+        &mut e,
+        &write,
+        &envelope(r#"{"posMode":"long_short_mode"}"#),
+        5.6,
+    );
+    actions(&mut e);
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"30"}"#),
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: Ok(s) }) if s.contains("30.0"))));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
 }

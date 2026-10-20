@@ -24,6 +24,13 @@ struct Plan {
     affected: Vec<String>,
     guard: Option<Target>,
     refresh_result: bool,
+    cancel_batch: bool,
+    cancel_errors: Vec<CancelFailure>,
+}
+#[derive(Serialize)]
+struct CancelFailure {
+    id: String,
+    error: String,
 }
 struct Step {
     method: Method,
@@ -270,6 +277,8 @@ impl Plan {
             affected: vec![],
             guard: None,
             refresh_result: false,
+            cancel_batch: false,
+            cancel_errors: vec![],
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -380,12 +389,12 @@ impl Bitrue {
         let setting = cx.store.setting(&opts.symbol);
         let leverage = position
             .map(|p| p.leverage)
-            .or(setting.map(|s| s.leverage))
+            .or(setting.map(|s| s.leverage).filter(|v| *v > 0.0))
             .ok_or("Bitrue leverage metadata is not loaded")?;
         let margin = position
             .and_then(|p| p.margin_type)
             .or(setting.and_then(|s| s.margin_type))
-            .ok_or("Bitrue margin metadata is not loaded")?;
+            .unwrap_or(MarginType::Cross);
         positive(leverage, "leverage metadata")?;
         if leverage.fract() != 0.0 || leverage > 125.0 {
             return Err("Invalid Bitrue leverage metadata".into());
@@ -641,28 +650,40 @@ impl Bitrue {
                     .push_back(target.lookup(Effect::Inspect(Box::new(amend))));
             }
             Command::CancelOrders { ids, .. } => {
+                plan.cancel_batch = true;
                 let mut seen = HashSet::new();
                 for id in &ids {
-                    let order = cx.store.order(id).ok_or_else(|| {
-                        format!("Order {id} not found; cancellation requires a reconciled order")
-                    })?;
-                    if terminal(order.status) || !seen.insert(id.clone()) {
+                    if !seen.insert(id.clone()) {
                         continue;
                     }
-                    if order
-                        .parent_id
-                        .as_ref()
-                        .is_some_and(|parent| ids.contains(parent))
-                    {
+                    let Some(order) = cx.store.order(id) else {
+                        plan.cancel_errors.push(CancelFailure {
+                            id: id.clone(),
+                            error: "Order not found; cancellation requires a reconciled order"
+                                .into(),
+                        });
+                        continue;
+                    };
+                    if terminal(order.status) {
                         continue;
                     }
-                    let target = self.cancel_target(cx, order)?;
+                    let target = match self.cancel_target(cx, order) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            plan.cancel_errors.push(CancelFailure {
+                                id: id.clone(),
+                                error,
+                            });
+                            continue;
+                        }
+                    };
                     plan.symbol(&order.symbol);
                     plan.affected.extend(target.store_ids.clone());
                     plan.steps.push_back(target.cancel());
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
+                plan.cancel_batch = true;
                 let orders = cx
                     .store
                     .orders()
@@ -670,14 +691,13 @@ impl Bitrue {
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open);
                 let mut targets = Vec::new();
                 for order in orders {
-                    if order.parent_id.as_ref().is_some_and(|id| {
-                        cx.store
-                            .order(id)
-                            .is_some_and(|p| p.status == OrderStatus::Open)
-                    }) {
-                        continue;
+                    match self.cancel_target(cx, order) {
+                        Ok(target) => targets.push(target),
+                        Err(error) => plan.cancel_errors.push(CancelFailure {
+                            id: order.id.clone(),
+                            error,
+                        }),
                     }
-                    targets.push(self.cancel_target(cx, order)?);
                 }
                 plan.symbol(&symbol);
                 for target in targets {
@@ -696,10 +716,16 @@ impl Bitrue {
                     .store
                     .market(&symbol)
                     .ok_or("Unknown Bitrue leverage market")?;
-                let leverage = leverage.clamp(
-                    market.limits.leverage.min.max(1.0),
-                    market.limits.leverage.max.min(125.0),
-                );
+                if leverage > 125.0 {
+                    return Err("Bitrue leverage exceeds the venue ceiling of 125".into());
+                }
+                if let Some(max) = self.account.bracket_limits.get(&symbol)
+                    && leverage > *max
+                {
+                    return Err(format!("Bitrue maximum leverage does not exceed {max}"));
+                }
+                // The startup market limit is conservative, not authoritative. Submit
+                // the exact requested leverage and let the venue accept or reject it.
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage<'a> {
@@ -739,7 +765,11 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if *hedged {
                     cx.done(
                         *command,
@@ -795,9 +825,35 @@ impl Bitrue {
         }
     }
     fn trade_step(&mut self, cx: &mut Cx<'_, Pending>, mut plan: Plan) {
-        let Some(step) = plan.steps.pop_front() else {
-            self.trade_finish(cx, plan, None);
-            return;
+        let step = loop {
+            let Some(step) = plan.steps.pop_front() else {
+                self.trade_finish(cx, plan, None);
+                return;
+            };
+            if plan.cancel_batch
+                && let Effect::Cancel(target) = &step.effect
+            {
+                // A confirmed parent cancellation can close its native children.
+                // Keep each child as a fallback until that success is known.
+                if let Some(order) = cx.store.order(&target.id)
+                    && terminal(order.status)
+                {
+                    if order.status == OrderStatus::Canceled {
+                        plan.ids.push(target.id.clone());
+                    }
+                    continue;
+                }
+                for id in &target.store_ids {
+                    if cx
+                        .store
+                        .order(id)
+                        .is_some_and(|o| o.status == OrderStatus::Open)
+                    {
+                        cx.store.set_order_status(id, OrderStatus::Canceling);
+                    }
+                }
+            }
+            break step;
         };
         if matches!(step.effect, Effect::Place { .. } | Effect::Verify(_))
             && plan.guard.as_ref().is_some_and(|target| {
@@ -845,11 +901,30 @@ impl Bitrue {
             }
         }
         self.trading.busy = false;
+        let error = if plan.cancel_errors.is_empty() {
+            error
+        } else {
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CancellationErrors<'a> {
+                message: &'static str,
+                canceled_order_ids: &'a [String],
+                failed_orders: &'a [CancelFailure],
+            }
+            Some(
+                serde_json::to_string(&CancellationErrors {
+                    message: "Bitrue cancellation failed for one or more orders",
+                    canceled_order_ids: &plan.ids,
+                    failed_orders: &plan.cancel_errors,
+                })
+                .expect("cancellation errors"),
+            )
+        };
         cx.done(
             plan.command,
             error.map_or_else(
                 || {
-                    Ok(if plan.refresh_result {
+                    Ok(if plan.refresh_result || plan.cancel_batch {
                         "[]".to_owned()
                     } else {
                         serde_json::to_string(&plan.ids).expect("order ids")
@@ -871,8 +946,32 @@ impl Bitrue {
         _item: &str,
     ) {
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.trade_finish(cx, *request.plan, Some(error.into()));
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: &str,
+    ) {
+        if request.plan.cancel_batch
+            && let Effect::Cancel(target) = &request.step.effect
+        {
+            request.plan.cancel_errors.push(CancelFailure {
+                id: target.id.clone(),
+                error: error.into(),
+            });
+            for id in &target.store_ids {
+                if cx
+                    .store
+                    .order(id)
+                    .is_some_and(|o| o.status == OrderStatus::Canceling)
+                {
+                    cx.store.set_order_status(id, OrderStatus::Open);
+                }
+            }
+            self.trade_step(cx, *request.plan);
+        } else {
+            self.trade_finish(cx, *request.plan, Some(error.into()));
+        }
     }
     pub(crate) fn trade_response(
         &mut self,
@@ -881,6 +980,30 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
+            if let Effect::Leverage { symbol, .. } = &request.step.effect
+                && let Ok(reply) = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body)
+            {
+                let message = reply.msg.to_ascii_lowercase();
+                if let Some((_, suffix)) = message.split_once("maximum leverage does not exceed") {
+                    let token: String = suffix
+                        .trim_start()
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit() || *c == '.')
+                        .collect();
+                    if let Ok(max) = token.parse::<f64>()
+                        && max > 0.0
+                        && max <= 125.0
+                        && max.fract() == 0.0
+                    {
+                        self.account.bracket_limits.insert(symbol.clone(), max);
+                        cx.store.update_markets(|market| {
+                            if market.symbol == *symbol {
+                                market.limits.leverage.max = max;
+                            }
+                        });
+                    }
+                }
+            }
             self.trade_failed(cx, request, &error);
             return;
         }
@@ -914,6 +1037,9 @@ impl Bitrue {
                         }
                     }
                     self.remember_terminal(&target.id);
+                    if request.plan.cancel_batch {
+                        request.plan.ids.push(target.id.clone());
+                    }
                     Ok(())
                 } else {
                     Err("Bitrue cancellation did not confirm the requested order identity".into())
@@ -928,6 +1054,7 @@ impl Bitrue {
                     s.leverage = *leverage;
                     s.buy_leverage = Some(*leverage);
                     s.sell_leverage = Some(*leverage);
+                    s.margin_type.get_or_insert(MarginType::Cross);
                 });
                 cx.store.update_positions(|p| {
                     if p.symbol == *symbol {

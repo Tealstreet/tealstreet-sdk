@@ -19,6 +19,18 @@ use trading::Trading;
 pub enum Pending {
     Trade(trading::Request),
 }
+fn issue(
+    cx: &mut Cx<'_, Pending>,
+    credentials: Option<&Credentials>,
+    method: safe_cex_engine::Method,
+    path: &'static str,
+    params: sign::Params,
+    _at: Option<safe_cex_engine::json::ArrayAt>,
+    pending: Pending,
+) {
+    let (url, headers, body) = params.into_request(method, path, credentials, cx.now);
+    cx.request(method, url, headers, body, pending);
+}
 struct TestVenue {
     trading: Trading,
     initial: Option<(Order, String, String)>,
@@ -498,20 +510,100 @@ fn trigger_replacement_stops_when_cancel_fails() {
     assert!(h.done[0].is_err());
 }
 #[test]
-fn hedged_leverage_updates_both_sides_sequentially() {
+fn hedged_leverage_requires_side_without_sending_a_write() {
     let mut h = Harness::new(None);
     h.engine.store_mut().set_hedged(true);
     h.command(Command::SetLeverage {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 20.0,
+        side: None,
     });
-    assert!(h.body().contains("\"side\":\"LONG\""));
-    h.reply(r#"{"code":0,"data":{}}"#);
-    assert!(h.body().contains("\"side\":\"SHORT\""));
-    assert!(h.engine.store().setting("BTCUSDT").is_none());
-    h.reply(r#"{"code":0,"data":{}}"#);
-    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].as_ref().unwrap_err().contains("Side is required"));
+}
+
+#[test]
+fn side_leverage_updates_only_the_acknowledged_leg_and_oneway_uses_both() {
+    for (hedged, side, native) in [
+        (true, PositionSide::Long, "LONG"),
+        (true, PositionSide::Short, "SHORT"),
+        (false, PositionSide::Short, "BOTH"),
+    ] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_hedged(hedged);
+        h.engine.store_mut().update_setting("BTCUSDT", |s| {
+            s.leverage = 5.0;
+            s.buy_leverage = Some(5.0);
+            s.sell_leverage = Some(7.0);
+        });
+        let mut long = position();
+        long.leverage = 5.0;
+        long.side = PositionSide::Long;
+        let mut short = long.clone();
+        short.leverage = 7.0;
+        short.side = PositionSide::Short;
+        h.engine.store_mut().set_positions(vec![long, short]);
+        h.command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: Some(side),
+        });
+        assert!(h.body().contains(&format!("\"side\":\"{native}\"")));
+        h.reply(r#"{"code":0,"data":{}}"#);
+        assert!(h.requests.is_empty());
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(
+            setting.buy_leverage,
+            Some(if !hedged || side == PositionSide::Long {
+                20.0
+            } else {
+                5.0
+            })
+        );
+        assert_eq!(
+            setting.sell_leverage,
+            Some(if !hedged || side == PositionSide::Short {
+                20.0
+            } else {
+                7.0
+            })
+        );
+        for p in h.engine.store().positions() {
+            assert_eq!(
+                p.leverage,
+                if !hedged || p.side == side {
+                    20.0
+                } else if p.side == PositionSide::Long {
+                    5.0
+                } else {
+                    7.0
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn rejected_side_leverage_preserves_both_rails() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_hedged(true);
+    h.engine.store_mut().update_setting("BTCUSDT", |s| {
+        s.leverage = 5.0;
+        s.buy_leverage = Some(5.0);
+        s.sell_leverage = Some(7.0);
+    });
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetLeverage {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        leverage: 20.0,
+        side: Some(PositionSide::Short),
+    });
+    h.failed();
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(h.done[0].is_err());
 }
 
 #[test]
@@ -1076,4 +1168,116 @@ fn unsupported_attached_trigger_sources_reject_the_entire_batch_before_writes() 
         assert!(h.requests.is_empty());
         assert!(h.done[0].is_err());
     }
+}
+
+#[test]
+fn attached_trigger_market_brackets_move_by_cancel_and_replacement() {
+    // A stop bracket below mark, entry not yet filled: stays TRIGGER_MARKET.
+    let mut stop = order();
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = 90.0;
+    stop.reduce_only = true;
+    stop.client_order_id = None;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((stop, "TRIGGER_MARKET")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    assert_eq!(h.requests[0].method, safe_cex_engine::Method::Delete);
+    h.reply(r#"{"code":0,"data":{}}"#);
+    for field in [
+        "\"type\":\"TRIGGER_MARKET\"",
+        "\"stopPrice\":91",
+        "\"quantity\":1",
+        "\"reduceOnly\":true",
+        "\"side\":\"SELL\"",
+        "\"workingType\":\"MARK_PRICE\"",
+    ] {
+        assert!(h.body().contains(field), "{field} in {}", h.body());
+    }
+
+    // A take-profit bracket above mark, with the entry filled: like TS, the
+    // replacement takes the type placement picks for an open position.
+    let mut take = order();
+    take.kind = OrderType::TakeProfit;
+    take.side = OrderSide::Sell;
+    take.price = 110.0;
+    take.reduce_only = true;
+    take.client_order_id = None;
+    take.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((take, "TRIGGER_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(112.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert!(h.body().contains("\"type\":\"TAKE_PROFIT_MARKET\""));
+    assert!(h.body().contains("\"stopPrice\":112"));
+    assert!(h.body().contains("\"reduceOnly\":true"), "{}", h.body());
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":"5","status":"NEW"}}}"#);
+    assert_eq!(h.done[0].as_deref(), Ok(r#"["5"]"#));
+}
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    for ids in [vec!["404".to_string()], vec![order().id, "404".into()]] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_orders(vec![order()]);
+        h.command(Command::CancelOrders { command: 1, ids });
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].as_ref().unwrap_err().contains("404"));
+        assert_eq!(
+            h.engine.store().order(&order().id).unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}
+
+#[test]
+fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
+    let mut stop = order();
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = 90.0;
+    stop.reduce_only = true;
+    stop.client_order_id = None;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((stop, "TRIGGER_MARKET")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    h.reply(r#"{"code":101204,"msg":"insufficient margin"}"#);
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(
+        error.starts_with("original bracket cancelled; replacement failed: BingX 101204"),
+        "{error}"
+    );
+
+    // A failed cancellation is not reported as a cancelled bracket.
+    let mut stop = order();
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = 90.0;
+    stop.client_order_id = None;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((stop, "TRIGGER_MARKET")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":109500,"msg":"busy"}"#);
+    assert!(!h.done[0].as_ref().unwrap_err().contains("original bracket"));
 }

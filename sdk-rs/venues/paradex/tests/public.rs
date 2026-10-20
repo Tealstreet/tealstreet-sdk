@@ -119,7 +119,7 @@ fn independent_book_subscribers_and_reconnect_restore_interest() {
         },
     );
     h.collect();
-    h.timer(h.now + 1000.);
+    h.reconnect();
     h.public = h
         .actions
         .iter()
@@ -480,7 +480,24 @@ fn late_poll_cannot_overwrite_newer_trade_or_restart_removed_subscription() {
     });
     let r = h.take("klines");
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"111","size":"2","created_at":1700000000000}}}"#);
-    assert!(h.e.take_market_frame(h.now).is_some());
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    let sections: Vec<_> = safe_cex_engine::wire::sections(startup).collect();
+    assert!(
+        sections
+            .iter()
+            .any(|(kind, _)| *kind == safe_cex_engine::wire::section::MARKETS)
+    );
+    let candle = sections
+        .iter()
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::CANDLES)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(candle[..4].try_into().unwrap()), 1);
+    let values: [f64; 6] = std::array::from_fn(|i| {
+        f64::from_le_bytes(candle[16 + i * 8..24 + i * 8].try_into().unwrap())
+    });
+    assert_eq!(values, [1699999980000., 111., 111., 111., 111., 2.]);
     h.respond(r, 200, r#"{"results":[[1699999980000,100,100,100,100,1]]}"#);
     assert!(h.e.take_market_frame(h.now).is_none());
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"112","size":"1","created_at":1699999900000}}}"#);
@@ -564,7 +581,7 @@ fn sbe_declared_blocks_groups_nullability_and_unknown_versions_are_checked_befor
         );
         h.collect();
         assert!(
-            h.actions
+            !h.actions
                 .iter()
                 .any(|a| matches!(a,Action::WsClose{socket}if *socket==h.public))
         );
@@ -582,10 +599,68 @@ fn sbe_declared_blocks_groups_nullability_and_unknown_versions_are_checked_befor
     );
     h.collect();
     assert!(
-        h.actions
+        !h.actions
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==h.public))
     );
+}
+
+#[test]
+fn malformed_sbe_preserves_books_and_socket_while_real_gaps_resync_only_the_affected_book() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    h.command(Command::SubscribeOrderBook {
+        symbol: "ETH-USD-PERP".into(),
+    });
+    h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"order_book.ETH-USD-PERP.deltas","data":{"market":"ETH-USD-PERP","update_type":"s","seq_no":10,"inserts":[{"side":"BUY","price":"9","size":"2"},{"side":"SELL","price":"11","size":"3"}],"updates":[],"deletes":[]}}}"#);
+    let binary = |h: &mut Harness, data: &[u8]| {
+        h.e.handle(
+            h.now,
+            Event::WsBinary {
+                socket: h.public,
+                data,
+            },
+        );
+        h.collect();
+    };
+    let mut snapshot = binary_vector("snapshot");
+    binary(&mut h, &snapshot);
+    let bids = h.e.book(BTC).unwrap().bids().to_vec();
+    let asks = h.e.book(BTC).unwrap().asks().to_vec();
+    let mut delta = binary_vector("delta");
+    let sent = h.sent().len();
+    binary(&mut h, &delta[..delta.len() - 1]);
+    assert_eq!(h.e.book(BTC).unwrap().bids(), bids);
+    assert_eq!(h.e.book(BTC).unwrap().asks(), asks);
+    assert_eq!(h.e.book("ETH-USD-PERP").unwrap().bids(), [(9., 2.)]);
+    assert_eq!(h.sent().len(), sent);
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+
+    binary(&mut h, &delta);
+    assert_eq!(h.e.book(BTC).unwrap().bids()[0], (99., 3.));
+    assert_eq!(h.e.book(BTC).unwrap().asks(), [(110., 2.)]);
+    delta[16..24].copy_from_slice(&103i64.to_le_bytes());
+    binary(&mut h, &delta);
+    assert!(h.e.book(BTC).unwrap().is_empty());
+    assert_eq!(h.e.book("ETH-USD-PERP").unwrap().bids(), [(9., 2.)]);
+    assert_eq!(h.e.book("ETH-USD-PERP").unwrap().asks(), [(11., 3.)]);
+    assert_eq!(h.sent().len(), sent + 2);
+    assert!(h.sent()[sent..].iter().all(|text| text.contains(BTC)));
+    assert!(h.sent()[sent].contains("unsubscribe"));
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+
+    snapshot[16..24].copy_from_slice(&104i64.to_le_bytes());
+    binary(&mut h, &snapshot);
+    assert_eq!(h.e.book(BTC).unwrap().bids(), bids);
+    assert_eq!(h.e.book(BTC).unwrap().asks(), asks);
 }
 
 #[test]
@@ -708,7 +783,21 @@ fn idle_sbe_heartbeats_preserve_liveness_without_invalid_application_pings() {
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == h.public))
     );
     assert!(!h.sent().iter().any(|text| text.contains("ping")));
-    h.now += 60_000.;
+    h.now += 59_000.;
+    h.e.handle(
+        h.now,
+        Event::WsBinary {
+            socket: h.public,
+            data: &[0, 1, 2],
+        },
+    );
+    h.collect();
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == h.public))
+    );
+    h.now += 1_000.;
     h.e.handle(h.now, Event::TimerFired { timer: watchdog });
     h.collect();
     assert!(
@@ -866,7 +955,12 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         interval: "1m".into(),
     });
     h.reply("klines", r#"{"results":[]}"#);
-    let _ = h.e.take_market_frame(h.now);
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(startup)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::MARKETS)
+    );
     h.ws(&format!(r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"trades.BTC-USD-PERP","data":{{"price":"100","size":"2","created_at":{}}}}}}}"#, h.now));
     assert_eq!(emitted(&mut h), Some([bucket, 100., 100., 100., 100., 2.]));
     for (timestamp, price, volume, expected) in [
@@ -887,4 +981,12 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         );
         assert_eq!(emitted(&mut h), expected);
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let h = Harness::new();
+    socket_checks::flaps(h.e, h.public, h.now);
 }

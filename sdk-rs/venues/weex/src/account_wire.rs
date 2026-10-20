@@ -57,6 +57,13 @@ fn trigger(value: &str) -> StopTriggerType {
         StopTriggerType::LastPrice
     }
 }
+fn bracket_trigger(value: &str) -> Option<StopTriggerType> {
+    matches!(
+        value,
+        "CONTRACT_PRICE" | "LAST_PRICE" | "MARK_PRICE" | "INDEX_PRICE"
+    )
+    .then(|| trigger(value))
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
@@ -123,6 +130,10 @@ pub struct OrderRow<'a> {
     pub working_type: Str<'a>,
     #[serde(borrow, default)]
     pub tp_order_type: Str<'a>,
+    #[serde(borrow, default, rename = "TpWorkingType")]
+    pub tp_working_type: Str<'a>,
+    #[serde(borrow, default, rename = "SlWorkingType")]
+    pub sl_working_type: Str<'a>,
     #[serde(default, deserialize_with = "optional_number")]
     pub tp_trigger_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
@@ -133,6 +144,14 @@ pub struct OrderRow<'a> {
     pub sl_price: Option<f64>,
 }
 impl OrderRow<'_> {
+    /// Some algo rows carry only `planType`; TS falls back to it as well.
+    fn order_type(&self) -> &str {
+        if self.kind.is_empty() {
+            &self.plan_type
+        } else {
+            &self.kind
+        }
+    }
     fn protective(&self) -> bool {
         self.reduce_only
             || self.position_tpsl
@@ -142,7 +161,7 @@ impl OrderRow<'_> {
     pub fn normal(&self) -> Option<Order> {
         if self.order_id.is_empty()
             || self.symbol.is_empty()
-            || self.kind.is_empty()
+            || self.order_type().is_empty()
             || self.status.is_empty()
             || self.orig_qty < 0.0
             || self.executed_qty < 0.0
@@ -150,7 +169,7 @@ impl OrderRow<'_> {
             return None;
         }
         let side = side(&self.side)?;
-        let kind = match self.kind.as_ref() {
+        let kind = match self.order_type() {
             "MARKET" => OrderType::Market,
             "CONDITIONAL" => OrderType::Conditional,
             "STOP" | "STOP_MARKET" | "STOP_LOSS" => OrderType::StopLoss,
@@ -160,7 +179,7 @@ impl OrderRow<'_> {
         };
         let kind = if !self.protective()
             && matches!(
-                self.kind.as_ref(),
+                self.order_type(),
                 "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET"
             ) {
             OrderType::Conditional
@@ -206,14 +225,32 @@ impl OrderRow<'_> {
             trigger_type: (!self.working_type.is_empty()).then(|| trigger(&self.working_type)),
             take_profit: self.tp_trigger_price.filter(|n| *n > 0.0),
             stop_loss: self.sl_trigger_price.filter(|n| *n > 0.0),
-            extra: (kind == OrderType::Conditional).then_some(OrderExtra {
-                conditional_order_price: Some(if self.price != 0.0 {
-                    self.price
-                } else {
-                    self.actual_price
-                }),
-                ..OrderExtra::default()
-            }),
+            extra: if kind == OrderType::Conditional {
+                Some(OrderExtra {
+                    conditional_order_price: Some(if self.price != 0.0 {
+                        self.price
+                    } else {
+                        self.actual_price
+                    }),
+                    ..OrderExtra::default()
+                })
+            } else {
+                // Regular-order bracket legs keep their venue trigger types
+                // (TS: tpOrderType ?? TpWorkingType, workingType ?? SlWorkingType).
+                let tp = bracket_trigger(&self.tp_order_type)
+                    .or_else(|| bracket_trigger(&self.tp_working_type))
+                    .filter(|_| self.tp_trigger_price.is_some_and(|n| n > 0.0));
+                let sl = bracket_trigger(&self.working_type)
+                    .or_else(|| bracket_trigger(&self.sl_working_type))
+                    .filter(|_| self.sl_trigger_price.is_some_and(|n| n > 0.0));
+                (matches!(kind, OrderType::Limit | OrderType::Market)
+                    && (tp.is_some() || sl.is_some()))
+                .then_some(OrderExtra {
+                    tp_trigger_type: tp,
+                    sl_trigger_type: sl,
+                    ..OrderExtra::default()
+                })
+            },
         })
     }
     pub fn algo(&self) -> Vec<Order> {
@@ -227,7 +264,7 @@ impl OrderRow<'_> {
             order.kind = OrderType::TakeProfit;
         } else if !protective
             && matches!(
-                self.kind.as_ref(),
+                self.order_type(),
                 "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET"
             )
         {
@@ -408,8 +445,17 @@ impl ConfigRow<'_> {
             } else {
                 self.cross_leverage
             },
+            buy_leverage: Some(if self.margin_type == "ISOLATED" {
+                self.isolated_long_leverage
+            } else {
+                self.cross_leverage
+            }),
+            sell_leverage: Some(if self.margin_type == "ISOLATED" {
+                self.isolated_short_leverage
+            } else {
+                self.cross_leverage
+            }),
             margin_type: Some(margin(&self.margin_type)),
-            ..MarketSetting::default()
         }
     }
 }

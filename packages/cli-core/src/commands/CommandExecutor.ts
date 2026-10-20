@@ -1,4 +1,4 @@
-import { isErrorReported, serializeCommandError, type SerializedCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
+import { serializeCommandError, type SerializedCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
 import type { CLIPlatformAdapter, ExchangeLike, TaskAction } from '../types';
 import type { CommandContext, CommandResult as CmdResult } from './Command';
 import type { PreprocessStore } from '../preprocess/types';
@@ -171,7 +171,7 @@ export interface ExecuteResult {
   /** Known native rejection or interrupted-command attribution, when available. */
   errorDetails?: SerializedCommandError;
   /**
-   * The exchange error path or executor already reported this error to the user.
+   * The executor already printed this error to the user.
    *
    * A host is contractually required to treat `success === false` as a failure
    * (see cli-core/CLAUDE.md, "Runner failure contract") and apps/cli converts
@@ -325,7 +325,9 @@ export async function executeCommand(
     return convertResult(result);
   } catch (error) {
     const message = (error as Error).message;
-    if (!isErrorReported(error)) adapter.printError(`Command failed: ${message}`);
+    // The exchange 'error' channel is filtered and deduplicated for account health,
+    // so it cannot stand in for the command's own result line.
+    adapter.printError(`Command failed: ${message}`);
     return {
       handled: true,
       success: false,

@@ -102,7 +102,9 @@ fn reconnect(e: &mut Engine<Bitrue>, actions: Vec<Action>, now: f64) -> SocketId
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 1000.0 => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms > now && *at_ms <= now + 1000.0 => {
+                Some(*timer)
+            }
             _ => None,
         })
         .unwrap();

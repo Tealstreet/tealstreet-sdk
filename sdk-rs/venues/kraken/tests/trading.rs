@@ -489,6 +489,7 @@ fn setting_cache_changes_only_after_acceptance_and_cross_omits_leverage() {
             command: 8,
             symbol: "PF_XBTUSD".into(),
             leverage: 7.0,
+            side: None,
         },
     );
     let r = http(&mut e, "leveragepreferences");
@@ -536,6 +537,7 @@ fn setting_refusal_or_transport_failure_preserves_cache() {
                 command: 8,
                 symbol: "PF_XBTUSD".into(),
                 leverage: 7.0,
+                side: None,
             },
         );
         let r = http(&mut e, "leveragepreferences");
@@ -557,6 +559,7 @@ fn leverage_lookup_returns_confirmed_two_sided_preferences() {
             command: 8,
             symbol: "PF_XBTUSD".into(),
             leverage: 7.0,
+            side: None,
         },
     );
     let r = http(&mut e, "leveragepreferences");
@@ -578,7 +581,14 @@ fn leverage_lookup_returns_confirmed_two_sided_preferences() {
 fn one_way_position_mode_is_noop_hedge_rejected() {
     let (mut e, _) = ready();
     for hedged in [false, true] {
-        command(&mut e, Command::SetPositionMode { command: 7, hedged });
+        command(
+            &mut e,
+            Command::SetPositionMode {
+                command: 7,
+                hedged,
+                symbol: None,
+            },
+        );
         assert_eq!(done(&mut e).is_ok(), !hedged);
         assert!(requests(&mut e).is_empty());
     }
@@ -785,6 +795,7 @@ fn queued_margin_change_uses_latest_accepted_leverage() {
             command: 7,
             symbol: "PF_XBTUSD".into(),
             leverage: 5.0,
+            side: None,
         },
     );
     let first = http(&mut e, "leveragepreferences");
@@ -875,6 +886,7 @@ fn initial_position_snapshot_cannot_roll_back_accepted_settings() {
             command: 7,
             symbol: "PF_XBTUSD".into(),
             leverage: 7.0,
+            side: None,
         },
     );
     let r = http(&mut e, "leveragepreferences");
@@ -924,4 +936,33 @@ fn batch_rejects_foreign_stp_controls_before_writes() {
         Action::Notice(Notice::CommandDone { result: Err(error), .. })
             if error.contains("self-trade prevention")
     )));
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let (mut e, _) = ready();
+        e.drain_actions().for_each(drop);
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        command(
+            &mut e,
+            Command::SetLeverage {
+                command: 99,
+                symbol: "PF_XBTUSD".into(),
+                leverage: 5.0,
+                side: None,
+            },
+        );
+        let out = e.drain_actions().collect::<Vec<_>>();
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
 }

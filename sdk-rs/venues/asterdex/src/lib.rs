@@ -9,6 +9,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
@@ -17,8 +18,6 @@ use sign::{Credentials, Version};
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
-const WATCHDOG_MS: f64 = 5_000.0;
-const SILENCE_MS: f64 = 20_000.0;
 const INTEREST_MS: f64 = 15_000.0;
 
 #[derive(Clone, Debug, Default)]
@@ -80,11 +79,11 @@ pub enum Pending {
     Clock(request::ClockRequest),
     ExchangeInfo {
         rows: Vec<(Market, MarketRule)>,
-        malformed: bool,
+        skipped: Vec<String>,
     },
     Daily {
         rows: Vec<Ticker>,
-        malformed: bool,
+        skipped: Vec<String>,
     },
     OpenInterest {
         rows: HashMap<String, f64>,
@@ -98,15 +97,26 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     next_request_id: u64,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_base_ms: 500.0,
+                ..Config::default()
+            }),
+            next_request_id: 0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -251,7 +261,7 @@ impl AsterDex {
             ArrayAt::Field("symbols"),
             Pending::ExchangeInfo {
                 rows: Vec::new(),
-                malformed: false,
+                skipped: Vec::new(),
             },
         );
     }
@@ -263,7 +273,7 @@ impl AsterDex {
             ArrayAt::Root,
             Pending::Daily {
                 rows: Vec::new(),
-                malformed: false,
+                skipped: Vec::new(),
             },
         );
     }
@@ -278,25 +288,15 @@ impl AsterDex {
         if self.public.socket.is_some() {
             return;
         }
+        self.public.supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
         self.public.open = false;
-    }
-
-    fn watch_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.watchdog = Some(cx.set_timer(WATCHDOG_MS));
     }
 
     fn close_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = None;
         self.public.open = false;
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.public.reconnect.is_none() {
-            let delay = (500.0 * 2f64.powi(self.public.attempts.min(6) as i32 - 1)).min(30_000.0);
-            self.public.reconnect = Some(cx.set_timer(delay));
-        }
+        self.public.supervisor.retry(cx);
     }
 
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
@@ -663,9 +663,7 @@ impl Venue for AsterDex {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
-        self.watch_public(cx);
+        self.public.supervisor.opened(cx);
         cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
         let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
         for (symbol, state) in &mut self.books {
@@ -683,7 +681,7 @@ impl Venue for AsterDex {
             return;
         }
         if self.public.socket == Some(socket) {
-            self.public.last_received = cx.now;
+            self.public.supervisor.received(cx.now);
             self.on_public_frame(cx, text);
         }
     }
@@ -778,11 +776,12 @@ impl Venue for AsterDex {
             Pending::Account(req) => self.on_account_response(cx, req, Ok(response)),
             Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
             Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
-            Pending::ExchangeInfo { rows, malformed } => {
-                if response.status != 200 || malformed {
+            Pending::ExchangeInfo { rows, skipped } => {
+                if response.status != 200 {
                     cx.log(LogLevel::Error, "Aster market bootstrap failed");
                     return;
                 }
+                log_skipped_rows(cx, "market", &skipped);
                 let mut markets = Vec::with_capacity(rows.len());
                 for (market, rule) in rows {
                     self.market_rules.insert(market.symbol.clone(), rule);
@@ -799,11 +798,12 @@ impl Venue for AsterDex {
                     self.get_streamed(cx, &path, ArrayAt::Root, pending);
                 }
             }
-            Pending::Daily { rows, malformed } => {
-                if response.status != 200 || malformed {
+            Pending::Daily { rows, skipped } => {
+                if response.status != 200 {
                     cx.log(LogLevel::Error, "Aster ticker bootstrap failed");
                     return;
                 }
+                log_skipped_rows(cx, "ticker", &skipped);
                 cx.store.set_tickers(rows);
                 self.request_interest(cx, true, None);
             }
@@ -845,14 +845,14 @@ impl Venue for AsterDex {
             Pending::Account(req) => self.on_account_item(cx, req, item),
             Pending::History(req) => self.on_history_item(cx, req, item),
             Pending::Clock(_) | Pending::Trade(_) => {}
-            Pending::ExchangeInfo { rows, malformed } => {
+            Pending::ExchangeInfo { rows, skipped } => {
                 match serde_json::from_str::<SymbolInfo>(item) {
                     Ok(row) if row.status == "TRADING" => rows.push(market_from_wire(row)),
                     Ok(_) => {}
-                    Err(_) => *malformed = true,
+                    Err(_) => skipped.push(row_symbol(item)),
                 }
             }
-            Pending::Daily { rows, malformed } => match serde_json::from_str::<Daily>(item) {
+            Pending::Daily { rows, skipped } => match serde_json::from_str::<Daily>(item) {
                 Ok(row) => rows.push(Ticker {
                     id: row.symbol.to_string(),
                     symbol: row.symbol.into_owned(),
@@ -862,7 +862,7 @@ impl Venue for AsterDex {
                     quote_volume: num::parse(&row.quote_volume),
                     ..Ticker::default()
                 }),
-                Err(_) => *malformed = true,
+                Err(_) => skipped.push(row_symbol(item)),
             },
             Pending::OpenInterest { rows, .. } => collect_interest(item, rows),
             Pending::Klines {
@@ -923,21 +923,20 @@ impl Venue for AsterDex {
         {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if let Some(socket) = self.public.socket {
-                if cx.now - self.public.last_received > SILENCE_MS {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect_public(cx),
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
                     cx.close(socket);
-                    self.close_public(cx);
-                } else {
-                    cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-                    self.watch_public(cx);
+                }
+                self.close_public(cx);
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    cx.send(socket, r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#);
                 }
             }
+            Tick::Handled | Tick::Unhandled => {}
         }
         if self.interest_timer == Some(timer) {
             self.interest_timer = None;
@@ -1085,31 +1084,63 @@ impl Venue for AsterDex {
     }
 }
 
+fn row_symbol(item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: std::borrow::Cow<'a, str>,
+    }
+    serde_json::from_str::<Identity>(item)
+        .map_or_else(|_| "<unidentified>".into(), |row| row.symbol.into_owned())
+}
+
+/// A malformed startup row is skipped, not fatal; one summary per read.
+fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
+    if !skipped.is_empty() {
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "Aster skipped {} malformed {kind} row(s): {}",
+                skipped.len(),
+                skipped.join(", ")
+            ),
+        );
+    }
+}
+
 fn reset_pending(pending: &mut Pending) {
     match pending {
         Pending::Account(account::Request::Positions {
             rows,
             settings,
+            skipped,
             invalid,
             ..
         }) => {
             rows.clear();
             settings.clear();
+            skipped.clear();
             *invalid = false;
         }
-        Pending::Account(account::Request::Orders { rows, invalid, .. }) => {
+        Pending::Account(account::Request::Orders {
+            rows,
+            skipped,
+            invalid,
+            ..
+        }) => {
             rows.clear();
+            skipped.clear();
             *invalid = false;
         }
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
-        Pending::ExchangeInfo { rows, malformed } => {
+        Pending::ExchangeInfo { rows, skipped } => {
             rows.clear();
-            *malformed = false;
+            skipped.clear();
         }
-        Pending::Daily { rows, malformed } => {
+        Pending::Daily { rows, skipped } => {
             rows.clear();
-            *malformed = false;
+            skipped.clear();
         }
         Pending::Klines {
             rows, malformed, ..

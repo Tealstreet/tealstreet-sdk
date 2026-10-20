@@ -6,6 +6,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
     PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId};
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,7 @@ pub(crate) const BUILDER_TESTNET: &str = "0xb0108ae4c07218ce320e5e22dd911a01c204
 pub(crate) enum BuilderState {
     #[default]
     Unknown,
+    Checking,
     Unauthorized,
     CapTooLow(u32),
     Authorized,
@@ -70,10 +72,12 @@ pub(crate) struct Account {
     ping_sent: bool,
     pong_ping: Option<(TimerId, SocketId, u64)>,
     request_id: u32,
-    health: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     tick: Option<TimerId>,
     login_retry: Option<TimerId>,
+    builder_retry: Option<TimerId>,
+    builder_attempt: u8,
+    pub builder_error: Option<String>,
     orders_timer: Option<TimerId>,
     positions_timer: Option<TimerId>,
     fills: HashSet<String>,
@@ -163,6 +167,51 @@ impl Account {
         }
     }
 }
+/// Snapshot rows that could not be mapped; known ids among them keep their stored copy.
+/// A row whose identity is unreadable could be any known record, so it retains the list.
+#[derive(Default)]
+pub(crate) struct Skipped {
+    count: usize,
+    first: String,
+    keep: Vec<String>,
+    opaque: bool,
+}
+impl Skipped {
+    fn add(&mut self, error: String, keep: Result<Option<String>, ()>) {
+        if self.count == 0 {
+            self.first = error;
+        }
+        self.count += 1;
+        match keep {
+            Ok(keep) => self.keep.extend(keep),
+            Err(()) => self.opaque = true,
+        }
+    }
+    fn log(&self, cx: &mut Cx<'_, Pending>, kind: &str) {
+        if self.count > 0 {
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "Skipped {} malformed GRVT {kind} row(s), retaining known copies: {}",
+                    self.count, self.first
+                ),
+            );
+        }
+    }
+}
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                idle_timeout_ms: 90_000.,
+                ping_interval_ms: Some(15_000.),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
+}
 pub(crate) enum Request {
     Login,
     Summary,
@@ -170,13 +219,13 @@ pub(crate) enum Request {
         revision: u64,
         issued_at: f64,
         rows: Vec<PositionRecord>,
-        failed: bool,
+        skipped: Skipped,
     },
     Orders {
         revision: u64,
         issued_at: f64,
         rows: Vec<DecodedOrder>,
-        failed: bool,
+        skipped: Skipped,
     },
     Leverage {
         revision: u64,
@@ -185,7 +234,7 @@ pub(crate) enum Request {
         failed: bool,
     },
     Builders {
-        cap: Option<u32>,
+        found: Option<BuilderState>,
         failed: bool,
     },
 }
@@ -203,20 +252,20 @@ impl Request {
     }
     pub(crate) fn reset(&mut self) {
         match self {
-            Self::Positions { rows, failed, .. } => {
+            Self::Positions { rows, skipped, .. } => {
                 rows.clear();
-                *failed = false;
+                *skipped = Skipped::default();
             }
-            Self::Orders { rows, failed, .. } => {
+            Self::Orders { rows, skipped, .. } => {
                 rows.clear();
-                *failed = false;
+                *skipped = Skipped::default();
             }
             Self::Leverage { rows, failed, .. } => {
                 rows.clear();
                 *failed = false;
             }
-            Self::Builders { cap, failed } => {
-                *cap = None;
+            Self::Builders { found, failed } => {
+                *found = None;
                 *failed = false;
             }
             _ => {}
@@ -313,9 +362,40 @@ struct BuilderWire<'a> {
         rename = "mfr",
         alias = "max_futures_fee_rate",
         alias = "max_fee_rate",
-        default
+        default,
+        deserialize_with = "lenient_cap"
     )]
-    cap: Option<Number>,
+    cap: Option<f64>,
+}
+/// An unreadable cap (null, "", text) reads as absent, which TS treats as authorized.
+fn lenient_cap<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Cap {
+        Number(Number),
+        Ignored(serde::de::IgnoredAny),
+    }
+    Ok(match Cap::deserialize(d)? {
+        Cap::Number(n) => Some(n.0),
+        Cap::Ignored(_) => None,
+    })
+}
+#[derive(Deserialize)]
+struct RowInstrument<'a> {
+    #[serde(borrow, rename = "i", alias = "instrument")]
+    instrument: Str<'a>,
+}
+#[derive(Deserialize)]
+struct RowIdentity<'a> {
+    #[serde(borrow, rename = "oi", alias = "order_id", default)]
+    id: Text<'a>,
+    #[serde(borrow, rename = "m", alias = "metadata", default)]
+    metadata: Option<RowClient<'a>>,
+}
+#[derive(Deserialize)]
+struct RowClient<'a> {
+    #[serde(borrow, rename = "co", alias = "client_order_id", default)]
+    client_id: Text<'a>,
 }
 #[derive(Deserialize)]
 struct OrderWire<'a> {
@@ -419,7 +499,8 @@ pub(crate) fn decode_order(text: &str, store: &Store, now: f64) -> Result<Decode
         return Err("Unsupported GRVT multi-leg order".into());
     }
     let leg = &wire.legs[0];
-    let market = market(store, &leg.instrument).ok_or("Unknown GRVT order instrument")?;
+    let market = market(store, &leg.instrument)
+        .ok_or_else(|| format!("Unknown GRVT order instrument {}", leg.instrument))?;
     let metadata = wire.metadata.unwrap_or_default();
     let native_id = (!wire.id.is_empty() && !matches!(&*wire.id, "0x00" | "0x0" | "0"))
         .then(|| wire.id.to_string());
@@ -513,7 +594,8 @@ pub(crate) fn decode_order(text: &str, store: &Store, now: f64) -> Result<Decode
 
 fn position(text: &str, store: &Store, now: f64) -> Result<PositionRecord, String> {
     let wire: PositionWire<'_> = serde_json::from_str(text).map_err(|_| "Invalid GRVT position")?;
-    let market = market(store, &wire.instrument).ok_or("Unknown GRVT position instrument")?;
+    let market = market(store, &wire.instrument)
+        .ok_or_else(|| format!("Unknown GRVT position instrument {}", wire.instrument))?;
     if wire.size.0 != 0.
         && (wire.entry.is_none()
             || wire.notional.is_none()
@@ -662,9 +744,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         self.login(cx);
     }
     pub(crate) fn account_defer(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
@@ -689,6 +769,7 @@ impl Grvt {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.authentication_failed
             || self.account.socket.is_some()
+            || self.account.supervisor.is_waiting()
             || self.account.trading_account_id.is_none()
         {
             return;
@@ -716,7 +797,7 @@ impl Grvt {
         self.account.socket = Some(socket);
         self.account.last_received = cx.now;
         self.account.authenticated = false;
-        self.account.health = Some(cx.set_timer(15_000.));
+        self.account.supervisor.connecting(cx);
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -724,6 +805,7 @@ impl Grvt {
         }
         self.cancel_pong_ping(cx);
         self.account.last_received = cx.now;
+        self.account.supervisor.opened(cx);
         self.account.healthy_since = None;
         self.account.sequences.clear();
         self.account.first_sequence.clear();
@@ -768,6 +850,7 @@ impl Grvt {
             is_full: bool,
         }
         self.account.authenticated = true;
+        self.account.supervisor.authenticated(cx);
         for stream in ["v1.order", "v1.position", "v1.fill"] {
             self.account.request_id += 1;
             cx.send(
@@ -798,12 +881,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some(timer) = self.account.reconnect.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
@@ -832,9 +910,7 @@ impl Grvt {
         if let Some(socket) = self.account.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.supervisor.cancel(cx);
         self.login(cx);
     }
     pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -848,11 +924,8 @@ impl Grvt {
         self.account.positions_revision += 1;
         self.account.sequences.clear();
         self.account.first_sequence.clear();
-        if let Some(timer) = self.account.health.take() {
-            cx.clear_timer(timer);
-        }
-        if !self.account.authentication_failed && self.account.reconnect.is_none() {
-            self.account.reconnect = Some(cx.set_timer(1_000.));
+        if !self.account.authentication_failed {
+            self.account.supervisor.retry(cx);
         }
         true
     }
@@ -881,7 +954,7 @@ impl Grvt {
                 revision: self.account.orders_revision,
                 issued_at: cx.now,
                 rows: vec![],
-                failed: false,
+                skipped: Skipped::default(),
             }),
         );
     }
@@ -903,7 +976,7 @@ impl Grvt {
                 revision: self.account.positions_revision,
                 issued_at: cx.now,
                 rows: vec![],
-                failed: false,
+                skipped: Skipped::default(),
             }),
         );
     }
@@ -967,13 +1040,25 @@ impl Grvt {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, failed, .. } => match position(item, cx.store, cx.now) {
+            Request::Positions { rows, skipped, .. } => match position(item, cx.store, cx.now) {
                 Ok(p) => rows.push(p),
-                Err(_) => *failed = true,
+                Err(error) => {
+                    let keep = serde_json::from_str::<RowInstrument<'_>>(item)
+                        .map(|row| {
+                            market(cx.store, &row.instrument)
+                                .map(|m| m.symbol.clone())
+                                .filter(|symbol| cx.store.position(symbol).is_some())
+                        })
+                        .map_err(|_| ());
+                    skipped.add(error, keep);
+                }
             },
-            Request::Orders { rows, failed, .. } => match decode_order(item, cx.store, cx.now) {
+            Request::Orders { rows, skipped, .. } => match decode_order(item, cx.store, cx.now) {
                 Ok(o) => rows.push(o),
-                Err(_) => *failed = true,
+                Err(error) => {
+                    let keep = self.stored_order_id(cx.store, item);
+                    skipped.add(error, keep);
+                }
             },
             Request::Leverage { rows, failed, .. } => {
                 match serde_json::from_str::<LeverageWire<'_>>(item) {
@@ -999,7 +1084,7 @@ impl Grvt {
                     _ => *failed = true,
                 }
             }
-            Request::Builders { cap, failed } => {
+            Request::Builders { found, failed } => {
                 match serde_json::from_str::<BuilderWire<'_>>(item) {
                     Ok(w) => {
                         let expected = if self.options.testnet {
@@ -1007,13 +1092,15 @@ impl Grvt {
                         } else {
                             BUILDER_MAINNET
                         };
-                        if w.address.eq_ignore_ascii_case(expected) {
-                            match w.cap {
-                                Some(n) if n.0 >= 0. && n.0 * 10_000. <= u32::MAX as f64 => {
-                                    *cap = Some((n.0 * 10_000.).round() as u32)
+                        if found.is_none() && w.address.eq_ignore_ascii_case(expected) {
+                            // As in TS, a matching row without a readable cap is authorized;
+                            // GRVT itself rejects an order whose builder fee exceeds the cap.
+                            *found = Some(match w.cap.map(|n| (n * 10_000.).round()) {
+                                Some(raw) if raw < 300. => {
+                                    BuilderState::CapTooLow(raw.max(0.) as u32)
                                 }
-                                _ => *failed = true,
-                            }
+                                _ => BuilderState::Authorized,
+                            });
                         }
                     }
                     Err(_) => *failed = true,
@@ -1021,6 +1108,34 @@ impl Grvt {
             }
             _ => {}
         }
+    }
+    fn stored_order_id(&self, store: &Store, item: &str) -> Result<Option<String>, ()> {
+        let row = serde_json::from_str::<RowIdentity<'_>>(item).map_err(|_| ())?;
+        let client = row.metadata.map(|m| m.client_id).unwrap_or_default();
+        let native = &*row.id;
+        if client.is_empty() && native.is_empty() {
+            return Err(());
+        }
+        if !client.is_empty() && store.order(&client).is_some() {
+            return Ok(Some(client.to_string()));
+        }
+        let matched = (!native.is_empty())
+            .then(|| {
+                store.orders().iter().find(|o| {
+                    o.id == native
+                        || self.account.native_ids.get(&o.id).map(String::as_str) == Some(native)
+                })
+            })
+            .flatten();
+        if let Some(order) = matched {
+            return Ok(Some(order.id.clone()));
+        }
+        // Unmatched is a foreign order only if every client-keyed order's native id is known.
+        let unmapped = store
+            .orders()
+            .iter()
+            .any(|o| o.client_order_id.is_some() && !self.account.native_ids.contains_key(&o.id));
+        if unmapped { Err(()) } else { Ok(None) }
     }
     fn remember_identity(&mut self, decoded: &DecodedOrder) {
         let previous = self.account.progress.get(&decoded.order.id);
@@ -1178,8 +1293,8 @@ impl Grvt {
         request: Request,
         response: Response<'_>,
     ) {
-        if crate::wire::check(&response).is_err() {
-            self.account_failed(cx, request, "GRVT private read rejected");
+        if let Err(error) = crate::wire::check(&response) {
+            self.account_failed(cx, request, &error);
             return;
         }
         match request {
@@ -1253,12 +1368,20 @@ impl Grvt {
                 revision,
                 issued_at,
                 rows,
-                failed,
+                skipped,
             } => {
                 self.account.positions_pending = false;
-                if !failed && revision == self.account.positions_revision {
-                    let seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
+                skipped.log(cx, "position");
+                if !skipped.opaque && revision == self.account.positions_revision {
+                    let mut seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
                     let mut accepted = Vec::with_capacity(rows.len());
+                    for id in skipped.keep {
+                        if seen.insert(id.clone())
+                            && let Some(previous) = cx.store.position(&id)
+                        {
+                            accepted.push(previous.clone());
+                        }
+                    }
                     for record in rows {
                         let time = record.time;
                         let position = record.position;
@@ -1318,23 +1441,25 @@ impl Grvt {
                     {
                         self.account.positions_timer = Some(cx.set_timer(500.));
                     }
-                    if failed {
-                        cx.log(
-                            LogLevel::Error,
-                            "Malformed GRVT positions; retaining previous positions",
-                        );
-                    }
                 }
             }
             Request::Orders {
                 revision,
                 issued_at,
                 rows,
-                failed,
+                skipped,
             } => {
                 self.account.orders_pending = false;
-                if !failed && revision == self.account.orders_revision {
+                skipped.log(cx, "order");
+                if !skipped.opaque && revision == self.account.orders_revision {
                     let mut orders = Vec::with_capacity(rows.len());
+                    for id in skipped.keep {
+                        if !orders.iter().any(|o: &Order| o.id == id)
+                            && let Some(previous) = cx.store.order(&id)
+                        {
+                            orders.push(previous.clone());
+                        }
+                    }
                     for mut decoded in rows {
                         self.preserve_local_order_fields(cx.store, &mut decoded);
                         if !self.accept_order(cx.store, &decoded) {
@@ -1362,12 +1487,6 @@ impl Grvt {
                         && self.account.orders_timer.is_none()
                     {
                         self.account.orders_timer = Some(cx.set_timer(1_000.));
-                    }
-                    if failed {
-                        cx.log(
-                            LogLevel::Error,
-                            "Malformed GRVT orders; retaining previous orders",
-                        );
                     }
                 }
             }
@@ -1449,17 +1568,16 @@ impl Grvt {
                     self.refresh_leverage(cx);
                 }
             }
-            Request::Builders { cap, failed } => {
-                self.account.builder = if failed {
-                    BuilderState::Unknown
-                } else {
-                    match cap {
-                        Some(n) if n >= 300 => BuilderState::Authorized,
-                        Some(n) => BuilderState::CapTooLow(n),
-                        None => BuilderState::Unauthorized,
-                    }
-                };
-            }
+            Request::Builders { found, failed } => match (found, failed) {
+                (None, true) => {
+                    self.builder_failed(cx, "malformed GRVT builder authorization list");
+                }
+                (found, _) => {
+                    self.account.builder = found.unwrap_or(BuilderState::Unauthorized);
+                    self.account.builder_error = None;
+                    self.builder_checked(cx);
+                }
+            },
         }
     }
     pub(crate) fn account_response_headers(
@@ -1493,17 +1611,49 @@ impl Grvt {
                 if let Some(socket) = self.account.socket.take() {
                     cx.close(socket);
                 }
-                if let Some(timer) = self.account.health.take() {
-                    cx.clear_timer(timer);
-                }
-                if let Some(timer) = self.account.reconnect.take() {
-                    cx.clear_timer(timer);
-                }
+                self.account.supervisor.cancel(cx);
                 if self.account.started {
                     self.connect_private(cx);
                 }
             }
         }
+    }
+    pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.builder == BuilderState::Checking {
+            return;
+        }
+        self.account.builder = BuilderState::Checking;
+        self.account.builder_attempt = 0;
+        self.send_builder_check(cx);
+    }
+    // TS budget: three tries with 2s/4s backoff, so queued writes are not held for long.
+    fn builder_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        if self.account.builder_attempt < 2 && !self.account.authentication_failed {
+            self.account.builder_attempt += 1;
+            let delay = 2_000. * f64::from(self.account.builder_attempt);
+            self.account.builder_retry = Some(cx.set_timer(delay));
+            return;
+        }
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "GRVT builder authorization check failed; rechecking before next order: {error}"
+            ),
+        );
+        self.account.builder = BuilderState::Unknown;
+        self.account.builder_error = Some(error.to_owned());
+        self.builder_checked(cx);
+    }
+    fn send_builder_check(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.request(
+            cx,
+            BUILDERS,
+            "{}".into(),
+            Job::Account(Request::Builders {
+                found: None,
+                failed: false,
+            }),
+        );
     }
     fn fail_waiting(&mut self, cx: &mut Cx<'_, Pending>) {
         for pending in std::mem::take(&mut self.account.waiting) {
@@ -1532,15 +1682,7 @@ impl Grvt {
         if self.account.trading_account_id.is_some() {
             self.account.started = true;
             self.refresh_leverage(cx);
-            self.request(
-                cx,
-                BUILDERS,
-                "{}".into(),
-                Job::Account(Request::Builders {
-                    cap: None,
-                    failed: false,
-                }),
-            );
+            self.check_builder(cx);
             self.connect_private(cx);
             self.refresh_positions(cx);
             self.refresh_orders(cx);
@@ -1557,7 +1699,7 @@ impl Grvt {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        _error: &str,
+        error: &str,
     ) {
         match request {
             Request::Login => {
@@ -1593,7 +1735,10 @@ impl Grvt {
                     self.account.leverage_pending = false;
                 }
             }
-            Request::Builders { .. } => self.account.builder = BuilderState::Unknown,
+            Request::Builders { .. } => {
+                self.builder_failed(cx, error);
+                return;
+            }
         }
         cx.log(
             LogLevel::Error,
@@ -1610,6 +1755,7 @@ impl Grvt {
             return false;
         }
         self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         self.account.ping_sent = false;
         if text == "pong" {
             self.cancel_pong_ping(cx);
@@ -1818,6 +1964,11 @@ impl Grvt {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.builder_retry == Some(timer) {
+            self.account.builder_retry = None;
+            self.send_builder_check(cx);
+            return true;
+        }
         if self
             .account
             .pong_ping
@@ -1835,24 +1986,27 @@ impl Grvt {
         } else if self.account.login_retry == Some(timer) {
             self.account.login_retry = None;
             self.login(cx);
-        } else if self.account.health == Some(timer) {
-            self.account.health = None;
-            if let Some(socket) = self.account.socket {
-                let idle = cx.now - self.account.last_received;
-                if idle >= 90_000. {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                } else {
-                    if idle >= 60_000. && !self.account.ping_sent {
+        } else if self.account.supervisor.owns_timer(timer) {
+            match self.account.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect_private(cx),
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = self.account.socket {
+                        cx.close(socket);
+                        self.account_close(cx, socket);
+                    }
+                }
+                SocketTick::Ping
+                    if self.account.authenticated
+                        && cx.now - self.account.last_received >= 60_000.
+                        && !self.account.ping_sent =>
+                {
+                    if let Some(socket) = self.account.socket {
                         cx.send(socket, "ping");
                         self.account.ping_sent = true;
                     }
-                    self.account.health = Some(cx.set_timer(15_000.));
                 }
+                _ => {}
             }
-        } else if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.connect_private(cx);
         } else if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.summary(cx);

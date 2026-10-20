@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import {
   fixBlofinAccount,
@@ -26,6 +27,7 @@ import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
+import { compareCoinbaseSpotMidpoints } from './coinbase-spot-midpoints.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -329,6 +331,10 @@ const KNOWN_TS_FIXES = {
   // Rust also fences lagging order-repair rows with native timestamps/exact fill
   // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
   // adversarial native tests cover this without rewriting TS replay output.
+  // Rust preserves accepted IDs from partial native/sequential placement batches,
+  // continues independent orders after rejection, surfaces failed protection at
+  // Error level, retains structured rejection reasons and sends integer leverage.
+  // These TS defects have native regressions; no replay normalization is applied.
   paradex() {},
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping
@@ -341,7 +347,11 @@ const KNOWN_TS_FIXES = {
   // both bracket siblings preserved during parent cancel/replace amendments.
   // Price-only amendments keep the observed residual quantity; invalid/no-op
   // amendments reject before cancellation and filled sources are not replaced.
-  apexomni: [],
+  // TS logs native login rejection and has no auth-completion deadline.
+  // Native failure regressions verify closure/backoff without altering replay output.
+  apexomni: ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'],
+  // TS only reports public/auth errors; heartbeat responses can mask missing auth.
+  cryptocom: ['Close rejected private authentication and enforce an independent auth deadline while preserving server heartbeat replies.'],
   kraken: {
     output: fixKrakenOutput,
     fixes: [
@@ -409,6 +419,7 @@ const KNOWN_TS_FIXES = {
       'Reject API key index 255, the query-all sentinel, for signing.',
       'Support the full official int16 market domain; TS leverage still rejects active IDs above 254.',
       'Acknowledge retaining the only supported net position mode; TS inherits an unsupported method.',
+      'Price-only cancel/replace amendments re-place the remaining quantity after partial execution; TS re-places the original amount and increases exposure.',
     ],
   },
   // WOO repairs live in the TS reference itself; no result normalization:
@@ -424,7 +435,8 @@ const KNOWN_TS_FIXES = {
   // clear synthetic flat marginSize when an authoritative holding reopens;
   // paced, complete V1 income with signed fees and account aggregate scope.
   // Rust additionally walks V3 fill time windows (TS still reads one page).
-  woo: [],
+  // TS only emits an error for auth.success=false; transport pongs are not auth.
+  woo: ['Close rejected private authentication and bound pending authentication independently of pongs.'],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
@@ -436,11 +448,20 @@ const KNOWN_TS_FIXES = {
   // Fresh TS private rows now retain native/cached TIF and default to GTC,
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
-  bitrue() {},
+  bitrue() {
+    // Confirmed leverage survives flat/empty account metadata; TS clears that
+    // rail and blocks fresh-account orders. Native regression tests cover this
+    // correction; no account values or command results are normalized here.
+    // Flat rows may omit leverage until explicitly set; balance still commits.
+    // Cancellation continues after failures, including child fallbacks after a
+    // failed parent, and reports each failed ID. TS stops subsequent chunks.
+  },
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.
     notes: [
+      // TS only logs event=login failures; authenticated liveness needs its own deadline.
+      'Close rejected private login and enforce an auth deadline independent of transport pongs.',
       'Reject book sequence gaps and legacy checksum failures.',
       'Preserve account state on failed business-error reads.',
       'Filter all-product UTA streams to this futures product.',
@@ -465,9 +486,20 @@ const KNOWN_TS_FIXES = {
   },
 
   blofin: (ts) => {
+    // TS recognizes successful login only; rejection/pongs can leave auth pending.
+    // Rust closes/backoffs rejected login and enforces an independent deadline.
+    // Native failure tests prove this; no replay liveness output is rewritten.
     if (ts.account) fixBlofinAccount(ts.account);
   },
-  mexc: () => {
+  mexc: (ts) => {
+    // The official sub.tickers sparse all-contract feed prevents stale prices
+    // past the first 100 detailed subscriptions. Add that exact expected TS
+    // subscription; prices and Rust output remain independently compared.
+    ts.subscriptions = withMexcMiniTickerSubscription(ts.subscriptions);
+    // A singleton skips TS placeOrders' market-maker batch probe; its exact
+    // rejected TS-only attempt is declared in the tape, not normalized away.
+    // TS only logs rejected rs.login; Rust closes/backoffs and bounds auth
+    // independently of rs.ping. Native regressions cover the failure path.
     // Full incremental depth, rather than replacing a 20-level snapshot.
     // Sized stops choose the closing leverage rail even without reduceOnly.
     // Bracket prices reach the native entry; unsupported opening triggers reject.
@@ -513,6 +545,9 @@ const KNOWN_TS_FIXES = {
   // totals, plain-trigger/caller-ID whole-batch rejection, post-only amendment,
   // cumulative-fill/terminal replay fences and malformed openOrders retention.
   // TS cancel-all marks already FILLED rows canceled; use explicit tape events.
+  // Trading audit: derivatives require x=TRADE, deduplicate native trade IDs,
+  // and report genuine late trades after stop-trigger EXPIRED/cancellation.
+  // Native regressions cover those adverse packets; no fill is normalized here.
   binanceinverse: (ts) => fixBinanceFilledStatus(ts.account, tapeRecords, false),
   // Other documented Binance variant fixes have native regression proofs:
   // - TS split lots divide the whole request and can round away quantity;
@@ -657,6 +692,12 @@ const KNOWN_TS_FIXES = {
     'composite capped or stalled product histories fail explicitly as incomplete',
   ],
 
+  // Trading audit: cancel/replace waits for cancellation evidence, subtracts
+  // racing cumulative fills, and refuses unknown-order replacement. Successful
+  // writes fence old USD-M/PM snapshots; generated client-ID RNG errors reject.
+  // Derivative lifecycle packets cannot emit fills; native trade IDs dedupe
+  // retries even after reconnect. Native race tests pin these TS corrections;
+  // this entry adds no output or request rewrite for the audit fixes.
   binance: (ts, rust) => {
     // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
     // stale and skipping restoration; rejected writes were swallowed. Reference
@@ -672,6 +713,10 @@ const KNOWN_TS_FIXES = {
   // the linear feed; malformed supplied option WS Greeks coerced to zero
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
+  // Trading audit: deduplicate native execId and fence acknowledged Demo/Hyro
+  // cancellations behind REST reads issued before, during or after the write,
+  // with bounded native terminal retention against stale replicas. Native tests
+  // exercise equal-time and late-response races without normalization.
   bybit: (ts, rust) => {
     if (!ts.account) return;
     const output = ts;
@@ -1041,7 +1086,14 @@ for (let run = 0; run < runs; run++) {
       `HTTP write sequence run ${run + 1}: ts=${JSON.stringify(tsWrites)} rust=${JSON.stringify(rustWrites)}`,
     );
   compare('market', ts.markets, rust.markets);
-  compare('ticker', ts.tickers, rust.tickers);
+  // Prove cosmetic spot-estimate midpoints against native decimal inputs.
+  // Neither output is rewritten; private and financial comparisons stay exact.
+  const midpoints = !isPrivate && ['coinbase', 'coinbasespot'].includes(values.venue)
+    ? compareCoinbaseSpotMidpoints({ venue: values.venue, records: tapeRecords, ts, rust })
+    : undefined;
+  if (midpoints?.equivalent)
+    console.log(`(Coinbase public spot decimal midpoints run ${run + 1}: ${JSON.stringify(midpoints.exceptions)})`);
+  else compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
     if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
       differences.push(`book ${symbol} differs`);

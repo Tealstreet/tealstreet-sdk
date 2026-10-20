@@ -135,6 +135,10 @@ impl Okx {
                 price,
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
+            Command::FetchLeverage { command, symbol } => {
+                self.fetch_leverage(cx, command, symbol);
+                return;
+            }
             Command::SetMarginType { command, .. } => {
                 cx.done(command, Err("Only cross mode is supported".into()));
                 return;
@@ -143,6 +147,7 @@ impl Okx {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -159,7 +164,11 @@ impl Okx {
                     if !leverage.is_finite() {
                         return Err("leverage must be finite".into());
                     }
-                    let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                    let leverage = num::clamp_leverage(
+                        leverage,
+                        m.limits.leverage.min,
+                        m.limits.leverage.max,
+                    )?;
                     let step = step(
                         "/api/v5/account/set-leverage",
                         &Leverage {
@@ -174,7 +183,11 @@ impl Okx {
                 })();
                 (command, result)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Mode {
@@ -775,6 +788,11 @@ impl Okx {
         }
         match job.finish {
             Finish::Leverage(symbol, leverage) => {
+                *self
+                    .account
+                    .leverage_versions
+                    .entry(symbol.clone())
+                    .or_default() += 1;
                 cx.store.update_setting(&symbol, |s| {
                     s.leverage = leverage;
                     s.margin_type = Some(MarginType::Cross);
@@ -783,6 +801,7 @@ impl Okx {
                 cx.done(command, Ok("[]".into()));
             }
             Finish::Mode(hedged) => {
+                self.account.mode_version += 1;
                 cx.store.set_hedged(hedged);
                 self.account_after_settings(cx);
                 cx.done(command, Ok("[]".into()));

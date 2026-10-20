@@ -644,10 +644,11 @@ The worker router forwards it alongside the existing error string and
 `outcome: 'unknown'`; known partial venue rejections retain accepted order IDs
 without becoming unknown outcomes. Neither serialization nor timeout authorizes
 a retry or reconstructs missing native-generated IDs.
-The outer executor honors safe-cex's object-level `errorReported` state before
-printing a thrown failure. The exchange error listener may already have printed
-it in a standalone session or worker stream. The result still carries failure
-status and all allowed outcome details; unreported failures print once here.
+The outer executor always prints a thrown failure as the command's result, even
+when safe-cex already emitted it as an exchange `'error'`: that listener filters
+suppressed categories, shows auth failures once per account and dedupes repeats,
+so it cannot guarantee the user sees a re-run rejection. The worker router skips
+its own extra `exec-log` because the executor line already reached the stream.
 
 This outer-executor contract covers errors that propagate from awaited order
 calls. Commands which aggregate or log errors internally (global close, swarm,

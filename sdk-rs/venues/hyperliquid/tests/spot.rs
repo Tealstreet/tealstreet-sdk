@@ -486,6 +486,7 @@ fn spot_fixed_settings_do_not_issue_perpetual_leverage_actions() {
             command: 1,
             symbol: "PURR/USDC".into(),
             leverage: 2.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 1,

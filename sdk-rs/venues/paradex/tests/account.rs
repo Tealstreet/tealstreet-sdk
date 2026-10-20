@@ -185,7 +185,7 @@ fn fills_are_deduplicated_by_execution_identity_across_reconnects() {
     assert_eq!(fills(&mut h), 1);
     h.e.handle(h.now, Event::WsClosed { socket, code: 1006 });
     h.collect();
-    h.timer(h.now + 1_000.);
+    h.reconnect();
     let newer = h
         .actions
         .iter()
@@ -952,4 +952,12 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         "completion retains one paused registration"
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn private_supervisor_bounds_handshake_and_preserves_backoff_after_open() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    socket_checks::flaps(h.e, socket, h.now);
 }

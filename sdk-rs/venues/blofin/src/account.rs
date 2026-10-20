@@ -2,6 +2,7 @@
 use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Default)]
@@ -23,6 +24,8 @@ pub struct Source {
 }
 #[derive(Default)]
 pub(crate) struct Account {
+    pub(crate) supervisor: Supervisor,
+    authenticated: bool,
     pub connection: Connection,
     pub margin: Option<MarginType>,
     pub mode_loaded: bool,
@@ -44,6 +47,18 @@ pub(crate) struct Account {
     auth_failures: u32,
 }
 impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
+
     fn remember_terminal(&mut self, id: &str) {
         if self.terminal.insert(id.to_owned()) {
             self.terminal_order.push_back(id.to_owned());
@@ -261,23 +276,26 @@ impl Blofin {
         };
         self.account.connection.socket =
             Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Private));
-        self.account.connection.last_received = cx.now;
-        self.account.connection.watchdog = Some(cx.set_timer(5_000.0));
+        self.account.authenticated = false;
+        self.account.supervisor.connecting(cx);
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.account.supervisor.opened(cx);
         let nonce = match safe_cex_crypto::uuid::uuid() {
             Ok(n) => n,
             Err(e) => {
                 cx.log(LogLevel::Error, e);
+                cx.close(socket);
+                self.private_close(cx, socket);
                 return;
             }
         };
-        let timestamp = cx.now.floor();
+        let timestamp = cx.now.floor() as u64;
         let sign = sign::signature(
             self.options.secret.as_deref().unwrap_or(""),
             "/users/self/verify",
             "GET",
-            &num::format(timestamp),
+            &timestamp.to_string(),
             &nonce,
             "",
         );
@@ -286,7 +304,7 @@ impl Blofin {
         struct Login<'a> {
             api_key: &'a str,
             passphrase: &'a str,
-            timestamp: f64,
+            timestamp: u64,
             sign: String,
             nonce: String,
         }
@@ -310,8 +328,7 @@ impl Blofin {
             .unwrap(),
         );
         self.account.connection.open = true;
-        self.account.connection.attempts = 0;
-        self.account.connection.last_received = cx.now;
+
         cx.send(socket, "ping");
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -627,6 +644,32 @@ impl Blofin {
                 s.leverage = s.buy_leverage.or(s.sell_leverage).unwrap_or(p.leverage);
                 s.margin_type = p.margin_type;
             });
+        }
+        // Position margin overrides apply only while that symbol is open. A
+        // close (including omission from a full snapshot) restores the account
+        // default without losing the symbol's last confirmed leverage.
+        if let Some(margin) = self.account.margin {
+            let open: HashSet<_> = positions
+                .iter()
+                .filter(|position| position.contracts > 0.0)
+                .map(|position| position.symbol.as_str())
+                .collect();
+            let closed: Vec<_> = cx
+                .store
+                .markets()
+                .iter()
+                .filter(|market| !open.contains(market.symbol.as_str()))
+                .filter(|market| {
+                    cx.store
+                        .setting(&market.symbol)
+                        .is_some_and(|setting| setting.margin_type != Some(margin))
+                })
+                .map(|market| market.symbol.clone())
+                .collect();
+            for symbol in closed {
+                cx.store
+                    .update_setting(&symbol, |setting| setting.margin_type = Some(margin));
+            }
         }
         cx.store.set_positions(
             positions
@@ -1105,7 +1148,7 @@ impl Blofin {
         socket: SocketId,
         text: &str,
     ) {
-        self.account.connection.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -1122,8 +1165,15 @@ impl Blofin {
                     LogLevel::Error,
                     format!("BloFin login rejected: {}", message.code),
                 );
+                cx.close(socket);
+                self.private_close(cx, socket);
                 return;
             }
+            if self.account.authenticated {
+                return;
+            }
+            self.account.authenticated = true;
+            self.account.supervisor.authenticated(cx);
             for channel in ["account", "positions", "orders", "orders-algo"] {
                 cx.send(
                     socket,
@@ -1142,10 +1192,17 @@ impl Blofin {
         match message.arg.channel.as_ref() {
             "orders" | "orders-algo" => {
                 if let Ok(Data { data: rows }) =
-                    serde_json::from_str::<Data<Vec<OrderRow<'_>>>>(text)
+                    serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
                     self.account.orders_revision += 1;
-                    for row in rows {
+                    for raw in rows {
+                        let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
+                            cx.log(
+                                LogLevel::Error,
+                                "Malformed BloFin order row; retaining known order",
+                            );
+                            continue;
+                        };
                         let orders = self.map_orders(cx, &row);
                         if matches!(row.state.as_ref(), "partially_filled" | "filled")
                             && row.average_price.0 > 0.0
@@ -1194,21 +1251,62 @@ impl Blofin {
             }
             "positions" => {
                 if let Ok(Data { data: rows }) =
-                    serde_json::from_str::<Data<Vec<PositionRow<'_>>>>(text)
+                    serde_json::from_str::<Data<Vec<&serde_json::value::RawValue>>>(text)
                 {
-                    let positions: Vec<_> = rows
-                        .iter()
-                        .filter_map(|p| self.map_position(cx, p))
-                        .collect();
+                    let mut positions = Vec::new();
+                    let mut malformed = HashSet::new();
+                    let mut used = 0.0;
+                    let mut upnl = 0.0;
+                    for raw in rows {
+                        match serde_json::from_str::<PositionRow<'_>>(raw.get()) {
+                            Ok(row) => {
+                                // Account totals cover every native position, including
+                                // instruments outside the tradable market catalog. Sum
+                                // raw PnL before any per-market display rounding.
+                                used += row.maintenance_margin.0;
+                                upnl += row.unrealized_pnl.0;
+                                if let Some(position) = self.map_position(cx, &row) {
+                                    positions.push(position);
+                                }
+                            }
+                            Err(_) => {
+                                cx.log(LogLevel::Error, "Malformed BloFin position row; retaining known position and balance totals");
+                                #[derive(serde::Deserialize)]
+                                struct Identity<'a> {
+                                    #[serde(borrow, rename = "instId")]
+                                    inst_id: Str<'a>,
+                                }
+                                let Ok(identity) = serde_json::from_str::<Identity<'_>>(raw.get())
+                                else {
+                                    // With no identity, any missing known position might be
+                                    // the malformed row. Preserve this authoritative snapshot.
+                                    return;
+                                };
+                                let Some(market) = cx.store.market_by_id(&identity.inst_id) else {
+                                    return;
+                                };
+                                malformed.insert(market.symbol.clone());
+                            }
+                        }
+                    }
+                    // Preserve the complete affected symbol, including both hedge legs.
+                    positions.retain(|position| !malformed.contains(&position.symbol));
+                    positions.extend(
+                        cx.store
+                            .positions()
+                            .iter()
+                            .filter(|position| malformed.contains(&position.symbol))
+                            .cloned(),
+                    );
                     self.account.positions_revision += 1;
                     self.account.balance_revision += 1;
-                    let used = round_usd(rows.iter().map(|p| p.maintenance_margin.0).sum());
-                    let upnl = round_usd(rows.iter().map(|p| p.unrealized_pnl.0).sum());
                     self.commit_positions(cx, positions);
-                    let mut balance = cx.store.balance().clone();
-                    balance.used = used;
-                    balance.upnl = upnl;
-                    cx.store.set_balance(balance);
+                    if malformed.is_empty() {
+                        let mut balance = cx.store.balance().clone();
+                        balance.used = round_usd(used);
+                        balance.upnl = round_usd(upnl);
+                        cx.store.set_balance(balance);
+                    }
                 }
             }
             "account" => {
@@ -1275,38 +1373,29 @@ impl Blofin {
         let c = &mut self.account.connection;
         c.socket = None;
         c.open = false;
-        if let Some(timer) = c.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        c.attempts += 1;
-        c.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(c.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        self.account.supervisor.retry(cx);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.connection.reconnect == Some(timer) {
-            self.account.connection.reconnect = None;
-            self.private_connect(cx);
-            return true;
-        }
-        if self.account.connection.watchdog == Some(timer) {
-            self.account.connection.watchdog = None;
-            if cx.now - self.account.connection.last_received >= 20_000.0 {
+        match self.account.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => (),
+            SocketTick::Reconnect => {
+                self.private_connect(cx);
+                return true;
+            }
+            SocketTick::Ping => {
+                if let Some(socket) = self.account.connection.socket {
+                    cx.send(socket, "ping");
+                }
+                return true;
+            }
+            SocketTick::TimedOut(_) => {
                 if let Some(socket) = self.account.connection.socket {
                     cx.close(socket);
                     self.private_close(cx, socket);
                 }
-            } else {
-                if let Some(socket) = self
-                    .account
-                    .connection
-                    .socket
-                    .filter(|_| self.account.connection.open)
-                {
-                    cx.send(socket, "ping");
-                }
-                self.account.connection.watchdog = Some(cx.set_timer(5_000.0));
+                return true;
             }
-            return true;
+            SocketTick::Handled => return true,
         }
         if self.account.tick == Some(timer) {
             self.account.tick = None;

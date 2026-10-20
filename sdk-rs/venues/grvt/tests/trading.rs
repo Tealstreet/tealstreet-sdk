@@ -1,6 +1,6 @@
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
+    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId, TimerId,
 };
 use safe_cex_venue_grvt::{Grvt, Options};
 use serde::Deserialize;
@@ -13,8 +13,18 @@ fn boot() -> Engine<Grvt> {
 fn boot_with_socket() -> (Engine<Grvt>, SocketId) {
     boot_with_catalog(CATALOG)
 }
+const AUTHORIZED: &str = r#"{"results":[{"builder_account_id":"0xee8f3559f298fffa79b8253437969d15b5dccff3","max_futures_fee_rate":"0.03"}]}"#;
 fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId) {
+    let (e, socket, _) = boot_with_builders(catalog, Some(AUTHORIZED));
+    (e, socket)
+}
+/// `None` leaves the startup builder check unanswered and returns it.
+fn boot_with_builders(
+    catalog: &str,
+    builders: Option<&str>,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>) {
     let mut private_socket = None;
+    let mut held = None;
     let mut e = Engine::new(Grvt::new(Options {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
@@ -50,10 +60,11 @@ fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId) {
                 r#"{"r":{"te":"1000","ts2":"1000","tu":"0","sas":[{"si":"9007199254740993"}]}}"#,
             )
         } else if request.url.ends_with("get_authorized_builders") {
-            (
-                "",
-                r#"{"results":[{"builder_account_id":"0xee8f3559f298fffa79b8253437969d15b5dccff3","max_futures_fee_rate":"0.03"}]}"#,
-            )
+            let Some(builders) = builders else {
+                held = Some(request);
+                continue;
+            };
+            ("", builders)
         } else if request.url.ends_with("get_all_initial_leverage") {
             ("", r#"{"r":[{"i":"BTC_USDT_Perp","l":"10"}]}"#)
         } else if request.url.ends_with("open_orders") {
@@ -85,7 +96,7 @@ fn boot_with_catalog(catalog: &str) -> (Engine<Grvt>, SocketId) {
         }
     }
     assert!(pending.is_empty());
-    (e, private_socket.expect("GRVT private socket"))
+    (e, private_socket.expect("GRVT private socket"), held)
 }
 fn authenticated() -> (Engine<Grvt>, SocketId) {
     let (mut engine, socket) = boot_with_socket();
@@ -422,6 +433,7 @@ fn retired_product_identities_reject_every_symbol_write_without_touching_perpetu
                     command: 35,
                     symbol,
                     leverage: 5.,
+                    side: None,
                 },
             ] {
                 let actions = command(&mut e, request);
@@ -916,6 +928,7 @@ fn leverage_changes_only_on_explicit_success() {
                 command: 11,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",
@@ -933,6 +946,7 @@ fn leverage_changes_only_on_explicit_success() {
                 command: 12,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",
@@ -1140,6 +1154,7 @@ fn old_leverage_read_cannot_overwrite_a_successful_mutation() {
                 command: 21,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",
@@ -1469,5 +1484,228 @@ fn authentication_resend_rechecks_execution_progress_for_pending_verify_and_plac
                 .contains("execution")
         );
         assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order")||r.url.ends_with("/order"))));
+    }
+}
+const PROXY_REJECTED: &str =
+    r#"{"code":1008,"message":"Request IP is not whitelisted","status":403}"#;
+fn timer_at(actions: &[Action], at: f64) -> TimerId {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing timer at {at}"))
+}
+/// Fails the held check and both TS-budget retries (2s, then 4s); returns the final actions.
+fn exhaust_builder_check(e: &mut Engine<Grvt>, first: HttpRequest) -> Vec<Action> {
+    assert_eq!(first.timeout_ms, Some(10_000));
+    let mut check = first;
+    for (attempt, delay) in [(1, 2_000.), (2, 4_000.)] {
+        let actions = reply(e, &check, 403, PROXY_REJECTED);
+        assert!(
+            !actions.iter().any(
+                |a| matches!(a, Action::Http(r) if r.url.ends_with("get_authorized_builders"))
+            ),
+            "attempt {attempt} retried immediately instead of backing off"
+        );
+        let timer = timer_at(&actions, NOW + 3. + delay);
+        e.handle(NOW + 3. + delay, Event::TimerFired { timer });
+        check = http(e.drain_actions().collect(), "get_authorized_builders");
+    }
+    reply(e, &check, 403, PROXY_REJECTED)
+}
+#[test]
+fn failed_builder_check_retries_within_budget_then_names_the_cause_and_rechecks() {
+    let (mut e, _, held) = boot_with_builders(CATALOG, None);
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 40,
+            orders: vec![opts()],
+        },
+    );
+    assert!(
+        done(&actions, 40).is_none(),
+        "order rejected while the check is in flight"
+    );
+    let actions = exhaust_builder_check(&mut e, held.unwrap());
+    let error = done(&actions, 40).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("could not be checked"), "{error}");
+    assert!(error.contains("code 1008"), "{error}");
+    assert!(error.contains("Request IP is not whitelisted"), "{error}");
+    let mut next = opts();
+    next.client_order_id = Some("43".into());
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 41,
+            orders: vec![next],
+        },
+    );
+    assert!(
+        done(&actions, 41).is_none(),
+        "failed check was cached for the session"
+    );
+    let check = http(actions, "get_authorized_builders");
+    let create = http(reply(&mut e, &check, 200, AUTHORIZED), "create_order");
+    assert_eq!(body(&create).o.bf, "0.03");
+}
+#[test]
+fn cancel_queued_behind_a_held_place_runs_in_fifo_order_after_the_check() {
+    let (mut e, _, held) = boot_with_builders(CATALOG, None);
+    seed(&mut e);
+    let mut actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 48,
+            orders: vec![opts()],
+        },
+    );
+    actions.extend(command(
+        &mut e,
+        Command::CancelOrders {
+            command: 49,
+            ids: vec!["42".into()],
+        },
+    ));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order"))),
+        "write overtook the held place"
+    );
+    let actions = reply(&mut e, &held.unwrap(), 200, AUTHORIZED);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("cancel_order")))
+    );
+    let create = http(actions, "create_order");
+    let actions = reply(&mut e, &create, 200, r#"{"r":{"oi":"0x00"}}"#);
+    assert!(done(&actions, 48).unwrap().is_ok());
+    http(actions, "cancel_order");
+}
+#[test]
+fn matching_builder_row_without_fee_cap_is_authorized() {
+    let (mut e, _, _) = boot_with_builders(
+        CATALOG,
+        Some(r#"{"r":[{"ba":"0xee8f3559f298fffa79b8253437969d15b5dccff3"}]}"#),
+    );
+    http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 44,
+                orders: vec![opts()],
+            },
+        ),
+        "create_order",
+    );
+}
+#[test]
+fn builder_fee_cap_below_required_still_rejects() {
+    let (mut e, _, _) = boot_with_builders(
+        CATALOG,
+        Some(r#"{"r":[{"ba":"0xee8f3559f298fffa79b8253437969d15b5dccff3","mfr":"0.01"}]}"#),
+    );
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 45,
+            orders: vec![opts()],
+        },
+    );
+    let error = done(&actions, 45).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("cap is below 300"), "{error}");
+}
+#[test]
+fn definitive_rejection_surfaces_grvt_message_without_reconcile_advice() {
+    let mut e = boot();
+    let r = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 46,
+                orders: vec![opts()],
+            },
+        ),
+        "create_order",
+    );
+    let actions = reply(
+        &mut e,
+        &r,
+        400,
+        r#"{"code":2001,"message":"Insufficient margin","status":400}"#,
+    );
+    let error = done(&actions, 46).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("code 2001"), "{error}");
+    assert!(error.contains("Insufficient margin"), "{error}");
+    assert!(!error.contains("reconcile"), "{error}");
+}
+#[test]
+fn gateway_failure_on_create_keeps_reconcile_advice() {
+    let mut e = boot();
+    let r = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 47,
+                orders: vec![opts()],
+            },
+        ),
+        "create_order",
+    );
+    let actions = reply(&mut e, &r, 502, "<html>bad gateway</html>");
+    let error = done(&actions, 47).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains("reconcile GRVT client order ID 9223372036854775807"),
+        "{error}"
+    );
+}
+#[test]
+fn unreadable_builder_fee_cap_on_matching_row_is_authorized() {
+    for cap in [r#""""#, r#""n/a""#, "null", "{}"] {
+        let (mut e, _, _) = boot_with_builders(
+            CATALOG,
+            Some(&format!(
+                r#"{{"r":[{{"ba":"0xee8f3559f298fffa79b8253437969d15b5dccff3","mfr":{cap}}}]}}"#
+            )),
+        );
+        http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 50,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+    }
+}
+#[test]
+fn null_or_non_string_rejection_message_keeps_the_grvt_code() {
+    for message in ["null", "42", r#"{"x":1}"#] {
+        let mut e = boot();
+        let r = http(
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 51,
+                    orders: vec![opts()],
+                },
+            ),
+            "create_order",
+        );
+        let actions = reply(
+            &mut e,
+            &r,
+            400,
+            &format!(r#"{{"code":2001,"message":{message},"status":400}}"#),
+        );
+        let error = done(&actions, 51).unwrap().as_ref().unwrap_err();
+        assert!(error.contains("code 2001"), "{message}: {error}");
+        assert!(!error.contains("reconcile"), "{message}: {error}");
     }
 }

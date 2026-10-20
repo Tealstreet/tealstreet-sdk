@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, PredictionMarket, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -69,13 +70,24 @@ pub enum Pending {
         invalid: bool,
     },
 }
-#[derive(Default)]
 pub(crate) struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     awaiting_pong: bool,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            awaiting_pong: false,
+            supervisor: Supervisor::new(Config {
+                ping_interval_ms: Some(10_000.),
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct BookState {
@@ -264,9 +276,10 @@ impl Polymarket {
     }
     pub(crate) fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
         let c = &mut self.connections[index];
-        if c.socket.is_some() {
+        if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
+        c.supervisor.connecting(cx);
         c.socket = Some(cx.connect_feed(
             SOCKETS[index],
             if index == 0 {
@@ -596,6 +609,7 @@ impl Venue for Polymarket {
             return;
         };
         self.connections[i].open = true;
+        self.connections[i].supervisor.opened(cx);
         if i == 0 {
             let ids = self
                 .books
@@ -611,7 +625,6 @@ impl Venue for Polymarket {
         }
         cx.send(socket, "PING");
         self.connections[i].awaiting_pong = true;
-        self.connections[i].ping = Some(cx.set_timer(10000.0));
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(i) = self
@@ -623,6 +636,7 @@ impl Venue for Polymarket {
         };
         if text == "PONG" {
             self.connections[i].awaiting_pong = false;
+            self.connections[i].supervisor.received(cx.now);
             return;
         }
         if i == 0 {
@@ -643,10 +657,7 @@ impl Venue for Polymarket {
         c.socket = None;
         c.open = false;
         c.awaiting_pong = false;
-        if let Some(t) = c.ping.take() {
-            cx.clear_timer(t);
-        }
-        c.reconnect = Some(cx.set_timer(1000.0));
+        c.supervisor.retry(cx);
         if i == 0 {
             for state in self.books.values_mut() {
                 state.synced = false;
@@ -974,25 +985,32 @@ impl Venue for Polymarket {
             return;
         }
         for i in 0..2 {
-            if self.connections[i].reconnect == Some(timer) {
-                self.connections[i].reconnect = None;
-                self.connect(cx, i);
-                return;
+            if !self.connections[i].supervisor.owns_timer(timer) {
+                continue;
             }
-            if self.connections[i].ping == Some(timer) {
-                self.connections[i].ping = None;
-                if let Some(socket) = self.connections[i].socket {
-                    if self.connections[i].awaiting_pong {
+            match self.connections[i].supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect(cx, i),
+                SocketTick::Ping if self.connections[i].awaiting_pong => {
+                    if let Some(socket) = self.connections[i].socket {
                         cx.close(socket);
                         self.on_close(cx, socket, 1006);
-                    } else {
-                        cx.send(socket, "PING");
-                        self.connections[i].awaiting_pong = true;
-                        self.connections[i].ping = Some(cx.set_timer(10000.0));
                     }
                 }
-                return;
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = self.connections[i].socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                }
+                SocketTick::Ping => {
+                    if let Some(socket) = self.connections[i].socket {
+                        cx.send(socket, "PING");
+                        self.connections[i].awaiting_pong = true;
+                    }
+                }
+                _ => {}
             }
+            return;
         }
         if self.candle_timer == Some(timer) {
             self.candle_timer = None;
@@ -1104,6 +1122,7 @@ impl Venue for Polymarket {
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
             | Command::FetchLeverage { .. }
+            | Command::FetchMaxLeverage { .. }
             | Command::FetchAccount { .. }
             | Command::FetchOrderBook { .. }
             | Command::FetchStpMode { .. }
