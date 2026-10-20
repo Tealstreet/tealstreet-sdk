@@ -23,7 +23,7 @@ const http = (path, requestBody, body, extra = {}) => records.push({
 });
 const info = (type, fields, data, extra = {}) => http('/info', { type, ...fields }, success(data), extra);
 const command = (t, op, args = {}) => { records.push({ type: 'command', t, op, ...args }); commands += 1; };
-const ws = (t, channel, data, url = NODE, socket = 1) => records.push({ type: 'ws', t, url, socket, text: JSON.stringify({ channel, data }) });
+const ws = (t, channel, data, url = NODE, socket = 0) => records.push({ type: 'ws', t, url, socket, text: JSON.stringify({ channel, data }) });
 const write = (action, responseType) => http('/exchange', {
   action, nonce: EPOCH, signature: { r: '0x00', s: '0x00', v: 27 }, confirm: 'executed',
 }, { status: 'ok', code: 0, confirm: 'executed', data: { type: responseType, data: { statuses: ['success'] } } }, stage());
@@ -72,7 +72,7 @@ const order = (asset, oid, side, price, amount, cloid, time, extra = {}) => ({
   state: 'Open', tif: 'GTC', reduceOnly: false, isTrigger: false,
   triggerPx: '', children: null, cloid, ...extra,
 });
-const update = (t, row, status = 'Open', socket = 1) => ws(t, 'orderUpdates', [{ order: row, status, statusTimestamp: EPOCH + t }], NODE, socket);
+const update = (t, row, status = 'Open', socket = 0) => ws(t, 'orderUpdates', [{ order: row, status, statusTimestamp: EPOCH + t }], NODE, socket);
 const limit = (asset, side, price, size, cloid, tif = 'Gtc') => ({
   a: asset, b: side === 'buy', p: String(price), s: String(size), r: false, t: { limit: { tif } }, c: cloid,
 });
@@ -136,11 +136,11 @@ const funding = { time: EPOCH + 5100, coin: 'ETH', amount: '-0.12', szi: '-0.5',
 command(6200, 'fetchIncome', { symbol: 'ETH-USDC', incomeType: 'FUNDING_FEE', ...queryRange }); queryRead('userFundings', [funding], filters); snapshots();
 command(6600, 'fetchIncome', { symbol: 'ETH-USDC', incomeType: 'COMMISSION', ...queryRange }); queryRead('userFills', [execution], filters); snapshots();
 
-records.push({ type: 'close', t: 7500, url: NODE, socket: 1, code: 1006 });
-update(8800, orders[0], 'Open', 2); ws(8900, 'clearinghouseState', state(), NODE, 2);
-ws(9000, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] }, NODE, 2);
-update(9100, marketOrder, 'Filled', 2);
-records.push({ type: 'ws', t: 9200, url: NODE, socket: 2, text: '{"method":"PONG"}' });
+records.push({ type: 'close', t: 7500, url: NODE, socket: 0, code: 1006 });
+update(8800, orders[0], 'Open', 1); ws(8900, 'clearinghouseState', state(), NODE, 1);
+ws(9000, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] }, NODE, 1);
+update(9100, marketOrder, 'Filled', 1);
+records.push({ type: 'ws', t: 9200, url: NODE, socket: 1, text: '{"method":"PONG"}' });
 ws(9300, 'pong', null, API);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, records.map((record) => JSON.stringify(record)).join('\n') + '\n');

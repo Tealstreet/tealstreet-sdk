@@ -529,6 +529,7 @@ export const VENUES = {
     compareWriteOrder: true,
     compareFillPrices: true,
     compareSubscriptions: true,
+    compareClientIds: true,
     replayCredentials: { applicationId: '0x0000000000000000000000000000000000000001', secret: '0x' + 'ab'.repeat(32), key: '' },
     initializeReplay: initializeTxFlowCrypto,
     createRequestValidator: createTxFlowRequestValidator,

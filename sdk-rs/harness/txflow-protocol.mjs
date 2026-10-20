@@ -53,7 +53,8 @@ const nativeBody = (action) => {
   if ('asset' in result) integer(result.asset);
   return result;
 };
-export function createTxFlowRequestValidator(options, { callerIds = new Set() } = {}) {
+export function createTxFlowRequestValidator(options, { callerIds, requireCreationIds = callerIds !== undefined } = {}) {
+  const knownCallerIds = callerIds ?? new Set();
   let lastNonce = -1;
   const generated = new Set();
   return ({ method, url, headers = {}, body }) => {
@@ -78,9 +79,11 @@ export function createTxFlowRequestValidator(options, { callerIds = new Set() } 
     if (envelope.confirm !== 'executed') throw new Error('TxFlow execution confirmation required');
     if ((envelope.vaultAddress ?? '').toLowerCase() !== (options.vault ?? '').toLowerCase()) throw new Error('Unexpected TxFlow vault');
     const packed = encode(nativeBody(envelope.action));
-    const creationIds = envelope.action.type === 'order' ? envelope.action.orders.map((o) => o.c).filter((c) => c !== undefined) : [];
-    if (new Set(creationIds).size !== creationIds.length) throw new Error('Duplicate TxFlow creation cloid');
-    if (creationIds.some((id) => !callerIds.has(id) && generated.has(id))) throw new Error('Reused generated TxFlow cloid');
+    const creationIds = envelope.action.type === 'order' ? envelope.action.orders.map((o) => o.c) : [];
+    if (requireCreationIds && creationIds.some((id) => id === undefined)) throw new Error('Missing connector-generated TxFlow creation cloid');
+    const presentIds = creationIds.filter((id) => id !== undefined);
+    if (new Set(presentIds).size !== presentIds.length) throw new Error('Duplicate TxFlow creation cloid');
+    if (presentIds.some((id) => !knownCallerIds.has(id) && generated.has(id))) throw new Error('Reused generated TxFlow cloid');
     const suffix = Buffer.alloc(envelope.vaultAddress == null ? 9 : 29);
     suffix.writeBigUInt64BE(BigInt(nonce));
     if (envelope.vaultAddress != null) {
@@ -96,7 +99,7 @@ export function createTxFlowRequestValidator(options, { callerIds = new Set() } 
     const signer = ethers.recoverAddress(digest, envelope.signature);
     if (signer.toLowerCase() !== new ethers.Wallet(options.secret).address.toLowerCase()) throw new Error('Invalid TxFlow signature');
     lastNonce = nonce;
-    for (const id of creationIds) if (!callerIds.has(id)) generated.add(id);
+    for (const id of presentIds) if (!knownCallerIds.has(id)) generated.add(id);
   };
 }
 export function validateTxFlowSocketMessage(socket, text) {

@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { performance } from 'node:perf_hooks';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createTxFlowRequestValidator, initializeTxFlowCrypto, validateTxFlowSocketMessage } from './txflow-protocol.mjs';
 import { ReplayClock, Tape } from './tape.mjs';
 import { VENUES } from './venues.mjs';
@@ -55,6 +60,8 @@ test('profile constructs a separate verifier for each TS/Rust implementation and
   assert.equal(VENUES.txflow.virtualPrivateClock, true);
   assert.equal(VENUES.txflow.compareFillPrices, true);
   assert.equal(VENUES.txflow.compareWriteOrder, true);
+  assert.equal(VENUES.txflow.compareClientIds, true, 'stored caller IDs and limit time-in-force must reach parity comparison');
+  assert.equal(VENUES.txflow.independentLeverage, true, 'both configured leverage rails must reach parity comparison');
   assert.notEqual(VENUES.txflow.replayCredentials.applicationId.toLowerCase(), new ethers.Wallet(VENUES.txflow.replayCredentials.secret).address.toLowerCase(), 'the replay must distinguish the main account from its approved agent');
   const signed = independentlySigned(native('caller-Ä'));
   for (const impl of ['ts', 'rust']) {
@@ -192,6 +199,63 @@ test('generated cloids stay distinct before normalization, including correctly s
   validate(request(independentlySigned(body).body));
   assert.throws(() => validate(request(independentlySigned(body, { nonce: EPOCH + 1 }).body)), /cloid|client|reuse|duplicate/i);
 }));
+
+test('connector replay rejects a freshly signed missing generated cloid before normalization can hide it', () => freeze(() => {
+  const expected = independentlySigned(native('ts_fixture-generated')).body;
+  const missing = independentlySigned(native()).body;
+  // The native protocol permits omission; the connector contract always mints
+  // an identity so it can resolve execution acknowledgements authoritatively.
+  assert.doesNotThrow(() => createTxFlowRequestValidator(OPTIONS)(request(missing)));
+  for (const impl of ['ts', 'rust']) {
+    const tape = new Tape([
+      { type: 'command', op: 'placeOrders', orders: [{ symbol: 'BTC-USDC', type: 'limit' }] },
+      { type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(expected), status: 200, body: '{}' },
+    ], VENUES.txflow, true, 100, impl, [], OPTIONS);
+    assert.throws(() => tape.respond('POST', `${ORIGIN}/exchange`, missing, request().headers), /cloid|client|creation/i);
+    assert.equal(tape.invalidSignatures, 1);
+    assert.equal(tape.respond('POST', `${ORIGIN}/exchange`, expected, request().headers).status, 200);
+    assert.throws(() => tape.assertWritesConsumed(), /invalid replay signature/i);
+  }
+}));
+
+test('generated private tape addresses initial sockets and the explicit reconnect without watchdog help', { timeout: 10_000 }, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'txflow-lifecycle-'));
+  const output = join(directory, 'private.jsonl');
+  try {
+    const generated = spawnSync('corepack', ['yarn', '-s', 'rust:private-tape-txflow', '--out', output], {
+      cwd: fileURLToPath(new URL('../../', import.meta.url)), encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(generated.status, 0, generated.stderr || generated.error?.message);
+    const records = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const closeIndex = records.findIndex((record) => record.type === 'close');
+    assert(closeIndex >= 0, 'the fixture must exercise a disconnect');
+    const closed = records[closeIndex];
+    assert.equal(closed.socket, 0);
+    for (const record of records.slice(0, closeIndex).filter((record) => record.type === 'ws')) assert.equal(record.socket, 0);
+    const reconnected = records.slice(closeIndex + 1).filter((record) => record.type === 'ws' && record.url === closed.url);
+    assert(reconnected.length > 0, 'the fixture must deliver native state after reconnect');
+    for (const record of reconnected) assert.equal(record.socket, 1);
+    for (const record of records.slice(closeIndex + 1).filter((record) => record.type === 'ws' && record.url !== closed.url)) assert.equal(record.socket, 0);
+
+    const first = records.find((record) => record.type === 'ws' && record.url === closed.url);
+    const tape = new Tape([{ ...first, t: 0 }, { ...closed, t: 1 }, { ...reconnected[0], t: 2 }], VENUES.txflow, true, 100);
+    const clock = new ReplayClock(EPOCH, true);
+    const received = [];
+    let connections = 0;
+    const connect = () => {
+      connections++;
+      tape.connect(closed.url, () => {}, (text) => received.push(text), () => connect());
+    };
+    clock.install();
+    try {
+      connect();
+      assert.equal(await tape.play(undefined, undefined, undefined, clock), 3);
+      assert.equal(connections, 2, 'only the fixture close may cause a reconnect');
+      assert.deepEqual(received, [first.text, reconnected[0].text]);
+      assert.equal(Date.now(), EPOCH + 2, 'no watchdog deadline may be needed to find a fixture socket');
+    } finally { clock.restore(); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test('request validation errors remain fatal even if transport catches one and later serves the valid write', () => freeze(() => {
   const signed = independentlySigned(native('ts_sticky-signature')).body;

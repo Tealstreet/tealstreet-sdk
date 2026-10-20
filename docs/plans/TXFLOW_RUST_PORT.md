@@ -7,8 +7,8 @@ rebase, force-push, or target master.
 
 ## Initial audit and verification constraint
 
-Read the TxFlow `CLAUDE.md` before the implementation. The checked-in
-At the initial audit, `txflow.exchange.ts` was a Phase 0 scaffold whose `start()` unconditionally
+Read the TxFlow `CLAUDE.md` before the implementation. At the initial audit,
+`txflow.exchange.ts` was a Phase 0 scaffold whose `start()` unconditionally
 rejects with `TXFLOW_PHASE_0_UNIMPLEMENTED_MESSAGE`. It had no public, private,
 trading or query implementation. This is a missing reference implementation,
 not evidence that the venue lacks these APIs.
@@ -300,3 +300,14 @@ byte APIs, bootstrap routing, deterministic private clock and caller-ID checks.
 Locked isolated TxFlow/Phemex constructor checks and workspace formatting pass.
 Pre-merge workspace tests passed 1,835 tests; root tests passed all 27 tasks.
 Final combined release/replay and merged-state checks are in progress.
+
+Final harness phase review found and fixed three proof gaps: compare retained
+client IDs/time-in-force; require a cloid on every connector order before any
+generated-ID normalization (the raw official no-cloid vector stays valid); use
+zero-based private socket ordinals so startup/reconnect cannot depend on an
+accidental extra watchdog reconnect. Independent regressions verify all three,
+including the actual generator and a two-connection virtual replay. Review
+accepted, 347 harness tests pass on Node 24; Node 22 verification is running.
+A native limit/market batch proof verifies distinct minted cloids (13 trading
+tests pass). These are harness/test changes, with no Rust production change
+after the combined release build started.

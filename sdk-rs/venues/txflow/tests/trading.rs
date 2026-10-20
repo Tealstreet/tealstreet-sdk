@@ -130,6 +130,34 @@ fn ack(e: &mut Engine<TxFlow>, r: &HttpRequest, status: u16, body: &str) {
     );
 }
 #[test]
+fn every_order_without_a_caller_id_gets_a_distinct_native_cloid() {
+    let mut e = engine();
+    place(
+        &mut e,
+        6,
+        vec![
+            opts(
+                json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":0.01,"price":50000}),
+            ),
+            opts(json!({"symbol":"BTC-USDC","type":"market","side":"sell","amount":0.02})),
+        ],
+    );
+    let request = write(&mut e);
+    let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let orders = body["action"]["orders"].as_array().unwrap();
+    let ids: Vec<_> = orders
+        .iter()
+        .map(|order| order["c"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1]);
+    assert!(
+        ids.iter()
+            .all(|id| !id.is_empty() && id.len() <= 64 && !id.starts_with("0x"))
+    );
+}
+
+#[test]
 fn complete_batch_preflight_rejects_invalid_last_shape_without_writes() {
     let mut e = engine();
     place(
