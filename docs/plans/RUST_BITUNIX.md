@@ -1377,3 +1377,16 @@ CrossvenueBitunix+Binance rebuiltcontrols follow before nextlanding merge.
 Fetched5d7589f296 nowincludesCoinbase5c0e437faf,PolymarketPR1327 andGRVTPR1321.
 Threeownedread-onlyplan audits running; nextmergewillcombineallthreeafter
 controls, retaininglogicalstartup451backbone andallpriornativeguards.
+
+Bitunixrebuiltcontrol module792,113bytes; private42framesPASS. Firstpublic
+controlFAILS atTS Startupframedelivery deadline (beforeRust replay), source
+d766/currentNode24.21.0. Instrumentedrepro rulesoutNodeversion/topic/I/O
+leaks: frame3930/socket2DELLUSDThasTopictrue,work0/holds0/pendingResponses0,
+nexttimer4008, pacedsubscriptionsfinish4258logical. Newtotal15sstartup
+wallbudget exhaustedwhileprogressing~5411frames×3two-idle-turn scopes,
+~30kidledrains. Boundedgenericcoalescing/settlement-checkpointoptimization
+underindependentreview; keepIO/newproducer invalidation, allcounterexamples,
+logicaltimeline/deadline/thresholds unchanged. No gate rerununtilchanged
+source verified. Coinbase/Polymarket/GRVTmergewaitingcontrols.
+Combinednextmatrix25venues/29public/54private+oldBitget4/Aster3; all35CIchecks
+exactheadgreen beforefinalmerge.
