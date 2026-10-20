@@ -409,7 +409,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
 | Hyperliquid perps | done (#1306) |
-| Hyperliquid Spot, Kraken Spot | verified opt-in products in existing crates; local gates 1–6, live public/documented private and all-46-alias consumer checks pass ([spot plan](RUST_SPOT_PRODUCTS.md)); PR correctness reviews/green CI required before landing; no TS venue deletion |
+| Hyperliquid Spot, Kraken Spot | verified opt-in products in existing crates ([PR #1339](https://github.com/Tealstreet/tealstreet-sdk/pull/1339)); gates 1–6, independent correctness reviews and all-47-alias consumer checks pass ([spot plan](RUST_SPOT_PRODUCTS.md)); live public/documented private evidence, no TS venue deletion |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
 | Bitrue futures | done (#1314) |

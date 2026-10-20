@@ -356,3 +356,37 @@ green CI remain pending before landing.
   venue gates pass on reviewed artifacts; incoming WASM changes are Lighter-
   feature-gated and do not alter the selected spot/parent/Binance builds.
   Rebuild the combined host and re-audit the integration before final push.
+
+## Final integrated acceptance for PR #1339
+
+All implementation and review findings are closed. Final source includes
+`e7f5bee863`, `177f57aa6d` and landing merge `f491ae2e7c`. The three independent
+code-correctness reviews, finding repros, fixes and closure results are posted
+on [PR #1339](https://github.com/Tealstreet/tealstreet-sdk/pull/1339).
+No TS venue was deleted or switched to Rust by default.
+
+| Gate | Final result |
+| --- | --- |
+| 1 — banned patterns | PASS |
+| 2 — native formatting, strict Clippy and tests | PASS; 218 touched-crate tests, full workspace all-target strict Clippy |
+| 3 — default WASM strict Clippy | PASS |
+| 4 — private replay | PASS; both spot products, both parent products and Binance |
+| 5 — public replay | PASS; both fresh live spot fixtures and parent/Binance regressions, three runs each, exact output and lower Rust CPU/memory |
+| 6 — Binance regression | PASS public/private; both touched parent products also pass public/private |
+
+Final combined build passes 418 SDK/WASM tests across 12 files, including
+all 47 native products through actual worker startup and late-consumer frames.
+Host tests pass 68/68; compiled spot controls pass 3 Hyperliquid + 5 Kraken.
+Independent latest-merge review passes 571 harness and 459 SDK tests with no
+findings, preserving incoming Lighter/GRVT behavior and both spot aliases.
+Root typecheck (44 tasks), lint (28 tasks) and tests (27 tasks) pass; safe-cex
+passes 7,482 tests across 516 files. Final post-merge bans, workspace formatting,
+workspace all-target strict Clippy and default WASM strict Clippy pass again.
+Selected rebuilt artifact measurements above supersede the earlier checkpoints.
+
+The final reviewed head must receive green CI before merging into
+`feat/rust-rewrite`; PR checks and the merge record are authoritative for that
+landing. After merge, cut a fresh follow-up branch from the landing branch.
+Private data remains documented/scripted evidence, without a funded live-account
+claim. Standalone spot support does not enable combined Hyperliquid
+`enableSpotMarkets` accounts or authorize TS retirement/default migration.
