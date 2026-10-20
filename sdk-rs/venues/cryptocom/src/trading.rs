@@ -90,6 +90,11 @@ fn validate_id(opts: &PlaceOrderOpts, ids: &mut HashSet<String>) -> Result<(), S
 
 impl Cryptocom {
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: Vec<PlaceOrderOpts>) -> Result<Job, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit BBO and TickSize controls are not supported by Crypto.com".into());
+        }
         let mut ids = HashSet::new();
         for order in &orders {
             validate_id(order, &mut ids)?;

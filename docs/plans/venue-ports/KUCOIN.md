@@ -734,3 +734,62 @@ The precedingc59bbb77a9 reached full green CI while this landing was integrated.
 Publish this reviewed checkpoint and require all final-commit checks green,
 including49 public/private replays and4Bitget native-contract integrations across
 16venue jobs, before merging PR1312 and cutting the follow-up branch.
+
+### Bybit variants landing integration plan
+
+Landing922b5fdc89 adds Bybit inverse/spot/demo/Hyro (#1307) while Orderly-
+integrateda5e9bc447a CI starts. Resolve SDK/frame/store docs and large shared
+harness conflicts through disjoint workers, then independent cross-review.
+Preserve native-column precedence, inverse extras and both R12 KuCoin hydration
+paths, Orderly IDs/generations, Lighter/WOO audits, typed raw signed headers and
+seven independent KuCoin reads. Adopt incoming stricter before-import memory
+baseline/nonnegative component accounting and diagnostics without weakening
+any assertion. KuCoin request-contract adapters must compose with the new gate.
+
+New common Bybit BBO/tick-slippage fields require None on ordinary KuCoin
+replacements and explicit whole-batch rejection before any I/O, matching peers;
+add focused tests for each control and document the deliberate TS correction.
+Review the shared engine buffer reuse and native quantity columns as compatible
+changes, then run workspace fmt/bans/native+Wasm clippy/tests, full harness,
+combined actualWasm+host/wire and root typecheck/lint. Repeat KuCoin/Binance
+public/private plus Bybit inverse/spot/demo/Hyro public/private gates using the
+shared Bybit feature bundle. Preserve all49 prior replay gates and four Bitget
+integrations; final CI now covers57 replays across16venue jobs. Commit reviews/
+results and require green final-commit CI before PR1312 merge/follow-up branch.
+
+### Bybit variants and measurement integration checkpoint
+
+All14 local replays pass without retry: KuCoin/Binance public+private and all
+five Bybit-family public+private cases (linear,inverse,spot,demo,Hyro). Hyro
+public is the incoming documented contract fixture, not live endpoint evidence.
+Three-run medians TS/Rust using incoming pre-import memory baselines:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 1327.2 / 842.3 | 861.4 / 559.2 | 21.3 / 3.9 | 753,048 |
+| Binance | 278.4 / 139.5 | 160.9 / 59.2 | 19.0 / 2.7 | 759,949 |
+| Bybit linear | 544.4 / 346.9 | 313.6 / 158.9 | 22.5 / 3.1 | 923,798 |
+| Bybit inverse | 176.6 / 56.9 | 112.7 / 27.4 | 16.5 / 1.3 | same Bybit bundle |
+| Bybit spot | 355.7 / 250.9 | 226.7 / 134.3 | 17.7 / 2.1 | same Bybit bundle |
+| Bybit demo | 485.7 / 318.2 | 268.2 / 160.4 | 21.9 / 3.1 | same Bybit bundle |
+| Hyro documented | 38.9 / 31.0 | 13.1 / 8.1 | 16.2 / 0.9 | same Bybit bundle |
+
+All bundles stay below1,258,291bytes. KuCoin public16,157frames/692markets/two
+books and private32frames/17commands pass all exact audits. New measurement
+model includes runtime/import allocations and rejects every negative component
+on public and private runs; diagnostics, arithmetic and limits remain incoming,
+so these retained-memory figures are not the earlier post-construction figures.
+
+Workspace1,368 tests (99 KuCoin), fmt/bans/native+Wasm clippy, harness246,
+complete actualWasm75, host/wire45 and root typecheck44/lint28 pass. Independent
+harness/signature/memory/impl-plan and SDK/frame/native-column cross-reviews
+pass with no outstanding P1/P2. KuCoin fixture has zero impl tags, so tagged
+response-plan exclusions omit none of its requests or writes. All seven native
+GETs and query-only oracle guards remain strict; R12's4remaining/3filled/
+10position/10copier-close assertions remain.
+
+Both new Bybit controls reject the full KuCoin batch before I/O, replacements
+initialize None, and focused regression + KNOWN_TS_FIXES document the correction.
+Publish this reviewed head and require all final-commit checks green across
+16venue jobs,57 replay gates and4Bitget integrations, then merge PR1312 into
+feat/rust-rewrite and cut the fresh branch.

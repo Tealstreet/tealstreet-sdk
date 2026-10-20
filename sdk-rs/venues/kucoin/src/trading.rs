@@ -103,6 +103,9 @@ fn positive(value: f64) -> bool {
 fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
     let mut seen = HashSet::new();
     for order in orders {
+        if order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some() {
+            return Err("Bybit BBO and TickSize controls are not supported by KuCoin".into());
+        }
         if order.max_slippage_pct.is_some() {
             return Err("KuCoin protected market-order slippage is not supported".into());
         }
@@ -439,6 +442,8 @@ impl Kucoin {
             },
             trigger_price: None,
             max_slippage_pct: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
             stop_loss: sl,
             take_profit: tp,
             reduce_only: Some(parent.reduce_only),

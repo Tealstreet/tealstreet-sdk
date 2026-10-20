@@ -143,6 +143,8 @@ pub struct ArraySplitter {
     /// The most recent string at the seeking depth.
     key: Vec<u8>,
     keys: Vec<Vec<u8>>,
+    /// Seeking containers: named path segments must all belong to objects.
+    containers: Vec<u8>,
     capturing_key: bool,
     /// The wanted key and its colon were just seen.
     armed: bool,
@@ -166,6 +168,7 @@ impl ArraySplitter {
             escaped: false,
             key: Vec::new(),
             keys: Vec::new(),
+            containers: Vec::new(),
             capturing_key: false,
             armed: false,
             item: Vec::new(),
@@ -259,26 +262,29 @@ impl ArraySplitter {
                                 .zip(&self.keys)
                                 .all(|(name, key)| name.as_bytes() == key)
                     };
-                    self.armed = match self.at {
-                        ArrayAt::Root => false,
-                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
-                            self.depth == 1 && name.as_bytes() == self.key
-                        }
-                        ArrayAt::Path(path) => matches(path),
-                        ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
-                        ArrayAt::EnvelopeFieldOrNested(field, nested) => {
-                            matches(&[field]) || matches(&[field, nested])
-                        }
-                        ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
-                            matches(&[field]) || nested.iter().any(|name| matches(&[field, name]))
-                        }
-                    };
+                    self.armed = self.containers.iter().all(|&kind| kind == b'{')
+                        && match self.at {
+                            ArrayAt::Root => false,
+                            ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                                self.depth == 1 && name.as_bytes() == self.key
+                            }
+                            ArrayAt::Path(path) => matches(path),
+                            ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
+                            ArrayAt::EnvelopeFieldOrNested(field, nested) => {
+                                matches(&[field]) || matches(&[field, nested])
+                            }
+                            ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
+                                matches(&[field])
+                                    || nested.iter().any(|name| matches(&[field, name]))
+                            }
+                        };
                     continue;
                 }
                 b'[' | b'{' => {
                     self.depth += 1;
                     self.keys.resize_with(self.depth as usize, Vec::new);
                     if self.phase == Phase::Seeking {
+                        self.containers.push(byte);
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
@@ -310,6 +316,9 @@ impl ArraySplitter {
                         self.depth = self.depth.saturating_sub(1);
                         self.keep(byte);
                         continue;
+                    }
+                    if self.phase == Phase::Seeking {
+                        self.containers.pop();
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
@@ -724,6 +733,62 @@ mod tests {
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
+
+    #[test]
+    fn named_paths_require_object_parents_not_array_string_elements() {
+        for (at, body) in [
+            (
+                ArrayAt::Path(&["result", "list"]),
+                r#"["result",{"list":[1]}]"#,
+            ),
+            (
+                ArrayAt::Envelope(&[&["result", "list"], &["data"]]),
+                r#"["result",{"list":[1]}]"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNested("result", "list"),
+                r#"["result",{"list":[1]}]"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("result", &["list", "rows"]),
+                r#"["result",{"rows":[1]}]"#,
+            ),
+            (
+                ArrayAt::Path(&["result", "nested", "list"]),
+                r#"{"result":["nested",{"list":[1]}]}"#,
+            ),
+        ] {
+            for size in [1, 2, 9, 1024] {
+                let mut splitter = ArraySplitter::new(at);
+                let mut items = Vec::new();
+                for chunk in body.as_bytes().chunks(size) {
+                    splitter.feed(chunk, |item| items.push(item.to_owned()));
+                }
+                assert!(!splitter.finished(), "{at:?}: {body}");
+                assert!(items.is_empty(), "{at:?}: {items:?}");
+                assert_eq!(splitter.outside(), body.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_root_paths_still_stream_arrays_with_string_elements() {
+        for at in [
+            ArrayAt::Root,
+            ArrayAt::Path(&[]),
+            ArrayAt::Envelope(&[&["data"], &[]]),
+        ] {
+            let mut splitter = ArraySplitter::new(at);
+            let mut items = Vec::new();
+            for byte in br#"["result",{"list":[1]}]"# {
+                splitter.feed(&[*byte], |item| items.push(item.to_owned()));
+            }
+            assert!(splitter.finished(), "{at:?}");
+            assert_eq!(items, [r#""result""#, r#"{"list":[1]}"#]);
+            assert_eq!(splitter.outside(), b"[]");
+        }
+    }
+
     #[test]
     fn alternative_paths_stream_native_shapes_and_keep_metadata() {
         for body in [

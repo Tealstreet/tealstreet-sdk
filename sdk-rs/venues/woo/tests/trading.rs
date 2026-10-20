@@ -151,6 +151,37 @@ fn caller_id_batch_preflight_rejects_every_invalid_or_nonplain_leg_before_reads_
         assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
+
+fn assert_bybit_control_rejected_before_batch_io(bad: PlaceOrderOpts) {
+    let mut e = engine();
+    let actions = placed(&mut e, vec![opts(), bad]);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_))),
+        "unsupported controls must cause no HTTP"
+    );
+    assert!(result(&actions).is_err());
+    assert!(e.store().orders().is_empty());
+}
+
+#[test]
+fn bybit_bbo_on_final_batch_member_prevents_every_http_request() {
+    let mut bad = opts();
+    bad.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 1.0,
+    });
+    assert_bybit_control_rejected_before_batch_io(bad);
+}
+
+#[test]
+fn bybit_ticks_on_final_batch_member_prevents_every_http_request() {
+    let mut bad = opts();
+    bad.bybit_slippage_tolerance_ticks = Some(2.0);
+    assert_bybit_control_rejected_before_batch_io(bad);
+}
+
 #[test]
 fn plain_safe_client_id_and_broker_are_sent_exactly_once() {
     let mut e = engine();

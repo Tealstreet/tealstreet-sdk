@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bodyBytes, canonicalBody, canonicalUrl, deliverSocketFrame, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
+import {
+  bodyBytes,
+  canonicalBody,
+  canonicalUrl,
+  deliverSocketFrame,
+  replayStoreReady,
+  ReplayClock,
+  Tape,
+} from './tape.mjs';
 import { createTape, withTimeout, sameCommandResults } from './tape.mjs';
 import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { venueOf } from './venues.mjs';
@@ -10,16 +18,19 @@ const canonicalMexcBody = (body, ids) => canonicalBody(body, ids, VENUES.mexc);
 const canonicalMexcUrl = (url) => canonicalUrl(url, new Set(), VENUES.mexc);
 const url = 'https://api.mexc.com/api/v1/private/order/cancel';
 test('POST matching preserves snowflakes and consumes every accepted write once', () => {
-  const tape = new Tape([
-    {
-      type: 'http',
-      method: 'POST',
-      url,
-      status: 200,
-      body: 'accepted',
-      requestBody: '{"id":"739113577038255617","vol":2}',
-    },
-  ], VENUES.mexc);
+  const tape = new Tape(
+    [
+      {
+        type: 'http',
+        method: 'POST',
+        url,
+        status: 200,
+        body: 'accepted',
+        requestBody: '{"id":"739113577038255617","vol":2}',
+      },
+    ],
+    VENUES.mexc,
+  );
   assert.equal(tape.respond('POST', url, '{"vol":2,"id":739113577038255617}').body, 'accepted');
   assert.equal(tape.respond('POST', url, '{"id":"739113577038255617","vol":2}').status, 599);
   assert.notEqual(canonicalMexcBody('[739113577038255617]'), canonicalMexcBody('[739113577038255618]'));
@@ -147,7 +158,7 @@ test('the replay epoch begins after account startup and before its first command
     undefined,
     () => seen.push('epoch'),
   );
-  assert.deepEqual(seen, ['ready', 'epoch', 'command']);
+  assert.deepEqual(seen, ['ready', 'epoch', 'ready', 'command']);
 });
 
 test('Bybit request IDs are volatile while native client order IDs remain exact', () => {
@@ -199,10 +210,12 @@ test('public replay starts with market/ticker seed while private replay waits fo
   assert.equal(replayStoreReady(4, false), false);
 });
 
-
 test('MEXC normalization preserves caller IDs and economic JSON types', () => {
   const caller = new Set(['mine']);
-  assert.notEqual(canonicalMexcBody('{"externalOid":"mine","vol":1}', caller), canonicalMexcBody('{"externalOid":"other","vol":1}', caller));
+  assert.notEqual(
+    canonicalMexcBody('{"externalOid":"mine","vol":1}', caller),
+    canonicalMexcBody('{"externalOid":"other","vol":1}', caller),
+  );
   assert.notEqual(canonicalMexcBody('{"externalOid":"generated","vol":1}'), canonicalMexcBody('{"vol":1}'));
   assert.notEqual(canonicalMexcBody('{"vol":739113577038255617}'), canonicalMexcBody('{"vol":"739113577038255617"}'));
   assert.notEqual(canonicalMexcBody('{"price":1}'), canonicalMexcBody('{"price":"1"}'));
@@ -214,7 +227,11 @@ test('MEXC historical trigger windows and unrelated hosts keep absolute bounds',
     'https://api.mexc.com/api/v1/private/planorder/list/orders?states=2',
     'https://api.mexc.com/api/v1/private/stoporder/list/orders?is_finished=1',
     'https://other.com/api/v1/private/planorder/list/orders?states=1',
-  ]) assert.notEqual(canonicalMexcUrl(`${base}&start_time=10&end_time=100`), canonicalMexcUrl(`${base}&start_time=110&end_time=200`));
+  ])
+    assert.notEqual(
+      canonicalMexcUrl(`${base}&start_time=10&end_time=100`),
+      canonicalMexcUrl(`${base}&start_time=110&end_time=200`),
+    );
 });
 
 test('standalone transport cannot wildcard a missing recorded write body', () => {
@@ -229,27 +246,43 @@ test('actual socket delivery audits authentication acknowledgement and heartbeat
   const url = 'wss://stream.crypto.com/exchange/v1/user';
   const nonce = Date.now();
   const auth = { method: 'public/auth', id: 1, api_key: 'replay-key', nonce };
-  auth.sig = createHmac('sha256', 'replay-secret').update(auth.method + auth.id + auth.api_key + nonce).digest('hex');
+  auth.sig = createHmac('sha256', 'replay-secret')
+    .update(auth.method + auth.id + auth.api_key + nonce)
+    .digest('hex');
   audit.sent(url, JSON.stringify(auth));
-  const socket = { url, onMessage(text) {
-    const frame = JSON.parse(text);
-    if (frame.method === 'public/auth') audit.sent(url, JSON.stringify({ method: 'subscribe', params: { channels: ['user.order', 'user.advance.order', 'user.balance', 'user.positions', 'user.trade'] } }));
-    else audit.sent(url, JSON.stringify({ method: 'public/respond-heartbeat', id: frame.id }));
-  } };
+  const socket = {
+    url,
+    onMessage(text) {
+      const frame = JSON.parse(text);
+      if (frame.method === 'public/auth')
+        audit.sent(
+          url,
+          JSON.stringify({
+            method: 'subscribe',
+            params: { channels: ['user.order', 'user.advance.order', 'user.balance', 'user.positions', 'user.trade'] },
+          }),
+        );
+      else audit.sent(url, JSON.stringify({ method: 'public/respond-heartbeat', id: frame.id }));
+    },
+  };
   deliverSocketFrame(socket, '{"method":"public/auth","code":0}', audit);
   deliverSocketFrame(socket, '{"method":"public/heartbeat","id":7}', audit);
   assert.deepEqual(audit.errors(), []);
 });
 
-
 test('MEXC login timestamps and signatures are checked before identity normalization', async () => {
   const { VENUES } = await import('./venues.mjs');
   const { createHmac } = await import('node:crypto');
   const now = Date.now();
-  const login = (reqTime, signature) => JSON.stringify({ method: 'login', param: {
-    apiKey: 'replay-key', reqTime,
-    signature: signature ?? createHmac('sha256', 'replay-secret').update(`replay-key${reqTime}`).digest('hex'),
-  } });
+  const login = (reqTime, signature) =>
+    JSON.stringify({
+      method: 'login',
+      param: {
+        apiKey: 'replay-key',
+        reqTime,
+        signature: signature ?? createHmac('sha256', 'replay-secret').update(`replay-key${reqTime}`).digest('hex'),
+      },
+    });
   const socket = {};
   assert.throws(() => VENUES.mexc.validateSocketFrame(socket, '{"channel":"rs.login","data":"success"}'));
   for (const time of [undefined, 'bad', String(now - 30001), String(now + 30001)])
@@ -486,7 +519,7 @@ test('shared Tape correlates signed envelopes, preserves exact cursors and reuse
   const write = 'https://api.example.test/private/create-order';
   const venue = {
     matchRequestBody: true,
-    requestBody: (body) => body?.method && body?.params ? body.params : body,
+    requestBody: (body) => (body?.method && body?.params ? body.params : body),
     checkRequest: (_method, _url, body) => JSON.parse(body).sig === 'valid',
     isWrite: (_method, url) => url.endsWith('/create-order'),
   };
@@ -644,7 +677,10 @@ test('recorded socket closes deliver later frames to a new subscribed generation
       { type: 'close', t: 1, url },
       { type: 'ws', t: 2, url, text: 'second' },
     ],
-    { subscriptionGenerations: true, startupSubscriptions: () => ['WS wss://example.test/public? {"args":["tickers.BTC"],"op":"subscribe"}'] },
+    {
+      subscriptionGenerations: true,
+      startupSubscriptions: () => ['WS wss://example.test/public? {"args":["tickers.BTC"],"op":"subscribe"}'],
+    },
     false,
     200,
   );
@@ -825,13 +861,24 @@ test('BloFin socket request comparison preserves credentials and native topics',
   assert.equal(tape.sentRequests.size, 4);
 });
 
-
 test('Hyperliquid legacy shared-URL frames reach both public and private listeners once', async () => {
   const url = 'wss://api.hyperliquid.xyz/ws';
-  const tape = new Tape([{ type: 'ws', t: 0, url, text: '{"channel":"webData2","data":{}}' }], venueOf('hyperliquid'), true);
+  const tape = new Tape(
+    [{ type: 'ws', t: 0, url, text: '{"channel":"webData2","data":{}}' }],
+    venueOf('hyperliquid'),
+    true,
+  );
   const seen = [];
-  tape.connect(url, () => {}, () => seen.push('public'));
-  tape.connect(url, () => {}, () => seen.push('private'));
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push('public'),
+  );
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push('private'),
+  );
   await new Promise(setImmediate);
   assert.equal(await tape.play(), 1);
   assert.deepEqual(seen, ['public', 'private']);
@@ -839,12 +886,23 @@ test('Hyperliquid legacy shared-URL frames reach both public and private listene
 
 test('Bybit startup waits for every actual topic and retains its expected map after replay', async () => {
   const url = 'wss://stream.bybit.com/v5/public/linear';
-  const expected = ['WS wss://stream.bybit.com/v5/public/linear? {"args":["tickers.BTCUSDT"],"op":"subscribe"}',
-    'WS wss://stream.bybit.com/v5/public/linear? {"args":["orderbook.1000.BTCUSDT"],"op":"subscribe"}'];
-  const tape = new Tape([{ type: 'ws', t: 0, url, text: 'book' }], { startupSubscriptions: () => expected }, false, 200);
+  const expected = [
+    'WS wss://stream.bybit.com/v5/public/linear? {"args":["tickers.BTCUSDT"],"op":"subscribe"}',
+    'WS wss://stream.bybit.com/v5/public/linear? {"args":["orderbook.1000.BTCUSDT"],"op":"subscribe"}',
+  ];
+  const tape = new Tape(
+    [{ type: 'ws', t: 0, url, text: 'book' }],
+    { startupSubscriptions: () => expected },
+    false,
+    200,
+  );
   const map = tape.startupSubscriptions;
   const seen = [];
-  const socket = tape.connect(url, () => {}, () => seen.push('delivered'));
+  const socket = tape.connect(
+    url,
+    () => {},
+    () => seen.push('delivered'),
+  );
   tape.send(socket, '{"op":"subscribe","args":["tickers.BTCUSDT"]}');
   const playback = tape.play();
   await new Promise(setImmediate);
@@ -859,8 +917,10 @@ test('Bybit startup waits for every actual topic and retains its expected map af
 });
 
 test('fixture TS body exceptions preserve common write sequence without relaxing native or TS bodies', () => {
-  const row = { ...record('POST', { quantity: '2', stopLossTriggerPrice: '120' }),
-    tsRequestBody: '{"quantity":"2","stopLossTriggerPrice":"120","stopLossLimitPrice":"120"}' };
+  const row = {
+    ...record('POST', { quantity: '2', stopLossTriggerPrice: '120' }),
+    tsRequestBody: '{"quantity":"2","stopLossTriggerPrice":"120","stopLossLimitPrice":"120"}',
+  };
   const rust = new Tape([row], {}, false, 200, 'rust');
   const ts = new Tape([row], {}, false, 200, 'ts');
   assert.equal(rust.respond('POST', URL, row.requestBody).status, 200);
@@ -871,17 +931,26 @@ test('fixture TS body exceptions preserve common write sequence without relaxing
   assert.equal(rust.respond('POST', URL, row.tsRequestBody).status, 599);
 });
 
-
 test('caught Backpack verifier exceptions still fail the final replay check', async () => {
   const venue = venueOf('backpack');
   for (const transport of ['REST', 'WS']) {
     const tape = new Tape([], venue, true);
     assert.equal(tape.missingWrites, 0);
     if (transport === 'REST') {
-      assert.throws(() => tape.respond('GET', 'https://api.backpack.exchange/api/v1/account', undefined, {}), /signature/);
+      assert.throws(
+        () => tape.respond('GET', 'https://api.backpack.exchange/api/v1/account', undefined, {}),
+        /signature/,
+      );
     } else {
-      const socket = tape.connect('wss://ws.backpack.exchange', () => {}, () => {});
-      assert.throws(() => tape.send(socket, '{"method":"SUBSCRIBE","params":["account.orderUpdate"],"signature":[]}'), /signature/);
+      const socket = tape.connect(
+        'wss://ws.backpack.exchange',
+        () => {},
+        () => {},
+      );
+      assert.throws(
+        () => tape.send(socket, '{"method":"SUBSCRIBE","params":["account.orderUpdate"],"signature":[]}'),
+        /signature/,
+      );
       await new Promise(setImmediate);
     }
     assert.equal(tape.invalidSignatures, 1);
@@ -891,15 +960,20 @@ test('caught Backpack verifier exceptions still fail the final replay check', as
   }
 });
 
-
 test('caught throwing signature verifiers persist exactly one final audit failure', async () => {
-  const broken = () => { throw new SyntaxError('malformed signed payload'); };
+  const broken = () => {
+    throw new SyntaxError('malformed signed payload');
+  };
   for (const kind of ['REST', 'WS']) {
     const tape = new Tape([], { verifyRequest: broken, verifySubscribe: broken }, true);
     if (kind === 'REST') {
       assert.throws(() => tape.respond('POST', URL, '{bad signed json', {}), /malformed signed payload/);
     } else {
-      const socket = tape.connect('wss://ws.backpack.exchange', () => {}, () => {});
+      const socket = tape.connect(
+        'wss://ws.backpack.exchange',
+        () => {},
+        () => {},
+      );
       assert.throws(() => tape.send(socket, '{"method":"SUBSCRIBE","params":[{}]}'), /malformed signed payload/);
       await new Promise(setImmediate);
     }
@@ -959,9 +1033,21 @@ test('caller IDs compare verbatim and Classic margin spelling exception is TS-on
     599,
   );
   const classic = 'https://api.bitget.com/api/v2/mix/order/batch-place-order';
-  assert.equal(createTape([bitgetResponse({ marginMode: 'crossed' }, { url: classic })], bitgetVenue, true).respond('POST', classic, { marginMode: 'cross' }).status, 599);
   assert.equal(
-    createTape([{ ...bitgetResponse({ marginMode: 'crossed' }, { url: classic }), tsRequestBody: { marginMode: 'cross' } }], bitgetVenue, true, { impl: 'ts' }).respond('POST', classic, {
+    createTape([bitgetResponse({ marginMode: 'crossed' }, { url: classic })], bitgetVenue, true).respond(
+      'POST',
+      classic,
+      { marginMode: 'cross' },
+    ).status,
+    599,
+  );
+  assert.equal(
+    createTape(
+      [{ ...bitgetResponse({ marginMode: 'crossed' }, { url: classic }), tsRequestBody: { marginMode: 'cross' } }],
+      bitgetVenue,
+      true,
+      { impl: 'ts' },
+    ).respond('POST', classic, {
       marginMode: 'cross',
     }).status,
     200,
@@ -970,7 +1056,11 @@ test('caller IDs compare verbatim and Classic margin spelling exception is TS-on
 
 test('signature rejection permits exactly the taped same-ID retry; reads can poll', () => {
   const body = { orderId: '1', newClientOid: 'fresh' };
-  const tape = createTape([bitgetResponse(body, { body: '{"code":"40009"}' }), bitgetResponse(body)], bitgetVenue, true);
+  const tape = createTape(
+    [bitgetResponse(body, { body: '{"code":"40009"}' }), bitgetResponse(body)],
+    bitgetVenue,
+    true,
+  );
   assert.equal(tape.respond('POST', bitgetUrl, body).status, 200);
   assert.equal(tape.respond('POST', bitgetUrl, body).status, 200);
   const reads = createTape([bitgetResponse(undefined, { method: 'GET' })], bitgetVenue, false);
@@ -1021,7 +1111,10 @@ test('existing client IDs are exact identities; only created aliases can transla
   assert.equal(tape.respond('POST', cancel, { clientOid: 'resting-client' }).status, 200);
   const place = 'https://api.bitget.com/api/v3/trade/place-order';
   const linked = createTape(
-    [bitgetResponse({ clientOid: 'taped-minted' }, { url: place }), bitgetResponse({ clientOid: 'taped-minted' }, { url: cancel })],
+    [
+      bitgetResponse({ clientOid: 'taped-minted' }, { url: place }),
+      bitgetResponse({ clientOid: 'taped-minted' }, { url: cancel }),
+    ],
     bitgetVenue,
     true,
   );
@@ -1044,24 +1137,28 @@ test('modify-by-client-id preserves an existing generated identity', () => {
   assert.equal(tape.respond('POST', bitgetUrl, { clientOid: 'actual-old', newClientOid: 'actual-new' }).status, 200);
 });
 
-
 test('Bitget callback validation fails before consuming a matched mutation', () => {
   const tape = createTape([bitgetResponse({ orderId: '1', newClientOid: 'recorded' })], bitgetVenue, true);
-  assert.throws(() => tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'invalid id' }), /invalid generated/);
+  assert.throws(
+    () => tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'invalid id' }),
+    /invalid generated/,
+  );
   assert.equal(tape.unusedWrites(), 1);
   assert.equal(tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'fresh' }).status, 200);
   assert.equal(tape.unusedWrites(), 0);
 });
 
-
 test('Bitget duplicate generated IDs inside one batch fail before response consumption', () => {
   const url = 'https://api.bitget.com/api/v3/trade/place-order';
-  const tape = createTape([bitgetResponse([{ clientOid: 'first' }, { clientOid: 'second' }], { url })], bitgetVenue, true);
+  const tape = createTape(
+    [bitgetResponse([{ clientOid: 'first' }, { clientOid: 'second' }], { url })],
+    bitgetVenue,
+    true,
+  );
   assert.throws(() => tape.respond('POST', url, [{ clientOid: 'reused' }, { clientOid: 'reused' }]), /reused/);
   assert.equal(tape.unusedWrites(), 1);
   assert.equal(tape.respond('POST', url, [{ clientOid: 'fresh-one' }, { clientOid: 'fresh-two' }]).status, 200);
 });
-
 
 test('Backpack cancellation client IDs stay exact while only valid creation IDs can vary', () => {
   const venue = venueOf('backpack');
@@ -1233,6 +1330,112 @@ test('missing recorded welcome keeps readiness bounded and wrong tokens never ma
   await assert.rejects(tape.socketFor(url.replace('public', 'private')), /socket/);
 });
 
+
+{
+  const URL = 'https://example.test/order';
+  const record = (method, requestBody) => ({
+    type: 'http',
+    method,
+    url: URL,
+    status: 200,
+    body: '{}',
+    ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+  });
+  test('extracted Tape scopes both HTTP stores and write ordering to the selected implementation', () => {
+    const records = [
+      { ...record('POST', { family: 'shared' }) },
+      { ...record('POST', { family: 'legacy' }), impl: 'ts' },
+      { ...record('POST', { family: 'Order' }), impl: 'rust' },
+      { ...record('POST', { family: 'StopOrder' }), impl: 'rust' },
+    ];
+    for (const typed of [false, true]) {
+      const venue = { compareWriteOrder: true, ...(typed ? { requestBodies: true } : {}) };
+      for (const impl of ['ts', 'rust']) {
+        const tape = new Tape(records, venue, true, 100, impl);
+        assert.equal(tape.missingWrites, impl === 'ts' ? 2 : 3);
+        assert.equal(tape.respond('POST', URL, { family: impl === 'ts' ? 'Order' : 'legacy' }).status, 599);
+        assert.equal(tape.respond('POST', URL, { family: 'shared' }).status, 200);
+        for (const family of impl === 'ts' ? ['legacy'] : ['Order', 'StopOrder']) {
+          assert.equal(tape.respond('POST', URL, { family }).status, 200);
+          assert.equal(tape.respond('POST', URL, { family }).status, 599);
+        }
+        assert.equal(tape.missingWrites, 0);
+        tape.assertWritesConsumed();
+      }
+      assert.throws(() => new Tape(records, venue), /require a replay implementation/);
+      assert.throws(() => new Tape(records, venue, false, 100, 'typo'), /Unknown replay implementation/);
+      assert.throws(
+        () => new Tape([{ ...records[0], impl: 'typo' }], venue, false, 100, 'rust'),
+        /Unknown HTTP record/,
+      );
+    }
+  });
+
+  test('Bybit typed Tape matching retains exact types, category and caller identity', () => {
+    const venue = venueOf('bybitspot');
+    const url = 'https://api.bybit.com/v5/order/create';
+    const requestBody = { category: 'spot', qty: '1', orderLinkId: 'caller' };
+    const tape = new Tape(
+      [
+        { type: 'command', t: 0, op: 'placeOrders', orders: [{ clientOrderId: 'caller' }] },
+        { ...record('POST', requestBody), url },
+      ],
+      venue,
+      true,
+      100,
+      'rust',
+    );
+    for (const body of [
+      { ...requestBody, qty: 1 },
+      { ...requestBody, category: 'linear' },
+      { ...requestBody, orderLinkId: 'other' },
+    ])
+      assert.equal(tape.respond('POST', url, body).status, 599);
+    assert.equal(tape.respond('POST', url, requestBody).status, 200);
+    assert.equal(tape.missingWrites, 0);
+  });
+
+  test('Hyro taped handshakes bootstrap before full account readiness and echo each connection request', async () => {
+    const url = 'wss://hyro.example/v5/private';
+    const records = [
+      { type: 'ws', t: 0, url, text: '{"op":"auth","req_id":"@latest","success":true}' },
+      { type: 'command', t: 0, op: 'write' },
+    ];
+    const tape = new Tape(records, { bootstrapPrivateFromTape: true }, true, 100);
+    let authenticated = false;
+    const seen = [];
+    const socket = tape.connect(
+      url,
+      () => {
+        setImmediate(() => tape.send(socket, '{"op":"auth","req_id":"connection-local"}'));
+      },
+      (text) => {
+        assert.equal(JSON.parse(text).req_id, 'connection-local');
+        authenticated = true;
+      },
+    );
+    await tape.play(
+      undefined,
+      async (accountReady) => {
+        seen.push(accountReady);
+        if (accountReady) assert.equal(authenticated, true);
+      },
+      async () => {
+        assert.equal(authenticated, true);
+        seen.push('command');
+        return [];
+      },
+    );
+    assert.deepEqual(seen, [false, true, 'command']);
+    const missing = new Tape(records.slice(0, 1), { bootstrapPrivateFromTape: true }, true, 20);
+    missing.connect(
+      url,
+      () => {},
+      () => assert.fail('unsolicited ack was delivered'),
+    );
+    await assert.rejects(missing.play(), /auth request for acknowledgement/);
+  });
+}
 
 test('caught WOO request validation failures remain fatal after a valid retry', () => {
   const venue = venueOf('woo');

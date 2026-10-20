@@ -216,6 +216,38 @@ fn invalid_final_batch_member_prevents_every_write() {
         assert_eq!(h.writes(), 0);
     }
 }
+
+fn assert_bybit_control_rejected_before_batch_io(control: &str) {
+    let mut h = Harness::new();
+    let requests_before = h.requests.len();
+    h.place(&format!(
+        r#"[{{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}},{{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,{control}}}]"#
+    ));
+    assert_eq!(
+        h.requests.len(),
+        requests_before,
+        "batch preflight must perform no HTTP"
+    );
+    assert!(
+        h.failed(),
+        "Bitrue cannot honor a Bybit-specific order control"
+    );
+    assert!(
+        h.e.store().orders().is_empty(),
+        "no creating orders may leak from preflight"
+    );
+}
+
+#[test]
+fn bybit_bbo_on_final_batch_member_prevents_every_http_request() {
+    assert_bybit_control_rejected_before_batch_io(r#""bybitBbo":{"sideType":"Queue","level":1}"#);
+}
+
+#[test]
+fn bybit_ticks_on_final_batch_member_prevents_every_http_request() {
+    assert_bybit_control_rejected_before_batch_io(r#""bybitSlippageToleranceTicks":2"#);
+}
+
 #[test]
 fn splits_conserve_step_units_and_each_size_stays_below_maximum() {
     let mut h = Harness::new();

@@ -1182,8 +1182,10 @@ impl Bitrue {
                     }
                     self.account.listen_key = Some(key.to_owned());
                     self.account.listen_attempt = 0;
-                    self.account.socket =
-                        Some(cx.connect(format!("{PRIVATE_URL}?listenKey={key}")));
+                    self.account.socket = Some(cx.connect_channel(
+                        format!("{PRIVATE_URL}?listenKey={key}"),
+                        safe_cex_engine::SocketChannel::Private,
+                    ));
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
                     self.account.health = Some(cx.set_timer(HEALTH_MS));
                 } else {

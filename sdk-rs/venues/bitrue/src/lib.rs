@@ -345,7 +345,8 @@ impl Bitrue {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect(PUBLIC));
+        self.public.socket =
+            Some(cx.connect_channel(PUBLIC, safe_cex_engine::SocketChannel::Public));
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5000.0));
     }

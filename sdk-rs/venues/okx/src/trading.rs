@@ -229,6 +229,11 @@ impl Okx {
     }
 
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: Vec<PlaceOrderOpts>) -> Result<Job, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit execution controls are supported only on Bybit".into());
+        }
         let mut seen = HashSet::new();
         for o in &orders {
             let m = cx
@@ -690,7 +695,6 @@ impl Okx {
                     amount: amount.unwrap_or(o.amount),
                     price: Some(price.unwrap_or(o.price)),
                     trigger_price: None,
-                    max_slippage_pct: None,
                     stop_loss: None,
                     take_profit: None,
                     reduce_only: Some(o.reduce_only),
@@ -700,6 +704,9 @@ impl Okx {
                     tp_trigger_type: o.trigger_type,
                     client_order_id: None,
                     close: o.close,
+                    max_slippage_pct: None,
+                    bybit_bbo: None,
+                    bybit_slippage_tolerance_ticks: None,
                 }],
             )?;
             result.steps.extend(replacement.steps);

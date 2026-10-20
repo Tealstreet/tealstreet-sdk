@@ -168,6 +168,40 @@ test('response time visibility and header authentication remain independent', ()
   assert.equal(responses.respond('GET', url, undefined, 0, 100, { auth: 'fixture' }).status, 200);
 });
 
+test('implementation-specific responses preserve exact matching and selected write consumption', () => {
+  const make = (requestBody, impl) => ({
+    type: 'http',
+    method: 'POST',
+    url: '/cancel',
+    requestBody,
+    status: 200,
+    body: 'ok',
+    ...(impl && { impl }),
+  });
+  const records = [make('shared'), make('legacy', 'ts'), make('Order', 'rust'), make('StopOrder', 'rust')];
+  const key = (method, url, body) => `${method} ${url} ${body}`;
+  const write = (method) => method === 'POST';
+  for (const impl of ['ts', 'rust']) {
+    const responses = new Responses(records, key, undefined, write, true, impl);
+    assert.equal(responses.unusedWrites(), impl === 'ts' ? 2 : 3);
+    assert.equal(responses.respond('POST', '/cancel', 'shared').status, 200);
+    const selected = impl === 'ts' ? 'legacy' : 'Order';
+    const excluded = impl === 'ts' ? 'Order' : 'legacy';
+    assert.equal(responses.respond('POST', '/cancel', excluded).status, 599);
+    assert.equal(responses.respond('POST', '/cancel', selected).status, 200);
+    assert.equal(responses.respond('POST', '/cancel', selected).status, 599);
+    assert.equal(responses.unserved, 2);
+    assert.equal(responses.unusedWrites(), impl === 'ts' ? 0 : 1);
+    if (impl === 'rust') {
+      assert.equal(responses.respond('POST', '/cancel', 'StopOrder').status, 200);
+      assert.equal(responses.unusedWrites(), 0);
+    }
+  }
+  assert.throws(() => new Responses(records, key, undefined, write), /require a replay implementation/);
+  assert.throws(() => new Responses(records, key, undefined, write, true, 'typo'), /Unknown replay implementation/);
+  assert.throws(() => new Responses([make('bad', 'typo')], key, undefined, write, true, 'rust'), /Unknown HTTP record/);
+});
+
 test('effectiveAt aliases availableAfter and never serves a future-only snapshot', () => {
   const url = 'https://example.test/state';
   const responses = new Responses(

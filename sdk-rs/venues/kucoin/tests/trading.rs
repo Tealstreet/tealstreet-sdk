@@ -246,6 +246,25 @@ fn unsupported_slippage_protection_rejects_the_entire_batch_before_transport() {
     }
 }
 #[test]
+fn bybit_execution_controls_reject_the_whole_batch_before_transport() {
+    for bbo in [true, false] {
+        let mut h = Harness::new();
+        let mut protected = order();
+        protected.client_order_id = None;
+        if bbo {
+            protected.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        } else {
+            protected.bybit_slippage_tolerance_ticks = Some(5.0);
+        }
+        place(&mut h, vec![order(), protected]);
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(h.done(1).as_ref().unwrap_err().contains("Bybit"));
+    }
+}
+#[test]
 fn late_batch_format_failure_sends_no_writes() {
     let mut h = Harness::new();
     let mut second = order();
