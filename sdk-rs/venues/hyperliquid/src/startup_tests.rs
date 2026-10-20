@@ -365,3 +365,55 @@ fn partial_catalogue_unknown_open_order_does_not_claim_a_loaded_empty_snapshot()
         "owned order has unavailable market metadata"
     ));
 }
+
+#[test]
+fn delisted_and_unquoted_core_perps_complete_discovery_without_retry() {
+    let universe = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":40},{"name":"MATIC","szDecimals":1,"maxLeverage":20,"isDelisted":true,"onlyIsolated":true},{"name":"ETH","szDecimals":4,"maxLeverage":25}]}"#;
+    let contexts = r#"[{"funding":"0.0000125","openInterest":"9812.5","prevDayPx":"99","dayNtlVlm":"1000","premium":"0.0","oraclePx":"100","markPx":"100","midPx":"100","impactPxs":["99.9","100.1"],"dayBaseVlm":"10"},{"funding":"0.0","openInterest":"0.0","prevDayPx":"0.37","dayNtlVlm":"0.0","premium":null,"oraclePx":"0.37","markPx":"0.37","midPx":null,"impactPxs":null,"dayBaseVlm":"0.0"},{"funding":"0.0","openInterest":"0.0","prevDayPx":"200","dayNtlVlm":"0.0","premium":null,"oraclePx":"200","markPx":"200","midPx":null,"impactPxs":null,"dayBaseVlm":"0.0"}]"#;
+    let mut e = connect(false, false);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0)),
+        "well-formed unquoted rows are not a discovery failure"
+    );
+    assert!(!e.venue().core_discovery_incomplete);
+    assert!(e.store().loaded().markets);
+    assert!(e.store().market("BTC-PERP").is_some());
+    assert!(e.store().market("MATIC-PERP").is_none());
+}
+
+#[test]
+fn unquoted_spot_contexts_complete_discovery_and_publish_owned_native_balance() {
+    let meta = r#"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"BTC","index":1,"szDecimals":5},{"name":"JEFF","index":2,"szDecimals":0}],"universe":[{"name":"@4","tokens":[1,0],"index":4},{"name":"@9","tokens":[2,0],"index":9}]}"#;
+    let contexts = r#"[{"prevDayPx":"100","dayNtlVlm":"10","markPx":"100","midPx":"100","circulatingSupply":"21000000","coin":"@4","totalSupply":"21000000","dayBaseVlm":"0.1"},{"prevDayPx":"0.0009","dayNtlVlm":"0.0","markPx":"0.0009","midPx":null,"circulatingSupply":"1000000000","coin":"@9","totalSupply":"1000000000","dayBaseVlm":"0.0"}]"#;
+    let mut e = connect(true, true);
+    let req = http(
+        &e.drain_actions().collect::<Vec<_>>(),
+        "spotMetaAndAssetCtxs",
+    );
+    reply(&mut e, &req, 1000.0, &tuple(meta, contexts));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 2000.0))
+    );
+    assert!(!e.venue().core_discovery_incomplete);
+    let req = http(&actions, "spotClearinghouseState");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"{"balances":[{"coin":"BTC","token":1,"total":"2","hold":"0"},{"coin":"JEFF","token":2,"total":"500","hold":"0"}]}"#,
+    );
+    assert!(e.store().loaded().balance);
+    assert_eq!(e.store().balance().total, 200.0);
+    let coins = e.store().coin_balances().unwrap();
+    assert_eq!(coins[1].base, "JEFF");
+    assert_eq!(coins[1].amount, 500.0);
+    assert_eq!(coins[1].notional, 0.0);
+}

@@ -38,6 +38,8 @@ pub enum Pending {
         meta: Option<SpotMeta>,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
+        /// Well-formed rows that carry no mid price yet.
+        unquoted: Vec<String>,
         valid: bool,
         stage: u8,
     },
@@ -50,6 +52,7 @@ pub enum Pending {
         instruments: Vec<Option<Instrument>>,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
+        unquoted: Vec<String>,
         valid: bool,
         stage: u8,
         attempt: u8,
@@ -140,6 +143,7 @@ impl Hyperliquid {
                 meta: None,
                 markets: Vec::new(),
                 tickers: Vec::new(),
+                unquoted: Vec::new(),
                 valid: true,
                 stage: 0,
             },
@@ -195,6 +199,7 @@ impl Hyperliquid {
                 instruments: Vec::new(),
                 markets: Vec::new(),
                 tickers: Vec::new(),
+                unquoted: Vec::new(),
                 valid: true,
                 stage: 0,
                 attempt,
@@ -545,6 +550,7 @@ fn market_rows(
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
+    unquoted: &mut Vec<String>,
 ) -> bool {
     let mut i = 0;
     json::each::<&serde_json::value::RawValue>(raw, |row| {
@@ -557,22 +563,22 @@ fn market_rows(
             safe_cex_engine::startup::skipped_row(cx);
             return;
         };
-        let Some(price) = ctx.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
-            safe_cex_engine::startup::skipped_row(cx);
-            return;
-        };
         if !dex.is_empty() && meta.is_delisted {
             return;
         }
-        let base = meta
-            .name
-            .split_once(':')
-            .map_or(meta.name.as_str(), |(_, b)| b);
         let id = if dex.is_empty() || meta.name.contains(':') {
             meta.name.clone()
         } else {
             format!("{dex}:{}", meta.name)
         };
+        let Some(price) = ctx.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
+            unquoted.push(id);
+            return;
+        };
+        let base = meta
+            .name
+            .split_once(':')
+            .map_or(meta.name.as_str(), |(_, b)| b);
         let symbol = if dex.is_empty() {
             format!("{}-PERP", base.to_uppercase())
         } else {
@@ -650,6 +656,7 @@ fn spot_rows(
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
+    unquoted: &mut Vec<String>,
 ) -> bool {
     let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
     else {
@@ -699,7 +706,7 @@ fn spot_rows(
             continue;
         };
         let Some(price) = ctx.context.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
-            safe_cex_engine::startup::skipped_row(cx);
+            unquoted.push(native.name.clone());
             continue;
         };
         let id = native.name.clone();
@@ -888,6 +895,7 @@ impl Venue for Hyperliquid {
                 meta,
                 markets,
                 tickers,
+                unquoted,
                 valid,
                 stage,
                 attempt,
@@ -899,6 +907,7 @@ impl Venue for Hyperliquid {
                             meta,
                             markets,
                             tickers,
+                            unquoted,
                             valid,
                             stage,
                             attempt,
@@ -909,9 +918,10 @@ impl Venue for Hyperliquid {
                 }
                 let complete = meta.as_ref().is_some_and(|meta| {
                     meta.universe.iter().all(|row| {
-                        row.0
-                            .as_ref()
-                            .is_some_and(|native| markets.iter().any(|m| m.id == native.name))
+                        row.0.as_ref().is_some_and(|native| {
+                            markets.iter().any(|m| m.id == native.name)
+                                || unquoted.contains(&native.name)
+                        })
                     })
                 });
                 self.core_discovery_incomplete = !complete;
@@ -972,6 +982,7 @@ impl Venue for Hyperliquid {
                 instruments,
                 markets,
                 tickers,
+                unquoted,
                 valid,
                 stage,
                 attempt,
@@ -985,6 +996,7 @@ impl Venue for Hyperliquid {
                             instruments,
                             markets,
                             tickers,
+                            unquoted,
                             valid: false,
                             stage,
                             attempt,
@@ -995,7 +1007,7 @@ impl Venue for Hyperliquid {
                 }
                 let complete = instruments.iter().all(|row| {
                     row.as_ref().is_some_and(|native| {
-                        if !dex.is_empty() && native.is_delisted {
+                        if native.is_delisted {
                             return true;
                         }
                         let id = if dex.is_empty() || native.name.contains(':') {
@@ -1003,7 +1015,7 @@ impl Venue for Hyperliquid {
                         } else {
                             format!("{dex}:{}", native.name)
                         };
-                        markets.iter().any(|market| market.id == id)
+                        markets.iter().any(|market| market.id == id) || unquoted.contains(&id)
                     })
                 });
                 if dex.is_empty() {
@@ -1067,6 +1079,7 @@ impl Venue for Hyperliquid {
                 meta,
                 markets,
                 tickers,
+                unquoted,
                 valid,
                 stage,
                 ..
@@ -1084,9 +1097,9 @@ impl Venue for Hyperliquid {
                         Err(_) => *valid = false,
                     },
                     1 => {
-                        *valid &= meta
-                            .as_ref()
-                            .is_some_and(|meta| spot_rows(_cx, meta, item, markets, tickers))
+                        *valid &= meta.as_ref().is_some_and(|meta| {
+                            spot_rows(_cx, meta, item, markets, tickers, unquoted)
+                        })
                     }
                     _ => *valid = false,
                 }
@@ -1100,6 +1113,7 @@ impl Venue for Hyperliquid {
                 instruments,
                 markets,
                 tickers,
+                unquoted,
                 valid,
                 stage,
                 ..
@@ -1121,7 +1135,10 @@ impl Venue for Hyperliquid {
                         }
                         Err(_) => *valid = false,
                     },
-                    1 => *valid &= market_rows(_cx, dex, instruments, item, markets, tickers),
+                    1 => {
+                        *valid &=
+                            market_rows(_cx, dex, instruments, item, markets, tickers, unquoted)
+                    }
                     _ => *valid = false,
                 }
                 *stage = stage.saturating_add(1);

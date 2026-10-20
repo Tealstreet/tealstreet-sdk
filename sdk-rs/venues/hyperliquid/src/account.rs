@@ -114,6 +114,7 @@ pub struct Account {
     pub preplacements: VecDeque<Placement>,
     pub pending: HashMap<String, Placement>,
     pub builder_approved: Option<bool>,
+    valuation_warned: bool,
 }
 #[derive(Default, PartialEq, Eq)]
 enum Mode {
@@ -1163,9 +1164,10 @@ impl Hyperliquid {
         &self,
         cx: &Cx<'_, Pending>,
         balances: impl Iterator<Item = (&'a str, f64, f64)>,
-    ) -> Option<(f64, f64)> {
+    ) -> Option<(f64, f64, bool)> {
         let mut equity = 0.0;
         let mut hold = 0.0;
+        let mut unvalued = false;
         for (coin, total, held) in balances {
             let price = if total == 0.0 && held == 0.0
                 || ["USDC", "USDT", "USD", "USDH"]
@@ -1173,11 +1175,17 @@ impl Hyperliquid {
                     .any(|stable| coin.eq_ignore_ascii_case(stable))
             {
                 1.0
-            } else {
-                let ticker = cx.store.ticker(self.symbol(coin)?)?;
+            } else if let Some(symbol) = self.symbol(coin) {
+                let ticker = cx.store.ticker(symbol)?;
                 [ticker.mark, ticker.last]
                     .into_iter()
                     .find(|price| price.is_finite() && *price > 0.0)?
+            } else if self.core_discovery_incomplete {
+                return None;
+            } else {
+                // Perp mode has no spot meta: tokens like UBTC have no valuation market.
+                unvalued = true;
+                continue;
             };
             equity += total * price;
             hold += held * price;
@@ -1185,7 +1193,16 @@ impl Hyperliquid {
                 return None;
             }
         }
-        Some((equity, hold))
+        Some((equity, hold, unvalued))
+    }
+    fn warn_unvalued(&mut self, cx: &mut Cx<'_, Pending>, unvalued: bool) {
+        if unvalued && !self.account.valuation_warned {
+            self.account.valuation_warned = true;
+            cx.log(
+                LogLevel::Warning,
+                "Hyperliquid collateral token has no valuation market; excluded from USD balance",
+            );
+        }
     }
     fn current_upnl(&self, cx: &Cx<'_, Pending>) -> f64 {
         cx.store
@@ -1234,7 +1251,7 @@ impl Hyperliquid {
             return;
         }
         if let Some(pending) = self.account.pending_spot.as_ref() {
-            let Some((equity, hold)) = self.collateral_values(
+            let Some((equity, hold, unvalued)) = self.collateral_values(
                 cx,
                 pending
                     .balances
@@ -1246,6 +1263,7 @@ impl Hyperliquid {
             let available = pending.available;
             let ws = pending.ws;
             self.account.pending_spot = None;
+            self.warn_unvalued(cx, unvalued);
             self.commit_collateral(cx, equity, hold, available, ws);
         }
         if self.account.mode != Mode::Standard && self.account.spot.is_none() {
@@ -1388,7 +1406,7 @@ impl Hyperliquid {
                 )
             })
             .flatten();
-        let Some((equity, hold)) = values else {
+        let Some((equity, hold, unvalued)) = values else {
             if self.account.pending_spot.is_none() {
                 cx.log(
                     LogLevel::Warning,
@@ -1411,6 +1429,7 @@ impl Hyperliquid {
             return;
         };
         self.account.pending_spot = None;
+        self.warn_unvalued(cx, unvalued);
         self.commit_collateral(cx, equity, hold, available, ws);
         self.live_balance(cx);
     }

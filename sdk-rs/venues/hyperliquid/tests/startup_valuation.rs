@@ -197,3 +197,36 @@ fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
     assert_eq!(engine.store().balance().total, 300.0);
     assert_eq!(engine.store().balance().free, 300.0);
 }
+
+#[test]
+fn collateral_tokens_without_a_valuation_market_keep_native_amount_and_load_balance() {
+    for mode in ["unifiedAccount", "portfolioMargin"] {
+        let (mut engine, socket) = ready(mode);
+        // Perp mode has no spot meta: UBTC and airdropped tokens have no mappable market.
+        let state = r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"USDC","token":0,"total":"100","hold":"0"},{"coin":"BTC","token":1,"total":"2","hold":"0.5"},{"coin":"UBTC","token":197,"total":"1","hold":"0"},{"coin":"PURRDROP","token":411,"total":"5000","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"300"]]}}}"#;
+        message(&mut engine, socket, 2000.0, state);
+        let warnings = engine
+            .drain_actions()
+            .filter(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("no valuation market")))
+            .count();
+        assert_eq!(engine.store().balance().total, 300.0);
+        assert_eq!(engine.store().balance().free, 300.0);
+        assert_eq!(warnings, 1);
+        message(&mut engine, socket, 2100.0, state);
+        assert!(!engine.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("no valuation market"))));
+    }
+}
+
+#[test]
+fn quoted_market_with_missing_price_still_holds_collateral_pending() {
+    let (mut engine, socket) = ready("unifiedAccount");
+    clear_prices(&mut engine);
+    let old = engine.store().balance().clone();
+    message(
+        &mut engine,
+        socket,
+        2000.0,
+        r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"BTC","token":1,"total":"2","hold":"0"},{"coin":"UBTC","token":197,"total":"1","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"300"]]}}}"#,
+    );
+    assert_eq!(engine.store().balance(), &old);
+}
