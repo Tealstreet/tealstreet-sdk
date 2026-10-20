@@ -300,3 +300,26 @@ usable-data liveness. Three independent shard/recovery regressions pass.
 Full native workspace:888tests passed; Orderly68passed. Post-merge harness181
 and host23tests pass; shared SDK/transport316targeted tests and whole-repo
 44typecheck/28lint tasks pass. Final WASM builds/replays follow this merge.
+
+### Final local gates (2df28a2ec9)
+
+All required local gates pass on the merged landing structure:
+
+- Bans, workspace fmt, strict workspace/all-target Clippy and WASM host Clippy.
+- Native workspace888tests; Orderly68tests (including malformed/empty/unknown
+  payloads failing to postpone protocol recovery).
+- SDK6885tests/466files; combined SDK WASM44tests; host41tests.
+- Full repository44typecheck and28lint tasks.
+- Harness181tests; Orderly private14broker/network gates, each14commands.
+- Public three-run gate:639inputs,144markets,144tickers,two full books.
+  Median main CPU TS156.4ms/Rust104.8ms (1.49x), steady122.7ms/72.1ms
+  (1.70x), process196.0ms/168.4ms, retained2.0MB/1.4MB (1.47x).
+  Rust linear0.7MB. Venue WASM772899bytes within1258291budget.
+- Binance public:873inputs,917markets,783tickers,three books; main
+  TS252.4ms/Rust130.3ms, retained4.3MB/2.5MB. Private14inputs passes.
+
+The public fixture was recorded live for20seconds with BTCUSDC/ETHUSDC. No
+live private credentials were supplied; documented-payload private tapes are
+strictly signed/verified, with exact requests, ordered writes and protocol
+checks. No local gate is waived. Next: PR into feat/rust-rewrite, post local
+adversarial reviews, fix findings, wait for green CI, merge and branch afresh.
