@@ -369,6 +369,8 @@ pub struct PositionRow<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct AccountRow<'a> {
+    #[serde(default, rename = "usdtEquity")]
+    pub usdt_equity: Number,
     #[serde(default, rename = "marginCoin", borrow)]
     pub margin_coin: Cow<'a, str>,
     #[serde(default, rename = "coin", borrow)]
@@ -377,6 +379,8 @@ pub struct AccountRow<'a> {
     pub union_total_margin: Number,
     #[serde(default, rename = "accountEquity")]
     pub account_equity: Number,
+    #[serde(default)]
+    pub equity: Number,
     #[serde(default, rename = "unionAvailable")]
     pub union_available: Number,
     #[serde(default, rename = "available")]
@@ -391,6 +395,12 @@ pub struct AccountRow<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct OrderRow<'a> {
+    #[serde(default, rename = "callbackRatio", alias = "rangeRate")]
+    pub callback_ratio: Number,
+    #[serde(default, rename = "type", borrow)]
+    pub strategy_type: Cow<'a, str>,
+    #[serde(default, rename = "trailingStopParams")]
+    pub trailing_stop_params: Option<TrailingRow>,
     #[serde(default, borrow)]
     pub category: Cow<'a, str>,
     #[serde(default, rename = "holdMode", borrow)]
@@ -895,4 +905,14 @@ mod numeric_tests {
             }
         }
     }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TrailingRow {
+    pub activation_price: Number,
+    pub activation_type: String,
+    pub trail_type: String,
+    pub pre_order_type: String,
+    pub trail_variance: Number,
 }

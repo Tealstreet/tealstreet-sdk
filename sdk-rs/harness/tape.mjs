@@ -290,6 +290,7 @@ export class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
+    this.audit?.connected?.(url);
     const key = canonicalUrl(url, this.callerIds);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);

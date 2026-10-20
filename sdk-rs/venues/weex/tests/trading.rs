@@ -67,6 +67,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         amount: 0.01,
         price: Some(69000.0),
         trigger_price: None,
+        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: None,

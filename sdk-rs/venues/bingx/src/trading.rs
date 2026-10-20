@@ -888,6 +888,7 @@ impl Trading {
                 amount: o.amount,
                 price: Some(next),
                 trigger_price: None,
+                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: Some(o.reduce_only),

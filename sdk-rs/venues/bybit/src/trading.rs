@@ -903,6 +903,7 @@ impl BybitLinear {
                 amount: order.amount,
                 price: Some(target),
                 trigger_price: None,
+                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: None,

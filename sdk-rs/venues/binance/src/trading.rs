@@ -630,6 +630,7 @@ impl BinanceFutures {
             amount: amount.unwrap_or(order.amount),
             price: Some(price.unwrap_or(order.price)),
             trigger_price: None,
+            max_slippage_pct: None,
             stop_loss: None,
             take_profit: None,
             reduce_only: Some(order.reduce_only),

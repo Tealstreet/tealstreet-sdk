@@ -787,6 +787,7 @@ impl WeexFutures {
                                 Some(new_price.unwrap_or(o.price)).filter(|v| *v > 0.0)
                             },
                             trigger_price: conditional.then_some(new_price.unwrap_or(o.price)),
+                            max_slippage_pct: None,
                             stop_loss: o.stop_loss,
                             take_profit: o.take_profit,
                             reduce_only: Some(o.reduce_only),

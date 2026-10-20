@@ -951,3 +951,29 @@ No exchange-specific test files exist in this directory. Validation is done thro
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends numeric `client_order_id`. The rule accepts only canonical positive decimal strings within the JavaScript safe-integer range, so the number on the wire stringifies back to the caller's value.
+
+## Rust engine
+
+`RustEngineExchange('woo', ...)` uses `sdk-rs/venues/woo`. Only `woo` belongs
+here; `woofi` and `kodiakfi` are Orderly brokers. The Rust lane uses the active
+legacy-public/V1/V3 hybrid, not the inert V3 migration foundations.
+
+The order-based historical-position fold is shared with TS. V1 income keeps
+account-level REALIZED_PNL rows without inventing a symbol and preserves signed
+TRANSACTION_FEE/INTEREST amounts; INTEREST is not funding. Explicit income ranges
+walk all pages (default budget 100000) with 6-second ledger pacing and visible
+errors. Native V3 fills also walk time windows when the API ignores pagination;
+the TS fills implementation retains its existing single-window depth limit.
+
+Opening `OrderType.Conditional` is unsupported in TS and rejected before any
+batch writes. Sized/full-position TP/SL and trailing stops are supported. Margin
+mutation supports Cross only. Caller IDs are rejected for split orders, brackets
+and algorithms before writes. Read failures retain state and ambiguous writes
+are never retried. No live authenticated account was available for this port;
+private validation uses exact signed request/response tapes and native tests.
+
+Private algo execution reports reconcile each child independently; terminal parent-only
+reports terminate known children and retain tombstones against stale snapshots. REST
+algo snapshots reject malformed executable known-market leaves as a whole. A delayed
+unseen trade still emits a fill, but optimistic position updates apply only the
+cumulative delta not already present in reconciled order state.

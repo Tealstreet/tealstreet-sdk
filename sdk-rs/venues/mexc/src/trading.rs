@@ -653,6 +653,7 @@ impl MexcFutures {
                         }),
                         price: price.or(Some(o.price)),
                         trigger_price: None,
+                        max_slippage_pct: None,
                         reduce_only: Some(o.reduce_only),
                         time_in_force: o.time_in_force,
                         trigger_type: o.trigger_type,

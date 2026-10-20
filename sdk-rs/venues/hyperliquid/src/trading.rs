@@ -211,6 +211,7 @@ impl Hyperliquid {
                     trigger_type: None,
                     tp_trigger_type: None,
                     sl_trigger_type: None,
+                    max_slippage_pct: None,
                     client_order_id: None,
                     close: None,
                 };
